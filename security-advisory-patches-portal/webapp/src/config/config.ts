@@ -38,8 +38,7 @@ export const AsgardeoConfig: BaseURLAuthClientConfig = {
 };
 
 export const ServiceBaseUrl = window.config?.BACKEND_BASE_URL ?? '';
-export const APP_NAME = window.config?.APP_NAME;
-
+export const APP_NAME = window.config?.APP_NAME ?? 'Security Advisory Patches Portal';
 export const AppConfig = {
   serviceUrls: {
     health: `${ServiceBaseUrl}/health`,
@@ -47,4 +46,3 @@ export const AppConfig = {
     downloadSecurityAdvisory: `${ServiceBaseUrl}/file`,
   },
 };
-
