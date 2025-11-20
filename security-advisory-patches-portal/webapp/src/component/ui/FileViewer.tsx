@@ -97,6 +97,7 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
         setPreviewUrl('');
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, file.name]);
 
   const handleDownload = () => {
@@ -139,12 +140,50 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   };
 
   const renderPreview = () => {
-    if (isLoadingPreview || !previewUrl) {
+    // Show loading spinner only when actually loading
+    if (isLoadingPreview) {
       return (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 4 }}>
           <CircularProgress size={60} />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             Loading preview...
+          </Typography>
+        </Box>
+      );
+    }
+
+    // Show error state if download failed
+    if (downloadError) {
+      return (
+        <Paper
+          elevation={1}
+          sx={{
+            p: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            maxWidth: 500,
+          }}
+        >
+          <Alert severity="error" sx={{ mb: 3, width: '100%' }}>
+            {downloadError === 'Server error. Please try again later.' 
+              ? 'This file could not be loaded. It may have been moved or deleted.'
+              : downloadError}
+          </Alert>
+          <Typography variant="body2" color="text.secondary" align="center">
+            Unable to preview this file.
+          </Typography>
+        </Paper>
+      );
+    }
+
+    // Show empty state if no preview URL is available
+    if (!previewUrl) {
+      return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 4 }}>
+          <Typography variant="body2" color="text.secondary">
+            No preview available
           </Typography>
         </Box>
       );
@@ -270,14 +309,6 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
             </Box>
           )}
 
-          {downloadError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {downloadError === 'Server error. Please try again later.' 
-                ? 'This file could not be loaded. It may have been moved or deleted.'
-                : downloadError}
-            </Alert>
-          )}
-
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <Button
               variant="contained"
@@ -285,7 +316,7 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
               size="small"
               startIcon={<DownloadIcon />}
               onClick={handleDownload}
-              disabled={isLoadingPreview || !previewUrl}
+              disabled={isLoadingPreview || !previewUrl || !!downloadError}
             >
               {isLoadingPreview ? 'Preparing...' : 'Download'}
             </Button>
