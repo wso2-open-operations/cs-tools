@@ -23,6 +23,30 @@ import ballerina/log;
     label: "Security Advisories File Share Backend",
     id: "security-advisories/files-backend"
 }
+@http:ServiceConfig {
+    cors: {
+        allowOrigins: ["http://localhost:3000"],
+        allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowCredentials: true,
+        allowHeaders: [
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-Requested-With",
+            "x-jwt-assertion",
+            "Access-Control-Request-Method",
+            "Access-Control-Request-Headers"
+        ],
+        exposeHeaders: [
+            "Content-Type",
+            "Content-Length",
+            "Content-Disposition",
+            "Authorization"
+        ],
+        maxAge: 84900
+    }
+}
 
 service / on new http:Listener(8080) {
 
@@ -63,11 +87,11 @@ service / on new http:Listener(8080) {
         };
     }
 
-    # Get directory content from Azure File Share
+     # Get directory content from Azure File Share
     #
     # + path - Optional directory path to list contents from
     # + return - Array of FileShareItem or error response
-    resource function get directory\-content(string? path) returns FileShareItem[]|
+    resource function get directory\-content(string? path) returns file_storage:FileShareItem[]|
     http:BadRequest|http:InternalServerError {
         // Use empty string if path is not provided
         string dirPath = path ?: "";
@@ -80,7 +104,7 @@ service / on new http:Listener(8080) {
             };
         }
         
-        FileShareItem[]|error items = file_storage:listItems(dirPath);
+        file_storage:FileShareItem[]|error items = file_storage:listItems(dirPath);
         if items is error {
             log:printError(string `Failed to list items at path: ${dirPath}`, items);
             return <http:InternalServerError>{

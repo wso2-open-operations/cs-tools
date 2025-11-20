@@ -14,26 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Represents an item in the Azure File Share (file or directory).
-public type FileShareItem record {|
-    # Name of the item (without path prefix)
-    string name;
-    # Whether this item is a directory
-    boolean isFolder;
-    # Size in bytes (only for files)
-    int size?;
-    # MIME type (only for files)
-    string contentType?;
-|};
-
-# Response for listing security advisories.
-public type ListSecurityAdvisoriesResponse record {|
-    # Array of items at the current path
-    FileShareItem[] items;
-    # Current directory path
-    string path;
-|};
-
 # Health check response when service is healthy.
 public type HealthyResponse record {|
     # Health status (healthy/unhealthy)
