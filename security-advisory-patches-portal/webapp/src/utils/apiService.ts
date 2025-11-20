@@ -87,7 +87,6 @@ export class APIService {
   private static updateRequestInterceptor() {
     APIService._instance.interceptors.request.use(
       async (config) => {
-        config.headers = config.headers || {};
         
         // Only add auth header if we have a callback (i.e., user is authenticated)
         if (APIService._callback && APIService._initialized) {
