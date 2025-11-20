@@ -39,7 +39,7 @@ export class APIService {
       retry: 3,
       instance: APIService._instance,
       httpMethodsToRetry: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
-      statusCodesToRetry: [[401]],
+      statusCodesToRetry: [[401, 401]],
       retryDelay: 100,
 
       onRetryAttempt: async (err) => {
