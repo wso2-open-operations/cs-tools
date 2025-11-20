@@ -90,32 +90,46 @@ public isolated function getDirectoryPath(string fullPath) returns string {
     return "";
 }
 
-# Determine content type based on file extension.
+# Content type mapping for file extensions.
+const map<string> CONTENT_TYPE_MAP = {
+    "pdf": "application/pdf",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "svg": "image/svg+xml",
+    "txt": "text/plain",
+    "json": "application/json",
+    "xml": "application/xml",
+    "html": "text/html",
+    "htm": "text/html",
+    "zip": "application/zip",
+    "xls": "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+};
+
+# Determine content type based on file extension (case-insensitive).
 #
 # + fileName - File name
 # + return - MIME content type
 public isolated function getContentType(string fileName) returns string {
-    if fileName.endsWith(".pdf") {
-        return "application/pdf";
-    } else if fileName.endsWith(".png") {
-        return "image/png";
-    } else if fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") {
-        return "image/jpeg";
-    } else if fileName.endsWith(".gif") {
-        return "image/gif";
-    } else if fileName.endsWith(".txt") {
-        return "text/plain";
-    } else if fileName.endsWith(".json") {
-        return "application/json";
-    } else if fileName.endsWith(".xml") {
-        return "application/xml";
-    } else if fileName.endsWith(".html") {
-        return "text/html";
-    } else if fileName.endsWith(".zip") {
-        return "application/zip";
-    } else {
-        return "application/octet-stream";
+    // Normalize to lower case for case-insensitive matching
+    string lowerFileName = fileName.toLowerAscii();
+    
+    // Find the last dot to extract extension
+    int? lastDotIndex = lowerFileName.lastIndexOf(".");
+    if lastDotIndex is int && lastDotIndex < lowerFileName.length() - 1 {
+        string extension = lowerFileName.substring(lastDotIndex + 1);
+        string? contentType = CONTENT_TYPE_MAP[extension];
+        if contentType is string {
+            return contentType;
+        }
     }
+    
+    return "application/octet-stream";
 }
 
 # URL encode path segments for Azure File Share API.
