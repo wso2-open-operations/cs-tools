@@ -26,9 +26,14 @@ export class APIService {
   private static _authInterceptorId: number | null = null;
 
   constructor(idToken: string, callback: () => Promise<{ idToken: string }>) {
-    APIService._instance = axios.create({
-      withCredentials: true,
-    });
+    // Only create a new instance if one doesn't exist
+    if (!APIService._instance) {
+      APIService._instance = axios.create({
+        withCredentials: true,
+      });
+    }
+    
+    // Attach retry-axios to the instance
     attach(APIService._instance);
 
     APIService._idToken = idToken;
@@ -36,6 +41,7 @@ export class APIService {
     APIService._initialized = true;
     APIService.updateRequestInterceptor();
 
+    // Configure retry behavior with auth token refresh
     (APIService._instance.defaults as unknown as RaxConfig).raxConfig = {
       retry: 3,
       instance: APIService._instance,
@@ -44,7 +50,7 @@ export class APIService {
       retryDelay: 100,
 
       onRetryAttempt: async (err) => {
-        var res = await callback();
+        const res = await callback();
         APIService.updateTokens(res.idToken);
         // Eject only the auth interceptor, not all interceptors
         if (APIService._authInterceptorId !== null) {
