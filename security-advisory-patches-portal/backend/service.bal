@@ -24,7 +24,7 @@ import ballerina/log;
     id: "security-advisories/files-backend"
 }
 
-service / on new http:Listener(8080) {
+service / on new http:Listener(9090) {
 
     # Service initialization - Runs health checks if enabled.
     function init() {
