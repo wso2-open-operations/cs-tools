@@ -52,12 +52,22 @@ export class APIService {
   }
 
   public static getInstance(): AxiosInstance {
-    // Initialize with a basic axios instance if not yet initialized
+    // Create instance if it doesn't exist
     if (!APIService._instance) {
       APIService._instance = axios.create({
         withCredentials: true,
       });
     }
+    
+    // Ensure interceptors are attached if not already initialized
+    if (!APIService._initialized) {
+      // Attach retry-axios without auth (for unauthenticated requests)
+      attach(APIService._instance);
+      
+      // Mark as initialized to prevent duplicate attachment
+      APIService._initialized = true;
+    }
+    
     return APIService._instance;
   }
 
