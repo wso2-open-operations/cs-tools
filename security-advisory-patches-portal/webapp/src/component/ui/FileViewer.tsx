@@ -53,6 +53,7 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
   const { downloadError } = useAppSelector((state) => state.file);
   const [previewUrl, setPreviewUrl] = React.useState<string>('');
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(true);
+  const previewUrlRef = React.useRef<string>('');
 
   const fileName = getFileName(file.name);
   const extension = getFileExtension(fileName);
@@ -72,6 +73,7 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
         
         // Create object URL for preview
         objectUrl = URL.createObjectURL(fileData);
+        previewUrlRef.current = objectUrl;
         setPreviewUrl(objectUrl);
       }
       
@@ -86,19 +88,24 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
       // Mark component as unmounted to prevent stale updates
       isMounted = false;
       
-      // Clean up object URL to prevent memory leaks
+      // Clean up object URL created in this effect run
+      // Use the objectUrl variable which is guaranteed to be from this effect
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
-      }
-      
-      // Clean up the preview URL if it exists
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-        setPreviewUrl('');
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, file.name]);
+
+  // Separate effect to clean up preview URL on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up the current preview URL when component unmounts
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+    };
+  }, []);
 
   const handleDownload = () => {
     // If we already have the preview URL (object URL from file data), use it
