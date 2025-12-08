@@ -21,4 +21,27 @@
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
-replay_pid*
+
+# Dependency monitoring dashboard
+apps/dependency_monitoring_dashboard/**/Config.toml
+
+# nano save
+nano.save
+
+# Build files
+target
+
+# Configuration files
+.gitsecret/keys/random_seed
+!*.secret
+Config.toml
+operations/sales-apex-trigger-subscriber/sn-config.env
+.vscode
+.DS_Store
+apps/vulnerability-management-system/bff/summary-handler/FinalReport.json
+
+.project
+.idea/*
+.settings/*
+udo systemctl enable mongod
+lib/*
