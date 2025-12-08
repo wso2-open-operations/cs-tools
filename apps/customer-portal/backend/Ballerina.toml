@@ -1,7 +1,7 @@
 [package]
 org = "wso2"
 name = "customer_portal"
-version = "1.0.1"
+version = "1.0.0"
 distribution = "2201.12.10"
 
 [build-options]

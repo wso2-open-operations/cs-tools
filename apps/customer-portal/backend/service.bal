@@ -229,10 +229,11 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
+            string customError = "User information header not found!";
             log:printError("User information header not found", userInfo);
             return <http:InternalServerError>{
                 body: {
-                    message: "User information header not found!"
+                    message: customError
                 }
             };
         }
