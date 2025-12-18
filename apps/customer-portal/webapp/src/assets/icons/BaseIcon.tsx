@@ -17,8 +17,6 @@
 import React from "react";
 import type { IconProps } from "../../types/icon.types";
 
-export type BaseIconProps = IconProps;
-
 export const BaseIcon: React.FC<IconProps & { children: React.ReactNode }> = ({
   width = 24,
   height = 24,
