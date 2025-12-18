@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Typography, Paper, Grid } from "@mui/material";
 import type { Attachment } from "../../types/case.types";
-import { FileTextIcon } from "../../assets/icons/support/support-icons"; // Use FileText as generic file icon
+import { FileTextIcon } from "../../assets/icons/support/FileTextIcon";
 
 interface CaseAttachmentsProps {
   attachments: Attachment[];

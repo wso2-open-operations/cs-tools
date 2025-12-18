@@ -1,8 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import { Box, Typography, Divider, Button } from "@mui/material";
 import { CommentCard } from "./CommentCard";
-import { Maximize2Icon } from "../../assets/icons/support/support-icons";
 import type { Comment } from "../../types/case.types";
+import { Maximize2Icon } from "../../assets/icons/support/Maximize2Icon";
 
 interface CaseActivityProps {
   comments: Comment[];
