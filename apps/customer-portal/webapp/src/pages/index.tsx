@@ -25,11 +25,7 @@ import type { ProjectResponse } from "../types/project.types";
 import { FolderOpenIcon } from "../assets/icons/common/folder-open-icon";
 
 export default function Home() {
-  const {
-    data,
-    isLoading: isLoadingProjects,
-    isError: isErrorProjects,
-  } = useGet<ProjectResponse>(
+  const { data } = useGet<ProjectResponse>(
     [PROJECTS_LIST_CACHE_KEY],
     Endpoints.getAllProjects()
   );

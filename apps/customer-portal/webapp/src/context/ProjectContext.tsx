@@ -24,7 +24,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({
   // Fetch all projects without pagination
   const { data, isLoading, isError } = useGet<ProjectResponse>(
     [PROJECTS_LIST_CACHE_KEY],
-    Endpoints.getAllProjects(0, 999999), // Large limit to get all projects
+    Endpoints.getAllProjects(0, 999999),
     {
       placeholderData: keepPreviousData,
     }

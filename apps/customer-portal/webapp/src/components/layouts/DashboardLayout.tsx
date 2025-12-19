@@ -16,7 +16,7 @@
 
 import React from "react";
 import { Box } from "@mui/material";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import Header from "../Header/Header";
 import Sidebar from "../Sidebar/Sidebar";
 import { useProject } from "../../context/ProjectContext";

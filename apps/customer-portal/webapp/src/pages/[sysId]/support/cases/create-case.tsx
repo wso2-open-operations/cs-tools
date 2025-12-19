@@ -69,7 +69,7 @@ const CreateCasePage: React.FC = () => {
   const projectName = currentProject?.name || "";
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState<FormData>({
     product: "",
     deployment: "",

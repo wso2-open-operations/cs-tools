@@ -46,7 +46,11 @@ import {
 } from "recharts";
 
 import { Close } from "@mui/icons-material";
-import { getStatsConfig } from "#/Dashboard/StatsConfig/statsConfig";
+import {
+
+  getActiveCasesData,
+  getOutstandingIncidentsData,
+} from "@/utils/dashboardUtils";
 import StatCard from "@/components/Dashboard/StatCard";
 import { Endpoints } from "@/services/endpoints";
 import { useGet } from "@/services/useApi";
@@ -56,11 +60,10 @@ import { useProject } from "@/context/ProjectContext";
 import { useParams } from "@/router";
 import { getSeverityColor } from "@/utils/color";
 import { formatDate } from "@/utils/dateUtils";
-import {
-  getActiveCasesData,
-  getOutstandingIncidentsData,
-} from "@/utils/dashboardUtils";
+
 import { EllipsisVerticalIcon, FunnelIcon } from "@/assets/icons/common-icons";
+import type { StatsConfig } from "@/types/dashboard.types";
+import { getDashboardStatsConfig } from "@/utils/dashboardUtils";
 
 export default function Dashboard() {
   const { sysId } = useParams("/:sysId/dashboard");
@@ -101,7 +104,9 @@ export default function Dashboard() {
   }, []);
 
   // Transform API data for stats cards
-  const statsConfig = projectMetadata ? getStatsConfig(projectMetadata) : [];
+  const statsConfig = projectMetadata
+    ? getDashboardStatsConfig(projectMetadata)
+    : [];
 
   // Transform API data for Outstanding Incidents pie chart
   const outstandingIncidentsData = getOutstandingIncidentsData(projectMetadata);
@@ -249,7 +254,7 @@ export default function Dashboard() {
           mb: 3,
         }}
       >
-        {statsConfig.map((stat, index) => (
+        {statsConfig.map((stat: StatsConfig, index: number) => (
           <StatCard key={index} {...stat} />
         ))}
       </Box>

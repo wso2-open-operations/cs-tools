@@ -1,5 +1,5 @@
 import { Box, Tab, Tabs } from "@mui/material";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { CaseHeader } from "@/components/CaseDetails/CaseHeader";
 import { CaseActivity } from "@/components/CaseDetails/CaseActivity";
