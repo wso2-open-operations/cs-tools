@@ -1,10 +1,7 @@
 import React from "react";
 import { Box, Typography, Button } from "@mui/material";
-import type { CallRequest } from "../../types/case.types";
-import {
-  PhoneIcon,
-  PhoneCallIcon,
-} from "../../assets/icons/support/support-icons";
+import type { CallRequest } from "@/types/case.types";
+import { PhoneIcon, PhoneCallIcon } from "@/assets/icons/common-icons";
 
 interface CaseCallsProps {
   callRequests: CallRequest[];

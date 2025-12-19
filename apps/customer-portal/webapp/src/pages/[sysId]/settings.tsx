@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Typography } from "@mui/material";
-import { SettingsIcon } from "../../assets/icons/side-nav-bar/side-nav-bar-icons";
+import { SettingsIcon } from "@/assets/icons/side-nav-bar-icons";
 
 export default function Settings() {
   return (

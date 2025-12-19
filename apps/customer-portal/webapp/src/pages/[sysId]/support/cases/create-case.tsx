@@ -40,10 +40,10 @@ import {
   Message,
   ExpandMore,
 } from "@mui/icons-material";
-import { Endpoints } from "../../../../services/endpoints";
-import apiClient from "../../../../services/apiClient";
-import { useGet } from "../../../../services/useApi";
-import { useProject } from "../../../../context/ProjectContext";
+import { Endpoints } from "@/services/endpoints";
+import apiClient from "@/services/apiClient";
+import { useGet } from "@/services/useApi";
+import { useProject } from "@/context/ProjectContext";
 
 interface FilterOptionsResponse {
   statuses: string[];

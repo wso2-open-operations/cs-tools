@@ -1,13 +1,13 @@
 import React from "react";
 import { Box, Typography, Chip, Button, Avatar } from "@mui/material";
-import type { CaseDetails } from "../../types/case.types";
+import type { CaseDetails } from "@/types/case.types";
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
   CirclePauseIcon,
   CirclePlayIcon,
   CircleCloseIcon,
-} from "../../assets/icons/support/support-icons";
+} from "@/assets/icons/common-icons";
 
 interface CaseHeaderProps {
   caseData: CaseDetails;

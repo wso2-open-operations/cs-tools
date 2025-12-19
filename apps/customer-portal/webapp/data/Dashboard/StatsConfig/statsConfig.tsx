@@ -1,14 +1,18 @@
-
 import type { StatsConfig } from "./types";
-import type { ProjectMetadataResponse } from "../../../src/types/project-metadata.types";
-import { CircleAlertIcon, ClockIcon, TrendingDownIcon , CircleCheckIcon} from "../../../src/assets/icons/dashboard/dashboard-icons";
+import type { ProjectMetadataResponse } from "@/types/project-metadata.types";
+import {
+  AlertCircleIcon,
+  CheckCircleIcon,
+  ClockIcon,
+} from "@/assets/icons/common-icons";
+import { TrendingDownIcon } from "@/assets/icons/common/trending-down-icon";
 
 export function getStatsConfig(data: ProjectMetadataResponse): StatsConfig[] {
   return [
     {
       title: "Total Cases",
       value: data.projectStatistics.totalCasesCount,
-      icon: <CircleAlertIcon width={20} height={20} />,
+      icon: <AlertCircleIcon width={20} height={20} />,
       iconBgColor: "#fff7ed",
       iconColor: "#ea580c",
     },
@@ -22,7 +26,7 @@ export function getStatsConfig(data: ProjectMetadataResponse): StatsConfig[] {
     {
       title: "Resolved This Month",
       value: data.projectStatistics.currentMonthResolvedCasesCount,
-      icon: <CircleCheckIcon width={20} height={20} />,
+      icon: <CheckCircleIcon width={20} height={20} />,
       iconBgColor: "#f0fdf4",
       iconColor: "#16a34a",
     },

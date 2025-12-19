@@ -1,6 +1,6 @@
 import { Box } from "@mui/material";
 import React from "react";
-import { BotIcon } from "../../../assets/icons/support/support-icons";
+import { BotIcon } from "../../../assets/icons/common-icons";
 
 export const CTAIcon: React.FC = () => {
   return (

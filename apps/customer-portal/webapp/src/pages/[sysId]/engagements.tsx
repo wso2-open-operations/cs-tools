@@ -14,10 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams } from "../../router";
-import ProjectPageHeader from "../../components/ProjectPageHeader/ProjectPageHeader";
-import { useProject } from "../../context/ProjectContext";
-
+import { useParams } from "@/router";
+import ProjectPageHeader from "@/components/ProjectPageHeader/ProjectPageHeader";
+import { useProject } from "@/context/ProjectContext";
 
 export default function Engagements() {
   const { sysId } = useParams("/:sysId/engagements");

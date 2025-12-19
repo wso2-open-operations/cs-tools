@@ -1,8 +1,8 @@
 import React, { useRef } from "react";
 import { Box, Typography, Divider, Button } from "@mui/material";
 import { CommentCard } from "./CommentCard";
-import type { Comment } from "../../types/case.types";
-import { MaximizeIcon } from "../../assets/icons/support/support-icons";
+import type { Comment } from "@/types/case.types";
+import { MaximizeIcon } from "@/assets/icons/common-icons";
 
 interface CaseActivityProps {
   comments: Comment[];
@@ -13,16 +13,9 @@ interface CaseActivityProps {
 export const CaseActivity: React.FC<CaseActivityProps> = ({
   comments,
   createdDate,
-  height = "100%", // Default to filling parent or explicit height
+  height = "100%",
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  //Auto-scroll disabled per user request
-  //   useEffect(() => {
-  //     if (bottomRef.current) {
-  //       bottomRef.current.scrollIntoView({ behavior: "smooth" });
-  //     }
-  //   }, [comments]);
 
   return (
     <Box

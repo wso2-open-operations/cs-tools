@@ -1,4 +1,4 @@
-import { ServerIcon } from "../../../assets/icons/support/support-icons";
+import { ServerIcon } from "../../../assets/icons/common-icons";
 import { InfoCard } from "./InfoCard";
 
 export const ServiceRequestCard = () => (

@@ -17,7 +17,7 @@
 import { Box, IconButton } from "@mui/material";
 import { useState } from "react";
 
-import { Wso2Logo } from "../../assets/icons/side-nav-bar/side-nav-bar-icons";
+import { Wso2Logo } from "../../assets/icons/side-nav-bar-icons";
 import SearchBar from "./SearchBar/SearchBar";
 import Profile from "./Profile/Profile";
 import Announcements from "./Announcements/Announcements";

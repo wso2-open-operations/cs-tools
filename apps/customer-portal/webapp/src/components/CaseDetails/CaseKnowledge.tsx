@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Typography, Chip, Card } from "@mui/material";
-import type { KBArticle } from "../../types/case.types";
-import { BookOpenIcon } from "../../assets/icons/support/support-icons";
+import type { KBArticle } from "@/types/case.types";
+import { BookOpenIcon } from "@/assets/icons/common-icons";
 
 interface CaseKnowledgeProps {
   kbArticles: KBArticle[];

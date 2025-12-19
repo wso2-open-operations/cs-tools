@@ -25,7 +25,7 @@ import {
   ExternalLinkIcon,
   ChatIcon,
   PlayIcon,
-} from "../../../assets/icons/support/support-icons";
+} from "../../../assets/icons/common-icons";
 
 export interface ChatSession {
   id: string;

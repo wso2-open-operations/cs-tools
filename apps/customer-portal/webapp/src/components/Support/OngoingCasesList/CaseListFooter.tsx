@@ -1,6 +1,6 @@
 import { Button } from "@mui/material";
 import React from "react";
-import { ArrowRightIcon } from "../../../assets/icons/support/support-icons";
+import { ArrowRightIcon } from "../../../assets/icons/common-icons";
 
 interface CaseListFooterProps {
   onClick?: () => void;

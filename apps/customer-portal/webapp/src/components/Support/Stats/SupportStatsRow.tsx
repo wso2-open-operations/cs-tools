@@ -23,7 +23,7 @@ import {
   FileTextIcon,
   ChatIcon,
   TrendingUpIcon,
-} from "../../../assets/icons/support/support-icons";
+} from "../../../assets/icons/common-icons";
 import { StatCard } from "./StatCard";
 
 export interface SupportStatsRowData {

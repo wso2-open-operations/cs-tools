@@ -15,8 +15,8 @@
 // under the License.
 
 import React from "react";
-import type { IconProps } from "../../../../types/icon.types";
-import { BaseIcon } from "../../BaseIcon";
+import type { IconProps } from "@/types/icon.types";
+import { BaseIcon } from "../../base-icon";
 
 export const TagIcon: React.FC<IconProps> = (props) => {
   return (

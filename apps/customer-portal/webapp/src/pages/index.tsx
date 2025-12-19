@@ -18,11 +18,11 @@ import { Typography, Box } from "@mui/material";
 import ProjectCard from "../components/ProjectCard";
 
 import Header from "../components/Header/Header";
-import FolderOpenIcon from "../assets/icons/common/folder-open-icon";
 import { Endpoints } from "../services/endpoints";
 import { PROJECTS_LIST_CACHE_KEY } from "../utils/constants";
 import { useGet } from "../services/useApi";
 import type { ProjectResponse } from "../types/project.types";
+import { FolderOpenIcon } from "../assets/icons/common/folder-open-icon";
 
 export default function Home() {
   const {

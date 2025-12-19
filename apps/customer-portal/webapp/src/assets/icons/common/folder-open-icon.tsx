@@ -14,29 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import SvgIcon from "@mui/material/SvgIcon";
-import type { IconProps } from "../../../types/icon.types";
+import React from "react";
+import type { IconProps } from "@/types/icon.types";
+import { BaseIcon } from "../base-icon";
 
-const FolderOpenIcon: React.FC<IconProps> = ({ width, height, color }) => {
-  return (
-    <SvgIcon
-      sx={{
-        width,
-        height,
-        color: color || "currentColor",
-      }}
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </SvgIcon>
-  );
-};
-
-export default FolderOpenIcon;
+export const FolderOpenIcon: React.FC<IconProps> = (props) => (
+  <BaseIcon {...props}>
+    <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+  </BaseIcon>
+);

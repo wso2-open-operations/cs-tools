@@ -16,9 +16,9 @@
 
 import React from "react";
 import { Box, Button } from "@mui/material";
-import FolderOpenIcon from "../../../assets/icons/common/folder-open-icon";
 import type { ProjectSwitcherProps } from "./types";
 import { KeyboardArrowDown } from "@mui/icons-material";
+import { FolderOpenIcon } from "../../../assets/icons/common-icons";
 
 const ProjectSwitcher: React.FC<ProjectSwitcherProps> = ({
   handleOpen,

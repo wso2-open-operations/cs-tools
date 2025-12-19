@@ -15,7 +15,7 @@ import {
   SearchIcon,
   SlidersIcon,
   CloseIcon,
-} from "../../assets/icons/support/support-icons";
+} from "@/assets/icons/common-icons";
 
 interface FilterOptions {
   statuses: string[];

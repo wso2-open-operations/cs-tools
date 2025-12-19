@@ -8,12 +8,12 @@ import {
   Chip,
   Divider,
 } from "@mui/material";
-import type { Comment } from "../../types/case.types";
+import type { Comment } from "@/types/case.types";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
   BotIcon,
-} from "../../assets/icons/support/support-icons";
+} from "@/assets/icons/common-icons";
 
 interface CommentCardProps {
   comment: Comment;

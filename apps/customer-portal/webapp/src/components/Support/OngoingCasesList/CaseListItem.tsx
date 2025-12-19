@@ -14,7 +14,7 @@ import {
   CheckCircleIcon,
   ClockIcon,
   MessageCircleIcon,
-} from "../../../assets/icons/support/support-icons";
+} from "../../../assets/icons/common-icons";
 
 const severityConfig: Record<string, { color: string; label: string }> = {
   "3": { color: "#3b82f6", label: "Low" }, // Blue

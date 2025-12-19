@@ -19,18 +19,18 @@ import React, { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import {
   ChangeRequestCard,
-  NewChatCTA,
-  OngoingCasesList,
   ServiceRequestCard,
   SupportHeader,
   SupportStatsRow,
-} from "../../../components/Support";
-import { Endpoints } from "../../../services/endpoints";
-import { useGet } from "../../../services/useApi";
-import { useProject } from "../../../context/ProjectContext";
-import type { CaseResponse } from "../../../types/support.types";
-import type { ProjectMetadataResponse } from "../../../types/project-metadata.types";
-import PreLoader from "../../../components/PreLoader/PreLoader";
+  OngoingCasesList,
+  NewChatCTA,
+} from "@/components/Support";
+import { Endpoints } from "@/services/endpoints";
+import { useGet } from "@/services/useApi";
+import { useProject } from "@/context/ProjectContext";
+import type { CaseResponse } from "@/types/support.types";
+import type { ProjectMetadataResponse } from "@/types/project-metadata.types";
+import PreLoader from "@/components/PreLoader/PreLoader";
 
 const SupportPage: React.FC = () => {
   const { sysId } = useParams<{ sysId: string }>();

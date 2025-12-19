@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import { Box, Button, IconButton, Typography } from "@mui/material";
 import { ChevronLeft, ChevronRight } from "@mui/icons-material";
 import { useRouter } from "../../hooks/useRouter";
-import FolderOpenIcon from "../../assets/icons/common/folder-open-icon";
-import CrownIcon from "../../assets/icons/common/crown-icon";
+
 import {
   SettingsIcon,
   DashboardIcon,
@@ -16,8 +15,10 @@ import {
   CommunityIcon,
   AnnouncementsIcon,
   Wso2Logo,
-} from "../../assets/icons/side-nav-bar/side-nav-bar-icons";
+} from "../../assets/icons/side-nav-bar-icons";
 import type { SidebarProps } from ".";
+import { FolderOpenIcon } from "../../assets/icons/common/folder-open-icon";
+import { CrownIcon } from "../../assets/icons/common/crown-icon";
 
 const Sidebar: React.FC<SidebarProps> = ({
   projectName,

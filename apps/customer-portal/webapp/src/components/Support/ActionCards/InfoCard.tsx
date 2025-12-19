@@ -1,6 +1,6 @@
 import { Box, Button, Card, Typography } from "@mui/material";
 import React from "react";
-import { ArrowRightIcon } from "../../../assets/icons/support/support-icons";
+import { ArrowRightIcon } from "../../../assets/icons/common-icons";
 
 interface InfoCardProps {
   icon: React.ReactNode;

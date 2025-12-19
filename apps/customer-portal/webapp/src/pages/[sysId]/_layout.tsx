@@ -15,8 +15,8 @@
 // under the License.
 
 import { Outlet } from "react-router-dom";
-import DashboardLayout from "../../components/layouts/DashboardLayout";
-import { ProjectProvider } from "../../context/ProjectContext";
+import DashboardLayout from "@/components/layouts/DashboardLayout";
+import { ProjectProvider } from "@/context/ProjectContext";
 
 export default function SysIdLayout() {
   return (

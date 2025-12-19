@@ -14,12 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams } from "../../router";
-import ProjectPageHeader from "../../components/ProjectPageHeader/ProjectPageHeader";
-import { useProject } from "../../context/ProjectContext";
+import { useParams } from "@/router";
+import ProjectPageHeader from "@/components/ProjectPageHeader/ProjectPageHeader";
+import { useProject } from "@/context/ProjectContext";
 
 export default function Announcements() {
-  
   const { sysId } = useParams("/:sysId/announcements");
   const { currentProject } = useProject();
   return (

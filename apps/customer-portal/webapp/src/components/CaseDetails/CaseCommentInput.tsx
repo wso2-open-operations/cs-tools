@@ -1,9 +1,6 @@
 import React from "react";
 import { Box, TextField, Button, Avatar } from "@mui/material";
-import {
-  AttachmentIcon,
-  SendIcon,
-} from "../../assets/icons/support/support-icons";
+import { AttachmentIcon, SendIcon } from "@/assets/icons/common-icons";
 
 interface CaseCommentInputProps {
   onSendComment?: (comment: string) => void;

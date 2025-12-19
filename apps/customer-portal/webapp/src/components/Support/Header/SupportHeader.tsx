@@ -16,7 +16,7 @@
 
 import { Box, Typography } from "@mui/material";
 import React from "react";
-import { SupportIcon } from "../../../assets/icons/side-nav-bar/side-nav-bar-icons";
+import { SupportIcon } from "../../../assets/icons/side-nav-bar-icons";
 
 interface SupportHeaderProps {
   projectName?: string;

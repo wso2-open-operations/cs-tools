@@ -1,8 +1,5 @@
-import { CircleAlertIcon } from "../assets/icons/dashboard/dashboard-icons";
-import {
-  ClockIcon,
-  MessageCircleIcon,
-} from "../assets/icons/support/support-icons";
+
+import { AlertCircleIcon, ClockIcon, MessageCircleIcon } from "../assets/icons/common-icons";
 
 export const getStatusColor = (color: string) => {
   switch (color) {
@@ -21,7 +18,7 @@ export const getStatusIcon = (status: string) => {
   if (status.includes("Progress")) return <ClockIcon width={12} height={12} />;
   if (status.includes("Response"))
     return <MessageCircleIcon width={12} height={12} />;
-  return <CircleAlertIcon width={12} height={12} />;
+  return <AlertCircleIcon width={12} height={12} />;
 };
 
 export const getPriorityColor = (priority: string) => {

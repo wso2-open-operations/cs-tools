@@ -1,6 +1,6 @@
 import { Box } from "@mui/material";
 import React from "react";
-import type { Case } from "../../types/support.types";
+import type { Case } from "@/types/support.types";
 import { CaseCard } from "./CaseCard";
 
 interface AllCasesListProps {

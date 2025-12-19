@@ -6,8 +6,8 @@ import {
   ClockIcon,
   FileTextIcon,
   MessageCircleIcon,
-} from "../../assets/icons/support/support-icons";
-import { StatCard } from "../Support/Stats/StatCard";
+} from "@/assets/icons/common-icons";
+import { StatCard } from "@/components/Support/Stats/StatCard";
 
 interface AllCasesStatsProps {
   stats: {

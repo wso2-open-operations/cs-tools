@@ -9,9 +9,9 @@ import {
   FileTextIcon,
   MessageCircleIcon,
   UserIcon,
-} from "../../assets/icons/support/support-icons";
-import { formatRelativeTime } from "../../utils/dateUtils";
-import type { Case } from "../../types/support.types";
+} from "@/assets/icons/common-icons";
+import { formatRelativeTime } from "@/utils/dateUtils";
+import type { Case } from "@/types/support.types";
 
 interface CaseCardProps {
   item: Case;

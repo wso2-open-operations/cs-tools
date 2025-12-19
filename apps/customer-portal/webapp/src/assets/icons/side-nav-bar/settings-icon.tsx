@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { BaseIcon } from "../BaseIcon";
-import type { IconProps } from "../../../types/icon.types";
+import { BaseIcon } from "../base-icon";
+import type { IconProps } from "@/types/icon.types";
 
 const SettingsIcon: React.FC<IconProps> = (props) => {
   return (

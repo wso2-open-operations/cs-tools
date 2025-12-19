@@ -14,10 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams } from "../../router";
-// import projects from "../../data/projects.json";
-import ProjectPageHeader from "../../components/ProjectPageHeader/ProjectPageHeader";
-import { useProject } from "../../context/ProjectContext";
+import { useParams } from "@/router";
+import ProjectPageHeader from "@/components/ProjectPageHeader/ProjectPageHeader";
+import { useProject } from "@/context/ProjectContext";
 
 export default function Community() {
   const { currentProject } = useProject();

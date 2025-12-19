@@ -1,7 +1,7 @@
 import { Box, Button, Typography } from "@mui/material";
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeftIcon } from "../../assets/icons/support/support-icons";
+import { ArrowLeftIcon } from "@/assets/icons/common-icons";
 
 export const AllCasesHeader: React.FC = () => {
   const navigate = useNavigate();

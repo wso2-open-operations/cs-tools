@@ -32,10 +32,7 @@ import {
   Chip,
 } from "@mui/material";
 import { Info, ExternalLink, ArrowUpDown, Plus } from "lucide-react";
-import {
-  FunnelIcon,
-  EllipsisVerticalIcon,
-} from "../../assets/icons/dashboard/dashboard-icons";
+
 import {
   PieChart,
   Pie,
@@ -49,20 +46,21 @@ import {
 } from "recharts";
 
 import { Close } from "@mui/icons-material";
-import { getStatsConfig } from "../../../data/Dashboard/StatsConfig/statsConfig";
-import StatCard from "../../components/Dashboard/StatCard";
-import { Endpoints } from "../../services/endpoints";
-import { useGet } from "../../services/useApi";
-import type { ProjectMetadataResponse } from "../../types/project-metadata.types";
-import type { CaseResponse } from "../../types/support.types";
-import { useProject } from "../../context/ProjectContext";
-import { useParams } from "../../router";
-import { getSeverityColor } from "../../utils/color";
-import { formatDate } from "../../utils/dateUtils";
+import { getStatsConfig } from "#/Dashboard/StatsConfig/statsConfig";
+import StatCard from "@/components/Dashboard/StatCard";
+import { Endpoints } from "@/services/endpoints";
+import { useGet } from "@/services/useApi";
+import type { ProjectMetadataResponse } from "@/types/project-metadata.types";
+import type { CaseResponse } from "@/types/support.types";
+import { useProject } from "@/context/ProjectContext";
+import { useParams } from "@/router";
+import { getSeverityColor } from "@/utils/color";
+import { formatDate } from "@/utils/dateUtils";
 import {
   getActiveCasesData,
   getOutstandingIncidentsData,
-} from "../../utils/dashboardUtils";
+} from "@/utils/dashboardUtils";
+import { EllipsisVerticalIcon, FunnelIcon } from "@/assets/icons/common-icons";
 
 export default function Dashboard() {
   const { sysId } = useParams("/:sysId/dashboard");

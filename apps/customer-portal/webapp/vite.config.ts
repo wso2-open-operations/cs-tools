@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import generouted from "@generouted/react-router/plugin";
 import { VitePWA } from "vite-plugin-pwa";
+import path from "path";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -37,4 +38,10 @@ export default defineConfig({
     port: 3000,
   },
   envPrefix: "CUSTOMER_PORTAL_",
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      "#": path.resolve(__dirname, "./data"),
+    },
+  },
 });

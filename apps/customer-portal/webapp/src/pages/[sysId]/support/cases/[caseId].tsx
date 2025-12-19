@@ -1,24 +1,24 @@
 import { Box, Tab, Tabs } from "@mui/material";
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CaseHeader } from "../../../../components/CaseDetails/CaseHeader";
-import { CaseActivity } from "../../../../components/CaseDetails/CaseActivity";
-import { CaseInfo } from "../../../../components/CaseDetails/CaseInfo";
-import { CaseCalls } from "../../../../components/CaseDetails/CaseCalls";
-import { CaseAttachments } from "../../../../components/CaseDetails/CaseAttachments";
-import { CaseKnowledge } from "../../../../components/CaseDetails/CaseKnowledge";
-// import { CaseCommentInput } from "../../../components/CaseDetails/CaseCommentInput";
-import type { CaseDetails } from "../../../../types/case.types";
+import { CaseHeader } from "@/components/CaseDetails/CaseHeader";
+import { CaseActivity } from "@/components/CaseDetails/CaseActivity";
+import { CaseInfo } from "@/components/CaseDetails/CaseInfo";
+import { CaseCalls } from "@/components/CaseDetails/CaseCalls";
+import { CaseAttachments } from "@/components/CaseDetails/CaseAttachments";
+import { CaseKnowledge } from "@/components/CaseDetails/CaseKnowledge";
+// import { CaseCommentInput } from "@/components/CaseDetails/CaseCommentInput";
+import type { CaseDetails } from "@/types/case.types";
 
-import { Endpoints } from "../../../../services/endpoints";
-import { useGet } from "../../../../services/useApi";
+import { Endpoints } from "@/services/endpoints";
+import { useGet } from "@/services/useApi";
 import {
   BookOpenIcon,
   InfoIcon,
   ChatIcon,
   AttachmentIcon,
   PhoneIcon,
-} from "../../../../assets/icons/support/support-icons";
+} from "@/assets/icons/common-icons";
 
 const CaseDetailsPage: React.FC = () => {
   const { sysId, caseId } = useParams<{ sysId: string; caseId: string }>();

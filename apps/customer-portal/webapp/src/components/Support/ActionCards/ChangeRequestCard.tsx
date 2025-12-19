@@ -1,4 +1,4 @@
-import { CalendarDaysIcon } from "../../../assets/icons/support/support-icons";
+import { CalendarDaysIcon } from "../../../assets/icons/common-icons";
 import { InfoCard } from "./InfoCard";
 
 export const ChangeRequestCard = () => (

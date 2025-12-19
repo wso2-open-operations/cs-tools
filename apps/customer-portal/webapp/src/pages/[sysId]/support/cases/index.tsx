@@ -5,13 +5,13 @@ import {
   AllCasesFilters,
   AllCasesHeader,
   AllCasesList,
-} from "../../../../components/AllCases";
-import PreLoader from "../../../../components/PreLoader/PreLoader";
-import { Endpoints } from "../../../../services/endpoints";
-import { useGet } from "../../../../services/useApi";
+} from "@/components/AllCases";
+import PreLoader from "@/components/PreLoader/PreLoader";
+import { Endpoints } from "@/services/endpoints";
+import { useGet } from "@/services/useApi";
 import { keepPreviousData } from "@tanstack/react-query";
-import type { Case, CaseResponse } from "../../../../types/support.types";
-import type { ProjectMetadataResponse } from "../../../../types/project-metadata.types";
+import type { Case, CaseResponse } from "@/types/support.types";
+import type { ProjectMetadataResponse } from "@/types/project-metadata.types";
 import {
   CircleAlert,
   Clock,

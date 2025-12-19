@@ -14,55 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import SvgIcon from "@mui/material/SvgIcon";
+import React from "react";
 import type { IconProps } from "../../../types/icon.types";
+import { BaseIcon } from "../base-icon";
 
-const UsersIcon: React.FC<IconProps> = ({ width, height, color }) => {
-  return (
-    <SvgIcon
-      sx={{
-        width,
-        height,
-        color: color || "currentColor",
-      }}
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="9"
-        cy="7"
-        r="4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M22 21v-2a4 4 0 0 0-3-3.87"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M16 3.128a4 4 0 0 1 0 7.744"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </SvgIcon>
-  );
-};
-
-export default UsersIcon;
+export const UsersIcon: React.FC<IconProps> = (props) => (
+  <BaseIcon {...props}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.128a4 4 0 0 1 0 7.744" />
+  </BaseIcon>
+);

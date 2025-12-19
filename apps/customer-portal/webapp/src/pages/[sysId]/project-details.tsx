@@ -17,21 +17,21 @@
 import { Box, Typography, Tabs, Tab, Chip } from "@mui/material";
 import { useState, useEffect } from "react";
 import {
-  FolderIcon,
-  BuildingIcon,
-  ActivityIcon,
-  ZapIcon,
-} from "../../assets/icons/project-details/project-details-icons";
-import UsersIcon from "../../assets/icons/common/users-icon";
-import CrownIcon from "../../assets/icons/common/crown-icon";
-import {
   InfoIcon,
   ServerIcon,
   ClockIcon,
-} from "../../assets/icons/support/support-icons";
-import projectDetailsData from "../../data/project-details-mock.json";
+  CrownIcon,
+} from "@/assets/icons/common-icons";
+import projectDetailsData from "@/data/project-details-mock.json";
 
-import { useProject } from "../../context/ProjectContext";
+import { useProject } from "@/context/ProjectContext";
+import {
+  ActivityIcon,
+  BuildingIcon,
+  FolderIcon,
+  ZapIcon,
+} from "@/assets/icons/project-details-icons";
+import { UsersIcon } from "@/assets/icons/common/users-icon";
 
 export default function ProjectDetails() {
   const { currentProject } = useProject();

@@ -1,4 +1,4 @@
-/// <parameter name="reference types="vite/client" />
+/// <reference types="vite/client" />
 
 interface ImportMetaEnv {
   readonly CUSTOMER_PORTAL_ASGARDEO_BASE_URL: string;

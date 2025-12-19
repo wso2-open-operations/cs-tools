@@ -1,6 +1,6 @@
 import { Box, Typography } from "@mui/material";
 import React from "react";
-import { FileTextIcon } from "../../../assets/icons/support/support-icons";
+import { FileTextIcon } from "../../../assets/icons/common-icons";
 
 export const CaseListHeader: React.FC = () => {
   return (
