@@ -15,3 +15,5 @@
 // under the License.
 
 export * from "./ProjectCard";
+export * from "./ProjectPopoverItem";
+export * from "./ProjectSelector";

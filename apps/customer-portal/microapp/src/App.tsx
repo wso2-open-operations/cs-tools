@@ -15,15 +15,33 @@
 // under the License.
 
 import React from "react";
-import HomePage from "@pages/HomePage";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
+import SelectProjectPage from "@pages/SelectProjectPage";
+import MainLayout from "./layout/MainLayout";
+import AppProvider from "./context/AppProvider";
+
+import HomePage from "@pages/HomePage";
+import SupportPage from "@pages/SupportPage";
+import UsersPage from "@pages/UsersPage";
+import ProfilePage from "@pages/ProfilePage";
+import NotificationsPage from "@pages/NotificationsPage";
 
 const App: React.FC = () => {
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-      </Routes>
+      <AppProvider>
+        <Routes>
+          <Route path="/select-project" element={<SelectProjectPage />} />
+
+          <Route element={<MainLayout />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/support" element={<SupportPage />} />
+            <Route path="/users" element={<UsersPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
+          </Route>
+        </Routes>
+      </AppProvider>
     </Router>
   );
 };

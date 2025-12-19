@@ -14,6 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export default function HomePage() {
-  return <>Home</>;
+import { Box } from "@mui/material";
+import { Outlet } from "react-router-dom";
+import { AppBar, TabBar } from "@components/core";
+
+export default function MainLayout() {
+  return (
+    <Box bgcolor="semantic.portal.background.main" minHeight={"100vh"}>
+      <AppBar />
+      <Box>
+        <Outlet />
+      </Box>
+      <TabBar />
+    </Box>
+  );
 }

@@ -14,6 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export default function HomePage() {
-  return <>Home</>;
+export default function ProfilePage() {
+  return <>Profile</>;
 }

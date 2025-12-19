@@ -19,9 +19,21 @@ export const palette = {
     main: "#ff7300",
     contrastText: "#ffffff",
   },
+  background: {
+    default: "#f5f5f5",
+    paper: "#ffffff",
+  },
+  text: {
+    tertiary: "#b8b8b8",
+  },
   semantic: {
     border: {
       subtle: "#e0e0e0",
+    },
+    state: {
+      active: {
+        background: "#fef8f3",
+      },
     },
     portal: {
       background: { main: "#f5f5f5", secondary: "#f9fafb" },
