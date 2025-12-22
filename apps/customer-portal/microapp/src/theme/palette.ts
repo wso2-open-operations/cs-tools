@@ -22,6 +22,7 @@ export const palette = {
   background: {
     default: "#f5f5f5",
     paper: "#ffffff",
+    card: "#f5f5f599",
   },
   text: {
     tertiary: "#b8b8b8",
@@ -39,6 +40,7 @@ export const palette = {
       background: { main: "#f5f5f5", secondary: "#f9fafb" },
       accent: {
         orange: "#ff5722",
+        yellow: "#ffc107",
         green: "#4caf50",
         blue: "#5b6ef5",
         cyan: "#00bcd4",
@@ -54,6 +56,10 @@ export const palette = {
       warning: {
         text: "#ffc107",
         background: "#fff8e1",
+      },
+      error: {
+        text: "#f54a00",
+        background: "#ffedd5",
       },
     },
     priority: {

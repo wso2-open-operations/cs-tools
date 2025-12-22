@@ -53,6 +53,13 @@ export default function Chips(theme: Theme): Components {
             backgroundColor: theme.palette.semantic.chip.warning.background,
           },
         },
+        {
+          props: { color: "error" },
+          style: {
+            color: theme.palette.semantic.chip.error.text,
+            backgroundColor: theme.palette.semantic.chip.error.background,
+          },
+        },
       ],
     },
   };

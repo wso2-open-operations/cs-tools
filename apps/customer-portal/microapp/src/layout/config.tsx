@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import type { AppBarVariant } from "@src/context/layout";
+import { AllCasesAppBarSlot } from "@pages/AllCasesPage";
+import { DetailedPageAppBarSlot } from "@pages/DetailedPage";
 
 type AppBarConfig = {
   showNotifications: boolean;
@@ -46,5 +48,23 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
+  },
+  { path: "/chat", title: "Chat with Novera", appBarVariant: "minimal", hasBackAction: true, tabIndex: -1 },
+  { path: "/create-case", title: "Create Support Case", appBarVariant: "minimal", hasBackAction: true, tabIndex: -1 },
+  {
+    path: "/cases/all",
+    title: "All Cases",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <AllCasesAppBarSlot />,
+  },
+  {
+    path: "/cases/:id",
+    title: "Authentication Service Issue",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <DetailedPageAppBarSlot />,
   },
 ];

@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { Theme, Components } from "@mui/material";
+import { ExpandMore } from "@mui/icons-material";
+import { type Theme, type Components, InputBase } from "@mui/material";
 
 export default function Inputs(theme: Theme): Components {
   return {
@@ -33,14 +34,47 @@ export default function Inputs(theme: Theme): Components {
             marginLeft: 2,
           },
 
+          "&.MuiInputBase-multiline": {
+            padding: 10,
+          },
+
           "&.Mui-focused": {
             outline: `1.5px solid ${theme.palette.primary.main}`,
           },
 
           "& .MuiInputAdornment-root .MuiSvgIcon-root": {
-            fontSize: theme.typography.pxToRem(19),
+            fontSize: theme.typography.pxToRem(20),
           },
         },
+      },
+    },
+    MuiSelect: {
+      defaultProps: {
+        input: <InputBase />,
+        IconComponent: ExpandMore,
+        MenuProps: {
+          slotProps: {
+            paper: {
+              sx: (theme) => ({
+                outline: `1px solid ${theme.palette.divider}`,
+                boxShadow: "rgba(0, 0, 0, 0.05) 0px 6px 24px 0px, rgba(0, 0, 0, 0.08) 0px 0px 0px 1px", // TODO: Replace this with proper palette tokens
+              }),
+            },
+            list: {
+              sx: (theme) => ({
+                "& .MuiMenuItem-root": {
+                  borderRadius: 0,
+                  fontSize: theme.typography.body2,
+                },
+              }),
+            },
+          },
+        },
+      },
+    },
+    MuiMenuItem: {
+      defaultProps: {
+        dense: true,
       },
     },
   };
