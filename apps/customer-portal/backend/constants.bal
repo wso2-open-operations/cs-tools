@@ -21,6 +21,7 @@ const MSG_USERS_ADDED_SUCCESS = "Users added successfully.";
 const ERR_MSG_GROUP_EMPTY = "Group name cannot be empty.";
 const ERR_MSG_EMAILS_EMPTY = "Emails array cannot be empty. At least one email is required.";
 const ERR_MSG_INVALID_EMAIL = "Invalid email format";
+const ERR_MSG_USER_INFO_HEADER_NOT_FOUND = "User information header not found!";
 
 // Default Pagination Values
 public const int DEFAULT_OFFSET = 0;
