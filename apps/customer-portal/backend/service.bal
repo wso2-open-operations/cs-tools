@@ -365,7 +365,8 @@ service http:InterceptableService / on new http:Listener(9095) {
         }
 
         string cacheKey = string `${userInfo.email}:cases:${projectId}:${payload.offset}:${payload.'limit}:${
-            payload.contact ?: ""}:${payload.status ?: ""}:${payload.severity ?: ""}:${payload.product ?: ""}:${payload.category ?: ""}`;
+            payload.contact ?: ""}:${payload.status ?: ""}:${payload.severity ?: ""}:${payload.product ?: ""}:${
+            payload.category ?: ""}`;
 
         if userCache.hasKey(cacheKey) {
             entity:CasesResponse|error cached = userCache.get(cacheKey).ensureType();
