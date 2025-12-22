@@ -17,7 +17,7 @@
 import React from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import SelectProjectPage from "@pages/SelectProjectPage";
-import MainLayout from "./components/layout/MainLayout";
+import MainLayout from "@components/layout/MainLayout";
 import AppProvider from "@context/AppProvider";
 
 import HomePage from "@pages/HomePage";
