@@ -68,4 +68,28 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     tabIndex: -1,
     appBarSlots: <DetailedPageAppBarSlot />,
   },
+  {
+    path: "/chats/all",
+    title: "All Chats",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <AllCasesAppBarSlot />,
+  },
+  {
+    path: "/services/all",
+    title: "All Service Requests",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <AllCasesAppBarSlot />,
+  },
+  {
+    path: "/changes/all",
+    title: "All Change Requests",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <AllCasesAppBarSlot />,
+  },
 ];

@@ -49,6 +49,15 @@ const App: React.FC = () => {
               <Route path="all" element={<AllCasesPage type="case" />} />
               <Route path=":id" element={<DetailedPage type="case" />} />
             </Route>
+            <Route path="/chats">
+              <Route path="all" element={<AllCasesPage type="chat" />} />
+            </Route>
+            <Route path="/services">
+              <Route path="all" element={<AllCasesPage type="service" />} />
+            </Route>
+            <Route path="/changes">
+              <Route path="all" element={<AllCasesPage type="change" />} />
+            </Route>
           </Route>
         </Routes>
       </AppProvider>

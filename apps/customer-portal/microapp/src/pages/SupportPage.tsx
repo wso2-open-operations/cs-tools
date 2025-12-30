@@ -63,7 +63,7 @@ export default function SupportPage() {
         <Tab label="Changes" value="change" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5} elevation={0}>
-        <ItemListView title="Open Cases" viewAllPath="/cases/all">
+        <ItemListView title="Open Cases" viewAllPath={`/${tab}s/all`}>
           {MOCK_ITEMS[tab].map((item, index) => (
             <ItemCard key={index} {...item} />
           ))}

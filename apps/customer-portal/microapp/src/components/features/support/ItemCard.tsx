@@ -1,9 +1,9 @@
 import { Card, Stack, Typography, SvgIcon } from "@mui/material";
 import { CalendarMonth, ChevronRight, Circle, Schedule } from "@mui/icons-material";
+import { PriorityChip, StatusChip } from "@components/features/support";
 import { Link } from "react-router-dom";
 
 import { TYPE_CONFIG } from "./config";
-import { PriorityChip, StatusChip } from "./Chip";
 
 export type ItemType = "case" | "chat" | "service" | "change";
 

@@ -16,9 +16,17 @@
 
 import { Search } from "@mui/icons-material";
 import { InputAdornment, Stack, Tab, Tabs, InputBase as TextField } from "@mui/material";
+import { ItemCardExtended, type ItemCardProps } from "@components/features/support";
+import { MOCK_EXTENDED_ITEMS } from "@src/mocks/data/support";
 
-export default function AllCasesPage({ type }: { type: string }) {
-  return <>Contet Goes Here...</>;
+export default function AllCasesPage({ type }: { type: ItemCardProps["type"] }) {
+  return (
+    <Stack gap={2}>
+      {MOCK_EXTENDED_ITEMS[type].map((item, index) => (
+        <ItemCardExtended key={index} {...item} />
+      ))}
+    </Stack>
+  );
 }
 
 export function AllCasesAppBarSlot() {
