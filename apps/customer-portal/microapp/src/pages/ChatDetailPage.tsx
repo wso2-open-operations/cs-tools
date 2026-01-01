@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { StatusChip } from "@components/features/support";
 import { Card, Grid, Stack, Typography } from "@mui/material";
-import { InfoField, StickyCommentBar } from "@components/features/detail";
+import { InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import { ConversationFeedback, MessageBubble, type ChatMessage } from "@components/features/chat";
+import { useLayout } from "@context/layout";
+import { Article, ChatBubble } from "@mui/icons-material";
 
 export default function ChatDetailPage() {
+  const layout = useLayout();
   const [comment, setComment] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -88,12 +91,44 @@ export default function ChatDetailPage() {
     setTimeout(() => setMessages((prev) => [...prev, assistantMessage]), 2000);
   };
 
+  const AppBarSlot = () => (
+    <Stack direction="row" justifyContent="space-between" gap={1.5} mt={1}>
+      <StatusChip status="resolved" size="small" />
+      <Stack direction="row" gap={3}>
+        <Stack direction="row" alignItems="center" gap={1}>
+          <ChatBubble sx={(theme) => ({ fontSize: theme.typography.pxToRem(20), color: "text.secondary" })} />
+          <Typography variant="subtitle1" color="text.secondary">
+            8 messages
+          </Typography>
+        </Stack>
+        <Stack direction="row" alignItems="center" gap={1}>
+          <Article sx={(theme) => ({ fontSize: theme.typography.pxToRem(20), color: "text.secondary" })} />
+          <Typography variant="subtitle1" color="text.secondary">
+            3 KB articles
+          </Typography>
+        </Stack>
+      </Stack>
+    </Stack>
+  );
+
+  useLayoutEffect(() => {
+    layout.setTitleOverride("How do I configure custom claims in JWT tokens?");
+    layout.setOverlineSlotOverride(<OverlineSlot type="chat" id="CH-1234" />);
+    layout.setAppBarSlotsOverride(<AppBarSlot />);
+
+    return () => {
+      layout.setTitleOverride(undefined);
+      layout.setOverlineSlotOverride(undefined);
+      layout.setAppBarSlotsOverride(undefined);
+    };
+  }, []);
+
   return (
     <>
       <Stack gap={2} mb={10}>
         <Card component={Stack} p={1.5} gap={1.5} elevation={0}>
           <Typography variant="h5" fontWeight="medium">
-            Case Information
+            Chat Information
           </Typography>
           <Grid spacing={1.5} container>
             <Grid size={6}>

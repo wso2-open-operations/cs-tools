@@ -11,7 +11,8 @@ import { APP_BAR_CONFIG } from "@root/src/components/layout/config";
 
 export function AppBar() {
   const navigate = useNavigate();
-  const { title, appBarVariant, appBarSlots, hasBackAction } = useLayout();
+  const { title, appBarVariant, overlineSlot, subtitleSlot, startSlot, endSlot, appBarSlots, hasBackAction } =
+    useLayout();
   const config = APP_BAR_CONFIG[appBarVariant];
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
@@ -38,12 +39,24 @@ export function AppBar() {
       >
         {config.showNotifications && <NotificationButton to="/notifications" />}
 
-        <Stack direction="row" gap={1}>
-          {hasBackAction && <BackButton onClick={navigateBack} />}
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Stack direction="row" alignItems="center" gap={1.5}>
+            {hasBackAction && <BackButton onClick={navigateBack} />}
+            {startSlot}
+            <Stack>
+              <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
+                {overlineSlot}
+              </Typography>
+              <Typography variant="h6" fontWeight="medium">
+                {title}
+              </Typography>
+              <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
+                {subtitleSlot}
+              </Typography>
+            </Stack>
+          </Stack>
 
-          <Typography variant="h6" fontWeight="medium">
-            {title}
-          </Typography>
+          {endSlot}
         </Stack>
 
         {config.showProjectSelector && (
@@ -99,7 +112,7 @@ function NotificationButton({ to }: { to: string }) {
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
-    <IconButton onClick={onClick} sx={{ p: 0 }}>
+    <IconButton onClick={onClick} sx={{ p: 0 }} disableRipple>
       <ArrowBack
         sx={(theme) => ({
           fontSize: theme.typography.pxToRem(26),

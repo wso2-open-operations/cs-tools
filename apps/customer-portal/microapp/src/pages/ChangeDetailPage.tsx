@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { Card, Chip, Grid, Stack, Typography } from "@mui/material";
-import { InfoField, StakeholderItem, StickyCommentBar, TimelineEntry } from "@components/features/detail";
+import { InfoField, OverlineSlot, StakeholderItem, StickyCommentBar, TimelineEntry } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
 import { CalendarMonth, PeopleAlt, Person, Warning } from "@mui/icons-material";
 import { ChecklistItem } from "@components/features/chat";
 import { SectionCard } from "@components/shared";
 import { Timeline } from "@components/ui";
+import { useLayout } from "@context/layout";
 
 import { MOCK_ACTIVITY_TIMELINE, MOCK_IMPLEMENTATION_STEPS, MOCK_STAKEHOLDERS } from "../mocks/data/change";
 
 export default function ChangeDetailPage() {
+  const layout = useLayout();
   const [comment, setComment] = useState("");
   const [activities, setActivities] = useState(MOCK_ACTIVITY_TIMELINE);
 
@@ -18,6 +20,26 @@ export default function ChangeDetailPage() {
 
     setActivities((prev) => [...prev, { author: "You", description: comment, timestamp: "Just Now" }]);
   };
+
+  const AppBarSlot = () => (
+    <Stack direction="row" gap={1.5} mt={1}>
+      <StatusChip status="scheduled" size="small" />
+      <PriorityChip prefix="Impact" priority="low" size="small" />
+      <Chip label="Security Update" size="small" />
+    </Stack>
+  );
+
+  useLayoutEffect(() => {
+    layout.setTitleOverride("Update API Gateway security policies");
+    layout.setOverlineSlotOverride(<OverlineSlot type="change" id="CR-1234" />);
+    layout.setAppBarSlotsOverride(<AppBarSlot />);
+
+    return () => {
+      layout.setTitleOverride(undefined);
+      layout.setOverlineSlotOverride(undefined);
+      layout.setAppBarSlotsOverride(undefined);
+    };
+  }, []);
 
   return (
     <>

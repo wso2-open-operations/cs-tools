@@ -22,11 +22,14 @@ import {
 } from "@components/features/support";
 import { Stack } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
+import { useLayout } from "@context/layout";
+import { useLayoutEffect } from "react";
 
 import { MOCK_EXTENDED_ITEMS } from "@src/mocks/data/support";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
+  const layout = useLayout();
 
   const filter = searchParams.get("filter") ?? "all";
   const search = (searchParams.get("search") ?? "").toLowerCase();
@@ -41,6 +44,14 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
       item.description.toLowerCase().includes(search);
 
     return matchesFilter && matchesSearch;
+  });
+
+  useLayoutEffect(() => {
+    layout.setSubtitleSlotOverride(`${items.length} of ${MOCK_EXTENDED_ITEMS[type].length}`);
+
+    return () => {
+      layout.setSubtitleSlotOverride(null);
+    };
   });
 
   return (

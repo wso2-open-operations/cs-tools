@@ -16,14 +16,17 @@
 
 import { PeopleAlt, Person } from "@mui/icons-material";
 import { Grid, Stack } from "@mui/material";
-import { InfoField, StickyCommentBar, TimelineEntry } from "@components/features/detail";
+import { InfoField, OverlineSlot, StickyCommentBar, TimelineEntry } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { SectionCard } from "@components/shared";
 import { Timeline } from "@components/ui";
-import { MOCK_ACTIVITY_TIMELINE } from "../mocks/data/case";
+import { useLayout } from "@context/layout";
+
+import { MOCK_ACTIVITY_TIMELINE } from "@src/mocks/data/case";
 
 export default function CaseDetailPage() {
+  const layout = useLayout();
   const [comment, setComment] = useState("");
   const [activities, setActivities] = useState(MOCK_ACTIVITY_TIMELINE);
 
@@ -32,6 +35,25 @@ export default function CaseDetailPage() {
 
     setActivities((prev) => [...prev, { author: "You", timestamp: "Just Now", comment: comment }]);
   };
+
+  const AppBarSlot = () => (
+    <Stack direction="row" gap={1.5} mt={1}>
+      <StatusChip status="in progress" size="small" />
+      <PriorityChip priority="high" size="small" />
+    </Stack>
+  );
+
+  useLayoutEffect(() => {
+    layout.setTitleOverride("Authentication Service Issue 2");
+    layout.setOverlineSlotOverride(<OverlineSlot type="case" id="CASE-1234" />);
+    layout.setAppBarSlotsOverride(<AppBarSlot />);
+
+    return () => {
+      layout.setTitleOverride(undefined);
+      layout.setOverlineSlotOverride(undefined);
+      layout.setAppBarSlotsOverride(undefined);
+    };
+  }, []);
 
   return (
     <>
@@ -78,14 +100,5 @@ export default function CaseDetailPage() {
       </Stack>
       <StickyCommentBar placeholder="Add Comment" value={comment} onChange={setComment} onSend={handleSend} />
     </>
-  );
-}
-
-export function DetailedPageAppBarSlot() {
-  return (
-    <Stack direction="row" gap={1.5} mt={1}>
-      <StatusChip status="in progress" />
-      <PriorityChip priority="high" />
-    </Stack>
   );
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { AppBarVariant } from "@src/context/layout";
-import { DetailedPageAppBarSlot } from "@root/src/pages/CaseDetailPage";
-import { FilterAppBarSlot } from "@root/src/pages/AllItemsPage";
+import { FilterAppBarSlot } from "@pages/AllItemsPage";
+import { Assistant } from "@mui/icons-material";
 
 type AppBarConfig = {
   showNotifications: boolean;
@@ -16,12 +16,21 @@ interface MainLayoutConfigType {
   showAppBar?: boolean;
   hasBackAction?: boolean;
   appBarVariant?: AppBarVariant;
+  overlineSlot?: ReactNode | string;
+  subtitleSlot?: ReactNode | string;
+  startSlot?: ReactNode;
+  endSlot?: ReactNode;
   appBarSlots?: ReactNode;
 }
 
 export const APP_BAR_CONFIG: Record<AppBarVariant, AppBarConfig> = {
   default: {
     showNotifications: true,
+    showProjectSelector: true,
+    showChips: false,
+  },
+  notifications: {
+    showNotifications: false,
     showProjectSelector: true,
     showChips: false,
   },
@@ -46,12 +55,27 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   {
     path: "/notifications",
     title: "Notifications",
+    appBarVariant: "notifications",
+    hasBackAction: true,
+    tabIndex: -1,
+  },
+  {
+    path: "/chat",
+    startSlot: <Assistant color="primary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(36) })} />,
+    title: "Chat with Novera",
+    subtitleSlot: "AI-powered support assistant",
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
   },
-  { path: "/chat", title: "Chat with Novera", appBarVariant: "minimal", hasBackAction: true, tabIndex: -1 },
-  { path: "/create", title: "Create Support Case", appBarVariant: "minimal", hasBackAction: true, tabIndex: -1 },
+  {
+    path: "/create",
+    title: "Create Support Case",
+    subtitleSlot: "Auto-populated from chat",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+  },
   {
     path: "/cases/all",
     title: "All Cases",
@@ -62,11 +86,10 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/cases/:id",
-    title: "Authentication Service Issue",
+    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
-    appBarSlots: <DetailedPageAppBarSlot />,
   },
   {
     path: "/chats/all",
@@ -78,11 +101,10 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/chats/:id",
-    title: "How do I configure custom claims in JWT tokens?",
+    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
-    appBarSlots: <DetailedPageAppBarSlot />,
   },
   {
     path: "/services/all",
@@ -94,11 +116,10 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/services/:id",
-    title: "Enable additional API Manager environment",
+    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
-    appBarSlots: <DetailedPageAppBarSlot />,
   },
   {
     path: "/changes/all",
@@ -110,10 +131,9 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/changes/:id",
-    title: "Update API Gateway security policies",
+    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
-    appBarSlots: <DetailedPageAppBarSlot />,
   },
 ];

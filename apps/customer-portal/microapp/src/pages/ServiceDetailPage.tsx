@@ -1,14 +1,16 @@
-import { useState } from "react";
-import { Card, Grid, Stack, Typography } from "@mui/material";
+import { useLayoutEffect, useState } from "react";
+import { Card, Chip, Grid, Stack, Typography } from "@mui/material";
 import { PeopleAlt, Person } from "@mui/icons-material";
-import { Comment, InfoField, StickyCommentBar, TimelineEntry } from "@components/features/detail";
-import { StatusChip } from "@components/features/support";
+import { Comment, InfoField, OverlineSlot, StickyCommentBar, TimelineEntry } from "@components/features/detail";
+import { PriorityChip, StatusChip } from "@components/features/support";
 import { ChecklistItem } from "@components/features/chat";
 import { Timeline } from "@mui/lab";
+import { useLayout } from "@context/layout";
 
 import { MOCK_REQUIREMENTS, MOCK_TIMELINE_DATA, MOCK_UPDATES } from "@src/mocks/data/service";
 
 export default function ServiceDetailPage() {
+  const layout = useLayout();
   const [comment, setComment] = useState("");
   const [updates, setUpdates] = useState(MOCK_UPDATES);
 
@@ -17,12 +19,32 @@ export default function ServiceDetailPage() {
     setUpdates((prev) => [...prev, { author: "You", timestamp: "Just Now", content: comment }]);
   };
 
+  const AppBarSlot = () => (
+    <Stack direction="row" gap={1.5} mt={1}>
+      <StatusChip status="in progress" size="small" />
+      <PriorityChip priority="high" size="small" />
+      <Chip label="Environment Setup" size="small" />
+    </Stack>
+  );
+
+  useLayoutEffect(() => {
+    layout.setTitleOverride("Enable additional API Manager environment");
+    layout.setOverlineSlotOverride(<OverlineSlot type="service" id="SR-1234" />);
+    layout.setAppBarSlotsOverride(<AppBarSlot />);
+
+    return () => {
+      layout.setTitleOverride(undefined);
+      layout.setOverlineSlotOverride(undefined);
+      layout.setAppBarSlotsOverride(undefined);
+    };
+  }, []);
+
   return (
     <>
       <Stack gap={2} mb={10}>
         <Card component={Stack} p={1.5} gap={1.5} elevation={0}>
           <Typography variant="h5" fontWeight="medium">
-            Case Information
+            Request Information
           </Typography>
           <Grid spacing={1.5} container>
             <Grid size={12}>
