@@ -11,7 +11,7 @@ export function ConversationFeedback() {
     <Card component={Stack} direction="row" justifyContent="space-between" p={1.5} elevation={0}>
       <Stack>
         <Typography variant="body1" fontWeight="medium">
-          Was this conversation helpful
+          Was this conversation helpful?
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
           Your feedback helps us improve Novera

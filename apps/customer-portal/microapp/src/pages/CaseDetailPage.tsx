@@ -79,10 +79,17 @@ export default function CaseDetailPage() {
               },
             }}
           >
-            <TimelineEntry author="System" title="created this case" timestamp="2 days ago" />
-            <TimelineEntry author="System" title="assigned to Support Team" timestamp="2 days ago" />
-            <TimelineEntry author="System" title="assigned to Support Team" timestamp="2 days ago" comment="" />
+            <TimelineEntry variant="activity" author="System" title="created this case" timestamp="2 days ago" />
+            <TimelineEntry variant="activity" author="System" title="assigned to Support Team" timestamp="2 days ago" />
             <TimelineEntry
+              variant="activity"
+              author="System"
+              title="assigned to Support Team"
+              timestamp="2 days ago"
+              comment=""
+            />
+            <TimelineEntry
+              variant="activity"
               author="System"
               title="Hey Hey"
               timestamp="2 days ago"

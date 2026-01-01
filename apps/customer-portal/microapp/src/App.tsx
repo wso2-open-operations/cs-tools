@@ -30,6 +30,7 @@ import CreateCasePage from "@pages/CreateCasePage";
 import AllItemsPage from "@root/src/pages/AllItemsPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
 import ChatDetailPage from "@pages/ChatDetailPage";
+import ServiceDetailPage from "@pages/ServiceDetailPage";
 
 const App: React.FC = () => {
   return (
@@ -56,7 +57,7 @@ const App: React.FC = () => {
             </Route>
             <Route path="/services">
               <Route path="all" element={<AllItemsPage type="service" />} />
-              <Route path=":id" element={<CaseDetailPage />} />
+              <Route path=":id" element={<ServiceDetailPage />} />
             </Route>
             <Route path="/changes">
               <Route path="all" element={<AllItemsPage type="change" />} />

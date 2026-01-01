@@ -93,6 +93,14 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     appBarSlots: <FilterAppBarSlot type="service" />,
   },
   {
+    path: "/services/:id",
+    title: "Enable additional API Manager environment",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <DetailedPageAppBarSlot />,
+  },
+  {
     path: "/changes/all",
     title: "All Change Requests",
     appBarVariant: "minimal",
