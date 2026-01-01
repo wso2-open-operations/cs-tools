@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { AppBarVariant } from "@src/context/layout";
-import { DetailedPageAppBarSlot } from "@pages/DetailedPage";
+import { DetailedPageAppBarSlot } from "@root/src/pages/CaseDetailPage";
 import { FilterAppBarSlot } from "@root/src/pages/AllItemsPage";
 
 type AppBarConfig = {
@@ -75,6 +75,14 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     hasBackAction: true,
     tabIndex: -1,
     appBarSlots: <FilterAppBarSlot type="chat" />,
+  },
+  {
+    path: "/chats/:id",
+    title: "How do I configure custom claims in JWT tokens?",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: -1,
+    appBarSlots: <DetailedPageAppBarSlot />,
   },
   {
     path: "/services/all",

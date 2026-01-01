@@ -22,7 +22,7 @@ export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilder
     filterParamName = "filter";
 
   const baseRoute = location.pathname;
-  const activeFilter = searchParams.get(filterParamName) ?? tabs[0].value;
+  const activeFilter = searchParams.get(filterParamName) ?? "all";
   const searchValue = searchParams.get(searchParamName) ?? "";
 
   const updateParams = (updates: Record<string, string | null>) => {
