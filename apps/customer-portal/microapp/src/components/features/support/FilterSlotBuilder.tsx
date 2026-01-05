@@ -2,10 +2,11 @@ import { Search } from "@mui/icons-material";
 import { InputAdornment, Stack, Tab, Tabs, InputBase as TextField } from "@mui/material";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { Status } from "./ItemCard";
+import type { NotificationFilter } from "@pages/NotificationsPage";
 
 export interface FilterTab {
   label: string;
-  value: Status | "all";
+  value: Status | NotificationFilter | "all";
 }
 
 export interface FilterSlotBuilderProps {

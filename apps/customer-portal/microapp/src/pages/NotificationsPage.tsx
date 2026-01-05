@@ -14,6 +14,63 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useLayoutEffect } from "react";
+import { ButtonBase, Stack, Typography } from "@mui/material";
+import type { ItemType } from "@components/features/support";
+import { useLayout } from "@context/layout";
+import { FilterAppBarSlot } from "./AllItemsPage";
+import { useSearchParams } from "react-router-dom";
+import { NotificationsListItem, type NotificationsListItemProps } from "@components/features/notifications";
+
+import { MOCK_NOTIFICATIONS } from "@src/mocks/data/notifications";
+
+export type NotificationFilter = "unread" | Exclude<ItemType, "chat">;
+
 export default function NotificationsPage() {
-  return <>Notifications</>;
+  const [searchParams] = useSearchParams();
+  const layout = useLayout();
+
+  const filter = searchParams.get("filter") ?? "all";
+  const search = (searchParams.get("search") ?? "").toLowerCase();
+
+  const items: NotificationsListItemProps[] = (
+    filter === "all" ? Object.values(MOCK_NOTIFICATIONS).flat() : MOCK_NOTIFICATIONS[filter]
+  ).filter(
+    (item) =>
+      !search ||
+      item.id.toLowerCase().includes(search) ||
+      item.title.toLowerCase().includes(search) ||
+      item.description.toLowerCase().includes(search),
+  );
+
+  useLayoutEffect(() => {
+    layout.setAppBarSlotsOverride(
+      <>
+        <Typography variant="subtitle2" fontWeight="regular" color="text.secondary" mt={1}>
+          {MOCK_NOTIFICATIONS["unread"].length > 0 && `${MOCK_NOTIFICATIONS["unread"].length} unread · `}
+          {items.length} of {Object.values(MOCK_NOTIFICATIONS).flat().length} total
+        </Typography>
+        <FilterAppBarSlot type="notifications" />
+      </>,
+    );
+
+    layout.setEndSlotOverride(
+      <ButtonBase sx={{ color: "primary.main", fontWeight: "medium" }} disableRipple>
+        Mark All Read
+      </ButtonBase>,
+    );
+
+    return () => {
+      layout.setAppBarSlotsOverride(undefined);
+      layout.setEndSlotOverride(undefined);
+    };
+  }, [searchParams]);
+
+  return (
+    <Stack gap={2}>
+      {items.map((props, index) => (
+        <NotificationsListItem key={index} {...props} />
+      ))}
+    </Stack>
+  );
 }

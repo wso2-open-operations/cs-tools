@@ -63,7 +63,7 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
   );
 }
 
-const config: Record<ItemCardProps["type"], FilterSlotBuilderProps> = {
+const config: Record<ItemCardProps["type"] | "notifications", FilterSlotBuilderProps> = {
   case: {
     searchPlaceholder: "Search cases by ID, title, or description...",
     tabs: [
@@ -99,8 +99,17 @@ const config: Record<ItemCardProps["type"], FilterSlotBuilderProps> = {
       { label: "Draft", value: "draft" },
     ],
   },
+  notifications: {
+    searchPlaceholder: "Search Notifications",
+    tabs: [
+      { label: "Unread", value: "unread" },
+      { label: "Cases", value: "case" },
+      { label: "Service Requests", value: "service" },
+      { label: "Change Requests", value: "change" },
+    ],
+  },
 };
 
-export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
+export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] | "notifications" }) {
   return <FilterSlotBuilder {...config[type]} />;
 }

@@ -59,6 +59,8 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     title: "Notifications",
     appBarVariant: "notifications",
     hasBackAction: true,
+    // appBarSlots: <NotificationsAppBarSlot />,
+    // appBarSlots: <FilterAppBarSlot type="chat" />,
     tabIndex: -1,
   },
   {
@@ -83,8 +85,8 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     title: "All Cases",
     appBarVariant: "minimal",
     hasBackAction: true,
-    tabIndex: -1,
     appBarSlots: <FilterAppBarSlot type="case" />,
+    tabIndex: -1,
   },
   {
     path: "/cases/:id",
