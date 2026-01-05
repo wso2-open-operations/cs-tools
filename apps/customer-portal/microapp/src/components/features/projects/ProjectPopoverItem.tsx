@@ -29,7 +29,7 @@ export function ProjectPopoverItem({
       onClick={onClick}
     >
       <Stack direction="row" gap={1}>
-        <Typography variant="subtitle1" fontWeight="medium">
+        <Typography variant="subtitle1" fontWeight="medium" color="text.primary">
           {name}
         </Typography>
         {active && <Check color="primary" />}
