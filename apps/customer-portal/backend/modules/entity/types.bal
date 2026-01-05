@@ -13,15 +13,21 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import ballerina/constraint;
 
 # Pagination information.
 public type Pagination record {|
     # Offset for pagination
-    int offset;
+    @constraint:Int {
+        minValue: 0
+    }
+    int offset = DEFAULT_OFFSET;
     # Limit for pagination
-    int 'limit;
-    # Total records available
-    int totalRecords;
+    @constraint:Int {
+        minValue: 1,
+        maxValue: 50
+    }
+    int 'limit = DEFAULT_LIMIT;
 |};
 
 # User data.
@@ -30,17 +36,10 @@ public type UserResponse record {|
     string sysId;
     # Email address of the user
     string email;
-    # Full name of the user
-    string name;
     # First name of the user
     string firstName;
     # Last name of the user
     string lastName;
-    # Username of the user
-    string userName;
-    # Active status of the user
-    string active;
-    json...;
 |};
 
 # Project data from ServiceNow.
@@ -61,12 +60,19 @@ public type Project record {|
     int openCasesCount;
 |};
 
+# Request body for searching projects.
+public type ProjectRequest record {|
+    # Pagination details
+    Pagination pagination = {};
+|};
+
 # Projects response from ServiceNow.
 public type ProjectsResponse record {|
     # List of projects
     Project[] projects;
-    # Pagination information
-    Pagination pagination;
+    # Total records count
+    int totalRecords;
+    *Pagination;
 |};
 
 # Account owner information.

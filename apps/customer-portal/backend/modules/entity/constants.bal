@@ -14,6 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Default pagination values
+# Default pagination values.
 const DEFAULT_OFFSET = 0;
 const DEFAULT_LIMIT = 10;

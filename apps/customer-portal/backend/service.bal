@@ -36,9 +36,8 @@ service class ErrorInterceptor {
     # Intercepts the response error.
     #
     # + err - The error occurred during request processing
-    # + ctx - Request context object
     # + return - Bad request response or error
-    remote function interceptResponseError(error err, http:RequestContext ctx) returns http:BadRequest|error {
+    remote function interceptResponseError(error err) returns http:BadRequest|error {
 
         // Handle data-binding errors.
         if err is http:PayloadBindingError {
@@ -58,8 +57,7 @@ service class ErrorInterceptor {
     label: "Customer Portal",
     id: "cs/customer-portal"
 }
-
-service http:InterceptableService / on new http:Listener(9095) {
+service http:InterceptableService / on new http:Listener(9090) {
     public function createInterceptors() returns http:Interceptor[] =>
         [new authorization:JwtInterceptor(), new ErrorInterceptor()];
 
@@ -72,7 +70,6 @@ service http:InterceptableService / on new http:Listener(9095) {
 
     # Fetch user information of the logged in user.
     #
-    # + ctx - Request context object
     # + return - User info object or error response
     resource function get users/me(http:RequestContext ctx) returns entity:UserResponse|http:InternalServerError {
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -90,7 +87,7 @@ service http:InterceptableService / on new http:Listener(9095) {
             if cachedUser is entity:UserResponse {
                 return cachedUser;
             }
-            log:printWarn(`Unable to read cached user info for ${userInfo.email}`);
+            log:printWarn(string `Unable to read cached user info for ${userInfo.email}`);
         }
 
         entity:UserResponse|error userDetails = entity:fetchUserBasicInfo(userInfo.email, userInfo.idToken);
@@ -111,13 +108,11 @@ service http:InterceptableService / on new http:Listener(9095) {
         return userDetails;
     }
 
-    # Fetch list of projects with pagination.
+    # Search projects of the logged-in user.
     #
-    # + ctx - Request context object
-    # + offset - Pagination offset
-    # + 'limit - Pagination limit
+    # + payload - Project search request body
     # + return - Projects list or error response
-    resource function get projects(http:RequestContext ctx, int offset = DEFAULT_OFFSET, int 'limit = DEFAULT_LIMIT)
+    resource function post projects/search(http:RequestContext ctx, entity:ProjectRequest payload)
         returns entity:ProjectsResponse|http:BadRequest|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -129,25 +124,7 @@ service http:InterceptableService / on new http:Listener(9095) {
             };
         }
 
-        if offset < 0 || 'limit <= 0 {
-            string customError = "Invalid pagination parameters";
-            log:printError(customError);
-            return <http:BadRequest>{
-                body: {
-                    message: customError
-                }
-            };
-        }
-
-        string cacheKey = string `${userInfo.email}:projects:${offset}:${'limit}`;
-        if userCache.hasKey(cacheKey) {
-            entity:ProjectsResponse|error cached = userCache.get(cacheKey).ensureType();
-            if cached is entity:ProjectsResponse {
-                return cached;
-            }
-        }
-
-        entity:ProjectsResponse|error projectsList = entity:fetchProjects(userInfo.idToken, offset, 'limit);
+        entity:ProjectsResponse|error projectsList = entity:searchProjects(userInfo.idToken, payload);
         if projectsList is error {
             string customError = "Error retrieving projects list";
             log:printError(customError, projectsList);
@@ -157,17 +134,11 @@ service http:InterceptableService / on new http:Listener(9095) {
                 }
             };
         }
-
-        error? cacheError = userCache.put(cacheKey, projectsList);
-        if cacheError is error {
-            log:printWarn("Error writing projects to cache", cacheError);
-        }
         return projectsList;
     }
 
     # Fetch specific project details.
     #
-    # + ctx - Request context object
     # + projectId - Unique identifier of the project
     # + return - Project details or error response
     resource function get projects/[string projectId](http:RequestContext ctx)
@@ -220,7 +191,6 @@ service http:InterceptableService / on new http:Listener(9095) {
 
     # Fetch project overview.
     #
-    # + ctx - Request context object
     # + projectId - Unique identifier of the project
     # + return - Project overview or error response
     resource function get projects/[string projectId]/overview(http:RequestContext ctx)
@@ -273,7 +243,6 @@ service http:InterceptableService / on new http:Listener(9095) {
 
     # Fetch case filters for a specific project.
     #
-    # + ctx - Request context object
     # + projectId - Unique identifier of the project
     # + return - Case filters or error response
     resource function get projects/[string projectId]/cases/filters(http:RequestContext ctx)
@@ -326,7 +295,6 @@ service http:InterceptableService / on new http:Listener(9095) {
 
     # Fetch cases for a project with optional filters.
     #
-    # + ctx - Request context object
     # + projectId - Project ID filter
     # + payload - Filter and pagination parameters
     # + return - Paginated cases or error response
@@ -395,7 +363,6 @@ service http:InterceptableService / on new http:Listener(9095) {
 
     # Fetch details of a specific case.
     #
-    # + ctx - Request context object
     # + projectId - Unique identifier of the project
     # + caseId - Unique identifier of the case
     # + return - Case details or error response
@@ -447,5 +414,4 @@ service http:InterceptableService / on new http:Listener(9095) {
 
         return caseDetails;
     }
-
 }
