@@ -11,16 +11,16 @@ export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
           Conversation Summary
         </Typography>
       </Stack>
-      <Stack gap={0.8}>
-        <Stack direction="row" gap={2} alignItems="center">
+      <Stack gap={1}>
+        <Stack>
           <Typography variant="body2" color="text.secondary">
             Messages Exchanged
           </Typography>
-          <Typography variant="body2" fontWeight="medium">
+          <Typography variant="h5" fontWeight="medium">
             6
           </Typography>
         </Stack>
-        <Stack direction="row" gap={2} alignItems="center">
+        <Stack>
           <Typography variant="body2" color="text.secondary">
             Troubleshooting attempts
           </Typography>
@@ -31,7 +31,7 @@ export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
             </Typography>
           </Stack>
         </Stack>
-        <Stack direction="row" gap={2} alignItems="center">
+        <Stack>
           <Typography variant="body2" color="text.secondary">
             Articles Reviewed
           </Typography>

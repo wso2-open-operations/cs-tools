@@ -32,11 +32,13 @@ export function TextField({
   value,
   multiline = false,
   rows = 10,
+  placeholder,
   startAdornment,
   onChange,
 }: {
   label: string;
   value: string;
+  placeholder?: string;
   multiline?: boolean;
   rows?: number;
   startAdornment?: React.ReactNode;
@@ -50,6 +52,7 @@ export function TextField({
       </Typography>
       <InputBase
         value={value}
+        placeholder={placeholder}
         multiline={multiline}
         rows={rows}
         sx={{ bgcolor: "background.paper", lineHeight: multiline ? 1.65 : undefined }}

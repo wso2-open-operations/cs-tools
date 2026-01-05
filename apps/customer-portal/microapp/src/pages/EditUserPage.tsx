@@ -25,6 +25,7 @@ export default function EditUserPage() {
         <Stack gap={2}>
           <TextField
             label="Email Address"
+            placeholder="user@example.com"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             startAdornment={
@@ -35,6 +36,7 @@ export default function EditUserPage() {
           />
           <TextField
             label="Full Name"
+            placeholder="John Doe"
             value={name}
             onChange={(event) => setName(event.target.value)}
             startAdornment={

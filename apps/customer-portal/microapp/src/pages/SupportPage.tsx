@@ -35,15 +35,26 @@ export default function SupportPage() {
           </Grid>
         ))}
         <Grid size={12}>
-          <Card component={Stack} direction="row" alignItems="center" px={2} py={1.5} gap={2} elevation={0}>
-            <Try fontSize="large" color="primary" />
-            <Stack>
-              <Typography variant="body1" fontWeight="medium" color="primary">
-                Create Support Ticket
-              </Typography>
-              <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
-                Chat with Novera or Create Support Case
-              </Typography>
+          <Card
+            component={Stack}
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            px={2}
+            py={1.5}
+            gap={2}
+            elevation={0}
+          >
+            <Stack direction="row" alignItems="center" gap={2}>
+              <Try fontSize="large" color="primary" />
+              <Stack>
+                <Typography variant="body1" fontWeight="medium" color="primary">
+                  Create Support Ticket
+                </Typography>
+                <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
+                  Chat with Novera or Create Support Case
+                </Typography>
+              </Stack>
             </Stack>
             <Button
               component={Link}
