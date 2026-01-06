@@ -54,10 +54,6 @@ public type Project record {|
     string projectKey;
     # Created date and time
     string createdOn;
-    # Active chats count
-    int activeChatsCount;
-    # Open case count
-    int openCasesCount;
 |};
 
 # Request body for searching projects.
