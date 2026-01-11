@@ -23,9 +23,10 @@ configurable string mockIdToken = ?;
 
 @test:Config
 public function testGetLoggedInUserInformation() returns error? {
-    http:Response response = check testClient->/users/me.get(headers = {MOCK_HEADER_NAME: mockIdToken});
+    http:Response response = check testClient->/user.get(headers = {MOCK_HEADER_NAME: mockIdToken});
+    json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
-    test:assertEquals(response.getJsonPayload(), MOCK_USER_INFO_RESPONSE);
+    test:assertEquals(payload, MOCK_USER_INFO_RESPONSE);
 
     response = check testClient->/users/me.get();
     test:assertEquals(response.statusCode, http:STATUS_INTERNAL_SERVER_ERROR);
@@ -35,17 +36,20 @@ public function testGetLoggedInUserInformation() returns error? {
 @test:Config
 public function testProjectsSearch() returns error? {
     // TODO: Add mock search payload
-    http:Response response = check testClient->/projects/search.post({}, headers = {MOCK_HEADER_NAME: mockIdToken});
+    http:Response response = check testClient->/user/projects/search.post({},
+        headers = {MOCK_HEADER_NAME: mockIdToken});
+    json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
-    test:assertEquals(response.getJsonPayload(), MOCK_PROJECTS_SEARCH_RESPONSE);
+    test:assertEquals(payload, MOCK_PROJECTS_SEARCH_RESPONSE);
 }
 
 @test:Config
 public function testProject() returns error? {
     // TODO: Add mock project ID
     http:Response response = check testClient->/projects/[1].get(headers = {MOCK_HEADER_NAME: mockIdToken});
+    json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
-    test:assertEquals(response.getJsonPayload(), {}); // TODO: Add mock response
+    test:assertEquals(payload, {}); // TODO: Add mock response
 
     response = check testClient->/projects/[" "].get(headers = {MOCK_HEADER_NAME: mockIdToken});
     test:assertEquals(response.statusCode, http:STATUS_BAD_REQUEST);
