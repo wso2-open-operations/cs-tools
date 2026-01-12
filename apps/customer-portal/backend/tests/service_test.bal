@@ -23,7 +23,7 @@ configurable string mockIdToken = ?;
 
 @test:Config
 public function testGetLoggedInUserInformation() returns error? {
-    http:Response response = check testClient->/user.get(headers = {MOCK_HEADER_NAME: mockIdToken});
+    http:Response response = check testClient->/users/me.get(headers = {MOCK_HEADER_NAME: mockIdToken});
     json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
     test:assertEquals(payload, MOCK_USER_INFO_RESPONSE);
@@ -36,7 +36,7 @@ public function testGetLoggedInUserInformation() returns error? {
 @test:Config
 public function testSearchLoggedInUserProjects() returns error? {
     // TODO: Add mock search payload
-    http:Response response = check testClient->/user/projects/search.post({},
+    http:Response response = check testClient->/projects/search.post({},
         headers = {MOCK_HEADER_NAME: mockIdToken});
     json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);

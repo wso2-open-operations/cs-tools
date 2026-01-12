@@ -71,7 +71,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Fetch user information of the logged in user.
     #
     # + return - User info object or error response
-    resource function get user(http:RequestContext ctx) returns entity:UserResponse|http:InternalServerError {
+    resource function get users/me(http:RequestContext ctx) returns entity:UserResponse|http:InternalServerError {
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -112,7 +112,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     #
     # + payload - Project search request body
     # + return - Projects list or error response
-    resource function post user/projects/search(http:RequestContext ctx, entity:ProjectRequest payload)
+    resource function post projects/search(http:RequestContext ctx, entity:ProjectRequest payload)
         returns entity:ProjectsResponse|http:BadRequest|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
