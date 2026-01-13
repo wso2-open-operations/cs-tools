@@ -142,7 +142,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + id - ID of the project
     # + payload - Case search request body
     # + return - Paginated cases or error
-    resource function post projects/[string id]/cases/search(http:RequestContext ctx, entity:CaseSearchPayload payload)
+    resource function post projects/[string id]/cases/search(http:RequestContext ctx, CaseSearchPayload payload)
         returns entity:CasesResponse|http:BadRequest|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -164,7 +164,17 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:CasesResponse|error cases = entity:searchCases(userInfo.idToken, id, payload);
+        entity:CaseSearchPayload searchPayload = {
+            caseTypes: payload.caseTypes,
+            filters: {
+                state: payload.filters?.status,
+                severity: payload.filters?.severity,
+                deployment: payload.filters?.deployment
+            },
+            pagination: payload.pagination,
+            sortBy: payload.sortBy
+        };
+        entity:CasesResponse|error cases = entity:searchCases(userInfo.idToken, id, searchPayload);
         if cases is error {
             string customError = "Error retrieving cases";
             log:printError(customError, cases);

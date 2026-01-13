@@ -15,6 +15,12 @@
 // under the License.
 import ballerina/constraint;
 
+# Valid sort order values.
+public enum SortOrder {
+    ASC = "asc",
+    DESC = "desc"
+}
+
 # Pagination information.
 public type Pagination record {|
     # Offset for pagination
@@ -107,26 +113,26 @@ public type Case record {|
     string caseId;
     # System ID of the project
     string projectId;
-    # Type of the case
-    string caseType;
     # Case number
     string number;
     # State code
-    string state;
+    int state;
     # State label
     string stateLabel;
-    # Case title
-    string title;
-    # Case description
-    string description;
     # Created date and time
     string createdOn;
     # Assigned engineer name
-    string assignedEngineer;
-    # Priority code
-    string? priority;
-    # Priority label
-    string? priorityLabel;
+    string? assignedEngineer;
+    # Case title
+    string? title;
+    # Case description
+    string? description;
+    # Type of the case
+    string? caseType;
+    # Severity code
+    int? severity;
+    # Severity label
+    string? severityLabel;
     # Deployment name
     string? deployment;
     # Deployment ID
@@ -135,8 +141,8 @@ public type Case record {|
 
 # Case search filters.
 public type CaseSearchFilters record {|
-    # Status ID
-    int status?;
+    # State ID
+    int state?;
     # Severity ID
     int severity?;
     # Deployment ID
@@ -152,21 +158,29 @@ public type CasesResponse record {|
     *Pagination;
 |};
 
-# Request body for case search.
+# Payload for case search.
 public type CaseSearchPayload record {|
     # List of case types to filter
     string[] caseTypes?;
     # Filter criteria
     CaseSearchFilters filters?;
-    # Sort field
-    string sortBy?;
+    # Sort configuration
+    SortBy sortBy?;
     # Pagination details
     Pagination pagination?;
 |};
 
-# Request body for searching cases for entity.
-public type CaseRequestBody record {|
+# Request payload for searching cases for entity.
+public type CaseRequestPayload record {|
     # List of project IDs to filter
     string[] projectIds?;
     *CaseSearchPayload;
+|};
+
+# Sort configuration.
+public type SortBy record {|
+    # Field to sort by
+    string 'field;
+    # Sort order
+    SortOrder 'order;
 |};

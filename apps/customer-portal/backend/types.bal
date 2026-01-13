@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import customer_portal.entity;
 
 # Cache configuration record.
 public type CacheConfig record {|
@@ -24,4 +25,26 @@ public type CacheConfig record {|
     float evictionFactor = 0.2;
     # Cleanup interval in seconds
     decimal cleanupInterval = 1800.0;
+|};
+
+# Case search filters.
+public type CaseSearchFilters record {|
+    # Status ID
+    int status?;
+    # Severity ID
+    int severity?;
+    # Deployment ID
+    string deployment?;
+|};
+
+# Payload for case search.
+public type CaseSearchPayload record {|
+    # List of case types to filter
+    string[] caseTypes?;
+    # Filter criteria
+    CaseSearchFilters filters?;
+    # Sort configuration
+    entity:SortBy sortBy?;
+    # Pagination details
+    entity:Pagination pagination?;
 |};
