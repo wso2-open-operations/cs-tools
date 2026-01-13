@@ -25,5 +25,3 @@ public type CacheConfig record {|
     # Cleanup interval in seconds
     decimal cleanupInterval = 1800.0;
 |};
-
-
