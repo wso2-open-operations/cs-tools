@@ -96,7 +96,7 @@ public type ProjectDetails record {|
     string slaStatus;
     # Subscription information
     ProjectSubscription? subscription;
-    json...;
+    json...; // TODO: Remove after adding all fields
 |};
 
 # Project subscription information.

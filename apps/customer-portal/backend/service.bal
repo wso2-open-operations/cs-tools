@@ -167,15 +167,25 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Get project details by ID.
     #
     # + id - ID of the project
-    # + return - Project details or error
+    # + return - Project details or error response
     resource function get projects/[string id](http:RequestContext ctx)
-        returns http:InternalServerError|entity:ProjectDetails {
+        returns entity:ProjectDetails|http:BadRequest|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
                 body: {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if id.trim().length() == 0 {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
                 }
             };
         }
