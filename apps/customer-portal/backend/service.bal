@@ -117,9 +117,11 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         scim:PhoneNumber[] mobilePhoneNumbers = [];
         if userResults.length() > 0 {
-            // Only one mobile type phone number exists
-            mobilePhoneNumbers = userResults[0].phoneNumbers.filter(
-                phoneNumber => phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE);
+            scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
+            if phoneNumbers != () {
+                // Only one mobile type phone number exists
+                mobilePhoneNumbers = phoneNumbers.filter(phoneNumber => phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE);
+            }
         }
 
         User user = {
@@ -214,7 +216,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
-    
+
         Case[] cases = from entity:Case case in casesResponse.cases
             select {
                 id: case.id,
