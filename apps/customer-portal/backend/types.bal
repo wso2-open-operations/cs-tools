@@ -77,7 +77,7 @@ public type Case record {|
     ReferenceItem? status;
 |};
 
-# Reference item with string or int ID.
+# Reference item with string ID.
 public type ReferenceItem record {|
     # ID
     string id;
