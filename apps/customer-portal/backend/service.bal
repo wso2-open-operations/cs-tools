@@ -102,27 +102,23 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         scim:User[]|error userResults = scim:searchUsers(userInfo.email);
         if userResults is error {
-            string customError = "Error retrieving user phone number from scim service";
-            log:printError(customError, userResults);
-            return <http:InternalServerError>{
-                body: {
-                    message: customError
-                }
-            };
-        }
-
-        if userResults.length() == 0 {
-            log:printError(string `No user found while searching phone number for ${userInfo.email}`);
+            log:printError("Error retrieving user phone number from scim service", userResults);
         }
 
         // TODO: Handle this in a utility function. Will address this in the next PR which has utils.bal file.
         scim:PhoneNumber[] mobilePhoneNumbers = [];
-        if userResults.length() > 0 {
-            scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
-            if phoneNumbers != () {
-                // Filter for mobile type phone numbers
-                mobilePhoneNumbers.push(...phoneNumbers.filter(phoneNumber =>
+        if userResults is scim:User[] {
+            if userResults.length() == 0 {
+                log:printError(string `No user found while searching phone number for ${userInfo.email}`);
+            }
+
+            if userResults.length() > 0 {
+                scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
+                if phoneNumbers != () {
+                    // Filter for mobile type phone numbers
+                    mobilePhoneNumbers.push(...phoneNumbers.filter(phoneNumber =>
                     phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE));
+                }
             }
         }
 
