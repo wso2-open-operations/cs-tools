@@ -83,3 +83,17 @@ public type CaseSearchResponse record {|
     int totalRecords;
     *entity:Pagination;
 |};
+
+# User.
+public type User record {|
+    # System ID of the user
+    string sysId;
+    # Email address of the user
+    string email;
+    # First name of the user
+    string firstName;
+    # Last name of the user
+    string lastName;
+    # Phone number of the user
+    string phoneNumber?;
+|};

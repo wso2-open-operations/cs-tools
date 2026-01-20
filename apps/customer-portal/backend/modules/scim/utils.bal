@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Error messages.
-const ERR_MSG_USER_INFO_HEADER_NOT_FOUND = "User information header not found!";
+import ballerina/lang.regexp;
 
-// Default Pagination Values
-public const int DEFAULT_OFFSET = 0;
-public const int DEFAULT_LIMIT = 10;
-
-public const MOBILE_PHONE_NUMBER_TYPE = "mobile";
+# Validate if the given email is a WSO2 email address.
+#
+# + email - email address to be validated
+# + return - true or false
+public isolated function isWso2Email(string email) returns boolean =>
+    regexp:isFullMatch(REGEX_EMAIL_DOMAIN, email.toLowerAscii());

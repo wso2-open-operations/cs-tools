@@ -1,5 +1,13 @@
 [customer_portal.entity]
-    csEntityBaseUrl = "<entity-service-base-url>"
+    csEntityBaseUrl = "<base_url>"
 
 [customer_portal.authorization.authorizedRoles]
-    userRole  = "<authorized-role>"
+    userRole  = "<authorized_role>"
+
+[customer_portal.scim]
+scimOperationsServiceUrl = "<base_url>"
+[customer_portal.scim.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]
