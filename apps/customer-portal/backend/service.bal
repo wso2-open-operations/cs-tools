@@ -16,6 +16,7 @@
 
 import customer_portal.authorization;
 import customer_portal.entity;
+import customer_portal.scim;
 
 import ballerina/cache;
 import ballerina/http;
@@ -69,7 +70,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Fetch user information of the logged in user.
     #
     # + return - User info object or error response
-    resource function get users/me(http:RequestContext ctx) returns entity:UserResponse|http:InternalServerError {
+    resource function get users/me(http:RequestContext ctx) returns User|http:InternalServerError {
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -81,8 +82,8 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         string cacheKey = string `${userInfo.email}:userinfo`;
         if userCache.hasKey(cacheKey) {
-            entity:UserResponse|error cachedUser = userCache.get(cacheKey).ensureType();
-            if cachedUser is entity:UserResponse {
+            User|error cachedUser = userCache.get(cacheKey).ensureType();
+            if cachedUser is User {
                 return cachedUser;
             }
             log:printWarn(string `Unable to read cached user info for ${userInfo.email}`);
@@ -99,11 +100,39 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        error? cacheError = userCache.put(cacheKey, userDetails);
+        scim:User[]|error userResults = scim:searchUsers(userInfo.email);
+        if userResults is error {
+            log:printError("Error retrieving user phone number from scim service", userResults);
+        }
+
+        // TODO: Handle this in a utility function. Will address this in the next PR which has utils.bal file.
+        scim:PhoneNumber[] mobilePhoneNumbers = [];
+        if userResults is scim:User[] {
+            if userResults.length() == 0 {
+                log:printError(string `No user found while searching phone number for ${userInfo.email}`);
+            } else {
+                scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
+                if phoneNumbers != () {
+                    // Filter for mobile type phone numbers
+                    mobilePhoneNumbers.push(...phoneNumbers.filter(phoneNumber =>
+                        phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE));
+                }
+            }
+        }
+
+        User user = {
+            sysId: userDetails.sysId,
+            email: userDetails.email,
+            firstName: userDetails.firstName,
+            lastName: userDetails.lastName,
+            phoneNumber: mobilePhoneNumbers.length() > 0 ? mobilePhoneNumbers[0].value : ()
+        };
+
+        error? cacheError = userCache.put(cacheKey, user);
         if cacheError is error {
             log:printWarn("Error writing user information to cache", cacheError);
         }
-        return userDetails;
+        return user;
     }
 
     # Search projects of the logged-in user.
@@ -183,7 +212,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
-    
+
         Case[] cases = from entity:Case case in casesResponse.cases
             select {
                 id: case.id,

@@ -14,11 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Error messages.
-const ERR_MSG_USER_INFO_HEADER_NOT_FOUND = "User information header not found!";
+import ballerina/lang.regexp;
 
-// Default Pagination Values
-public const int DEFAULT_OFFSET = 0;
-public const int DEFAULT_LIMIT = 10;
-
-public const MOBILE_PHONE_NUMBER_TYPE = "mobile";
+public final regexp:RegExp REGEX_EMAIL_DOMAIN = re `^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*@wso2\.com$`;
+const ORGANIZATION_INTERNAL = "internal";
+const ORGANIZATION_EXTERNAL = "external";
+const DOMAIN_DEFAULT = "DEFAULT";
+const ATTRIBUTE_PHONE_NUMBERS = "phoneNumbers";
