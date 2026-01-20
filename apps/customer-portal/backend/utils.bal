@@ -16,7 +16,6 @@
 import customer_portal.entity;
 import customer_portal.scim;
 
-import ballerina/http;
 import ballerina/log;
 
 # Search cases for a given project.
@@ -82,19 +81,8 @@ public isolated function getCaseFilters(string idToken, string projectId) return
 # Validates the given project ID.
 #
 # + id - Project ID to validate
-# + return - BadRequest response if invalid, else nil
-public isolated function validateProjectId(string id) returns http:BadRequest? {
-    if id.trim().length() == 0 {
-        string customError = "Project ID cannot be empty or whitespace";
-        log:printError(customError);
-        return <http:BadRequest>{
-            body: {
-                message: customError
-            }
-        };
-    }
-    return;
-}
+# + return - True if valid, else false
+public isolated function isValidateProjectId(string id) returns boolean => id.trim().length() != 0;
 
 # Get mobile phone number from SCIM users.
 #

@@ -161,9 +161,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        http:BadRequest? validationResult = validateProjectId(id);
-        if validationResult is http:BadRequest {
-            return validationResult;
+        if !isValidateProjectId(id) {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
         }
 
         entity:ProjectDetailsResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
@@ -196,9 +201,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        http:BadRequest? validationResult = validateProjectId(id);
-        if validationResult is http:BadRequest {
-            return validationResult;
+        if !isValidateProjectId(id) {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
         }
 
         CaseSearchResponse|error casesResponse = searchCases(userInfo.idToken, id, payload);
@@ -231,10 +241,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        http:BadRequest? validationResult = validateProjectId(id);
-        if validationResult is http:BadRequest {
-            log:printWarn("Invalid project ID provided for case filters");
-            return validationResult;
+        if !isValidateProjectId(id) {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
         }
 
         CaseFilterOptions|error caseFilters = getCaseFilters(userInfo.idToken, id);
