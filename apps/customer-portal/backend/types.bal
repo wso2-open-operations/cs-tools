@@ -96,8 +96,8 @@ public type CaseSearchResponse record {|
 
 # User.
 public type User record {|
-    # System ID of the user
-    string sysId;
+    # ID of the user
+    string id;
     # Email address of the user
     string email;
     # First name of the user

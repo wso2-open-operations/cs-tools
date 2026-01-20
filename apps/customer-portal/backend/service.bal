@@ -16,7 +16,6 @@
 
 import customer_portal.authorization;
 import customer_portal.entity;
-import customer_portal.scim;
 
 import ballerina/cache;
 import ballerina/http;
@@ -100,32 +99,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        scim:User[]|error userResults = scim:searchUsers(userInfo.email);
-        if userResults is error {
-            log:printError("Error retrieving user phone number from scim service", userResults);
-        }
-
-        // TODO: Handle this in a utility function. Will address this in the next PR which has utils.bal file.
-        scim:PhoneNumber[] mobilePhoneNumbers = [];
-        if userResults is scim:User[] {
-            if userResults.length() == 0 {
-                log:printError(string `No user found while searching phone number for ${userInfo.email}`);
-            } else {
-                scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
-                if phoneNumbers != () {
-                    // Filter for mobile type phone numbers
-                    mobilePhoneNumbers.push(...phoneNumbers.filter(phoneNumber =>
-                        phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE));
-                }
-            }
-        }
+        string? phoneNumber = getPhoneNumber(userInfo.email);
 
         User user = {
-            sysId: userDetails.sysId,
+            id: userDetails.id,
             email: userDetails.email,
             firstName: userDetails.firstName,
             lastName: userDetails.lastName,
-            phoneNumber: mobilePhoneNumbers.length() > 0 ? mobilePhoneNumbers[0].value : ()
+            phoneNumber
         };
 
         error? cacheError = userCache.put(cacheKey, user);

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 import customer_portal.entity;
+import customer_portal.scim;
 
 import ballerina/http;
 import ballerina/log;
@@ -79,7 +80,7 @@ public isolated function getCaseFilters(string idToken, string projectId) return
 }
 
 # Validates the given project ID.
-# 
+#
 # + id - Project ID to validate
 # + return - BadRequest response if invalid, else nil
 public isolated function validateProjectId(string id) returns http:BadRequest? {
@@ -93,4 +94,30 @@ public isolated function validateProjectId(string id) returns http:BadRequest? {
         };
     }
     return;
+}
+
+# Get mobile phone number from SCIM users.
+#
+# + email - Email address of the user
+# + return - Mobile phone number if found, else nil
+public isolated function getPhoneNumber(string email) returns string? {
+    string? mobilePhoneNumber = ();
+    scim:User[]|error userResults = scim:searchUsers(email);
+    if userResults is error {
+        // Log the error and return nil
+        log:printError("Error retrieving user phone number from scim service", userResults);
+    } else {
+        if userResults.length() == 0 {
+            log:printError(string `No user found while searching phone number for ${email}`);
+        } else {
+            scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
+            if phoneNumbers != () {
+                // Filter for mobile type phone numbers
+                scim:PhoneNumber[] mobilePhoneNumbers =
+                    phoneNumbers.filter(phoneNumber => phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE);
+                mobilePhoneNumber = mobilePhoneNumbers.length() > 0 ? mobilePhoneNumbers[0].value : ();
+            }
+        }
+    }
+    return mobilePhoneNumber;
 }
