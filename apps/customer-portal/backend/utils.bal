@@ -15,6 +15,9 @@
 // under the License.
 import customer_portal.entity;
 
+import ballerina/http;
+import ballerina/log;
+
 # Search cases for a given project.
 #
 # + idToken - ID token for authorization
@@ -54,4 +57,40 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
         'limit: casesResponse.'limit,
         offset: casesResponse.offset
     };
+}
+
+# Get case filters for a given project.
+#
+# + idToken - ID token for authorization
+# + projectId - Project ID to get filters
+# + return - Case filters or error
+public isolated function getCaseFilters(string idToken, string projectId) returns CaseFilter|error {
+    entity:CaseMetadataResponse caseMetadata = check entity:getCaseMetadata(idToken);
+    ReferenceItem[] statuses = from entity:ChoiceListItem item in caseMetadata.states
+        select {id: item.id.toString(), label: item.label};
+    ReferenceItem[] severities = from entity:ChoiceListItem item in caseMetadata.severities
+        select {id: item.id.toString(), label: item.label};
+
+    // TODO: Other project specific filters will be added later
+    return {
+        statuses,
+        severities
+    };
+}
+
+# Validates the given project ID.
+# 
+# + id - Project ID to validate
+# + return - BadRequest response if invalid, else nil
+public isolated function validateProjectId(string id) returns http:BadRequest? {
+    if id.trim().length() == 0 {
+        string customError = "Project ID cannot be empty or whitespace";
+        log:printError(customError);
+        return <http:BadRequest>{
+            body: {
+                message: customError
+            }
+        };
+    }
+    return;
 }

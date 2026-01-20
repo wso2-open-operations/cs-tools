@@ -107,3 +107,12 @@ public type User record {|
     # Phone number of the user
     string phoneNumber?;
 |};
+
+# Case filter options.
+public type CaseFilter record {|
+    # List of case statuses
+    ReferenceItem[] statuses;
+    # List of case severities
+    ReferenceItem[] severities;
+    // TODO: Add other filters once implemented
+|};

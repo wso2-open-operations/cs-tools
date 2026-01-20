@@ -195,3 +195,11 @@ public type SortBy record {|
     # Sort order
     SortOrder 'order;
 |};
+
+# Case metadata response.
+public type CaseMetadataResponse record {|
+    # List of available case states
+    ChoiceListItem[] states;
+    # List of available case severities
+    ChoiceListItem[] severities;
+|};

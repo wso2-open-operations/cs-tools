@@ -15,7 +15,7 @@
 // under the License.
 
 # Get logged-in user information.
-# 
+#
 # + email - Email of the user
 # + idToken - ID token for authorization
 # + return - User response or error
@@ -24,7 +24,7 @@ public isolated function getUserBasicInfo(string email, string idToken) returns 
 }
 
 # Get project by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + projectId - Unique ID of the project
 # + return - Project details or error
@@ -48,4 +48,12 @@ public isolated function searchProjects(string idToken, ProjectRequest payload) 
 # + return - Cases object or error
 public isolated function searchCases(string idToken, CaseSearchPayload payload) returns CaseSearchResponse|error {
     return csEntityClient->/cases/search.post(payload, generateHeaders(idToken));
+}
+
+# Get case metadata.
+#
+# + idToken - ID token for authorization
+# + return - Case metadata response or error
+public isolated function getCaseMetadata(string idToken) returns CaseMetadataResponse|error {
+    return csEntityClient->/cases/meta.get(generateHeaders(idToken));
 }

@@ -180,14 +180,9 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if id.trim().length() == 0 {
-            string customError = "Project ID cannot be empty or whitespace";
-            log:printError(customError);
-            return <http:BadRequest>{
-                body: {
-                    message: customError
-                }
-            };
+        http:BadRequest? validationResult = validateProjectId(id);
+        if validationResult is http:BadRequest {
+            return validationResult;
         }
 
         entity:ProjectDetails|error projectResponse = entity:getProject(userInfo.idToken, id);
@@ -220,14 +215,9 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if id.trim().length() == 0 {
-            string customError = "Project ID cannot be empty or whitespace";
-            log:printError(customError);
-            return <http:BadRequest>{
-                body: {
-                    message: customError
-                }
-            };
+        http:BadRequest? validationResult = validateProjectId(id);
+        if validationResult is http:BadRequest {
+            return validationResult;
         }
 
         CaseSearchResponse|error casesResponse = searchCases(userInfo.idToken, id, payload);
@@ -242,5 +232,39 @@ service http:InterceptableService / on new http:Listener(9090) {
         }
 
         return casesResponse;
+    }
+
+    # Get case filters for a project.
+    #
+    # + id - ID of the project
+    # + return - Case filters or error
+    resource function get projects/[string id]/cases/filters(http:RequestContext ctx)
+        returns CaseFilter|http:BadRequest|http:InternalServerError {
+
+        authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        http:BadRequest? validationResult = validateProjectId(id);
+        if validationResult is http:BadRequest {
+            return validationResult;
+        }
+
+        CaseFilter|error caseFilters = getCaseFilters(userInfo.idToken, id);
+        if caseFilters is error {
+            string customError = "Error retrieving case filters";
+            log:printError(customError, caseFilters);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return caseFilters;
     }
 }
