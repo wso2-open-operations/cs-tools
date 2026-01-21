@@ -88,8 +88,9 @@ public isolated function isValidProjectId(string id) returns boolean => id.trim(
 # Get mobile phone number from SCIM users.
 #
 # + email - Email address of the user
+# + id - ID of the user (for logging purposes)
 # + return - Mobile phone number if found, else nil
-public isolated function getPhoneNumber(string email) returns string? {
+public isolated function getPhoneNumber(string email, string id) returns string? {
     string? mobilePhoneNumber = ();
     scim:User[]|error userResults = scim:searchUsers(email);
     if userResults is error {
@@ -97,7 +98,7 @@ public isolated function getPhoneNumber(string email) returns string? {
         log:printError("Error retrieving user phone number from scim service", userResults);
     } else {
         if userResults.length() == 0 {
-            log:printError(string `No user found while searching phone number for ${email}`);
+            log:printError(string `No user found while searching phone number for user: ${id}`);
         } else {
             scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
             if phoneNumbers != () {

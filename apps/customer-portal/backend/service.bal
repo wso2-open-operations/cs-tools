@@ -99,7 +99,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        string? phoneNumber = getPhoneNumber(userInfo.email);
+        string? phoneNumber = getPhoneNumber(userInfo.email, userDetails.id);
 
         User user = {
             id: userDetails.id,
