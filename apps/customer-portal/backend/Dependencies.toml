@@ -195,6 +195,9 @@ version = "0.0.0"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"}
 ]
+modules = [
+	{org = "ballerina", packageName = "lang.regexp", moduleName = "lang.regexp"}
+]
 
 [[package]]
 org = "ballerina"
@@ -336,6 +339,7 @@ dependencies = [
 	{org = "ballerina", name = "constraint"},
 	{org = "ballerina", name = "http"},
 	{org = "ballerina", name = "jwt"},
+	{org = "ballerina", name = "lang.regexp"},
 	{org = "ballerina", name = "log"},
 	{org = "ballerina", name = "test"},
 	{org = "ballerinai", name = "observe"}
@@ -343,6 +347,8 @@ dependencies = [
 modules = [
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.authorization"},
-	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.entity"}
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.entity"},
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.scim"},
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.types"}
 ]
 

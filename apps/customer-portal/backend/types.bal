@@ -53,26 +53,36 @@ public type CaseSearchPayload record {|
 public type Case record {|
     # Case ID
     string id;
-    # Project ID
-    string projectId;
-    # Case type
-    string 'type;
+    # Internal case ID
+    string internalId;
     # Case number
     string number;
     # Created date and time
     string createdOn;
-    # Assigned engineer name
-    string? assignedEngineer;
     # Case title
     string? title;
     # Case description
     string? description;
+    # Assigned engineer
+    ReferenceItem? assignedEngineer;
+    # Associated project
+    ReferenceItem? project;
+    # Type of the case
+    ReferenceItem? 'type;
+    # Deployment
+    ReferenceItem? deployment;
     # Severity of the case
-    entity:KeyValue? severity;
+    ReferenceItem? severity;
     # State of the case
-    entity:KeyValue? status;
-    # Deployment ID
-    string? deploymentId;
+    ReferenceItem? status;
+|};
+
+# Reference item.
+public type ReferenceItem record {|
+    # ID
+    string id;
+    # Label
+    string label;
 |};
 
 # Cases list response with pagination.
@@ -86,8 +96,8 @@ public type CaseSearchResponse record {|
 
 # User.
 public type User record {|
-    # System ID of the user
-    string sysId;
+    # ID of the user
+    string id;
     # Email address of the user
     string email;
     # First name of the user
@@ -96,4 +106,15 @@ public type User record {|
     string lastName;
     # Phone number of the user
     string phoneNumber?;
+|};
+
+# Case filter options.
+public type CaseFilterOptions record {|
+    # List of case statuses
+    ReferenceItem[] statuses;
+    # List of case severities
+    ReferenceItem[] severities;
+    # List of case types
+    ReferenceItem[] caseTypes;
+    // TODO: Add other filters once implemented
 |};

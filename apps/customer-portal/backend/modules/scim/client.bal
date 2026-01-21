@@ -28,7 +28,7 @@ final http:Client scimOperationsClient = check new (scimOperationsServiceUrl, {
     timeout: 300.0,
     retryConfig: {
         count: 3,
-        interval: 5.0,
+        interval: 2.0,
         statusCodes: [
             http:STATUS_INTERNAL_SERVER_ERROR,
             http:STATUS_REQUEST_TIMEOUT,

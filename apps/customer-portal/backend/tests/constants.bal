@@ -15,12 +15,13 @@
 // under the License.
 
 const MOCK_HEADER_NAME = "x-jwt-assertion";
-const ERR_MSG_USER_INFO_HEADER_NOT_FOUND = "User information header not found!";
+const MOCK_ERR_MSG_MISSING_INVOKER_HEADER = "Missing invoker info header!";
 const MOCK_USER_INFO_RESPONSE = {
-    "sysId": "mockSysId",
+    "id": "mockSysId",
     "email": "mock-user@wso2.com",
     "firstName": "Mock",
-    "lastName": "User"
+    "lastName": "User",
+    "timezone": "Europe/London"
 };
 const MOCK_PROJECTS_SEARCH_RESPONSE = {
     "projects": [

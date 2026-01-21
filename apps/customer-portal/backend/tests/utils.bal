@@ -14,11 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ballerina/lang.regexp;
-
-public final regexp:RegExp REGEX_EMAIL_DOMAIN = re `^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*@wso2\.com$`;
-const ORGANIZATION_INTERNAL = "internal";
-const ORGANIZATION_EXTERNAL = "external";
-const DOMAIN_DEFAULT = "DEFAULT";
-const ATTRIBUTE_PHONE_NUMBERS = "phoneNumbers";
-const ATTRIBUTE_USERNAME = "userName";
+# Generate headers.
+#
+# + idToken - ID token for authorization
+# + return - Map of headers with authorization
+isolated function generateHeaders(string idToken) returns map<string|string[]> => {"x-jwt-assertion": idToken};

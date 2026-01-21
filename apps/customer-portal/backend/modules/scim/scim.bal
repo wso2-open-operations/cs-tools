@@ -26,7 +26,7 @@ public isolated function searchUsers(string email) returns User[]|error {
         string organization = isWso2Email(email) ? ORGANIZATION_INTERNAL : ORGANIZATION_EXTERNAL;
         UserSearchResult usersResult = check scimOperationsClient->/organizations/[organization]/users/search.post({
             domain: DOMAIN_DEFAULT,
-            attributes: [ATTRIBUTE_PHONE_NUMBERS],
+            attributes: [ATTRIBUTE_PHONE_NUMBERS, ATTRIBUTE_USERNAME],
             filter: string `userName eq ${email}`,
             startIndex
         });

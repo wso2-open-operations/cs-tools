@@ -16,7 +16,6 @@
 
 import customer_portal.authorization;
 import customer_portal.entity;
-import customer_portal.scim;
 
 import ballerina/cache;
 import ballerina/http;
@@ -89,7 +88,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             log:printWarn(string `Unable to read cached user info for ${userInfo.email}`);
         }
 
-        entity:UserResponse|error userDetails = entity:fetchUserBasicInfo(userInfo.email, userInfo.idToken);
+        entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
         if userDetails is error {
             string customError = "Error retrieving user data from entity service";
             log:printError(customError, userDetails);
@@ -100,32 +99,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        scim:User[]|error userResults = scim:searchUsers(userInfo.email);
-        if userResults is error {
-            log:printError("Error retrieving user phone number from scim service", userResults);
-        }
-
-        // TODO: Handle this in a utility function. Will address this in the next PR which has utils.bal file.
-        scim:PhoneNumber[] mobilePhoneNumbers = [];
-        if userResults is scim:User[] {
-            if userResults.length() == 0 {
-                log:printError(string `No user found while searching phone number for ${userInfo.email}`);
-            } else {
-                scim:PhoneNumber[]? phoneNumbers = userResults[0].phoneNumbers;
-                if phoneNumbers != () {
-                    // Filter for mobile type phone numbers
-                    mobilePhoneNumbers.push(...phoneNumbers.filter(phoneNumber =>
-                        phoneNumber.'type == MOBILE_PHONE_NUMBER_TYPE));
-                }
-            }
-        }
+        string? phoneNumber = getPhoneNumber(userInfo.email, userDetails.id);
 
         User user = {
-            sysId: userDetails.sysId,
+            id: userDetails.id,
             email: userDetails.email,
             firstName: userDetails.firstName,
             lastName: userDetails.lastName,
-            phoneNumber: mobilePhoneNumbers.length() > 0 ? mobilePhoneNumbers[0].value : ()
+            phoneNumber
         };
 
         error? cacheError = userCache.put(cacheKey, user);
@@ -164,6 +145,45 @@ service http:InterceptableService / on new http:Listener(9090) {
         return projectsList;
     }
 
+    # Get project details by ID.
+    #
+    # + id - ID of the project
+    # + return - Project details or error response
+    resource function get projects/[string id](http:RequestContext ctx)
+        returns entity:ProjectDetailsResponse|http:BadRequest|http:InternalServerError {
+
+        authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if !isValidProjectId(id) {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        entity:ProjectDetailsResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
+        if projectResponse is error {
+            string customError = "Error retrieving project details";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return projectResponse;
+    }
+
     # Search cases for a specific project with filters and pagination.
     #
     # + id - ID of the project
@@ -181,7 +201,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if id.trim().length() == 0 {
+        if !isValidProjectId(id) {
             string customError = "Project ID cannot be empty or whitespace";
             log:printError(customError);
             return <http:BadRequest>{
@@ -191,18 +211,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:CaseSearchPayload searchPayload = {
-            filters: {
-                projectIds: [id],
-                caseTypes: payload.filters?.caseTypes,
-                severityId: payload.filters?.severityId,
-                stateId: payload.filters?.statusId,
-                deploymentId: payload.filters?.deploymentId
-            },
-            pagination: payload.pagination,
-            sortBy: payload.sortBy
-        };
-        entity:CaseSearchResponse|error casesResponse = entity:searchCases(userInfo.idToken, id, searchPayload);
+        CaseSearchResponse|error casesResponse = searchCases(userInfo.idToken, id, payload);
         if casesResponse is error {
             string customError = "Error retrieving cases";
             log:printError(customError, casesResponse);
@@ -213,26 +222,46 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        Case[] cases = from entity:Case case in casesResponse.cases
-            select {
-                id: case.id,
-                projectId: case.projectId,
-                'type: case.'type,
-                number: case.number,
-                createdOn: case.createdOn,
-                assignedEngineer: case.assignedEngineer,
-                title: case.title,
-                description: case.description,
-                severity: case.severity,
-                status: case.state,
-                deploymentId: case.deploymentId
-            };
+        return casesResponse;
+    }
 
-        return {
-            cases,
-            totalRecords: casesResponse.totalRecords,
-            'limit: casesResponse.'limit,
-            offset: casesResponse.offset
-        };
+    # Get case filters for a project.
+    #
+    # + id - ID of the project
+    # + return - Case filters or error
+    resource function get projects/[string id]/cases/filters(http:RequestContext ctx)
+        returns CaseFilterOptions|http:BadRequest|http:InternalServerError {
+
+        authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if !isValidProjectId(id) {
+            string customError = "Project ID cannot be empty or whitespace";
+            log:printError(customError);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        entity:CaseMetadataResponse|error caseMetadata = entity:getCaseMetadata(userInfo.idToken);
+        if caseMetadata is error {
+            string customError = "Error retrieving case filters";
+            log:printError(customError, caseMetadata);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return getCaseFilters(caseMetadata);
     }
 }

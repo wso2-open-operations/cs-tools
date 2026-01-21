@@ -38,28 +38,30 @@ public type Pagination record {|
 
 # User data.
 public type UserResponse record {|
-    # System ID of the user
-    string sysId;
-    # Email address of the user
+    # ID
+    string id;
+    # Email address
     string email;
-    # First name of the user
+    # First name
     string firstName;
-    # Last name of the user
+    # Last name
     string lastName;
+    # Time zone
+    string? timeZone;
 |};
 
 # Project data from ServiceNow.
 public type Project record {|
-    # System ID of the project
-    string sysId;
-    # Name of the project
+    # ID
+    string id;
+    # Name
     string name;
-    # Description of the project
-    string? description;
     # Project key
-    string projectKey;
+    string key;
     # Created date and time
     string createdOn;
+    # Description
+    string? description;
 |};
 
 # Request body for searching projects.
@@ -79,66 +81,78 @@ public type ProjectsResponse record {|
 
 # Account owner information.
 public type AccountOwner record {|
-    # System ID of the user
-    string sysId;
-    # Name of the user
+    # ID
+    string id;
+    # Name
     string name;
-    # Email of the user
+    # Email
     string email;
 |};
 
-# Project information.
+# Project details information.
 public type ProjectDetailsResponse record {|
     *Project;
     # Project type
-    string projectType;
-    # Subscription start date
-    string? subscriptionStart;
-    # Subscription end date
-    string? subscriptionEnd;
-    # Support tier
-    string? supportTier;
+    string 'type;
     # SLA status
     string slaStatus;
-    # Account owner information
-    AccountOwner accountOwner;
-    # Technical owner information
-    AccountOwner? technicalOwner;
-    json...;
+    # Subscription information
+    ProjectSubscription? subscription;
+    json...; // TODO: Remove after adding all fields
+|};
+
+# Project subscription information.
+public type ProjectSubscription record {|
+    # Subscription start date
+    string? startDate;
+    # Subscription end date
+    string? endDate;
+    # Support tier
+    string? supportTier;
 |};
 
 # Base case.
 public type Case record {|
     # Case ID
     string id;
-    # Project ID
-    string projectId;
-    # Case type
-    string 'type;
+    # Internal ID of the case
+    string internalId;
     # Case number
     string number;
     # Created date and time
     string createdOn;
-    # Assigned engineer name
-    string? assignedEngineer;
     # Case title
     string? title;
     # Case description
     string? description;
-    # Severity of the case
-    KeyValue? severity;
-    # State of the case
-    KeyValue? state;
-    # Deployment ID
-    string? deploymentId;
+    # Assigned engineer
+    ReferenceTableItem? assignedEngineer;
+    # Associated project
+    ReferenceTableItem? project;
+    # Type of the case
+    ReferenceTableItem? 'type;
+    # Deployment information
+    ReferenceTableItem? deployment;
+    # Status information
+    ChoiceListItem? state;
+    # Severity information
+    ChoiceListItem? severity;
 |};
 
-# Key-Value pair type.
-public type KeyValue record {|
-    # Key
-    string? key;
-    # Value
-    string? value;
+# Choice list item information.
+public type ChoiceListItem record {|
+    # ID
+    int id;
+    # Label
+    string label;
+|};
+
+# Basic table information.
+public type ReferenceTableItem record {|
+    # System ID
+    string id;
+    # Display name
+    string name;
 |};
 
 # Case search filters.
@@ -180,4 +194,14 @@ public type SortBy record {|
     string 'field;
     # Sort order
     SortOrder 'order;
+|};
+
+# Case metadata response.
+public type CaseMetadataResponse record {|
+    # List of available case states
+    ChoiceListItem[] states;
+    # List of available case severities
+    ChoiceListItem[] severities;
+    # List of available case types
+    ReferenceTableItem[] caseTypes;
 |};

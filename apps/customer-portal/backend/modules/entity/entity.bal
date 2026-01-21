@@ -14,13 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Fetch logged-in user information.
-# 
+# Get logged-in user information.
+#
 # + email - Email of the user
 # + idToken - ID token for authorization
 # + return - User response or error
-public isolated function fetchUserBasicInfo(string email, string idToken) returns UserResponse|error {
+public isolated function getUserBasicInfo(string email, string idToken) returns UserResponse|error {
     return csEntityClient->/users/me.get(generateHeaders(idToken));
+}
+
+# Get project by ID.
+#
+# + idToken - ID token for authorization
+# + projectId - Unique ID of the project
+# + return - Project details or error
+public isolated function getProject(string idToken, string projectId) returns ProjectDetailsResponse|error {
+    return csEntityClient->/projects/[projectId].get(generateHeaders(idToken));
 }
 
 # Search projects of the logged-in user.
@@ -29,17 +38,22 @@ public isolated function fetchUserBasicInfo(string email, string idToken) return
 # + payload - Request body for searching projects
 # + return - Projects response or error
 public isolated function searchProjects(string idToken, ProjectRequest payload) returns ProjectsResponse|error {
-    return csEntityClient->/projects.post(payload, generateHeaders(idToken));
+    return csEntityClient->/projects/search.post(payload, generateHeaders(idToken));
 }
 
 # Search cases of a project.
 #
 # + idToken - ID token for authorization
-# + projectId - Unique ID of the project
 # + payload - Request body for searching cases
 # + return - Cases object or error
-public isolated function searchCases(string idToken, string projectId, CaseSearchPayload payload)
-    returns CaseSearchResponse|error {
-
+public isolated function searchCases(string idToken, CaseSearchPayload payload) returns CaseSearchResponse|error {
     return csEntityClient->/cases/search.post(payload, generateHeaders(idToken));
+}
+
+# Get case metadata.
+#
+# + idToken - ID token for authorization
+# + return - Case metadata response or error
+public isolated function getCaseMetadata(string idToken) returns CaseMetadataResponse|error {
+    return csEntityClient->/cases/meta.get(generateHeaders(idToken));
 }

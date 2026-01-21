@@ -23,21 +23,26 @@ configurable string mockIdToken = ?;
 
 @test:Config
 public function testGetLoggedInUserInformation() returns error? {
-    http:Response response = check testClient->/users/me.get(headers = {MOCK_HEADER_NAME: mockIdToken});
+    http:Response response = check testClient->/users/me.get(headers = generateHeaders(mockIdToken));
     json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
     test:assertEquals(payload, MOCK_USER_INFO_RESPONSE);
+}
 
-    response = check testClient->/users/me.get();
+@test:Config
+public function testMissingInvokerHeader() returns error? {
+    http:Response response = check testClient->/users/me.get();
     test:assertEquals(response.statusCode, http:STATUS_INTERNAL_SERVER_ERROR);
-    test:assertEquals(response.getTextPayload(), ERR_MSG_USER_INFO_HEADER_NOT_FOUND);
+    json payload = check response.getJsonPayload();
+    ErrorDetail errDetail = check payload.fromJsonWithType();
+    test:assertEquals(errDetail.message, MOCK_ERR_MSG_MISSING_INVOKER_HEADER);
 }
 
 @test:Config
 public function testSearchLoggedInUserProjects() returns error? {
     // TODO: Add mock search payload
     http:Response response = check testClient->/projects/search.post({},
-        headers = {MOCK_HEADER_NAME: mockIdToken}
+        headers = generateHeaders(mockIdToken)
     );
     json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
@@ -48,13 +53,13 @@ public function testSearchLoggedInUserProjects() returns error? {
 public function testSearchCasesOfProject() returns error? {
     // TODO: Add mock project ID
     http:Response response = check testClient->/projects/[1]/cases/search.post({},
-        headers = {MOCK_HEADER_NAME: mockIdToken}
+        headers = generateHeaders(mockIdToken)
     );
     json payload = check response.getJsonPayload();
     test:assertEquals(response.statusCode, http:STATUS_OK);
     test:assertEquals(payload, {}); // TODO: Add mock response
 
-    response = check testClient->/projects/[" "]/cases/search.post({}, headers = {MOCK_HEADER_NAME: mockIdToken});
+    response = check testClient->/projects/[" "]/cases/search.post({}, headers = generateHeaders(mockIdToken));
     test:assertEquals(response.statusCode, http:STATUS_BAD_REQUEST);
     test:assertEquals(response.getTextPayload(), "Project ID cannot be empty or whitespace");
 }
