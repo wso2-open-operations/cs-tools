@@ -86,12 +86,75 @@ public isolated function isValidId(string id) returns boolean => id.trim().lengt
 
 # Get HTTP status code from the given error.
 #
-# + err - Error to handle
-# + return - HTTP status code
-public isolated function getStatusCode(error err) returns int {
-    map<anydata|readonly> & readonly errorDetails = err.detail();
-    anydata|readonly statusCodeValue = errorDetails[ERR_STATUS_CODE] ?: ();
-    return statusCodeValue is int ? statusCodeValue : http:STATUS_INTERNAL_SERVER_ERROR;
+# + projectId - Unique ID of the project
+# + return - Project case statistics if found, else nil
+public isolated function getCaseStatsFromCache(string projectId) returns ProjectCaseStats? {
+    string cacheKey = string `${projectId}:caseStats`;
+    if statsCache.hasKey(cacheKey) {
+        ProjectCaseStats|error cachedStats = statsCache.get(cacheKey).ensureType();
+        if cachedStats is ProjectCaseStats {
+            return cachedStats;
+        }
+        log:printWarn(string `Unable to read cached stats for project: ${projectId}`);
+    }
+    return;
+}
+
+# Cache case statistics for a project.
+#
+# + projectId - Unique ID of the project
+# + caseStats - Project case statistics
+public isolated function updateCaseStatsCache(string projectId, entity:ProjectCaseStatsResponse caseStats) {
+    ProjectCaseStats caseStatsToCache = {
+        totalCases: caseStats.totalCount,
+        openCases: caseStats.openCount,
+        averageResponseTime: caseStats.averageResponseTime,
+        activeCases: caseStats.activeCount,
+        resolvedCases: caseStats.resolvedCount,
+        outstandingIncidents: caseStats.outstandingIncidentsCount
+    };
+    error? cacheError = statsCache.put(string `${projectId}:caseStats`, caseStatsToCache);
+    if cacheError is error {
+        log:printWarn(string `Error writing case stats of project: ${projectId} to cache`, cacheError);
+    }
+    return;
+}
+
+# Get support statistics from cache for a given project.
+#
+# + projectId - Unique ID of the project
+# + return - Project chat statistics if found, else nil
+public isolated function getSupportStatsFromCache(string projectId) returns ProjectSupportStats? {
+    string cacheKey = string `${projectId}:supportStats`;
+    if statsCache.hasKey(cacheKey) {
+        ProjectSupportStats|error cachedStats = statsCache.get(cacheKey).ensureType();
+        if cachedStats is ProjectSupportStats {
+            return cachedStats;
+        }
+        log:printWarn(string `Unable to read cached support stats for project: ${projectId}`);
+    }
+    return;
+}
+
+# Cache support statistics for a project.
+#
+# + projectId - Unique ID of the project
+# + chatStats - Project chat statistics
+# + totalCases - Total cases count
+public isolated function updateSupportStatsCache(string projectId, entity:ProjectChatStatsResponse chatStats,
+        int totalCases) {
+
+    ProjectSupportStats supportStatsToCache = {
+        totalCases,
+        activeChats: chatStats.activeCount,
+        sessionChats: chatStats.sessionCount,
+        resolvedChats: chatStats.resolvedCount
+    };
+    error? cacheError = statsCache.put(string `${projectId}:supportStats`, supportStatsToCache);
+    if cacheError is error {
+        log:printWarn(string `Error writing support stats of project: ${projectId} to cache`, cacheError);
+    }
+    return;
 }
 
 # Extract error message from the given error.

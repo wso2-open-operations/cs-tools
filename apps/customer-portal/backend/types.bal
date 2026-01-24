@@ -135,3 +135,41 @@ public type CaseFilterOptions record {|
     ReferenceItem[] caseTypes;
     // TODO: Add other filters once implemented
 |};
+
+# Case statistics for a project.
+public type ProjectCaseStats record {|
+    # Total case count
+    int totalCases;
+    # Open cases count
+    int openCases;
+    # Average response time
+    decimal averageResponseTime;
+    # Active case count breakdown
+    entity:ActiveCaseCount activeCases;
+    # Outstanding incidents count breakdown
+    entity:OutstandingIncidentsCount outstandingIncidents;
+    # Resolved case count breakdown
+    entity:ResolvedCaseCount resolvedCases;
+|};
+
+# Project support statistics.
+public type ProjectSupportStats record {|
+    # Total cases count
+    int totalCases;
+    # Active chats count
+    int activeChats;
+    # Session chats count
+    int sessionChats;
+    # Resolved chats count
+    int resolvedChats;
+|};
+
+# Project health statistics.
+public type ProjectHealthtStats record {|
+    # Open cases count
+    int openCases;
+    # Active chats count
+    int activeChats;
+    # Deployments count
+    int deployments;
+|};

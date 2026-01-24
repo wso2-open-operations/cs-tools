@@ -41,6 +41,44 @@ public isolated function searchProjects(string idToken, ProjectRequest payload) 
     return csEntityClient->/projects/search.post(payload, generateHeaders(idToken));
 }
 
+# Get project statistics by ID.
+# 
+# + idToken - ID token for authorization
+# + id - Unique ID of the project
+# + return - Project statistics or error
+public isolated function getProjectStats(string idToken, string id) returns ProjectStatsResponse|error {
+    return csEntityClient->/projects/[id]/stats.get(generateHeaders(idToken));
+}
+
+# Get cases statistics of a project by ID.
+# 
+# + idToken - ID token for authorization
+# + id - Unique ID of the project
+# + return - Project cases statistics or error
+public isolated function getCaseStatsForProject(string idToken, string id) returns ProjectCaseStatsResponse|error {
+    return csEntityClient->/projects/[id]/cases/stats.get(generateHeaders(idToken));
+}
+
+# Get chats statistics of a project by ID.
+# 
+# + idToken - ID token for authorization
+# + id - Unique ID of the project
+# + return - Project chats statistics or error
+public isolated function getChatStatsForProject(string idToken, string id) returns ProjectChatStatsResponse|error {
+    return csEntityClient->/projects/[id]/chats/stats.get(generateHeaders(idToken));
+}
+
+# Get deployments statistics of a project by ID.
+# 
+# + idToken - ID token for authorization
+# + id - Unique ID of the project
+# + return - Project deployments statistics or error
+public isolated function getDeploymentStatsForProject(string idToken, string id)
+    returns ProjectDeploymentStatsResponse|error {
+
+    return csEntityClient->/projects/[id]/deployments/stats.get(generateHeaders(idToken));
+}
+
 # Get case by ID.
 # 
 # + idToken - ID token for authorization

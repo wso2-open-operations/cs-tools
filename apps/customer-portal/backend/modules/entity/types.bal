@@ -244,3 +244,76 @@ public type CaseMetadataResponse record {|
     # List of available case types
     ReferenceTableItem[] caseTypes;
 |};
+
+# Project statistics response from ServiceNow.
+public type ProjectStatsResponse record {|
+    # Total time logged
+    decimal totalTimeLogged;
+    # Billable hours
+    decimal billableHours;
+    # System health status
+    string systemHealth;
+|};
+
+# Active case count breakdown.
+public type ActiveCaseCount record {|
+    # Work in progress count
+    int workInProgress;
+    # Waiting on client count
+    int waitingOnClient;
+    # Waiting on WSO2 count
+    int waitingOnWso2;
+    # Total active count
+    int total;
+|};
+# Outstanding incidents count breakdown.
+public type OutstandingIncidentsCount record {|
+    # Medium severity count
+    int medium;
+    # High severity count
+    int high;
+    # Critical severity count
+    int critical;
+    # Total count
+    int total;
+|};
+
+# Resolved case count breakdown.
+public type ResolvedCaseCount record {|
+    # Total resolved count
+    int total;
+    # Current month resolved count
+    int currentMonth;
+|};
+
+# Project cases statistics response.
+public type ProjectCaseStatsResponse record {|
+    # Total case count
+    int totalCount;
+    # Open case count
+    int openCount;
+    # Average response time
+    decimal averageResponseTime;
+    # Active case count breakdown
+    ActiveCaseCount activeCount;
+    # Outstanding incidents count breakdown
+    OutstandingIncidentsCount outstandingIncidentsCount;
+    # Resolved case count breakdown
+    ResolvedCaseCount resolvedCount;
+|};
+
+# Project chats statistics response.
+public type ProjectChatStatsResponse record {|
+    # Active chat count
+    int activeCount;
+    # Session count
+    int sessionCount;
+    # Resolved count
+    int resolvedCount;
+|};
+
+# Project deployment statistics response.
+public type ProjectDeploymentStatsResponse record {|
+    # Total deployment count
+    int totalCount;
+|};
