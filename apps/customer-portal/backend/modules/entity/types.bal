@@ -266,6 +266,7 @@ public type ActiveCaseCount record {|
     # Total active count
     int total;
 |};
+
 # Outstanding incidents count breakdown.
 public type OutstandingIncidentsCount record {|
     # Medium severity count
