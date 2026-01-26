@@ -658,8 +658,8 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Get comments for a specific project.
     # 
     # + payload - Comment request payload
-    # + return - Case filter options or error
-    resource function get comments/search(http:RequestContext ctx, entity:CommentRequestPayload payload) 
+    # + return - Comments response or error
+    resource function post comments/search(http:RequestContext ctx, entity:CommentRequestPayload payload) 
         returns entity:CommentsResponse|http:InternalServerError{
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
