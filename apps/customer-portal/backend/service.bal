@@ -261,7 +261,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: "Project ID cannot be empty or whitespace"
@@ -308,7 +308,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: ERR_MSG_PROJECT_ID_EMPTY
@@ -475,7 +475,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: ERR_MSG_PROJECT_ID_EMPTY
@@ -548,7 +548,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: ERR_MSG_PROJECT_ID_EMPTY
@@ -649,7 +649,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: "Case ID cannot be empty or whitespace"
@@ -697,7 +697,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: "Project ID cannot be empty or whitespace"
@@ -735,7 +735,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(id) {
+        if isEmptyId(id) {
             return <http:BadRequest>{
                 body: {
                     message: "Project ID cannot be empty or whitespace"

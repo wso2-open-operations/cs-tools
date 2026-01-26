@@ -78,11 +78,11 @@ public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata
     };
 }
 
-# Validates the given ID.
+# Check if the given ID is empty.
 #
 # + id - ID to validate
 # + return - True if valid, else false
-public isolated function isValidId(string id) returns boolean => id.trim().length() != 0;
+public isolated function isEmptyId(string id) returns boolean => id.trim().length() == 0;
 
 # Get HTTP status code from the given error.
 #
