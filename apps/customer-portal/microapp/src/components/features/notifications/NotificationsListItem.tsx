@@ -1,7 +1,7 @@
-import { Card, Chip, Stack, SvgIcon, Typography } from "@mui/material";
+import { Card, Chip, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { Circle } from "@mui/icons-material";
 import type { ItemType } from "../support";
 import { TYPE_CONFIG } from "../support/config";
-import { Circle } from "@mui/icons-material";
 
 export interface NotificationsListItemProps {
   type: ItemType;
@@ -20,7 +20,7 @@ export function NotificationsListItem({
   timestamp,
   unread = false,
 }: NotificationsListItemProps) {
-  const { icon, color } = TYPE_CONFIG[type];
+  const { icon: Icon, color } = TYPE_CONFIG[type];
 
   return (
     <Card
@@ -33,7 +33,7 @@ export function NotificationsListItem({
       elevation={0}
       sx={{ borderLeft: "5px solid", borderColor: unread ? "primary.main" : "transparent" }}
     >
-      <SvgIcon component={icon} sx={(theme) => ({ color: color, fontSize: theme.typography.pxToRem(24) })} />
+      <Icon size={pxToRem(24)} color={color} />
       <Stack sx={{ width: "100%" }} justifyContent="space-between" gap={1}>
         <Stack>
           <Typography variant="body2" fontWeight="medium">

@@ -1,22 +1,22 @@
-import { Chat, ReplayCircleFilled, Report, Settings } from "@mui/icons-material";
+import { MessageSquare, OctagonAlert, RefreshCcw, Settings, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 import type { ItemType } from "./ItemCard";
-import type { ElementType } from "react";
+import { colors } from "@wso2/oxygen-ui";
 
-export const TYPE_CONFIG: Record<ItemType, { icon: ElementType; color: string }> = {
+export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> = {
   case: {
-    icon: Report,
-    color: "text.secondary",
+    icon: OctagonAlert,
+    color: colors.red[500],
   },
   chat: {
-    icon: Chat,
-    color: "components.portal.accent.blue",
+    icon: MessageSquare,
+    color: colors.blue[500],
   },
   service: {
     icon: Settings,
-    color: "components.portal.accent.purple",
+    color: colors.purple[500],
   },
   change: {
-    icon: ReplayCircleFilled,
-    color: "components.portal.accent.blue",
+    icon: RefreshCcw,
+    color: colors.cyan[500],
   },
 };

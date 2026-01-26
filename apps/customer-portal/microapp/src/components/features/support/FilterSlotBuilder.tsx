@@ -1,8 +1,9 @@
-import { Search } from "@mui/icons-material";
-import { InputAdornment, Stack, Tab, Tabs, InputBase as TextField } from "@mui/material";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import type { Status } from "./ItemCard";
+import { InputAdornment, Stack, Tab, Tabs, TextField } from "@wso2/oxygen-ui";
+import { Search } from "@wso2/oxygen-ui-icons-react";
+import { pxToRem } from "@wso2/oxygen-ui";
 import type { NotificationFilter } from "@pages/NotificationsPage";
+import type { Status } from "./ItemCard";
 
 export interface FilterTab {
   label: string;
@@ -45,14 +46,19 @@ export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilder
       <TextField
         fullWidth
         type="search"
+        size="small"
         placeholder={searchPlaceholder}
         value={searchValue}
         onChange={(e) => updateParams({ [searchParamName]: e.target.value || null })}
-        startAdornment={
-          <InputAdornment position="start">
-            <Search />
-          </InputAdornment>
-        }
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search size={pxToRem(18)} />
+              </InputAdornment>
+            ),
+          },
+        }}
         sx={{
           mt: 1,
           bgcolor: "background.paper",
@@ -63,35 +69,6 @@ export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilder
         scrollButtons={false}
         variant="scrollable"
         onChange={(_, value) => updateParams({ [filterParamName]: value })}
-        sx={(theme) => ({
-          minHeight: "unset",
-
-          "& .MuiTabs-flexContainer": {
-            gap: 1.2,
-          },
-          "& .MuiButtonBase-root": {
-            minHeight: "unset",
-            minWidth: "unset",
-            p: "4px 12px",
-            fontSize: theme.typography.subtitle1,
-            color: "text.tertiary",
-            fontWeight: "medium",
-            textTransform: "revert",
-            borderRadius: 999,
-            backgroundColor: "background.default",
-          },
-
-          "& .MuiTab-root.Mui-selected": {
-            color: theme.palette.primary.contrastText,
-            backgroundColor: theme.palette.primary.main,
-            fontSize: theme.typography.body1,
-            fontWeight: "bold",
-          },
-
-          "& .MuiTabs-indicator": {
-            display: "none",
-          },
-        })}
       >
         <Tab label="All" value="all" disableRipple />
         {tabs.map((tab, index) => (

@@ -15,12 +15,12 @@
 // under the License.
 
 import { useLayoutEffect } from "react";
-import { ButtonBase, Stack, Typography } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
+import { Button, Stack, Typography } from "@wso2/oxygen-ui";
+import { NotificationsListItem, type NotificationsListItemProps } from "@components/features/notifications";
 import type { ItemType } from "@components/features/support";
 import { useLayout } from "@context/layout";
 import { FilterAppBarSlot } from "./AllItemsPage";
-import { useSearchParams } from "react-router-dom";
-import { NotificationsListItem, type NotificationsListItemProps } from "@components/features/notifications";
 
 import { MOCK_NOTIFICATIONS } from "@src/mocks/data/notifications";
 
@@ -55,9 +55,9 @@ export default function NotificationsPage() {
     );
 
     layout.setEndSlotOverride(
-      <ButtonBase sx={{ color: "primary.main", fontWeight: "medium" }} disableRipple>
+      <Button variant="text" sx={{ textTransform: "initial" }} disableRipple>
         Mark All Read
-      </ButtonBase>,
+      </Button>,
     );
 
     return () => {
