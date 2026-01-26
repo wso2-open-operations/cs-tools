@@ -660,7 +660,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + payload - Comment request payload
     # + return - Comments response or error
     resource function post comments/search(http:RequestContext ctx, entity:CommentRequestPayload payload) 
-        returns entity:CommentsResponse|http:InternalServerError{
+        returns entity:CommentsResponse|http:BadRequest|http:InternalServerError{
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
