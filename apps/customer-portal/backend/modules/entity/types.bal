@@ -212,19 +212,19 @@ public type CaseResponse record {|
         *ReferenceTableItem;
         # Product version
         string? version;
-    } product;
+    }? product;
     # Account information
     record {
         *ReferenceTableItem;
         # Account type
         string? 'type;
-    } account;
+    }? account;
     # CS Manager information
     record {
         *ReferenceTableItem;
         # Email address
         string? email;
-    } csManager;
+    }? csManager;
 |};
 
 # Sort configuration.
