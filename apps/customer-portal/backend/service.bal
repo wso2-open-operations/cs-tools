@@ -182,7 +182,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             updatedUserResponse.phoneNumber = processPhoneNumber(updatedUser);
         }
 
-        if payload.timezone is string {
+        if payload.timeZone is string {
             // TODO: Update timezone
         }
 

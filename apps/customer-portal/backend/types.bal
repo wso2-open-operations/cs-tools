@@ -114,7 +114,7 @@ public type UserUpdatePayload record {|
     }
     string phoneNumber?;
     # Timezone of the user
-    string timezone?;
+    string timeZone?;
 |};
 
 # Updated user information.
