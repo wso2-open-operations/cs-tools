@@ -130,10 +130,10 @@ service http:InterceptableService / on new http:Listener(9090) {
 
     # Update user information of the logged in user.
     #
-    # + payload - User update request body
+    # + payload - User update payload
     # + return - Updated user object or error response
     resource function patch users/me(http:RequestContext ctx, UserUpdatePayload payload)
-        returns UpdatedUser|http:InternalServerError|http:BadRequest {
+        returns UpdatedUser|http:BadRequest|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
