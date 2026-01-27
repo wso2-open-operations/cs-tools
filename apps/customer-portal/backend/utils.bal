@@ -16,6 +16,7 @@
 import customer_portal.entity;
 import customer_portal.scim;
 
+import ballerina/http;
 import ballerina/log;
 
 # Search cases for a given project.
@@ -110,4 +111,14 @@ public isolated function getPhoneNumber(string email, string id) returns string?
         }
     }
     return mobilePhoneNumber;
+}
+
+# Get HTTP status code from the given error.
+#
+# + err - Error to handle
+# + return - HTTP status code
+public isolated function getStatusCode(error err) returns int {
+    map<anydata|readonly> & readonly errorDetails = err.detail();
+    anydata|readonly statusCodeValue = errorDetails[ERR_STATUS_CODE] ?: ();
+    return statusCodeValue is int ? statusCodeValue : http:STATUS_INTERNAL_SERVER_ERROR;
 }
