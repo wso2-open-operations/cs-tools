@@ -681,7 +681,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if ('limit != () && 'limit < 0) || (offset != () && offset < 0 && offset > 50) {
+        if ('limit != () && 'limit < 0) || (offset != () && (offset < 0 || offset > 50)) {
             return <http:BadRequest>{
                 body: {
                     message: "Offset and limit must be non-negative integers. Offset cannot be greater than 50."
