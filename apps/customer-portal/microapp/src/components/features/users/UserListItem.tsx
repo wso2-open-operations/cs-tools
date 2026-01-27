@@ -1,7 +1,7 @@
-import { AdminPanelSettingsOutlined, ChevronRight, Email } from "@mui/icons-material";
-import { Card, Stack, Avatar as MuiAvatar, Typography, Chip } from "@mui/material";
-import { capitalize, stringAvatar } from "@root/src/utils/others";
 import { Link } from "react-router-dom";
+import { Card, Stack, Avatar as MuiAvatar, Typography, Chip, useTheme, pxToRem } from "@wso2/oxygen-ui";
+import { ShieldUser, ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
+import { capitalize, stringAvatar } from "@utils/others";
 import type { RoleName } from "./RoleSelector";
 
 export interface UserListItemProps {
@@ -12,6 +12,7 @@ export interface UserListItemProps {
 }
 
 export function UserListItem({ name, email, role, lastActive }: UserListItemProps) {
+  const theme = useTheme();
   const admin = role === "admin";
 
   return (
@@ -30,10 +31,10 @@ export function UserListItem({ name, email, role, lastActive }: UserListItemProp
               <Typography variant="body1" fontWeight="medium">
                 {name}
               </Typography>
-              <Chip size="small" label={capitalize(role)} color={admin ? "error" : "default"} />
+              <Chip size="small" label={capitalize(role)} color={admin ? "primary" : "default"} />
             </Stack>
             <Stack direction="row" alignItems="center" gap={1}>
-              <Email sx={(theme) => ({ fontSize: theme.typography.pxToRem(18), color: "text.secondary" })} />
+              <Mail color={theme.palette.text.secondary} size={pxToRem(14)} />
               <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
                 {email}
               </Typography>
@@ -44,11 +45,9 @@ export function UserListItem({ name, email, role, lastActive }: UserListItemProp
           </Stack>
         </Stack>
         <Stack direction="row" alignItems="center" gap={2}>
-          {admin && (
-            <AdminPanelSettingsOutlined color="primary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(28) })} />
-          )}
+          {admin && <ShieldUser color={theme.palette.primary.main} size={pxToRem(28)} />}
 
-          <ChevronRight sx={{ color: "text.tertiary" }} />
+          <ChevronRight color={theme.palette.text.secondary} size={pxToRem(18)} />
         </Stack>
       </Stack>
     </Card>

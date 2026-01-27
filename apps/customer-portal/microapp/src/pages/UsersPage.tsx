@@ -17,17 +17,19 @@
 import {
   Card,
   Grid,
-  InputBase as TextField,
+  TextField,
   Stack,
   Typography,
   InputAdornment,
-  ButtonBase as Button,
+  Button,
   Divider,
-} from "@mui/material";
-import { Add, Search } from "@mui/icons-material";
+  pxToRem,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import { MetricWidget } from "@components/features/dashboard";
 import { UserListItem } from "@components/features/users";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Search, Plus } from "@wso2/oxygen-ui-icons-react";
 
 import { MOCK_METRICS, MOCK_ROLES, MOCK_USERS } from "@src/mocks/data/users";
 
@@ -65,15 +67,20 @@ export default function UsersPage() {
         <Grid size={12}>
           <TextField
             fullWidth
+            size="small"
             type="search"
             placeholder="Search Users"
             value={searchValue}
             onChange={(e) => updateParams({ ["search"]: e.target.value || null })}
-            startAdornment={
-              <InputAdornment position="start">
-                <Search />
-              </InputAdornment>
-            }
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={pxToRem(18)} />
+                  </InputAdornment>
+                ),
+              },
+            }}
             sx={{
               mt: 1,
               bgcolor: "background.paper",
@@ -81,11 +88,9 @@ export default function UsersPage() {
           />
         </Grid>
       </Grid>
-      <Card component={Stack} p={2} mt={2} gap={0.5} elevation={0}>
+      <Card component={Stack} p={2} mt={2} gap={0.5}>
         <Stack direction="row" justifyContent="space-between" pb={1}>
-          <Typography variant="h6" fontWeight="bold">
-            All Users
-          </Typography>
+          <Typography variant="h6">All Users</Typography>
           <AddButton />
         </Stack>
         <Divider />
@@ -101,13 +106,15 @@ export default function UsersPage() {
 }
 
 function AddButton() {
+  const theme = useTheme();
+
   return (
-    <Button component={Link} to="/users/invite" sx={{ padding: 0 }} disableRipple>
+    <Button component={Link} to="/users/invite" sx={{ textTransform: "initial" }}>
       <Stack direction="row" gap={1}>
-        <Typography variant="body2" color="primary" fontWeight="medium">
+        <Typography variant="body1" color="primary" fontWeight="medium">
           Add
         </Typography>
-        <Add color="primary" />
+        <Plus color={theme.palette.primary.main} />
       </Stack>
     </Button>
   );
@@ -115,7 +122,7 @@ function AddButton() {
 
 function UserRolesInfo() {
   return (
-    <Card component={Stack} p={2} mt={2} elevation={0} sx={{ bgcolor: "components.priority.medium.background" }}>
+    <Card component={Stack} p={2} mt={2}>
       <Typography variant="subtitle1" fontWeight="medium">
         User Roles
       </Typography>

@@ -15,9 +15,7 @@ export function ItemListView({ title, viewAllPath, children }: ItemListViewProps
   return (
     <>
       <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1}>
-        <Typography variant="h6" fontWeight="bold">
-          {title}
-        </Typography>
+        <Typography variant="h6">{title}</Typography>
         <Button variant="text" component={Link} to={viewAllPath} sx={{ textTransform: "initial" }}>
           <Stack direction="row" gap={1}>
             <Typography variant="body1" color="primary">
