@@ -350,11 +350,8 @@ public type CommentsResponse record {|
 
 # Request payload for searching comments.
 public type CommentRequestPayload record {|
-    # Filter criteria
-    record {
-        # Reference ID to filter comments
-        string referenceId?;
-    } filters?;
+    # Reference ID to filter comments
+    string referenceId;
     # Pagination details
     Pagination pagination?;
 |};

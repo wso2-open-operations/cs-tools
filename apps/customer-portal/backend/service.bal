@@ -655,12 +655,14 @@ service http:InterceptableService / on new http:Listener(9090) {
         return getCaseFilters(caseMetadata);
     }
 
-    # Get comments for a specific project.
+    # Get comments for a specific case.
     # 
-    # + payload - Comment request payload
+    # + id - ID of the case
+    # + limit - Number of comments to retrieve
+    # + offset - Offset for pagination
     # + return - Comments response or error
-    resource function post comments/search(http:RequestContext ctx, entity:CommentRequestPayload payload) 
-        returns entity:CommentsResponse|http:BadRequest|http:InternalServerError{
+    resource function get cases/[string id]/comments(http:RequestContext ctx, int? 'limit, int? offset) 
+        returns entity:CommentsResponse|http:BadRequest|http:Forbidden|http:InternalServerError{
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -671,7 +673,37 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:CommentsResponse|error commentsResponse = entity:searchComments(userInfo.idToken, payload);
+        if !isValidId(id) {
+            return <http:BadRequest>{
+                body: {
+                    message: "Case ID cannot be empty or whitespace"
+                }
+            };
+        }
+
+        // Verify case validation for the user
+        entity:CaseResponse|error caseDetails = entity:getCase(userInfo.idToken, id);
+        if caseDetails is error {
+            if getStatusCode(caseDetails) == http:STATUS_FORBIDDEN {
+                // TODO: Will log the UUID once the PR #42 is merged
+                log:printWarn(string `Access to case ID: ${id} is forbidden for user:`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested case is forbidden!"
+                    }
+                };
+            }
+
+            string customError = "Error retrieving case details while validating comments access";
+            log:printError(customError, caseDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        entity:CommentsResponse|error commentsResponse = entity:getComments(userInfo.idToken, id, 'limit, offset);
         if commentsResponse is error {
             string customError = "Error retrieving comments";
             log:printError(customError, commentsResponse);
