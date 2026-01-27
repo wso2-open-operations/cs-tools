@@ -69,7 +69,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Fetch user information of the logged in user.
     #
     # + return - User info object or error response
-    resource function get users/me(http:RequestContext ctx) returns User|http:InternalServerError {
+    resource function get users/me(http:RequestContext ctx) returns User|http:Forbidden|http:InternalServerError {
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -90,6 +90,16 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
         if userDetails is error {
+            if getStatusCode(userDetails) == http:STATUS_FORBIDDEN {
+                // TODO: Will log the UUID once the PR #42 is merged
+                log:printWarn(string `User: does not have access to the customer portal!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "User is not authorized to access the customer portal!"
+                    }
+                };
+            }
+
             string customError = "Error retrieving user data from entity service";
             log:printError(customError, userDetails);
             return <http:InternalServerError>{
@@ -121,7 +131,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + payload - Project search request body
     # + return - Projects list or error response
     resource function post projects/search(http:RequestContext ctx, entity:ProjectRequest payload)
-        returns entity:ProjectsResponse|http:BadRequest|http:InternalServerError {
+        returns entity:ProjectsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -134,6 +144,16 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         entity:ProjectsResponse|error projectsList = entity:searchProjects(userInfo.idToken, payload);
         if projectsList is error {
+            if getStatusCode(projectsList) == http:STATUS_FORBIDDEN {
+                // TODO: Will log the UUID once the PR #42 is merged
+                log:printWarn(string `Access to requested projects are forbidden for user:`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested project is forbidden!"
+                    }
+                };
+            }
+
             string customError = "Error retrieving projects list";
             log:printError(customError, projectsList);
             return <http:InternalServerError>{
@@ -150,7 +170,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + id - ID of the project
     # + return - Project details or error response
     resource function get projects/[string id](http:RequestContext ctx)
-        returns entity:ProjectDetailsResponse|http:BadRequest|http:InternalServerError {
+        returns entity:ProjectDetailsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -171,6 +191,16 @@ service http:InterceptableService / on new http:Listener(9090) {
 
         entity:ProjectDetailsResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
         if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                // TODO: Will log the UUID once the PR #42 is merged
+                log:printWarn(string `Access to project ID: ${id} is forbidden for user:`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested project is forbidden!"
+                    }
+                };
+            }
+
             string customError = "Error retrieving project details";
             log:printError(customError, projectResponse);
             return <http:InternalServerError>{
@@ -184,10 +214,10 @@ service http:InterceptableService / on new http:Listener(9090) {
 
     # Get case details by ID.
     # 
-    # + caseId - ID of the case
+    # + id - ID of the case
     # + return - Case details or error
-    resource function get cases/[string caseId](http:RequestContext ctx) 
-        returns entity:CaseResponse|http:BadRequest|http:InternalServerError {
+    resource function get cases/[string id](http:RequestContext ctx) 
+        returns entity:CaseResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
 
         authorization:UserDataPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -198,7 +228,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if !isValidId(caseId) {
+        if !isValidId(id) {
             return <http:BadRequest>{
                 body: {
                     message: "Case ID cannot be empty or whitespace"
@@ -206,8 +236,18 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, caseId);
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, id);
         if caseResponse is error {
+            if getStatusCode(caseResponse) == http:STATUS_FORBIDDEN {
+                // TODO: Will log the UUID once the PR #42 is merged
+                log:printWarn(string `Access to case ID: ${id} is forbidden for user:`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to the requested case is forbidden!"
+                    }
+                };
+            }
+
             string customError = "Error retrieving case details";
             log:printError(customError, caseResponse);
             return <http:InternalServerError>{
