@@ -15,22 +15,23 @@
 // under the License.
 import ballerina/http;
 
-configurable string csEntityBaseUrl = "";
+configurable string csEntityBaseUrl = ?;
+configurable ClientCredentialsOauth2Config clientCredentialsOauth2Config = ?;
 
-// TODO: Restore below logic after Entity Url is finalized.
-// final http:Client csEntityClient = check new(configurable string csEntityBaseUrl,
-//     auth = {
-//         tokenUrl: oauthConfig.tokenUrl,
-//         clientId: oauthConfig.clientId,
-//         clientSecret: oauthConfig.clientSecret
-//     },
-//     retryConfig = {
-//         count: retryConfig.count,
-//         interval: retryConfig.interval,
-//         backOffFactor: retryConfig.backOffFactor,
-//         maxWaitInterval: retryConfig.maxWaitInterval
-//     }
-// );
-
-// TODO: Remove below logic after Entity Url is finalized.
-final http:Client csEntityClient = check new(csEntityBaseUrl);
+final http:Client csEntityClient = check new (csEntityBaseUrl, {
+    auth: {
+        ...clientCredentialsOauth2Config
+    },
+    httpVersion: http:HTTP_1_1,
+    http1Settings: {keepAlive: http:KEEPALIVE_NEVER},
+    timeout: 300.0,
+    retryConfig: {
+        count: 3,
+        interval: 2.0,
+        statusCodes: [
+            http:STATUS_BAD_GATEWAY,
+            http:STATUS_SERVICE_UNAVAILABLE,
+            http:STATUS_GATEWAY_TIMEOUT
+        ]
+    }
+});

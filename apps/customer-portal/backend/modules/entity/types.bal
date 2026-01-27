@@ -15,6 +15,18 @@
 // under the License.
 import ballerina/constraint;
 
+# [Configurable] Client credentials grant type oauth2 configuration.
+type ClientCredentialsOauth2Config record {|
+    # OAuth2 token endpoint
+    string tokenUrl;
+    # OAuth2 client ID
+    string clientId;
+    # OAuth2 client secret
+    string clientSecret;
+    # OAuth2 scopes
+    string[] scopes = [];
+|};
+
 # Valid sort order values.
 public enum SortOrder {
     ASC = "asc",

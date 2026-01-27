@@ -1,5 +1,10 @@
 [customer_portal.entity]
-    csEntityBaseUrl = "<base_url>"
+csEntityBaseUrl = "<base_url>"
+[customer_portal.entity.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]
 
 [customer_portal.authorization.authorizedRoles]
     userRole  = "<authorized_role>"

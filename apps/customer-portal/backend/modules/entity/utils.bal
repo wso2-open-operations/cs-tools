@@ -18,4 +18,4 @@
 #
 # + token - ID token for authorization
 # + return - Map of headers with authorization
-isolated function generateHeaders(string token) returns map<string|string[]> => {"Authorization": "Bearer " + token};
+isolated function generateHeaders(string token) returns map<string|string[]> => {"x-user-id-token": token};
