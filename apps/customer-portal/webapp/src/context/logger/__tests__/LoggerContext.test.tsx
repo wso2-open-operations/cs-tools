@@ -24,7 +24,7 @@ describe("LoggerContext", () => {
     expect(LoggerContext.displayName).toBe("LoggerContext");
   });
 
-  it("should have null as default value", () => {
+  it("should expose Provider and Consumer", () => {
     expect(LoggerContext.Provider).toBeDefined();
     expect(LoggerContext.Consumer).toBeDefined();
   });
