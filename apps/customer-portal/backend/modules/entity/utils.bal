@@ -19,3 +19,21 @@
 # + token - ID token for authorization
 # + return - Map of headers with authorization
 isolated function generateHeaders(string token) returns map<string|string[]> => {"x-user-id-token": token};
+
+# Get comments for a given entity ID with pagination.
+# 
+# + idToken - ID token for authorization
+# + id - Entity ID to filter comments
+# + limit - Number of comments to retrieve
+# + offset - Offset for pagination
+# + return - Comments response or error
+public isolated function getComments(string idToken, string id, int? 'limit, int? offset) returns CommentsResponse|error {
+    CommentRequestPayload payload = {
+        referenceId: id,
+        pagination: {
+            'limit: 'limit ?: DEFAULT_LIMIT,
+            offset: offset ?: DEFAULT_OFFSET
+        }
+    };
+    return searchComments(idToken, payload);
+}

@@ -62,7 +62,7 @@ public type UserResponse record {|
     string? timeZone;
 |};
 
-# Project data from ServiceNow.
+# Project data.
 public type Project record {|
     # ID
     string id;
@@ -82,7 +82,7 @@ public type ProjectRequest record {|
     Pagination pagination = {};
 |};
 
-# Projects response from ServiceNow.
+# Projects response.
 public type ProjectsResponse record {|
     # List of projects
     Project[] projects;
@@ -161,7 +161,7 @@ public type ChoiceListItem record {|
 
 # Basic table information.
 public type ReferenceTableItem record {|
-    # System ID
+    # ID
     string id;
     # Display name
     string name;
@@ -212,19 +212,19 @@ public type CaseResponse record {|
         *ReferenceTableItem;
         # Product version
         string? version;
-    } product;
+    }? product;
     # Account information
     record {
         *ReferenceTableItem;
         # Account type
         string? 'type;
-    } account;
+    }? account;
     # CS Manager information
     record {
         *ReferenceTableItem;
         # Email address
         string? email;
-    } csManager;
+    }? csManager;
 |};
 
 # Sort configuration.
@@ -319,4 +319,39 @@ public type ProjectDeploymentStatsResponse record {|
     int totalCount;
     # Last deployment date
     string? lastDeploymentOn;
+|};
+
+# Comment information.
+public type Comment record {|
+    # ID
+    string id;
+    # Reference ID associated with the comment
+    string referenceId;
+    # Content of the comment
+    string content;
+    # Type of the comment
+    string 'type;
+    # Created date and time
+    string createdOn;
+    # User who created the comment
+    string createdBy;
+    # Indicates if the comment is escalated
+    boolean isEscalated;
+|};
+
+# Comments response with pagination.
+public type CommentsResponse record {|
+    # List of comments
+    Comment[] comments;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+|};
+
+# Request payload for searching comments.
+public type CommentRequestPayload record {|
+    # Reference ID to filter comments
+    string referenceId;
+    # Pagination details
+    Pagination pagination?;
 |};

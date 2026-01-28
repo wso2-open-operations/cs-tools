@@ -80,7 +80,7 @@ public isolated function getDeploymentStatsForProject(string idToken, string id)
 }
 
 # Get case by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + caseId - Unique ID of the case
 # + return - Case details or error
@@ -103,4 +103,13 @@ public isolated function searchCases(string idToken, CaseSearchPayload payload) 
 # + return - Case metadata response or error
 public isolated function getCaseMetadata(string idToken) returns CaseMetadataResponse|error {
     return csEntityClient->/cases/meta.get(generateHeaders(idToken));
+}
+
+# Search comments.
+#
+# + idToken - ID token for authorization
+# + payload - Comment request payload
+# + return - Comments response or error
+public isolated function searchComments(string idToken, CommentRequestPayload payload) returns CommentsResponse|error {
+    return csEntityClient->/comments/search.post(payload, generateHeaders(idToken));
 }
