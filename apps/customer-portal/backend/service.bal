@@ -220,7 +220,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                 log:printWarn(string `Access to requested projects are forbidden for user: ${userInfo.userId}`);
                 return <http:Forbidden>{
                     body: {
-                        message: "Access to the requested project is forbidden!"
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
                     }
                 };
             }
@@ -267,7 +267,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                 log:printWarn(string `Access to project ID: ${id} is forbidden for user:`);
                 return <http:Forbidden>{
                     body: {
-                        message: "Access to the requested project is forbidden!"
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
                     }
                 };
             }
