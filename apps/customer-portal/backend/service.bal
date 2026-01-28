@@ -203,7 +203,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + payload - Project search payload
     # + return - Projects list or error response
     resource function post projects/search(http:RequestContext ctx, entity:ProjectPayload payload)
-        returns entity:ProjectsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -233,7 +233,9 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
-        return projectsList;
+        return <http:Ok>{
+            body: projectsList
+        };
     }
 
     # Get project details by ID.
@@ -583,7 +585,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + payload - Case search request body
     # + return - Paginated cases or error
     resource function post projects/[string id]/cases/search(http:RequestContext ctx, CaseSearchPayload payload)
-        returns CaseSearchResponse|http:BadRequest|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -613,7 +615,9 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        return casesResponse;
+        return <http:Ok>{
+            body: casesResponse
+        };
     }
 
     # Get case filters for a project.
