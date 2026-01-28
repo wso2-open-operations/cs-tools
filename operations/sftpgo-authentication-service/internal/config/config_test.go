@@ -18,6 +18,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,19 @@ func TestLoad_Success(t *testing.T) {
 }
 
 func TestLoad_MissingCritical(t *testing.T) {
+	// Snapshot current environment
+	oldEnv := os.Environ()
+	defer func() {
+		// Restore environment
+		os.Clearenv()
+		for _, e := range oldEnv {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				os.Setenv(parts[0], parts[1])
+			}
+		}
+	}()
+
 	os.Clearenv()
 	// Only set one, missing others
 	os.Setenv("INTERNAL_CLIENT_ID", "test_client_id")

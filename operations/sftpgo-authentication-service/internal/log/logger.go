@@ -106,7 +106,7 @@ func (l *AppLogger) Error(format string, v ...interface{}) {
 
 func (l *AppLogger) Errorf(format string, v ...interface{}) error {
 	msg := fmt.Sprintf(format, v...)
-	l.Error(msg)
+	l.Error("%s", msg)
 	return errors.New(msg)
 }
 

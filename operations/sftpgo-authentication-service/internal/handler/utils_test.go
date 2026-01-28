@@ -43,15 +43,11 @@ func TestValidateUsername(t *testing.T) {
 }
 
 func TestSanitizeUsername(t *testing.T) {
-	// sanitizeUsername calls util.SanitizeUsername, assuming util behavior here for completion within handler package scope
-	// However, since it's a wrapper, we test the wrapper.
 	input := "user@email.com"
-	expected := "user_email.com"
-	// Note: Actual behavior depends on util implementation.
-	// If util implementation is not visible here, this test might be fragile if we assume logic.
-	// But based on common sense:
+	expected := "user_email_com" // Both @ and . are replaced with _
 
-	if got := sanitizeUsername(input); got != expected && got != input {
-		// Just checking it returns something reasonable, preventing crash
+	got := sanitizeUsername(input)
+	if got != expected {
+		t.Errorf("sanitizeUsername(%q) = %q; want %q", input, got, expected)
 	}
 }

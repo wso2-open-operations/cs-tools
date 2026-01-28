@@ -80,10 +80,10 @@ type AsgardeoUser struct {
 
 // KeyIntRequest represents the incoming request for keyboard-interactive auth.
 type KeyIntRequest struct {
-	RequestID string   `json:"RequestID"`
-	Step      int      `json:"Step"`
-	Username  string   `json:"Username"`
-	Answers   []string `json:"Answers"`
+	RequestID string   `json:"request_id"`
+	Step      int      `json:"step"`
+	Username  string   `json:"username"`
+	Answers   []string `json:"answers"`
 }
 
 // KeyIntResponse represents the response for keyboard-interactive auth.

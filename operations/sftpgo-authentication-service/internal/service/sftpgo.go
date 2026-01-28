@@ -108,18 +108,17 @@ func (s *SFTPGoService) ProvisionFolders(folders []string) error {
 
 	for _, f := range folders {
 		if err := validateFolderName(f); err != nil {
-			s.logger.Warn("Invalid folder name '%s': %v. Skipping.", f, err)
-			continue
+			return fmt.Errorf("invalid folder name '%s': %w", f, err)
 		}
 
 		exists, err := s.checkFolderExists(f, token)
 		if err != nil {
-			s.logger.Warn("Error checking existence of folder '%s': %v. Skipping.", f, err)
-			continue
+			return fmt.Errorf("failed to check folder '%s': %w", f, err)
 		}
+
 		if !exists {
 			if err := s.createFolder(f, token); err != nil {
-				s.logger.Error("Failed to create folder '%s': %v", f, err)
+				return fmt.Errorf("failed to create folder '%s': %w", f, err)
 			}
 		} else {
 			s.logger.Debug("Folder '%s' already exists. No action needed.", f)

@@ -15,7 +15,7 @@
 // under the License.
 module github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service
 
-go 1.24
+go 1.25.6
 
 require github.com/go-sql-driver/mysql v1.8.1
 

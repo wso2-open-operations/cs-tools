@@ -65,7 +65,7 @@ This project provides a secure, individual-account-based authentication and prov
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.24+
 - MySQL database
 - Two Asgardeo organizations (for internal and external users)
 - SFTPGo server with admin API access

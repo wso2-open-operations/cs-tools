@@ -45,7 +45,7 @@ func main() {
 
 	// 3. Initialize email regex with custom pattern if provided
 	if err := util.InitEmailRegex(cfg.EmailRegexPattern); err != nil {
-		logger.Error("Failed to initialize email regex: %v", err)
+		log.Fatalf("Failed to initialize email regex: %v", err)
 	}
 
 	// 4. Initialize database service
@@ -69,8 +69,11 @@ func main() {
 
 	// 8. Start the server with graceful shutdown support
 	server := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Addr:         ":" + cfg.Port,
+		Handler:      mux,
+		ReadTimeout:  time.Duration(cfg.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(cfg.IdleTimeout) * time.Second,
 	}
 
 	// Channel to listen for shutdown signals

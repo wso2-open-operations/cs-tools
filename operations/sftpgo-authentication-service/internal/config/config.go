@@ -30,6 +30,9 @@ type Config struct {
 	Port              string
 	LogLevel          string
 	HTTPTimeout       int
+	ReadTimeout       int
+	WriteTimeout      int
+	IdleTimeout       int
 	EmailRegexPattern string
 	HookAPIKey        string
 
@@ -129,6 +132,34 @@ func Load() (*Config, error) {
 	}
 	if cfg.HTTPTimeout == 0 {
 		cfg.HTTPTimeout = 15 // Default to 15 seconds
+	}
+
+	// Load HTTP Server Timeouts
+	if timeoutStr := os.Getenv("READ_TIMEOUT"); timeoutStr != "" {
+		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
+			cfg.ReadTimeout = timeout
+		}
+	}
+	if cfg.ReadTimeout == 0 {
+		cfg.ReadTimeout = 5 // Default to 5 seconds
+	}
+
+	if timeoutStr := os.Getenv("WRITE_TIMEOUT"); timeoutStr != "" {
+		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
+			cfg.WriteTimeout = timeout
+		}
+	}
+	if cfg.WriteTimeout == 0 {
+		cfg.WriteTimeout = 10 // Default to 10 seconds
+	}
+
+	if timeoutStr := os.Getenv("IDLE_TIMEOUT"); timeoutStr != "" {
+		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
+			cfg.IdleTimeout = timeout
+		}
+	}
+	if cfg.IdleTimeout == 0 {
+		cfg.IdleTimeout = 120 // Default to 120 seconds
 	}
 
 	// Load Database Connection Pooling Settings

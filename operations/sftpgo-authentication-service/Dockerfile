@@ -15,7 +15,7 @@
 # under the License.
 # This Dockerfile creates an image that contains the sftp-authn-service executable.
 
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25.6-alpine AS builder
 
 # Set the working directory to /app
 WORKDIR /app

@@ -78,11 +78,19 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 		return
 	}
 
+	// Validate username before initiating IdP flow
+	if err := validateUsername(req.Username); err != nil {
+		resp.AuthResult = AuthResultFailure
+		resp.Instruction = "Authentication failed: Invalid username."
+		h.logger.Error("Invalid username in auth step 1: %v", err)
+		return
+	}
+
 	initFlowResp, err := h.idp.InitFlow(req.Username)
 	if err != nil || initFlowResp.NextStep == nil || len(initFlowResp.NextStep.Authenticators) == 0 {
 		resp.AuthResult = AuthResultFailure
 		resp.Instruction = "Authentication failed: Error initiating flow."
-		h.logger.Error("Failed to get initial flow from IdP for user %s: %v", req.Username, err)
+		h.logger.Error("Failed to get initial flow from IdP: %v", err)
 		return
 	}
 
@@ -99,7 +107,7 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 	if err != nil || idpResp.FlowStatus == "FAILED" || idpResp.NextStep == nil {
 		resp.AuthResult = AuthResultFailure
 		resp.Instruction = "Authentication failed."
-		h.logger.Error("IdP discovery failed for user %s: %v", req.Username, err)
+		h.logger.Error("IdP discovery failed: %v", err)
 		return
 	}
 

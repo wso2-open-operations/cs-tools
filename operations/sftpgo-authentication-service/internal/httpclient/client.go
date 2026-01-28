@@ -58,11 +58,19 @@ func (t *LoggingTransport) logRequest(req *http.Request) {
 	if t.Logger.IsTraceEnabled() {
 		var bodyBytes []byte
 		if req.Body != nil {
-			// Limit reading to 10KB to avoid memory issues
-			bodyBytes, _ = io.ReadAll(io.LimitReader(req.Body, 10240))
+			// Read full body
+			bodyBytes, _ = io.ReadAll(req.Body)
+			// Restore full body for transmission
 			req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
-		t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s", req.Header, string(bodyBytes))
+		// Log only first 10KB
+		logLimit := 10240
+		if len(bodyBytes) > logLimit {
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s [truncated, total: %d bytes]",
+				req.Header, string(bodyBytes[:logLimit]), len(bodyBytes))
+		} else {
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s", req.Header, string(bodyBytes))
+		}
 	}
 }
 
@@ -72,11 +80,19 @@ func (t *LoggingTransport) logResponse(resp *http.Response, duration time.Durati
 	if t.Logger.IsTraceEnabled() {
 		var bodyBytes []byte
 		if resp.Body != nil {
-			// Limit reading to 10KB to avoid memory issues
-			bodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, 10240))
+			// Read full body
+			bodyBytes, _ = io.ReadAll(resp.Body)
+			// Restore full body for caller
 			resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
-		t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s", resp.Header, string(bodyBytes))
+		// Log only first 10KB
+		logLimit := 10240
+		if len(bodyBytes) > logLimit {
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s [truncated, total: %d bytes]",
+				resp.Header, string(bodyBytes[:logLimit]), len(bodyBytes))
+		} else {
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s", resp.Header, string(bodyBytes))
+		}
 	}
 }
 

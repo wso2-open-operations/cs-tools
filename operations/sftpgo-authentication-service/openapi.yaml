@@ -14,6 +14,9 @@
 # specific language governing permissions and limitations
 # under the License.
 openapi: 3.0.0
+servers:
+  - url: "https://api.example.com"
+    description: "HTTPS API endpoint"
 info:
   title: SFTPGo Authentication and User Provisioning Hooks
   version: 1.0.0
