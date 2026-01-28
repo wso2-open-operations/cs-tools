@@ -240,14 +240,10 @@ func (h *Handler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	h.logger.Debug("AuthHandler: step=%d id=%s user=%s", req.Step, req.RequestID, req.Username)
 	resp := &models.KeyIntResponse{}
 
-	isProjectKeyStep := false
 	if req.Step == 1 {
 		h.handleAuthStep1(resp, &req)
 	} else {
 		session, err := h.db.GetSession(req.RequestID)
-		if session.FlowID == FlowIDAskProjectKey {
-			isProjectKeyStep = true
-		}
 		if err != nil {
 			resp.AuthResult = AuthResultFailure
 			resp.Instruction = "Authentication session expired or invalid."
@@ -266,11 +262,7 @@ func (h *Handler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 		status = "failure"
 	}
 	detail := fmt.Sprintf("step=%d id=%s", req.Step, req.RequestID)
-	if isProjectKeyStep && status == "success" && len(req.Answers) > 0 {
-		detail = fmt.Sprintf("%s projectKey=%s", detail, req.Answers[0])
-	} else {
-		detail = fmt.Sprintf("%s instruction=%s questions=%s", detail, resp.Instruction, strings.Join(resp.Questions, ","))
-	}
+	detail += fmt.Sprintf(" instruction=%s questions=%s", resp.Instruction, strings.Join(resp.Questions, ","))
 	h.auditLog(r, req.Username, "auth-hook", status, detail)
 }
 

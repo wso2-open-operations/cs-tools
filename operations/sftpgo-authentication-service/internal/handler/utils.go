@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -34,9 +33,6 @@ const (
 	AuthResultFailure    = -1
 	AuthResultIncomplete = 0
 	AuthResultSuccess    = 1
-
-	// Session flow IDs
-	FlowIDAskProjectKey = "askprojectkey"
 
 	// Default permissions
 	PermissionList = "list"
@@ -117,10 +113,6 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 }
 
 func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *models.KeyIntRequest, session models.SessionData) {
-	if session.FlowID == FlowIDAskProjectKey {
-		h.handleProjectKeyStep(resp, req)
-		return
-	}
 
 	if session.NextStep == nil || len(session.NextStep.Authenticators) == 0 {
 		resp.AuthResult = AuthResultFailure
@@ -192,43 +184,10 @@ func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *mo
 	}
 }
 
-func (h *Handler) handleProjectKeyStep(resp *models.KeyIntResponse, req *models.KeyIntRequest) {
-	if len(req.Answers) == 0 {
-		resp.AuthResult = AuthResultFailure
-		resp.Instruction = "No project key provided."
-		return
-	}
-	projectKey := strings.ToLower(req.Answers[0])
-	virtualPath := "/" + projectKey
-	mappedPath := filepath.Join(h.cfg.FolderPath, projectKey)
-	vfs := []models.UserVirtualFolder{{Name: projectKey, VirtualPath: virtualPath, MappedPath: mappedPath}}
-	perms := map[string][]string{
-		"/":         {PermissionList},
-		virtualPath: generalFileMgtPermissions,
-	}
-
-	h.sftpgo.ProvisionFolders([]string{projectKey})
-	err := h.sftpgo.UpdateUser(req.Username, projectKey, perms, vfs)
-	if err != nil {
-		resp.AuthResult = AuthResultFailure
-		resp.Instruction = "Error providing project access, please try again."
-	} else {
-		resp.AuthResult = AuthResultSuccess
-	}
-	h.db.DeleteSession(req.RequestID)
-}
-
 func (h *Handler) handleAuthSuccess(resp *models.KeyIntResponse, req *models.KeyIntRequest) {
-	// if util.IsInternalUser(req.Username, h.cfg.InternalUserSuffix) {
-	// 	resp.Instruction = "Provide the project key to access the shared directory"
-	// 	resp.Questions = []string{"Project Key: "}
-	// 	resp.Echos = []bool{true}
-	// 	resp.AuthResult = AuthResultIncomplete // Incomplete, waiting for key
-	// 	h.db.SaveSession(req.RequestID, models.SessionData{FlowID: FlowIDAskProjectKey})
-	// } else {
-	resp.AuthResult = AuthResultSuccess // Success
+
+	resp.AuthResult = AuthResultSuccess
 	h.db.DeleteSession(req.RequestID)
-	// }
 }
 
 func generatePromptFromAuthenticators(idpResp models.IdPResponse) (string, []string, []bool) {
