@@ -115,8 +115,9 @@ func (h *Handler) PreLoginHook(w http.ResponseWriter, r *http.Request) {
 	asgUser, err := h.idp.GetAsgardeoUser(u.Username)
 	if err != nil {
 		h.logger.Debug("User '%s' not found in IdP, denying access.", u.Username)
-		// Return 404 with empty body to prevent user creation in SFTPGo
-		//w.WriteHeader(http.StatusNotFound)
+
+		// Return anonymous user to prevent username enumeration attacks.
+		// Consistent response regardless of IdP user existence protects valid usernames.
 		anonymousUsername := "anonymous_user@wso2.org"
 		home := filepath.Join(h.cfg.DIRPath, sanitizeUsername(anonymousUsername))
 		perms := make(map[string][]string)
