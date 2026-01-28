@@ -17,6 +17,8 @@
 package util
 
 import (
+	"fmt"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -63,4 +65,15 @@ func IsInternalUser(username, suffix string) bool {
 		return false
 	}
 	return strings.HasSuffix(username, suffix)
+}
+
+// ValidateFolderName checks if a folder name is valid (not empty and no illegal characters).
+func ValidateFolderName(name string) error {
+	if name == "" {
+		return io.ErrShortBuffer // Reusing generic error for empty
+	}
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("invalid folder name '%s': contains illegal characters (.., /, or \\)", name)
+	}
+	return nil
 }

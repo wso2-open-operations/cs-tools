@@ -18,6 +18,8 @@ package service
 
 import (
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
 )
 
 func TestValidateFolderName(t *testing.T) {
@@ -80,9 +82,9 @@ func TestValidateFolderName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFolderName(tt.folderName)
+			err := util.ValidateFolderName(tt.folderName)
 			if (err != nil) != tt.wantError {
-				t.Errorf("validateFolderName(%q) error = %v, wantError %v", tt.folderName, err, tt.wantError)
+				t.Errorf("util.ValidateFolderName(%q) error = %v, wantError %v", tt.folderName, err, tt.wantError)
 			}
 		})
 	}

@@ -185,9 +185,17 @@ func (h *Handler) PreLoginHook(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.sftpgo.ProvisionFolders(folders); err != nil {
 		h.logger.Error("Failed to provision folders for user '%s': %v", u.Username, err)
+		h.auditLog(r, u.Username, "pre-login-hook", "failure", fmt.Sprintf("folder provisioning failed: %v", err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 
 	for _, folder := range folders {
+		// Safety check: skip any folder names that fail validation to ensure secure path operations
+		if err := util.ValidateFolderName(folder); err != nil {
+			h.logger.Warn("Skipping unvalidated folder name '%s' for user '%s' in path construction: %v", folder, u.Username, err)
+			continue
+		}
 		virtualPath := "/" + folder
 		mappedPath := filepath.Join(h.cfg.FolderPath, folder)
 		perms[virtualPath] = generalFileMgtPermissions

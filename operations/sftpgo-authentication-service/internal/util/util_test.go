@@ -160,3 +160,71 @@ func TestIsLikelyEmail(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFolderName(t *testing.T) {
+	tests := []struct {
+		name       string
+		folderName string
+		wantError  bool
+	}{
+		{
+			name:       "Valid folder name",
+			folderName: "project1",
+			wantError:  false,
+		},
+		{
+			name:       "Valid folder with underscore",
+			folderName: "project_folder_1",
+			wantError:  false,
+		},
+		{
+			name:       "Valid folder with hyphen",
+			folderName: "project-folder-1",
+			wantError:  false,
+		},
+		{
+			name:       "Empty folder name",
+			folderName: "",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with parent directory traversal",
+			folderName: "../etc",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with double dots in middle",
+			folderName: "folder..name",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with forward slash",
+			folderName: "folder/name",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with backslash",
+			folderName: "folder\\name",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with leading slash",
+			folderName: "/folder",
+			wantError:  true,
+		},
+		{
+			name:       "Folder with trailing slash",
+			folderName: "folder/",
+			wantError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateFolderName(tt.folderName)
+			if (err != nil) != tt.wantError {
+				t.Errorf("ValidateFolderName(%q) error = %v, wantError %v", tt.folderName, err, tt.wantError)
+			}
+		})
+	}
+}

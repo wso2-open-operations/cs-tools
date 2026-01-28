@@ -55,21 +55,30 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 func (t *LoggingTransport) logRequest(req *http.Request) {
 	t.Logger.Debug("OUTGOING REQUEST: method=%s url=%s", req.Method, req.URL.String())
 
-	if t.Logger.IsTraceEnabled() {
-		var bodyBytes []byte
-		if req.Body != nil {
-			// Read full body
-			bodyBytes, _ = io.ReadAll(req.Body)
-			// Restore full body for transmission
-			req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		}
-		// Log only first 10KB
-		logLimit := 10240
-		if len(bodyBytes) > logLimit {
-			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s [truncated, total: %d bytes]",
-				req.Header, string(bodyBytes[:logLimit]), len(bodyBytes))
+	if t.Logger.IsTraceEnabled() && req.Body != nil {
+		// Read only first 10KB for logging to avoid OOM
+		const logLimit = 10240
+		prefix := make([]byte, logLimit)
+		n, err := io.ReadFull(req.Body, prefix)
+
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			// Body is smaller than 10KB - log it all
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s", req.Header, string(prefix[:n]))
+			// Restore the body with what we read
+			req.Body = io.NopCloser(bytes.NewReader(prefix[:n]))
+		} else if err == nil {
+			// Body is larger than 10KB - log prefix and preserve rest
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s [truncated, showing first %d bytes]",
+				req.Header, string(prefix), logLimit)
+			// Reconstruct body: prefix + remaining unread stream
+			req.Body = io.NopCloser(io.MultiReader(
+				bytes.NewReader(prefix),
+				req.Body, // remaining unread portion
+			))
 		} else {
-			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s", req.Header, string(bodyBytes))
+			// Error reading - restore empty body
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=<error reading: %v>", req.Header, err)
+			req.Body = io.NopCloser(bytes.NewReader(nil))
 		}
 	}
 }
@@ -77,21 +86,30 @@ func (t *LoggingTransport) logRequest(req *http.Request) {
 func (t *LoggingTransport) logResponse(resp *http.Response, duration time.Duration) {
 	t.Logger.Debug("INCOMING RESPONSE: status=%s duration=%v", resp.Status, duration)
 
-	if t.Logger.IsTraceEnabled() {
-		var bodyBytes []byte
-		if resp.Body != nil {
-			// Read full body
-			bodyBytes, _ = io.ReadAll(resp.Body)
-			// Restore full body for caller
-			resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		}
-		// Log only first 10KB
-		logLimit := 10240
-		if len(bodyBytes) > logLimit {
-			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s [truncated, total: %d bytes]",
-				resp.Header, string(bodyBytes[:logLimit]), len(bodyBytes))
+	if t.Logger.IsTraceEnabled() && resp.Body != nil {
+		// Read only first 10KB for logging to avoid OOM
+		const logLimit = 10240
+		prefix := make([]byte, logLimit)
+		n, err := io.ReadFull(resp.Body, prefix)
+
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			// Body is smaller than 10KB - log it all
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s", resp.Header, string(prefix[:n]))
+			// Restore the body with what we read
+			resp.Body = io.NopCloser(bytes.NewReader(prefix[:n]))
+		} else if err == nil {
+			// Body is larger than 10KB - log prefix and preserve rest
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s [truncated, showing first %d bytes]",
+				resp.Header, string(prefix), logLimit)
+			// Reconstruct body: prefix + remaining unread stream
+			resp.Body = io.NopCloser(io.MultiReader(
+				bytes.NewReader(prefix),
+				resp.Body, // remaining unread portion
+			))
 		} else {
-			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s", resp.Header, string(bodyBytes))
+			// Error reading - restore empty body
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=<error reading: %v>", resp.Header, err)
+			resp.Body = io.NopCloser(bytes.NewReader(nil))
 		}
 	}
 }

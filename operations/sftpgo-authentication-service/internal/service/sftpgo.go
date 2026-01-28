@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
@@ -58,7 +57,10 @@ func (s *SFTPGoService) UpdateUser(username, projectKey string, perms map[string
 	}
 
 	exists, err := s.checkFolderExists(projectKey, token)
-	if err != nil || !exists {
+	if err != nil {
+		return s.logger.Errorf("failed to check folder '%s' before user update: %v", projectKey, err)
+	}
+	if !exists {
 		return s.logger.Errorf("folder '%s' does not exist, cannot update user", projectKey)
 	}
 
@@ -107,7 +109,7 @@ func (s *SFTPGoService) ProvisionFolders(folders []string) error {
 	}
 
 	for _, f := range folders {
-		if err := validateFolderName(f); err != nil {
+		if err := util.ValidateFolderName(f); err != nil {
 			return fmt.Errorf("invalid folder name '%s': %w", f, err)
 		}
 
@@ -215,14 +217,4 @@ func (s *SFTPGoService) createFolder(name, token string) error {
 // sanitizeUsername is a helper function specific to this service's needs.
 func sanitizeUsername(u string) string {
 	return util.SanitizeUsername(u)
-}
-
-func validateFolderName(name string) error {
-	if name == "" {
-		return io.ErrShortBuffer // Reusing generic error for empty
-	}
-	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return fmt.Errorf("invalid folder name '%s': contains illegal characters (.., /, or \\)", name)
-	}
-	return nil
 }
