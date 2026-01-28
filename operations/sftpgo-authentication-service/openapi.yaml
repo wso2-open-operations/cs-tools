@@ -1,0 +1,381 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+openapi: 3.0.0
+info:
+  title: SFTPGo Authentication and User Provisioning Hooks
+  version: 1.0.0
+  description: |
+    This API defines the endpoints used by SFTPGo as external hooks for pre-login user management and keyboard-interactive authentication.
+    
+    **Dual Organization Support**:
+    The service supports two separate Asgardeo organizations:
+    - Internal users (@wso2.com) authenticate against the internal organization
+    - External users authenticate against the external organization
+    User type is automatically detected based on email domain.
+
+    **Pre-Login Hook (`/prelogin-hook`)**:
+    This hook is invoked by SFTPGo before a user logs in. It is responsible for:
+    1. Receiving a minimal SFTPGo user object.
+    2. If the user is new (ID is 0), it fetches detailed user information from the identity provider.
+    3. Based on the user's role (e.g., "internal"), it configures SFTPGo user properties like home directory, permissions, and virtual folders.
+       - "internal" roles get access to all existing SFTPGo folders with full permissions.
+       - Other roles get a dedicated home directory and potentially specific custom folders from an external API or Asgardeo's custom attributes, with more restrictive permissions.
+    4. It provisions any required folders in SFTPGo via SFTPGo's administrative API.
+    5. Returns an enriched SFTPGo user object to SFTPGo.
+
+    **Authentication Hook (`/auth-hook`)**:
+    This hook handles SFTPGo's keyboard-interactive authentication flow. It integrates with Asgardeo's authentication API to perform multi-step authentication, including password verification and handling of multi-factor authentication (MFA) like TOTP or email OTP.
+    Authentication state is managed via database sessions.
+paths:
+  /prelogin-hook:
+    post:
+      summary: Handle SFTPGo pre-login user provisioning
+      operationId: preLoginHook
+      description: |
+        Processes SFTPGo user requests before login. If the user is new (ID=0), it fetches user details from Asgardeo,
+        determines their SFTPGo configuration (home directory, permissions, virtual folders) based on their role,
+        and provisions necessary folders. Returns the enhanced SFTPGo user object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SFTPGoUserRequest'
+            examples:
+              newUser:
+                summary: Example for a new user
+                value:
+                  id: 0
+                  username: john.doe@example.com
+              existingUser:
+                summary: Example for an existing user (SFTPGo already knows)
+                value:
+                  id: 123
+                  username: jane.smith@example.com
+      responses:
+        '200':
+          description: User configuration successfully determined and returned to SFTPGo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinimalSFTPGoUserResponse'
+              examples:
+                internalAdminUser:
+                  summary: Example response for a 'internal'
+                  value:
+                    username: admin@example.com
+                    home_dir: /sftp_root
+                    permissions:
+                      /: ["list"]
+                      /shared: ["upload", "list", "download", "create_dirs", "delete"]
+                    status: 1
+                    virtual_folders:
+                      - name: shared
+                        virtual_path: /shared
+                regularUser:
+                  summary: Example response for a regular user
+                  value:
+                    username: user1@example.com
+                    home_dir: /data/user1_example_com
+                    permissions:
+                      /: ["list"]
+                      /user1_example_com: ["upload", "list", "download", "create_dirs", "delete"]
+                    status: 1
+                    virtual_folders:
+                      - name: user1_example_com
+                        virtual_path: /user1_example_com
+        '400':
+          description: Invalid payload or missing username in the request.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Invalid payload
+        '404':
+          description: User not found in IdP. SFTPGo will not create the user.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '204':
+          description: No Content. External user has no folders assigned, access denied.
+        '405':
+          description: Method Not Allowed. Only POST requests are accepted.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Method not allowed
+        '500':
+          description: Internal server error (e.g., failed to obtain tokens, Asgardeo API errors, folder provisioning issues).
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Internal error
+      security:
+        - ApiKeyAuth: []
+  /auth-hook:
+    post:
+      summary: Handle SFTPGo keyboard-interactive authentication
+      operationId: authHook
+      description: |
+        Implements a multi-step keyboard-interactive authentication flow with an external identity provider (Asgardeo).
+        It manages session state for authentication steps (password, MFA like TOTP/OTP) and provides instructions
+        and questions back to SFTPGo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthHookRequest'
+            examples:
+              step1Initial:
+                summary: Step 1 - Initial password prompt
+                value:
+                  request_id: "req123"
+                  step: 1
+                  username: "user@example.com"
+                  ip: "192.168.1.100"
+                  answers: []
+              step2Password:
+                summary: Step 2 - User provides password
+                value:
+                  request_id: "req123"
+                  step: 2
+                  username: "user@example.com"
+                  ip: "192.168.1.100"
+                  answers: ["myPassword123"]
+              step3MfaChoice:
+                summary: Step 3 - User chooses MFA method (if applicable)
+                value:
+                  request_id: "req123"
+                  step: 3
+                  username: "user@example.com"
+                  ip: "192.168.1.100"
+                  answers: ["2"] # Chooses OTP
+              step3OtpCode:
+                summary: Step 3 - User provides OTP code (if no choice was given)
+                value:
+                  request_id: "req123"
+                  step: 3
+                  username: "user@example.com"
+                  ip: "192.168.1.100"
+                  answers: ["123456"]
+              step4TotpCode:
+                summary: Step 4 - User provides TOTP code (after choosing TOTP)
+                value:
+                  request_id: "req123"
+                  step: 4
+                  username: "user@example.com"
+                  ip: "192.168.1.100"
+                  answers: ["654321"]
+      responses:
+        '200':
+          description: Returns instructions/questions for the next authentication step or the final authentication result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthHookResponse'
+              examples:
+                promptPassword:
+                  summary: Prompt for password (Step 1 response)
+                  value:
+                    instruction: "Enter your password:"
+                    questions: ["Password:"]
+                    echos: [false]
+                promptMfaChoice:
+                  summary: Prompt for MFA method selection (Step 2 response for TOTP-enabled)
+                  value:
+                    instruction: "Select the authentication method:"
+                    questions: ["[1] TOTP\n[2] OTP\nEnter:"]
+                    echos: [true]
+                promptOtpCode:
+                  summary: Prompt for OTP code (Step 2 or 3 response)
+                  value:
+                    instruction: "Enter the code:"
+                    questions: ["Code:"]
+                    echos: [false]
+                authSuccess:
+                  summary: Authentication successful
+                  value:
+                    auth_result: 1
+                authFailure:
+                  summary: Authentication failed
+                  value:
+                    auth_result: -1
+        '400':
+          description: Invalid payload in the request.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Invalid payload
+        '500':
+          description: Internal server error during the authentication flow.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: API-Key
+  schemas:
+    SFTPGoUserRequest:
+      type: object
+      description: Represents a minimal user object sent by SFTPGo to the pre-login hook.
+      properties:
+        id:
+          type: integer
+          description: The SFTPGo user ID. Will be 0 for new users.
+          example: 0
+        username:
+          type: string
+          description: The username attempting to log in.
+          example: john.doe@example.com
+      required:
+        - id
+        - username
+
+    UserVirtualFolder:
+      type: object
+      description: Represents a virtual folder assigned to an SFTPGo user.
+      properties:
+        name:
+          type: string
+          description: The name of the virtual folder.
+          example: my_shared_folder
+        virtual_path:
+          type: string
+          description: The virtual path where the folder is exposed to the user.
+          example: /my_shared_folder
+      required:
+        - name
+        - virtual_path
+
+    MinimalSFTPGoUserResponse:
+      type: object
+      description: |
+        Represents the enriched SFTPGo user object returned by the pre-login hook.
+        SFTPGo uses this to configure the user's session.
+      properties:
+        username:
+          type: string
+          description: The username.
+          example: john.doe@example.com
+        home_dir:
+          type: string
+          description: The absolute path to the user's home directory on the SFTPGo server.
+          example: /srv/sftp/john_doe_example_com
+        permissions:
+          type: object
+          description: |
+            A map where keys are virtual paths (e.g., '/') and values are arrays of allowed operations
+            (e.g., "list", "download", "upload", "create_dirs", "delete", "*").
+          additionalProperties:
+            type: array
+            items:
+              type: string
+              enum: ["list", "download", "upload", "create_dirs", "delete", "*"]
+          example:
+            /: ["list", "download", "upload"]
+            /my_folder: ["upload", "list", "download", "create_dirs", "delete"]
+        status:
+          type: integer
+          description: The status of the user (e.g., 1 for active).
+          example: 1
+        virtual_folders:
+          type: array
+          description: List of virtual folders to be exposed to the user.
+          items:
+            $ref: '#/components/schemas/UserVirtualFolder'
+          example:
+            - name: my_folder
+              virtual_path: /my_folder
+
+    AuthHookRequest:
+      type: object
+      description: Request payload from SFTPGo for keyboard-interactive authentication.
+      properties:
+        request_id:
+          type: string
+          description: A unique identifier for the authentication session.
+          example: "abcedfg12345"
+        step:
+          type: integer
+          description: The current step in the keyboard-interactive flow.
+          example: 1
+        username:
+          type: string
+          description: The username attempting to authenticate.
+          example: "user@example.com"
+        ip:
+          type: string
+          description: The IP address of the client.
+          example: "192.168.1.1"
+        answers:
+          type: array
+          description: An array of strings containing the user's responses to questions from the previous step.
+          items:
+            type: string
+          example: ["my_secret_password"]
+      required:
+        - request_id
+        - step
+        - username
+
+    AuthHookResponse:
+      type: object
+      description: Response payload to SFTPGo for keyboard-interactive authentication.
+      properties:
+        instruction:
+          type: string
+          description: A message or instruction to display to the user.
+          example: "Enter your password:"
+        questions:
+          type: array
+          description: An array of questions to prompt the user for input.
+          items:
+            type: string
+          example: ["Password:"]
+        echos:
+          type: array
+          description: An array of booleans indicating whether the input for each question should be echoed (true) or hidden (false). Corresponds to `questions`.
+          items:
+            type: boolean
+          example: [false]
+        check_password:
+          type: integer
+          description: |
+            SFTPGo specific flag. A value of 1 instructs SFTPGo to internally check the password after this hook
+            (typically for scenarios where the hook only validates part of the authentication).
+            This hook usually sets auth_result directly.
+          example: 0
+        auth_result:
+          type: integer
+          description: |
+            The authentication result.
+            - `1`: Authentication successful.
+            - `-1`: Authentication failed.
+            - `0`: Authentication is still in progress (more steps required).
+          example: 0
