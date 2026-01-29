@@ -21,7 +21,7 @@ import {
   COMPANY_NAME,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
-} from "@/constants/AppShellConstants";
+} from "@/constants/appLayoutConstants";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
