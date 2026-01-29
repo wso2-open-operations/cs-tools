@@ -39,10 +39,20 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
         sortBy: payload.sortBy
     };
     entity:CaseSearchResponse casesResponse = check entity:searchCases(idToken, searchPayload);
-    Case[] cases = from entity:Case {project, 'type, deployment, state, severity, assignedEngineer, ...rest}
-        in casesResponse.cases
+    Case[] cases = from entity:Case case in casesResponse.cases
+        let entity:ReferenceTableItem? project = case.project
+        let entity:ReferenceTableItem? 'type = case.'type
+        let entity:ReferenceTableItem? deployment = case.deployment
+        let entity:ReferenceTableItem? assignedEngineer = case.assignedEngineer
+        let entity:ChoiceListItem? severity = case.severity
+        let entity:ChoiceListItem? state = case.state
         select {
-            ...rest,
+            id: case.id,
+            internalId: case.internalId,
+            number: case.number,
+            title: case.title,
+            createdOn: case.createdOn,
+            description: case.description,
             project: project != () ? {id: project.id, label: project.name} : (),
             'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name} : (),
@@ -81,7 +91,7 @@ public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata
 
 # Check if the given ID is empty or whitespace.
 #
- # + id - ID to validate
+# + id - ID to validate
 # + return - True if empty/whitespace, else false
 public isolated function isEmptyId(string id) returns boolean => id.trim().length() == 0;
 
@@ -111,3 +121,33 @@ public isolated function extractErrorMessage(error err) returns string {
 # + uuid - User UUID
 public isolated function logForbiddenProjectAccess(string id, string uuid) =>
     log:printWarn(string `Access to project ID: ${id} is forbidden for user: ${uuid}`);
+
+# Log forbidden case access attempt.
+# 
+# + id - Case ID
+# + uuid - User UUID
+public isolated function logForbiddenCaseAccess(string id, string uuid) =>
+    log:printWarn(string `Access to case ID: ${id} is forbidden for user: ${uuid}`);
+
+# Map comments response to map to desired structure.
+#
+# + response - Comments response from the entity service
+# + return - Map comments response
+public isolated function mapCommentsResponse(entity:CommentsResponse response) returns CommentsResponse {
+    Comment[] comments = from entity:Comment comment in response.comments
+        select {
+            id: comment.id,
+            content: comment.content,
+            'type: comment.'type,
+            createdOn: comment.createdOn,
+            createdBy: comment.createdBy,
+            isEscalated: comment.isEscalated
+        };
+
+    return {
+        comments,
+        totalRecords: response.totalRecords,
+        'limit: response.'limit,
+        offset: response.offset
+    };
+}

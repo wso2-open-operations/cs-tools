@@ -18,8 +18,10 @@
 const ERR_MSG_USER_INFO_HEADER_NOT_FOUND = "User information header not found!";
 const UNEXPECTED_ERROR_MSG = "An unexpected error occurred.";
 const ERR_MSG_PROJECT_ACCESS_FORBIDDEN = "Access to the requested project is forbidden!";
+const ERR_MSG_CASE_ACCESS_FORBIDDEN = "Access to the requested case is forbidden!";
 const ERR_MSG_FETCHING_PROJECT_DETAILS = "Error retrieving project details!";
 const ERR_MSG_PROJECT_ID_EMPTY = "Project ID cannot be empty!";
+const ERR_MSG_CASE_ID_EMPTY = "Case ID cannot be empty!";
 
 // Default Pagination Values
 public const int DEFAULT_OFFSET = 0;

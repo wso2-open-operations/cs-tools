@@ -39,6 +39,18 @@ public isolated service class JwtInterceptor {
             };
         }
 
+        // TODO: Remove this if the token issuer issue get resolved.
+        string|error userIdToken = req.getHeader(USER_ID_TOKEN_HEADER);
+        if userIdToken is error {
+            string errorMsg = "Missing user id token info header!";
+            log:printError(errorMsg, userIdToken);
+            return <http:InternalServerError>{
+                body: {
+                    message: errorMsg
+                }
+            };
+        }
+
         [jwt:Header, jwt:Payload]|jwt:Error result = jwt:decode(idToken);
         if result is jwt:Error {
             string errorMsg = "Error while reading the Invoker info!";
@@ -58,7 +70,7 @@ public isolated service class JwtInterceptor {
             email: payloadData.email,
             groups: payloadData.groups,
             userId: payloadData.userid,
-            idToken
+            idToken: userIdToken
         };
 
         // TODO: Restore below logic after roles & groups are finalized.

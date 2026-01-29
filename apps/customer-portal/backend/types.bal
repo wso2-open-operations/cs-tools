@@ -193,3 +193,28 @@ public type ProjectStatsResponse record {|
     # Recent activity details
     RecentActivity recentActivity;
 |};
+
+# Comment information.
+public type Comment record {|
+    # ID
+    string id;
+    # Content of the comment
+    string content;
+    # Type of the comment
+    string 'type;
+    # Created date and time
+    string createdOn;
+    # User who created the comment
+    string createdBy;
+    # Indicates if the comment is escalated
+    boolean isEscalated;
+|};
+
+# Comments response with pagination.
+public type CommentsResponse record {|
+    # List of comments
+    Comment[] comments;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};

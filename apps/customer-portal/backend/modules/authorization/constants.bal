@@ -7,4 +7,5 @@
 
 // Authorization Constants.
 public const JWT_ASSERTION_HEADER = "x-jwt-assertion";
+public const USER_ID_TOKEN_HEADER = "x-user-id-token";
 public const HEADER_USER_INFO = "user-info";
