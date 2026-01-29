@@ -32,11 +32,17 @@ import (
 
 // Handler holds all the services and dependencies for the HTTP handlers.
 type Handler struct {
-	cfg          *config.Config
-	logger       *log.AppLogger
-	db           *service.DBService
-	idp          *service.IdPService
-	sftpgo       *service.SFTPGoService
+	// cfg is the application configuration.
+	cfg *config.Config
+	// logger is the application-wide logger.
+	logger *log.AppLogger
+	// db is the database service for session persistence.
+	db *service.DBService
+	// idp is the service for interacting with the Identity Provider.
+	idp *service.IdPService
+	// sftpgo is the service for interacting with the SFTPGo Admin API.
+	sftpgo *service.SFTPGoService
+	// subscription is the service for retrieving user folder lists.
 	subscription *service.SubscriptionService
 }
 

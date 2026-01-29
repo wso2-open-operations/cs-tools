@@ -33,6 +33,7 @@ import (
 	applog "github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 )
 
+// The entry point for the SFTPGo Authentication Service.
 func main() {
 	// 1. Load configuration from environment variables
 	cfg, err := config.Load()

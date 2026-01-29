@@ -29,16 +29,19 @@ import (
 )
 
 const (
-	// Authentication result codes for SFTPGo
-	AuthResultFailure    = -1
+	// AuthResultFailure indicates a failed authentication attempt.
+	AuthResultFailure = -1
+	// AuthResultIncomplete indicates that further authentication steps are required.
 	AuthResultIncomplete = 0
-	AuthResultSuccess    = 1
+	// AuthResultSuccess indicates a successful authentication.
+	AuthResultSuccess = 1
 
-	// Default permissions
+	// PermissionList is the SFTPGo permission to list directory contents.
 	PermissionList = "list"
 )
 
 var (
+	// generalFileMgtPermissions is the default set of permissions for project folders.
 	generalFileMgtPermissions = []string{"upload", "list", "download", "create_dirs", "delete", "overwrite", "rename"}
 )
 
@@ -112,10 +115,16 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 		return
 	}
 
-	h.db.SaveSession(req.RequestID, models.SessionData{
+	sessionData := models.SessionData{
 		FlowID:   idpResp.FlowID,
 		NextStep: idpResp.NextStep,
-	})
+	}
+	if err := h.db.SaveSession(req.RequestID, sessionData); err != nil {
+		resp.AuthResult = AuthResultFailure
+		resp.Instruction = "Authentication failed: Internal error."
+		h.logger.Error("Failed to save session (RequestID: %s, FlowID: %s): %v", req.RequestID, idpResp.FlowID, err)
+		return
+	}
 
 	resp.Instruction, resp.Questions, resp.Echos = generatePromptFromAuthenticators(*idpResp)
 	resp.AuthResult = AuthResultIncomplete // Incomplete
@@ -184,7 +193,12 @@ func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *mo
 	case "SUCCESS_COMPLETED":
 		h.handleAuthSuccess(resp, req)
 	case "INCOMPLETE", "FAIL_INCOMPLETE":
-		h.db.SaveSession(req.RequestID, models.SessionData{FlowID: session.FlowID, NextStep: idpResp.NextStep})
+		if err := h.db.SaveSession(req.RequestID, models.SessionData{FlowID: session.FlowID, NextStep: idpResp.NextStep}); err != nil {
+			resp.AuthResult = AuthResultFailure
+			resp.Instruction = "Authentication failed: Internal error."
+			h.logger.Error("Failed to update session (RequestID: %s, FlowID: %s): %v", req.RequestID, session.FlowID, err)
+			return
+		}
 		resp.Instruction, resp.Questions, resp.Echos = generatePromptFromAuthenticators(*idpResp)
 		resp.AuthResult = AuthResultIncomplete
 	default:

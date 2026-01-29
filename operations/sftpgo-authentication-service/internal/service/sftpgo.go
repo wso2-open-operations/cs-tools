@@ -35,8 +35,11 @@ import (
 
 // SFTPGoService handles interactions with the SFTPGo Admin API.
 type SFTPGoService struct {
-	cfg    *config.Config
+	// cfg is the application configuration.
+	cfg *config.Config
+	// logger is the application-wide logger.
 	logger *log.AppLogger
+	// client is the HTTP client used for SFTPGo API calls.
 	client *http.Client
 }
 

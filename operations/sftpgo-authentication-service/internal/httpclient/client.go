@@ -27,8 +27,10 @@ import (
 
 // LoggingTransport implements http.RoundTripper and logs requests and responses.
 type LoggingTransport struct {
+	// Transport is the underlying RoundTripper used to execute the request.
 	Transport http.RoundTripper
-	Logger    *log.AppLogger
+	// Logger is the application-wide logger.
+	Logger *log.AppLogger
 }
 
 // RoundTrip executes a single HTTP transaction and logs the details.

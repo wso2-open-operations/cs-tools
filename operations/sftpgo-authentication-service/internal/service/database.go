@@ -31,11 +31,14 @@ import (
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 )
 
+// ErrSessionNotFound is returned when a requested session is not found or has expired.
 var ErrSessionNotFound = errors.New("session not found or expired")
 
 // DBService handles all database interactions.
 type DBService struct {
-	db     *sql.DB
+	// db is the underlying SQL database connection.
+	db *sql.DB
+	// logger is the application-wide logger.
 	logger *log.AppLogger
 }
 

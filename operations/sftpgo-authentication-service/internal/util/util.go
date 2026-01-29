@@ -24,10 +24,11 @@ import (
 )
 
 var (
-	// Default email regex pattern - simplified structure but keeps symbol checks.
+	// defaultEmailRegexPattern is the default pattern used for broad email address validation.
 	// Supports accented letters (\p{L}), digits, and allowed special characters.
 	defaultEmailRegexPattern = `^[\p{L}0-9!#$'%*+=?^_{|}~&-]+(?:\.[\p{L}0-9!#$'%*+=?^_{|}~&-]+)*@[\p{L}0-9.\-_]+\.[a-zA-Z]{2,10}$`
 
+	// emailRegex is the compiled regular expression used for email validation.
 	emailRegex *regexp.Regexp
 )
 

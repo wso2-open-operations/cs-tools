@@ -35,8 +35,11 @@ import (
 
 // IdPService handles interactions with the Identity Provider.
 type IdPService struct {
-	cfg    *config.Config
+	// cfg is the application configuration.
+	cfg *config.Config
+	// logger is the application-wide logger.
 	logger *log.AppLogger
+	// client is the HTTP client used for IdP API calls.
 	client *http.Client
 }
 
@@ -49,13 +52,20 @@ func NewIdPService(cfg *config.Config, logger *log.AppLogger) *IdPService {
 	}
 }
 
+// orgContext holds the configuration and endpoints for a specific organization in the IdP.
 type orgContext struct {
-	clientID     string
+	// clientID is the OAuth2 client ID for the organization.
+	clientID string
+	// clientSecret is the OAuth2 client secret for the organization.
 	clientSecret string
-	tokenEP      string
-	scimEP       string
-	authnEP      string
-	authorizeEP  string
+	// tokenEP is the OAuth2 token endpoint.
+	tokenEP string
+	// scimEP is the SCIM Users endpoint.
+	scimEP string
+	// authnEP is the app-native authentication endpoint.
+	authnEP string
+	// authorizeEP is the OAuth2 authorize endpoint.
+	authorizeEP string
 }
 
 // getOrgContext returns the appropriate organization context based on whether the user is internal.

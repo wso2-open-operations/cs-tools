@@ -33,8 +33,11 @@ import (
 
 // SubscriptionService handles interactions with the external subscription/folder API.
 type SubscriptionService struct {
-	cfg    *config.Config
+	// cfg is the application configuration.
+	cfg *config.Config
+	// logger is the application-wide logger.
 	logger *log.AppLogger
+	// client is the HTTP client used for subscription API calls.
 	client *http.Client
 }
 

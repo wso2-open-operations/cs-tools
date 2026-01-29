@@ -26,69 +26,105 @@ import (
 
 // Config holds all configuration for the application, loaded from environment variables.
 type Config struct {
-	// Service Configuration
-	Port              string
-	LogLevel          string
-	HTTPTimeout       int
-	ReadTimeout       int
-	WriteTimeout      int
-	IdleTimeout       int
+	// Port is the port on which the HTTP server will listen.
+	Port string
+	// LogLevel defines the verbosity of logging (TRACE, DEBUG, INFO, WARN, ERROR).
+	LogLevel string
+	// HTTPTimeout is the timeout for outgoing HTTP requests in seconds.
+	HTTPTimeout int
+	// ReadTimeout is the maximum duration for reading the entire request, including the body.
+	ReadTimeout int
+	// WriteTimeout is the maximum duration before timing out writes of the response.
+	WriteTimeout int
+	// IdleTimeout is the maximum amount of time to wait for the next request when keep-alives are enabled.
+	IdleTimeout int
+	// EmailRegexPattern is an optional custom regex pattern for email validation.
 	EmailRegexPattern string
-	HookAPIKey        string
+	// HookAPIKey is the expected X-API-Key header value for authenticating incoming hook requests.
+	HookAPIKey string
 
-	// IdP Configuration (Internal Users)
-	InternalClientID     string
+	// InternalClientID is the OAuth2 client ID for the internal organization.
+	InternalClientID string
+	// InternalClientSecret is the OAuth2 client secret for the internal organization.
 	InternalClientSecret string
-	OAuthCallbackURL     string
-	InternalIdPBasePath  string
-	SCIMScope            string
-	InternalUserSuffix   string
+	// OAuthCallbackURL is the registered callback URL for OAuth2 flows.
+	OAuthCallbackURL string
+	// InternalIdPBasePath is the base URL for the internal Identity Provider.
+	InternalIdPBasePath string
+	// SCIMScope is the required OAuth2 scope for SCIM API access.
+	SCIMScope string
+	// InternalUserSuffix is the domain suffix used to identify internal users (e.g., "@wso2.com").
+	InternalUserSuffix string
 
-	// IdP Configuration (External Users)
-	ExternalClientID     string
+	// ExternalClientID is the OAuth2 client ID for external organizations.
+	ExternalClientID string
+	// ExternalClientSecret is the OAuth2 client secret for external organizations.
 	ExternalClientSecret string
-	ExternalIdPBasePath  string
+	// ExternalIdPBasePath is the base URL for the external Identity Provider.
+	ExternalIdPBasePath string
 
-	// SFTPGo Configuration
+	// SFTPGoBasePath is the base URL for the SFTPGo Admin API.
 	SFTPGoBasePath string
-	AdminUser      string
-	AdminKey       string
-	FolderPath     string
-	DIRPath        string
-	CheckRole      string
+	// AdminUser is the SFTPGo admin username.
+	AdminUser string
+	// AdminKey is the SFTPGo admin API key or password.
+	AdminKey string
+	// FolderPath is the base system path where SFTPGo managed folders are located.
+	FolderPath string
+	// DIRPath is the base system path for user home directories.
+	DIRPath string
+	// CheckRole is the name of the role required for a user to be authorized.
+	CheckRole string
 
-	// External APIs
+	// SubscriptionAPI is the endpoint for retrieving a user's subscription and folder details.
 	SubscriptionAPI string
-	ProjectAPI      string
+	// ProjectAPI is the endpoint for validating a project's existence and details.
+	ProjectAPI string
 
-	// Database Configuration
-	DBConnString      string
-	DBMaxOpenConns    int
-	DBMaxIdleConns    int
+	// DBConnString is the DSN for the MySQL database connection.
+	DBConnString string
+	// DBMaxOpenConns is the maximum number of open connections to the database.
+	DBMaxOpenConns int
+	// DBMaxIdleConns is the maximum number of connections in the idle connection pool.
+	DBMaxIdleConns int
+	// DBConnMaxLifetime is the maximum amount of time a connection may be reused.
 	DBConnMaxLifetime time.Duration
 
-	// Computed endpoints
-	AdminTokenEP    string
+	// AdminTokenEP is the computed endpoint for obtaining an SFTPGo admin token.
+	AdminTokenEP string
+	// SftpgoFoldersEP is the computed endpoint for SFTPGo folder management.
 	SftpgoFoldersEP string
-	SftpgoUsersEP   string
-	IdPTokenEP      string
-	IdPSCIMUsersEP  string
-	IdPAuthnEP      string
-	IdPAuthorizeEP  string
+	// SftpgoUsersEP is the computed endpoint for SFTPGo user management.
+	SftpgoUsersEP string
+	// IdPTokenEP is the computed endpoint for obtaining internal IdP OAuth2 tokens.
+	IdPTokenEP string
+	// IdPSCIMUsersEP is the computed endpoint for the internal IdP's SCIM Users API.
+	IdPSCIMUsersEP string
+	// IdPAuthnEP is the computed endpoint for internal IdP app-native authentication.
+	IdPAuthnEP string
+	// IdPAuthorizeEP is the computed endpoint for internal IdP authorization.
+	IdPAuthorizeEP string
 
-	// External org computed endpoints
-	ExternalIdPTokenEP     string
+	// ExternalIdPTokenEP is the computed endpoint for obtaining external IdP OAuth2 tokens.
+	ExternalIdPTokenEP string
+	// ExternalIdPSCIMUsersEP is the computed endpoint for the external IdP's SCIM Users API.
 	ExternalIdPSCIMUsersEP string
-	ExternalIdPAuthnEP     string
+	// ExternalIdPAuthnEP is the computed endpoint for external IdP app-native authentication.
+	ExternalIdPAuthnEP string
+	// ExternalIdPAuthorizeEP is the computed endpoint for external IdP authorization.
 	ExternalIdPAuthorizeEP string
 }
 
 // EnvVar defines a structure for checking environment variables.
 type EnvVar struct {
-	Name        string
-	Value       *string
+	// Name is the name of the environment variable.
+	Name string
+	// Value is a pointer to the Config field where the variable's value is stored.
+	Value *string
+	// IsSensitive indicates if the variable contains sensitive information (e.g., secrets).
 	IsSensitive bool
-	IsCritical  bool
+	// IsCritical indicates if the application cannot start without this variable.
+	IsCritical bool
 }
 
 // Load reads environment variables into the Config struct and validates them.

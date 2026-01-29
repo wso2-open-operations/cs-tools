@@ -36,13 +36,11 @@ const (
 	LogLevelError
 )
 
-// AppLogger is a custom logger that supports different log levels.
 type AppLogger struct {
 	logger *log.Logger
 	level  LogLevel
 }
 
-// NewAppLogger creates a new AppLogger instance.
 func NewAppLogger(levelStr string) *AppLogger {
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 	level := parseLogLevel(levelStr)
