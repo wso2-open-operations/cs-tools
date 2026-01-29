@@ -76,9 +76,13 @@ func (t *LoggingTransport) logRequest(req *http.Request) {
 				req.Body, // remaining unread portion
 			))
 		} else {
-			// Error reading - restore empty body
-			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=<error reading: %v>", req.Header, err)
-			req.Body = io.NopCloser(bytes.NewReader(nil))
+			// Error reading - reconstruct body with whatever was read
+			t.Logger.Trace("OUTGOING REQUEST DETAILS: headers=%v body=%s [partial read, error: %v]",
+				req.Header, string(prefix[:n]), err)
+			req.Body = io.NopCloser(io.MultiReader(
+				bytes.NewReader(prefix[:n]),
+				req.Body,
+			))
 		}
 	}
 }
@@ -107,9 +111,13 @@ func (t *LoggingTransport) logResponse(resp *http.Response, duration time.Durati
 				resp.Body, // remaining unread portion
 			))
 		} else {
-			// Error reading - restore empty body
-			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=<error reading: %v>", resp.Header, err)
-			resp.Body = io.NopCloser(bytes.NewReader(nil))
+			// Error reading - reconstruct body with whatever was read
+			t.Logger.Trace("INCOMING RESPONSE DETAILS: headers=%v body=%s [partial read, error: %v]",
+				resp.Header, string(prefix[:n]), err)
+			resp.Body = io.NopCloser(io.MultiReader(
+				bytes.NewReader(prefix[:n]),
+				resp.Body,
+			))
 		}
 	}
 }

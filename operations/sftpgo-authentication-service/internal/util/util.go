@@ -36,9 +36,12 @@ func InitEmailRegex(pattern string) error {
 	if pattern == "" {
 		pattern = defaultEmailRegexPattern
 	}
-	var err error
-	emailRegex, err = regexp.Compile(pattern)
-	return err
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return err
+	}
+	emailRegex = re
+	return nil
 }
 
 func init() {
@@ -53,10 +56,10 @@ func SanitizeUsername(u string) string {
 
 // IsLikelyEmail checks if a string broadly resembles an email address.
 func IsLikelyEmail(s string) bool {
-	if !emailRegex.MatchString(s) {
+	if emailRegex == nil {
 		return false
 	}
-	return true
+	return emailRegex.MatchString(s)
 }
 
 // IsInternalUser checks if a username belongs to an internal user based on the configured suffix.

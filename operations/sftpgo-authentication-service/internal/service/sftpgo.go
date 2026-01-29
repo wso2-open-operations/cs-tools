@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -78,7 +79,7 @@ func (s *SFTPGoService) UpdateUser(username, projectKey string, perms map[string
 		return s.logger.Errorf("error marshaling JSON for user update: %v", err)
 	}
 
-	sftpgoUserEP := s.cfg.SftpgoUsersEP + "/" + username
+	sftpgoUserEP := s.cfg.SftpgoUsersEP + "/" + url.PathEscape(username)
 	req, err := http.NewRequest("PUT", sftpgoUserEP, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return s.logger.Errorf("failed to create update user request for '%s': %v", username, err)
@@ -155,7 +156,7 @@ func (s *SFTPGoService) getAdminToken() (string, error) {
 }
 
 func (s *SFTPGoService) checkFolderExists(name, token string) (bool, error) {
-	endpoint := s.cfg.SftpgoFoldersEP + "/" + name
+	endpoint := s.cfg.SftpgoFoldersEP + "/" + url.PathEscape(name)
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return false, s.logger.Errorf("failed to create folder check request for '%s': %v", name, err)

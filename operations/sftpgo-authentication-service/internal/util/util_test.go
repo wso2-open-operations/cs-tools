@@ -228,3 +228,36 @@ func TestValidateFolderName(t *testing.T) {
 		})
 	}
 }
+
+func TestInitEmailRegex_Invalid(t *testing.T) {
+	// Savely backup and restore
+	oldRegex := emailRegex
+	defer func() { emailRegex = oldRegex }()
+
+	// Reset to nil to simulate failure at start if needed,
+	// though InitEmailRegex should preserve previous value on error.
+	emailRegex = nil
+
+	err := InitEmailRegex("[invalid")
+	if err == nil {
+		t.Error("InitEmailRegex with invalid pattern should return error")
+	}
+
+	// Should not panic and should return false
+	if IsLikelyEmail("test@example.com") {
+		t.Error("IsLikelyEmail should return false when emailRegex is nil")
+	}
+
+	// Initialize with valid pattern
+	err = InitEmailRegex("^[a-z]+$")
+	if err != nil {
+		t.Errorf("InitEmailRegex failed with valid pattern: %v", err)
+	}
+
+	if !IsLikelyEmail("abc") {
+		t.Error("IsLikelyEmail should return true for valid match")
+	}
+	if IsLikelyEmail("123") {
+		t.Error("IsLikelyEmail should return false for non-match")
+	}
+}
