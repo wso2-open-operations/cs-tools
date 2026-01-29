@@ -95,17 +95,6 @@ public type ProjectsResponse record {|
     json...;
 |};
 
-# Account owner information.
-public type AccountOwner record {|
-    # ID
-    string id;
-    # Name
-    string name;
-    # Email
-    string email;
-    json...;
-|};
-
 # Project details information.
 public type ProjectDetailsResponse record {|
     *Project;
