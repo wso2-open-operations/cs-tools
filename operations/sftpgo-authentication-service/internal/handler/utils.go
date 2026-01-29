@@ -56,7 +56,7 @@ func sanitizeUsername(u string) string {
 	return util.SanitizeUsername(u)
 }
 
-// validateUsername performs basic validation on username
+// validateUsername performs basic validation on username to prevent common injection attacks and ensure validity.
 func validateUsername(username string) error {
 	if username == "" {
 		return fmt.Errorf("username cannot be empty")
@@ -71,6 +71,7 @@ func validateUsername(username string) error {
 	return nil
 }
 
+// handleAuthStep1 initiates the authentication flow by identifying the user and retrieving the first step from the IdP.
 func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIntRequest) {
 	if req.Username == "" {
 		resp.AuthResult = AuthResultFailure
@@ -120,6 +121,7 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 	resp.AuthResult = AuthResultIncomplete // Incomplete
 }
 
+// handleAuthSubsequentSteps processes subsequent steps of the keyboard-interactive authentication flow.
 func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *models.KeyIntRequest, session models.SessionData) {
 
 	if session.NextStep == nil || len(session.NextStep.Authenticators) == 0 {
@@ -192,12 +194,14 @@ func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *mo
 	}
 }
 
+// handleAuthSuccess finalizes a successful authentication flow.
 func (h *Handler) handleAuthSuccess(resp *models.KeyIntResponse, req *models.KeyIntRequest) {
 
 	resp.AuthResult = AuthResultSuccess
 	h.db.DeleteSession(req.RequestID)
 }
 
+// generatePromptFromAuthenticators parses IdP response to generate instruction and questions for SFTPGo.
 func generatePromptFromAuthenticators(idpResp models.IdPResponse) (string, []string, []bool) {
 	if idpResp.NextStep == nil || len(idpResp.NextStep.Authenticators) == 0 {
 		return "No auth methods available.", nil, nil

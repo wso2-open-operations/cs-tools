@@ -131,6 +131,7 @@ func (s *SFTPGoService) ProvisionFolders(folders []string) error {
 	return nil
 }
 
+// getAdminToken retrieves an admin authentication token from SFTPGo.
 func (s *SFTPGoService) getAdminToken() (string, error) {
 	req, err := http.NewRequest("GET", s.cfg.AdminTokenEP, nil)
 	if err != nil {
@@ -155,6 +156,7 @@ func (s *SFTPGoService) getAdminToken() (string, error) {
 	return tr.AccessToken, nil
 }
 
+// checkFolderExists checks if a folder with the given name exists in SFTPGo.
 func (s *SFTPGoService) checkFolderExists(name, token string) (bool, error) {
 	endpoint := s.cfg.SftpgoFoldersEP + "/" + url.PathEscape(name)
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -180,6 +182,7 @@ func (s *SFTPGoService) checkFolderExists(name, token string) (bool, error) {
 	}
 }
 
+// createFolder creates a new folder in SFTPGo with the specified name.
 func (s *SFTPGoService) createFolder(name, token string) error {
 	s.logger.Debug("Attempting to create SFTPGo folder '%s'.", name)
 	path := filepath.Join(s.cfg.FolderPath, name)

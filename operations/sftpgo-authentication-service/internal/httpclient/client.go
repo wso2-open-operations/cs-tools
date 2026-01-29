@@ -52,6 +52,7 @@ func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, nil
 }
 
+// logRequest logs the standard details of an outgoing HTTP request.
 func (t *LoggingTransport) logRequest(req *http.Request) {
 	t.Logger.Debug("OUTGOING REQUEST: method=%s url=%s", req.Method, req.URL.String())
 
@@ -87,6 +88,7 @@ func (t *LoggingTransport) logRequest(req *http.Request) {
 	}
 }
 
+// logResponse logs the details of an incoming HTTP response, including duration.
 func (t *LoggingTransport) logResponse(resp *http.Response, duration time.Duration) {
 	t.Logger.Debug("INCOMING RESPONSE: status=%s duration=%v", resp.Status, duration)
 

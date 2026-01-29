@@ -70,54 +70,64 @@ func parseLogLevel(levelStr string) LogLevel {
 	}
 }
 
+// SetOutput sets the output destination for the logger.
 func (l *AppLogger) SetOutput(w io.Writer) {
 	l.logger.SetOutput(w)
 }
 
+// Trace logs a message at the TRACE level.
 func (l *AppLogger) Trace(format string, v ...interface{}) {
 	if l.level <= LogLevelTrace {
 		l.logger.Printf("[TRACE] "+format, v...)
 	}
 }
 
+// Debug logs a message at the DEBUG level.
 func (l *AppLogger) Debug(format string, v ...interface{}) {
 	if l.level <= LogLevelDebug {
 		l.logger.Printf("[DEBUG] "+format, v...)
 	}
 }
 
+// Info logs a message at the INFO level.
 func (l *AppLogger) Info(format string, v ...interface{}) {
 	if l.level <= LogLevelInfo {
 		l.logger.Printf("[INFO] "+format, v...)
 	}
 }
 
+// Warn logs a message at the WARN level.
 func (l *AppLogger) Warn(format string, v ...interface{}) {
 	if l.level <= LogLevelWarn {
 		l.logger.Printf("[WARN] "+format, v...)
 	}
 }
 
+// Error logs a message at the ERROR level.
 func (l *AppLogger) Error(format string, v ...interface{}) {
 	if l.level <= LogLevelError {
 		l.logger.Printf("[ERROR] "+format, v...)
 	}
 }
 
+// Errorf logs a formatted message at the ERROR level and returns an error with the same message.
 func (l *AppLogger) Errorf(format string, v ...interface{}) error {
 	msg := fmt.Sprintf(format, v...)
 	l.Error("%s", msg)
 	return errors.New(msg)
 }
 
+// Fatal logs a message at the FATAL level and terminates the application.
 func (l *AppLogger) Fatal(format string, v ...interface{}) {
 	l.logger.Fatalf("[FATAL] "+format, v...)
 }
 
+// IsDebugEnabled returns true if the DEBUG log level is enabled.
 func (l *AppLogger) IsDebugEnabled() bool {
 	return l.level <= LogLevelDebug
 }
 
+// IsTraceEnabled returns true if the TRACE log level is enabled.
 func (l *AppLogger) IsTraceEnabled() bool {
 	return l.level <= LogLevelTrace
 }

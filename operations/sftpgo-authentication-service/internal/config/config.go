@@ -225,6 +225,7 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// validateEnvVars checks if all critical environment variables are set.
 func validateEnvVars(cfg *Config) error {
 	envVars := []EnvVar{
 		// Service Configuration

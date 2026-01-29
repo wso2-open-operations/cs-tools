@@ -58,6 +58,7 @@ type orgContext struct {
 	authorizeEP  string
 }
 
+// getOrgContext returns the appropriate organization context based on whether the user is internal.
 func (s *IdPService) getOrgContext(isInternal bool) orgContext {
 	if isInternal {
 		return orgContext{
@@ -212,6 +213,7 @@ func (s *IdPService) PostToAuthnEndpoint(payload interface{}, isInternal bool) (
 	return &idpResp, nil
 }
 
+// getBearerToken retrieves an OAuth2 bearer token for SCIM API access.
 func (s *IdPService) getBearerToken(isInternal bool) (string, error) {
 	ctx := s.getOrgContext(isInternal)
 

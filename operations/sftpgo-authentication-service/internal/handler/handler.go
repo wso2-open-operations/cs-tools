@@ -59,6 +59,7 @@ func NewHandler(
 	}
 }
 
+// auditLog logs administrative actions for auditing purposes.
 func (h *Handler) auditLog(r *http.Request, username string, action string, status string, detail string) {
 	h.logger.Info("AUDIT: ip=%s user=%s action=%s status=%s detail=%s", r.RemoteAddr, username, action, status, detail)
 }
