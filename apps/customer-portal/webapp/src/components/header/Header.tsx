@@ -137,11 +137,11 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
       /**
        * Get the sub path from the current location.
        */
-      const subPath = location.pathname.split(/\/[^/]+/)[2] || "/dashboard";
+      const subPath = location.pathname.split("/").slice(2).join("/");
       /**
        * Navigate to the new project.
        */
-      navigate(`/${project.key}/${subPath}`);
+      navigate(`/${project.key}/${subPath || "dashboard"}`);
     } else {
       logger.warn(`Project with key ${projectKey} not found for switching`);
     }
