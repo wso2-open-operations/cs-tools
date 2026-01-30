@@ -42,7 +42,7 @@ public isolated function searchProjects(string idToken, ProjectPayload payload) 
 }
 
 # Get project activity statistics by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + id - Unique ID of the project
 # + return - Project statistics or error
@@ -51,7 +51,7 @@ public isolated function getProjectActivityStats(string idToken, string id) retu
 }
 
 # Get cases statistics of a project by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + id - Unique ID of the project
 # + return - Project cases statistics or error
@@ -60,7 +60,7 @@ public isolated function getCaseStatsForProject(string idToken, string id) retur
 }
 
 # Get chats statistics of a project by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + id - Unique ID of the project
 # + return - Project chats statistics or error
@@ -69,7 +69,7 @@ public isolated function getChatStatsForProject(string idToken, string id) retur
 }
 
 # Get deployments statistics of a project by ID.
-# 
+#
 # + idToken - ID token for authorization
 # + id - Unique ID of the project
 # + return - Project deployments statistics or error
@@ -110,6 +110,17 @@ public isolated function getCaseMetadata(string idToken) returns CaseMetadataRes
 # + idToken - ID token for authorization
 # + payload - Comment request payload
 # + return - Comments response or error
-public isolated function searchComments(string idToken, CommentRequestPayload payload) returns CommentsResponse|error {
+public isolated function searchComments(string idToken, ReferenceSearchPayload payload) returns CommentsResponse|error {
     return csEntityClient->/comments/search.post(payload, generateHeaders(idToken));
+}
+
+# Search attachments.
+#
+# + idToken - ID token for authorization
+# + payload - Attachment request payload
+# + return - Attachments response or error
+public isolated function searchAttachments(string idToken, ReferenceSearchPayload payload)
+    returns AttachmentsResponse|error {
+
+    return csEntityClient->/attachments/search.post(payload, generateHeaders(idToken));
 }

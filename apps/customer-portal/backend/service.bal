@@ -684,10 +684,10 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0) {
+        if isInValidLimitOffset('limit, offset) {
             return <http:BadRequest>{
                 body: {
-                    message: "Limit must be between 1 and 50. Offset must be a non-negative integer!"
+                    message: ERR_LIMIT_OFFSET_INVALID
                 }
             };
         }
@@ -696,7 +696,6 @@ service http:InterceptableService / on new http:Listener(9090) {
         entity:CaseResponse|error caseDetails = entity:getCase(userInfo.idToken, id);
         if caseDetails is error {
             if getStatusCode(caseDetails) == http:STATUS_FORBIDDEN {
-                // TODO: Will log the UUID once the PR #42 is merged
                 logForbiddenCaseAccess(id, userInfo.userId);
                 return <http:Forbidden>{
                     body: {
@@ -725,5 +724,74 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
         return mapCommentsResponse(commentsResponse);
+    }
+
+    # Get attachments for a specific case.
+    #
+    # + id - ID of the case
+    # + limit - Number of attachments to retrieve
+    # + offset - Offset for pagination
+    # + return - Attachments response or error
+    resource function get cases/[string id]/attachments(http:RequestContext ctx, int? 'limit, int? offset)
+        returns AttachmentsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isEmptyId(id) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_ID_EMPTY
+                }
+            };
+        }
+
+        if isInValidLimitOffset('limit, offset) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_LIMIT_OFFSET_INVALID
+                }
+            };
+        }
+
+        // Verify case validation for the user
+        entity:CaseResponse|error caseDetails = entity:getCase(userInfo.idToken, id);
+        if caseDetails is error {
+            if getStatusCode(caseDetails) == http:STATUS_FORBIDDEN {
+                logForbiddenCaseAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_CASE_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve case details.";
+            log:printError(customError, caseDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        entity:AttachmentsResponse|error attachmentResponse =
+            entity:getAttachments(userInfo.idToken, id, 'limit, offset);
+        if attachmentResponse is error {
+            string customError = "Failed to retrieve attachments.";
+            log:printError(customError, attachmentResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return mapAttachmentsResponse(attachmentResponse);
     }
 }
