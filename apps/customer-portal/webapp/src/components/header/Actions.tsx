@@ -40,6 +40,8 @@ export default function Actions(): JSX.Element {
         color="secondary"
         size="medium"
         href={JOIN_COMMUNITY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
       >
         Join our community
       </Button>
