@@ -16,7 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { useEffect, type JSX } from "react";
-import useSearchProjects from "@/api/useSearchProjects";
+import useGetProjects from "@/api/useGetProjects";
 import { useLogger } from "@/hooks/useLogger";
 import ProjectCard from "@/components/projectCard/ProjectCard";
 import ProjectCardSkeleton from "@/components/projectCard/ProjectCardSkeleton";
@@ -40,7 +40,7 @@ export default function ProjectHub(): JSX.Element {
     data: projectsResponse,
     isLoading,
     isError,
-  } = useSearchProjects({}, true);
+  } = useGetProjects({}, true);
 
   /**
    * Get projects from the response.
