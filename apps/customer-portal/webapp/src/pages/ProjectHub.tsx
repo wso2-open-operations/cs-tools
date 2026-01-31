@@ -18,8 +18,8 @@ import { Box, Typography } from "@wso2/oxygen-ui";
 import { useEffect, type JSX } from "react";
 import useGetProjects from "@/api/useGetProjects";
 import { useLogger } from "@/hooks/useLogger";
-import ProjectCard from "@/components/projectCard/ProjectCard";
-import ProjectCardSkeleton from "@/components/projectCard/ProjectCardSkeleton";
+import ProjectCard from "@/components/projectHub/projectCard/ProjectCard";
+import ProjectCardSkeleton from "@/components/projectHub/projectCard/ProjectCardSkeleton";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 
 /**

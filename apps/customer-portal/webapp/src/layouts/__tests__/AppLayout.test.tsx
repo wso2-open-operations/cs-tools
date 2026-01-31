@@ -65,11 +65,11 @@ vi.mock("react-router", () => ({
 }));
 
 // Mock child components
-vi.mock("@/components/footer/Footer", () => ({
+vi.mock("@/components/common/footer/Footer", () => ({
   default: () => <div data-testid="footer" />,
 }));
 
-vi.mock("@/components/header/Header", () => ({
+vi.mock("@/components/common/header/Header", () => ({
   default: ({ onToggleSidebar }: { onToggleSidebar: () => void }) => (
     <div data-testid="header">
       <button onClick={onToggleSidebar}>Toggle</button>
@@ -77,7 +77,7 @@ vi.mock("@/components/header/Header", () => ({
   ),
 }));
 
-vi.mock("@/components/sideNavBar/SideBar", () => ({
+vi.mock("@/components/common/sideNavBar/SideBar", () => ({
   default: ({ collapsed, onSelect, onToggleExpand }: any) => (
     <div data-testid="sidebar">
       <span>Collapsed: {collapsed.toString()}</span>
