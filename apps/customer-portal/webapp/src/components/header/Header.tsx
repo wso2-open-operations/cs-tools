@@ -74,16 +74,17 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isError,
   } = useSearchProjects({}, true);
 
   /**
    * Fetch next page of projects if available.
    */
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (hasNextPage && !isFetchingNextPage && !isError) {
       fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
 
   /**
    * Flatten the projects response.
@@ -111,15 +112,25 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
       /**
        * Find the project from the URL parameters.
        */
-      const project = projects.find((project) => project.id === projectId);
+      const project = projects.find((p) => p.id === projectId);
       /**
        * Set the selected project if it is different from the current selected project.
+       * If no matching project is found, clear the selection.
        */
-      if (project && project.key !== selectedProject?.key) {
-        setProject(project);
+      if (project) {
+        if (project.id !== selectedProject?.id) {
+          setProject(project);
+        }
+      } else {
+        setProject(undefined);
       }
+    } else if (selectedProject) {
+      /**
+       * If projectId is missing (e.g., on the project hub), clear the selection.
+       */
+      setProject(undefined);
     }
-  }, [projectId, selectedProject?.key, projects]);
+  }, [projectId, selectedProject?.id, projects]);
 
   /**
    * Handles the project change.
