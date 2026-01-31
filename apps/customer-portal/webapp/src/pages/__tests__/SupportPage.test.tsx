@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import SupportPage from "@/pages/SupportPage";
 
 // Mock useParams
@@ -96,6 +96,10 @@ vi.mock("@/api/useGetProjectSupportStats", () => ({
   useGetProjectSupportStats: (id: string) => mockUseGetProjectSupportStats(id),
 }));
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("SupportPage", () => {
   it("should render loading state correctly", () => {
     mockUseGetProjectSupportStats.mockReturnValue({
@@ -106,9 +110,7 @@ describe("SupportPage", () => {
     render(<SupportPage />);
 
     const skeletons = screen.getAllByTestId("skeleton");
-    // Only 4 skeletons for values, as icons are now persistent during loading
     expect(skeletons).toHaveLength(4);
-    // Note: totalCases now uses FileText
     expect(screen.getByTestId("icon-file-text")).toBeInTheDocument();
     expect(mockLogger.debug).not.toHaveBeenCalled();
   });
