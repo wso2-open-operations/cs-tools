@@ -114,7 +114,7 @@ const mockUseSearchProjects = vi.fn(() => ({
   isError: false,
 })) as any;
 
-vi.mock("@/api/useSearchProjects", () => ({
+vi.mock("@/api/useGetProjects", () => ({
   default: (searchData: any, fetchAll: any) =>
     mockUseSearchProjects(searchData, fetchAll),
 }));
