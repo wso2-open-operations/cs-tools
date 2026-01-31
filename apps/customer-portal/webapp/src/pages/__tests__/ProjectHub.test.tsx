@@ -44,9 +44,9 @@ vi.mock("@/components/projectCard/ProjectCardSkeleton", () => ({
 }));
 
 // Mock hooks
-const mockUseSearchProjects = vi.fn();
-vi.mock("@/api/useSearchProjects", () => ({
-  default: (...args: any[]) => mockUseSearchProjects(...args),
+const mockUseGetProjects = vi.fn();
+vi.mock("@/api/useGetProjects", () => ({
+  default: (...args: any[]) => mockUseGetProjects(...args),
 }));
 
 const mockLogger = {
@@ -65,7 +65,7 @@ describe("ProjectHub", () => {
   });
 
   it("should render loading skeletons when isLoading is true", () => {
-    mockUseSearchProjects.mockReturnValue({
+    mockUseGetProjects.mockReturnValue({
       isLoading: true,
       data: null,
       isError: false,
@@ -77,7 +77,7 @@ describe("ProjectHub", () => {
   });
 
   it("should render project cards when data is loaded", () => {
-    mockUseSearchProjects.mockReturnValue({
+    mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: {
         pages: [{ projects: mockProjects }],
@@ -94,7 +94,7 @@ describe("ProjectHub", () => {
   });
 
   it("should render error message when isError is true", async () => {
-    mockUseSearchProjects.mockReturnValue({
+    mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: null,
       isError: true,
@@ -111,7 +111,7 @@ describe("ProjectHub", () => {
   });
 
   it("should render empty state when no projects are returned", () => {
-    mockUseSearchProjects.mockReturnValue({
+    mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: {
         pages: [{ projects: [] }],
@@ -125,7 +125,7 @@ describe("ProjectHub", () => {
   });
 
   it("should log debug message when projects are loaded", async () => {
-    mockUseSearchProjects.mockReturnValue({
+    mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: {
         pages: [{ projects: mockProjects }],
