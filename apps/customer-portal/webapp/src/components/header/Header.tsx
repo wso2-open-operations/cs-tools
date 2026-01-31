@@ -17,7 +17,7 @@
 import { useState, useEffect, type JSX } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useNavigate, useLocation, useParams } from "react-router";
-import useSearchProjects from "@/api/useSearchProjects";
+import useGetProjects from "@/api/useGetProjects";
 import { useLogger } from "@/hooks/useLogger";
 import type { ProjectListItem } from "@/models/responses";
 import Brand from "@/components/header/Brand";
@@ -75,7 +75,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     hasNextPage,
     isFetchingNextPage,
     isError,
-  } = useSearchProjects({}, true);
+  } = useGetProjects({}, true);
 
   /**
    * Fetch next page of projects if available.
