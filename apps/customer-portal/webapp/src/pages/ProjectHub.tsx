@@ -14,11 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Typography } from "@wso2/oxygen-ui";
-import { useNavigate } from "react-router";
+import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import useSearchProjects from "@/api/useSearchProjects";
 import { useLogger } from "@/hooks/useLogger";
+import ProjectCard from "@/components/projectCard/ProjectCard";
+import ProjectCardSkeleton from "@/components/projectCard/ProjectCardSkeleton";
+import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 
 /**
  * ProjectHub component.
@@ -26,11 +28,6 @@ import { useLogger } from "@/hooks/useLogger";
  * @returns {JSX.Element} The ProjectHub component.
  */
 export default function ProjectHub(): JSX.Element {
-  /**
-   * Navigation hook.
-   */
-  const navigate = useNavigate();
-
   /**
    * Logger hook.
    */
@@ -57,9 +54,39 @@ export default function ProjectHub(): JSX.Element {
   const renderContent = () => {
     if (isLoading) {
       return (
-        <Typography variant="h6" color="text.secondary">
-          Loading projects...
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            gap: 3,
+            maxWidth: 1800,
+            mx: "auto",
+            width: "100%",
+          }}
+        >
+          {[...Array(3)].map((_, index) => (
+            <Box
+              key={index}
+              sx={{
+                flex: {
+                  xs: "1 1 100%",
+                  sm: "0 1 calc(50% - 24px)",
+                  md: "0 1 calc(33.33% - 24px)",
+                  lg: "0 1 calc(25% - 24px)",
+                  xl: "0 1 calc(20% - 24px)",
+                },
+                maxWidth: {
+                  xs: "100%",
+                  sm: 400,
+                },
+                minWidth: 300,
+              }}
+            >
+              <ProjectCardSkeleton />
+            </Box>
+          ))}
+        </Box>
       );
     }
 
@@ -96,40 +123,96 @@ export default function ProjectHub(): JSX.Element {
     return (
       <Box
         sx={{
-          display: "grid",
-          gap: 4,
-          maxWidth: "1200px",
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: 3,
+          maxWidth: 1800,
           mx: "auto",
+          width: "100%",
         }}
       >
-        {/* project card */}
+        {/* project card wrapper */}
         {projects.map((project) => (
-          <Button
+          <Box
             key={project.id}
-            variant="contained"
-            fullWidth
-            id={project.id}
-            onClick={() => navigate(`/${project.key}/dashboard`)}
-            sx={{ py: 4 }}
+            sx={{
+              flex: {
+                xs: "1 1 100%",
+                sm: "0 1 calc(50% - 24px)",
+                md: "0 1 calc(33.33% - 24px)",
+                lg: "0 1 calc(25% - 24px)",
+                xl: "0 1 calc(20% - 24px)",
+              },
+              maxWidth: {
+                xs: "100%",
+                sm: 400,
+              },
+              minWidth: 300,
+            }}
           >
-            {project.name}
-          </Button>
+            <ProjectCard
+              id={project.id}
+              projectKey={project.key}
+              title={project.name}
+              subtitle={project.description}
+              date={project.createdOn}
+            />
+          </Box>
         ))}
       </Box>
     );
   };
 
   return (
-    <Box sx={{ p: 8, textAlign: "center" }}>
-      {/* project hub title */}
-      <Typography variant="h3" gutterBottom>
-        Welcome to Project Hub
-      </Typography>
-      {/* project hub subtitle */}
-      <Typography variant="h6" color="text.secondary" sx={{ mb: 6 }}>
-        Select a project to get started
-      </Typography>
-      {renderContent()}
+    <Box
+      sx={{
+        //bgcolor: "blue",
+        width: "100%",
+        minHeight: "100%",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box
+        sx={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          justifyContent: "center",
+        }}
+      >
+        <Box
+          sx={{
+            mb: 3,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            textAlign: "center",
+          }}
+        >
+          {/* project hub title */}
+          <Box
+            sx={{
+              mb: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+            }}
+          >
+            <FolderOpen size={28} />
+            <Typography variant="h4">Select Your Project</Typography>
+          </Box>
+
+          {/* project hub subtitle */}
+          <Typography variant="subtitle2" color="text.secondary">
+            Choose a project to access your support cases, chat history, and
+            dashboard
+          </Typography>
+        </Box>
+        <Box sx={{ width: "100%" }}>{renderContent()}</Box>
+      </Box>
     </Box>
   );
 }
