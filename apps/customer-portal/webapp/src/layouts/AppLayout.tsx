@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { AppShell, useAppShell } from "@wso2/oxygen-ui";
+import { AppShell, Box, useAppShell } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { useLocation, Outlet } from "react-router";
 import Footer from "@/components/footer/Footer";
@@ -65,7 +65,9 @@ export default function AppLayout(): JSX.Element {
 
       {/* Main content. */}
       <AppShell.Main>
-        <Outlet />
+        <Box sx={{ p: 3, flex: 1, overflow: "auto" }}>
+          <Outlet />
+        </Box>
       </AppShell.Main>
 
       {/* Footer component. */}
