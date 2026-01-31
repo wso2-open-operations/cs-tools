@@ -17,6 +17,7 @@
 import { AppShell, Box, useAppShell } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { useLocation, Outlet } from "react-router";
+import GlobalNotificationBanner from "@/components/common/notificationBanner/GlobalNotificationBanner";
 import Footer from "@/components/common/footer/Footer";
 import Header from "@/components/common/header/Header";
 import SideBar from "@/components/common/sideNavBar/SideBar";
@@ -45,35 +46,38 @@ export default function AppLayout(): JSX.Element {
   const isProjectHub = location.pathname === "/";
 
   return (
-    <AppShell>
-      {/* Header component. */}
-      <AppShell.Navbar>
-        <Header onToggleSidebar={shellActions.toggleSidebar} />
-      </AppShell.Navbar>
+    <>
+      <GlobalNotificationBanner />
+      <AppShell>
+        {/* Header component. */}
+        <AppShell.Navbar>
+          <Header onToggleSidebar={shellActions.toggleSidebar} />
+        </AppShell.Navbar>
 
-      {/* Side bar component. */}
-      {!isProjectHub && (
-        <AppShell.Sidebar>
-          <SideBar
-            collapsed={shellState.sidebarCollapsed}
-            expandedMenus={shellState.expandedMenus}
-            onSelect={shellActions.setActiveMenuItem}
-            onToggleExpand={shellActions.toggleMenu}
-          />
-        </AppShell.Sidebar>
-      )}
+        {/* Side bar component. */}
+        {!isProjectHub && (
+          <AppShell.Sidebar>
+            <SideBar
+              collapsed={shellState.sidebarCollapsed}
+              expandedMenus={shellState.expandedMenus}
+              onSelect={shellActions.setActiveMenuItem}
+              onToggleExpand={shellActions.toggleMenu}
+            />
+          </AppShell.Sidebar>
+        )}
 
-      {/* Main content. */}
-      <AppShell.Main>
-        <Box sx={{ p: 3, flex: 1, overflow: "auto" }}>
-          <Outlet />
-        </Box>
-      </AppShell.Main>
+        {/* Main content. */}
+        <AppShell.Main>
+          <Box sx={{ p: 3, flex: 1, overflow: "auto" }}>
+            <Outlet />
+          </Box>
+        </AppShell.Main>
 
-      {/* Footer component. */}
-      <AppShell.Footer>
-        <Footer />
-      </AppShell.Footer>
-    </AppShell>
+        {/* Footer component. */}
+        <AppShell.Footer>
+          <Footer />
+        </AppShell.Footer>
+      </AppShell>
+    </>
   );
 }
