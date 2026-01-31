@@ -61,8 +61,8 @@ describe("ProjectCardSkeleton", () => {
   it("should render skeleton placeholders", () => {
     render(<ProjectCardSkeleton />);
 
-    expect(screen.getAllByTestId("skeleton-rounded")).toHaveLength(3); 
-    expect(screen.getAllByTestId("skeleton-text")).toHaveLength(9); 
-    expect(screen.getAllByTestId("skeleton-circular")).toHaveLength(3); 
+    expect(screen.getAllByTestId("skeleton-rounded")).toHaveLength(3);
+    expect(screen.getAllByTestId("skeleton-text")).toHaveLength(9);
+    expect(screen.getAllByTestId("skeleton-circular")).toHaveLength(3);
   });
 });
