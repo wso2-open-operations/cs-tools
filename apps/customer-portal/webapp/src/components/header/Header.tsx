@@ -20,10 +20,10 @@ import { useNavigate, useLocation, useParams } from "react-router";
 import useSearchProjects from "@/api/useSearchProjects";
 import { useLogger } from "@/hooks/useLogger";
 import type { ProjectListItem } from "@/models/responses";
-import Brand from "./Brand";
-import Actions from "./Actions";
-import SearchBar from "./SearchBar";
-import ProjectSwitcher from "./ProjectSwitcher";
+import Brand from "@/components/header/Brand";
+import Actions from "@/components/header/Actions";
+import SearchBar from "@/components/header/SearchBar";
+import ProjectSwitcher from "@/components/header/ProjectSwitcher";
 
 /**
  * Props for the Header component.
@@ -94,7 +94,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
   /**
    * Find the project from the URL parameters.
    */
-  const projectFromUrl = projects.find((project) => project.key === projectId);
+  const projectFromUrl = projects.find((project) => project.id === projectId);
 
   /**
    * State for the selected project.
@@ -111,7 +111,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
       /**
        * Find the project from the URL parameters.
        */
-      const project = projects.find((project) => project.key === projectId);
+      const project = projects.find((project) => project.id === projectId);
       /**
        * Set the selected project if it is different from the current selected project.
        */
@@ -124,12 +124,12 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
   /**
    * Handles the project change.
    *
-   * @param {string} projectKey - Key of the project to switch to.
+   * @param {string} projectId - ID of the project to switch to.
    */
-  const handleProjectChange = (projectKey: string) => {
-    const project = projects.find((p) => p.key === projectKey);
+  const handleProjectChange = (id: string) => {
+    const project = projects.find((p) => p.id === id);
     if (project) {
-      logger.debug(`Switching to project: ${project.name} (${project.key})`);
+      logger.debug(`Switching to project: ${project.name} (${project.id})`);
       /**
        * Set the selected project.
        */
@@ -141,9 +141,9 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
       /**
        * Navigate to the new project.
        */
-      navigate(`/${project.key}/${subPath || "dashboard"}`);
+      navigate(`/${project.id}/${subPath || "dashboard"}`);
     } else {
-      logger.warn(`Project with key ${projectKey} not found for switching`);
+      logger.warn(`Project with id ${id} not found for switching`);
     }
   };
 
