@@ -22,6 +22,13 @@ import { mockProjects } from "@/models/mockData";
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: { children: any }) => <div>{children}</div>,
+  Skeleton: ({ variant, width, height }: any) => (
+    <div
+      data-testid="skeleton"
+      data-variant={variant}
+      style={{ width, height }}
+    />
+  ),
   ComplexSelect: Object.assign(
     ({ value, onChange, children }: any) => (
       <select
@@ -87,5 +94,19 @@ describe("ProjectSwitcher", () => {
     fireEvent.change(select, { target: { value: mockProjects[1].id } });
 
     expect(mockOnProjectChange).toHaveBeenCalledWith(mockProjects[1].id);
+  });
+
+  it("should render skeleton when isLoading is true", () => {
+    render(
+      <ProjectSwitcher
+        projects={mockProjects}
+        onProjectChange={mockOnProjectChange}
+        isLoading={true}
+      />,
+    );
+
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+    expect(screen.getByTestId("icon-FolderOpen")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-select")).not.toBeInTheDocument();
   });
 });
