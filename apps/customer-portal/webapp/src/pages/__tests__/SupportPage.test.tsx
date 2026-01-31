@@ -23,6 +23,17 @@ vi.mock("react-router", () => ({
   useParams: () => ({ projectId: "project-1" }),
 }));
 
+// Mock useLogger
+const mockLogger = {
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+};
+vi.mock("@/hooks/useLogger", () => ({
+  useLogger: () => mockLogger,
+}));
+
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
@@ -95,9 +106,30 @@ describe("SupportPage", () => {
     render(<SupportPage />);
 
     const skeletons = screen.getAllByTestId("skeleton");
+    // Only 4 skeletons for values, as icons are now persistent during loading
     expect(skeletons).toHaveLength(4);
     // Note: totalCases now uses FileText
     expect(screen.getByTestId("icon-file-text")).toBeInTheDocument();
+    expect(mockLogger.debug).not.toHaveBeenCalled();
+  });
+
+  it("should render error state correctly and log the error", () => {
+    mockUseGetProjectSupportStats.mockReturnValue({
+      isLoading: false,
+      isError: true,
+      data: null,
+    });
+
+    render(<SupportPage />);
+
+    expect(
+      screen.getByText(
+        "Error loading support statistics. Please try again later.",
+      ),
+    ).toBeInTheDocument();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      "Failed to load support stats for project: project-1",
+    );
   });
 
   it("should render statistics correctly when data is loaded", () => {
@@ -121,5 +153,8 @@ describe("SupportPage", () => {
     expect(screen.getByText("Active Chats")).toBeInTheDocument();
     expect(screen.getByText("Chat Sessions")).toBeInTheDocument();
     expect(screen.getByText("Resolved via Chat")).toBeInTheDocument();
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      "Support stats loaded for project: project-1",
+    );
   });
 });
