@@ -15,13 +15,19 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SupportPage from "@/pages/SupportPage";
 
-// Mock useParams
-vi.mock("react-router", () => ({
-  useParams: () => ({ projectId: "project-1" }),
-}));
+// Mock react-router
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
+  return {
+    ...actual,
+    useParams: () => ({ projectId: "project-1" }),
+    useNavigate: () => vi.fn(),
+  };
+});
 
 // Mock useLogger
 const mockLogger = {
@@ -57,6 +63,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
     purple: { 500: "#9c27b0" },
   },
   Divider: () => <hr />,
+  Button: ({ children }: any) => <button>{children}</button>,
   Card: ({ children, sx }: any) => <div style={sx}>{children}</div>,
   CardContent: ({ children, sx }: any) => <div style={sx}>{children}</div>,
   StatCard: ({ label, value, icon }: any) => (
@@ -75,6 +82,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {children}
     </div>
   ),
+  Paper: ({ children }: any) => <div data-testid="paper">{children}</div>,
 }));
 
 // Mock icons
@@ -107,11 +115,16 @@ describe("SupportPage", () => {
       data: null,
     });
 
-    render(<SupportPage />);
+    render(
+      <MemoryRouter>
+        <SupportPage />
+      </MemoryRouter>,
+    );
 
     const skeletons = screen.getAllByTestId("skeleton");
     expect(skeletons).toHaveLength(4);
     expect(screen.getByTestId("icon-file-text")).toBeInTheDocument();
+    expect(screen.getAllByTestId("icon-bot")).toHaveLength(2);
     expect(mockLogger.debug).not.toHaveBeenCalled();
   });
 
@@ -122,7 +135,11 @@ describe("SupportPage", () => {
       data: null,
     });
 
-    render(<SupportPage />);
+    render(
+      <MemoryRouter>
+        <SupportPage />
+      </MemoryRouter>,
+    );
 
     expect(
       screen.getByText(
@@ -145,7 +162,11 @@ describe("SupportPage", () => {
       },
     });
 
-    render(<SupportPage />);
+    render(
+      <MemoryRouter>
+        <SupportPage />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByText("10")).toBeInTheDocument();
     expect(screen.getByText("5")).toBeInTheDocument();
@@ -158,5 +179,29 @@ describe("SupportPage", () => {
     expect(mockLogger.debug).toHaveBeenCalledWith(
       "Support stats loaded for project: project-1",
     );
+  });
+
+  it("should render the 'Start New Chat' call-to-action card", () => {
+    mockUseGetProjectSupportStats.mockReturnValue({
+      isLoading: false,
+      data: {
+        totalCases: 10,
+        activeChats: 5,
+        sessionChats: 15,
+        resolvedChats: 20,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SupportPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText("Need help with something new?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Start New Chat")).toBeInTheDocument();
+    expect(screen.getAllByTestId("icon-bot")).toHaveLength(2);
   });
 });
