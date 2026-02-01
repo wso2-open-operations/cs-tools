@@ -60,7 +60,7 @@ export const CaseCreationHeader = ({
           Review Case Details
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Please review and edit the auto populated information before
+          Please review and edit the auto-populated information before
           submitting
         </Typography>
       </Box>

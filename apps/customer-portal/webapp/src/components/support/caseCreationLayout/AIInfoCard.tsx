@@ -35,7 +35,7 @@ export const AIInfoCard = (): JSX.Element => (
       {/* AI info text container */}
       <Box>
         <Typography variant="body2">
-          Case details auto populated from your conversation
+          Case details auto-populated from your conversation
         </Typography>
         <Typography variant="caption">
           All fields below have been filled based on your chat with Novera.
