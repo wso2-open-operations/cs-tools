@@ -42,7 +42,7 @@ describe("AIInfoCard", () => {
 
     expect(screen.getByTestId("card")).toBeInTheDocument();
     expect(
-      screen.getByText("Case details auto populated from your conversation"),
+      screen.getByText("Case details auto-populated from your conversation"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

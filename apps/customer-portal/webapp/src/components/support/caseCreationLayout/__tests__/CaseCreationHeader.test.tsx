@@ -49,7 +49,7 @@ describe("CaseCreationHeader", () => {
 
     expect(screen.getByText("Review Case Details")).toBeInTheDocument();
     expect(
-      screen.getByText(/Please review and edit the auto populated information/),
+      screen.getByText(/Please review and edit the auto-populated information/),
     ).toBeInTheDocument();
     expect(screen.getByText("AI Generated")).toBeInTheDocument();
     expect(screen.getByTestId("icon-sparkles")).toBeInTheDocument();
