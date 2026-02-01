@@ -146,8 +146,8 @@ public type ProjectCaseStats record {|
     decimal averageResponseTime;
     # Active case count breakdown
     entity:ActiveCaseCount activeCases;
-    # Outstanding incidents count breakdown
-    entity:OutstandingIncidentsCount outstandingIncidents;
+    # Outstanding cases count breakdown
+    entity:OutstandingCasesCount outstandingCases;
     # Resolved case count breakdown
     entity:ResolvedCaseCount resolvedCases;
 |};

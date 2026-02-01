@@ -37,7 +37,7 @@ public isolated function getProject(string idToken, string projectId) returns Pr
 # + idToken - ID token for authorization
 # + payload - Payload for searching projects
 # + return - Projects response or error
-public isolated function searchProjects(string idToken, ProjectPayload payload) returns ProjectsResponse|error {
+public isolated function searchProjects(string idToken, ProjectSearchPayload payload) returns ProjectsResponse|error {
     return csEntityClient->/projects/search.post(payload, generateHeaders(idToken));
 }
 

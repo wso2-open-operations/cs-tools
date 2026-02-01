@@ -202,7 +202,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     #
     # + payload - Project search payload
     # + return - Projects list or error response
-    resource function post projects/search(http:RequestContext ctx, entity:ProjectPayload payload)
+    resource function post projects/search(http:RequestContext ctx, entity:ProjectSearchPayload payload)
         returns http:Ok|http:BadRequest|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -453,7 +453,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             averageResponseTime: caseStats.averageResponseTime,
             activeCases: caseStats.activeCount,
             resolvedCases: caseStats.resolvedCount,
-            outstandingIncidents: caseStats.outstandingIncidentsCount
+            outstandingCases: caseStats.outstandingCasesCount
         };
     }
 
