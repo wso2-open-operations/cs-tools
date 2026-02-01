@@ -43,7 +43,10 @@ export default function ProjectCardActions({
           color="secondary"
           fullWidth
           endIcon={<ArrowRight size={16} />}
-          onClick={onViewDashboard}
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewDashboard?.();
+          }}
         >
           View Dashboard
         </Button>

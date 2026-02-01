@@ -44,13 +44,20 @@ describe("ProjectCardActions", () => {
     expect(screen.getByText("View Dashboard")).toBeInTheDocument();
     expect(screen.getByTestId("arrow-right-icon")).toBeInTheDocument();
   });
-  it("should call onViewDashboard when 'View Dashboard' button is clicked", () => {
+  it("should call onViewDashboard and stop propagation when 'View Dashboard' button is clicked", () => {
     const onViewDashboardMock = vi.fn();
-    render(<ProjectCardActions onViewDashboard={onViewDashboardMock} />);
+    const onParentClick = vi.fn();
+
+    render(
+      <div onClick={onParentClick}>
+        <ProjectCardActions onViewDashboard={onViewDashboardMock} />
+      </div>,
+    );
 
     const button = screen.getByText("View Dashboard");
     fireEvent.click(button);
 
     expect(onViewDashboardMock).toHaveBeenCalledTimes(1);
+    expect(onParentClick).not.toHaveBeenCalled();
   });
 });
