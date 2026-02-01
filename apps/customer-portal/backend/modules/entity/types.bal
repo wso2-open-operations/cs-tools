@@ -55,10 +55,10 @@ public type UserResponse record {|
     string id;
     # Email address
     string email;
-    # First name
-    string firstName;
     # Last name
     string lastName;
+    # First name
+    string? firstName;
     # Time zone
     string? timeZone;
     json...;
