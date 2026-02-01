@@ -66,7 +66,7 @@ export default function NoveraChatPage(): JSX.Element {
     if (projectId) {
       navigate(`/${projectId}/support/chat/create-case`);
     } else {
-      navigate(-1);
+      navigate("/");
     }
   };
   const [messages, setMessages] = useState<Message[]>([
@@ -170,7 +170,7 @@ export default function NoveraChatPage(): JSX.Element {
             onSend={handleSendMessage}
             inputValue={inputValue}
             setInputValue={setInputValue}
-            showEscalationBanner={messages.length > 0}
+            showEscalationBanner={messages.length > 4}
             onCreateCase={handleCreateCase}
           />
         </Paper>
