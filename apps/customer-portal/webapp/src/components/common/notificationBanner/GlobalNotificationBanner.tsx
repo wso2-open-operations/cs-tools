@@ -18,12 +18,22 @@ import { NotificationBanner } from "@wso2/oxygen-ui";
 import { useState, useEffect, type JSX } from "react";
 import { notificationBannerConfig } from "@/config/notificationBannerConfig";
 
+interface GlobalNotificationBannerProps {
+  /**
+   * Visibility state of the banner.
+   */
+  visible: boolean;
+}
+
 /**
  * GlobalNotificationBanner component.
  *
- * @returns {JSX.Element} The GlobalNotificationBanner component.
+ * @param {GlobalNotificationBannerProps} props - Component props.
+ * @returns {JSX.Element | null} The GlobalNotificationBanner component.
  */
-export default function GlobalNotificationBanner(): JSX.Element {
+export default function GlobalNotificationBanner({
+  visible,
+}: GlobalNotificationBannerProps): JSX.Element | null {
   /**
    * State for the notification banner dismissal.
    */
@@ -34,14 +44,18 @@ export default function GlobalNotificationBanner(): JSX.Element {
    * This ensures that if the banner is reactivated with new info, it shows up again.
    */
   useEffect(() => {
-    if (notificationBannerConfig.visible) {
+    if (visible) {
       setDismissed(false);
     }
-  }, [notificationBannerConfig.visible]);
+  }, [visible]);
+
+  if (!visible || dismissed) {
+    return null;
+  }
 
   return (
     <NotificationBanner
-      visible={notificationBannerConfig.visible && !dismissed}
+      visible={true}
       severity={notificationBannerConfig.severity}
       title={notificationBannerConfig.title}
       message={notificationBannerConfig.message}
