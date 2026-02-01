@@ -66,13 +66,22 @@ vi.mock("@wso2/oxygen-ui", () => ({
   Button: ({ children }: any) => <button>{children}</button>,
   Card: ({ children, sx }: any) => <div style={sx}>{children}</div>,
   CardContent: ({ children, sx }: any) => <div style={sx}>{children}</div>,
-  StatCard: ({ label, value, icon }: any) => (
-    <div data-testid="oxygen-stat-card">
-      <div data-testid="stat-card-icon">{icon}</div>
-      <span>{label}</span>
-      <div data-testid="stat-card-value">{value}</div>
-    </div>
-  ),
+  StatCard: ({ label, value, icon }: any) => {
+    const ValueSkeleton =
+      value && typeof value === "object" && "Skeleton" in value
+        ? (value as any).Skeleton
+        : null;
+
+    return (
+      <div data-testid="oxygen-stat-card">
+        <div data-testid="stat-card-icon">{icon}</div>
+        <span>{label}</span>
+        <div data-testid="stat-card-value">
+          {ValueSkeleton ? <ValueSkeleton variant="text" /> : value}
+        </div>
+      </div>
+    );
+  },
   Skeleton: ({ children, variant, width, height }: any) => (
     <div
       data-testid="skeleton"
