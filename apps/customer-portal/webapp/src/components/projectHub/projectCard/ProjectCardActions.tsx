@@ -18,12 +18,22 @@ import { Button, Form, Stack } from "@wso2/oxygen-ui";
 import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
+interface ProjectCardActionsProps {
+  /**
+   * Callback function for viewing the dashboard.
+   */
+  onViewDashboard?: () => void;
+}
+
 /**
  * Component to render the action buttons for the Project Card.
  *
+ * @param {ProjectCardActionsProps} props - The component props.
  * @returns {JSX.Element} The rendered actions.
  */
-export default function ProjectCardActions(): JSX.Element {
+export default function ProjectCardActions({
+  onViewDashboard,
+}: ProjectCardActionsProps): JSX.Element {
   return (
     <Form.CardActions sx={{ width: "100%", mt: "auto", pt: 1.5, pb: 2 }}>
       <Stack spacing={2} sx={{ width: "100%" }}>
@@ -33,6 +43,7 @@ export default function ProjectCardActions(): JSX.Element {
           color="secondary"
           fullWidth
           endIcon={<ArrowRight size={16} />}
+          onClick={onViewDashboard}
         >
           View Dashboard
         </Button>
