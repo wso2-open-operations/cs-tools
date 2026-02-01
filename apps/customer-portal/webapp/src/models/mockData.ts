@@ -17,6 +17,26 @@
 import type { ProjectListItem, UserProfile } from "@/models/responses";
 
 /**
+ * Interface for case creation metadata.
+ */
+export interface CaseCreationMetadata {
+  projects: string[];
+  products: string[];
+  deploymentTypes: string[];
+  issueTypes: string[];
+  severityLevels: {
+    id: string;
+    label: string;
+    description: string;
+  }[];
+  conversationSummary: {
+    messagesExchanged: number;
+    troubleshootingAttempts: string;
+    kbArticlesReviewed: string;
+  };
+}
+
+/**
  * Sample projects for the project switcher.
  */
 export const mockProjects: ProjectListItem[] = [
@@ -81,4 +101,49 @@ export const mockUser: UserProfile = {
   email: "John@example.com",
   avatar: "JD",
   role: "Admin",
+};
+
+/**
+ * Mock metadata for case creation.
+ */
+export const mockCaseCreationMetadata: CaseCreationMetadata = {
+  projects: [
+    "Production Environment-Main",
+    "Development Environment",
+    "Staging environment",
+  ],
+  products: [
+    "WSO2 API Manager - v4.2.0",
+    "WSO2 API Manager - v4.1.0",
+    "WSO2 Identity Server - v6.1.0",
+    "WSO2 Identity Server - v6.0.0",
+  ],
+  deploymentTypes: ["Production", "Non-Production", "Development"],
+  issueTypes: [
+    "Total Outage",
+    "Partial Outage",
+    "Performance Degradation",
+    "Question",
+    "Security or Compliance",
+    "Error",
+  ],
+  severityLevels: [
+    {
+      id: "S1",
+      label: "S1 - Critical",
+      description: "Business critical system down",
+    },
+    {
+      id: "S2",
+      label: "S2 - Medium",
+      description: "Important features affected",
+    },
+    { id: "S3", label: "S3 - Low", description: "Minor issues" },
+    { id: "S4", label: "S4 - Minimal", description: "General questions" },
+  ],
+  conversationSummary: {
+    messagesExchanged: 8,
+    troubleshootingAttempts: "2 steps completed",
+    kbArticlesReviewed: "3 articles suggested",
+  },
 };
