@@ -16,9 +16,11 @@
 
 import {
   mockActiveChatsOptions,
+  mockCaseCreationMetadata,
   mockOpenCasesOptions,
   mockStatusOptions,
 } from "@/models/mockData";
+import type { CaseCreationMetadata } from "@/models/mockData";
 
 import type { ProjectSupportStats } from "@/models/responses";
 
@@ -83,4 +85,31 @@ export const getNoveraResponse = (): string => {
     "It seems like a known issue. I'll guide you through the fix.",
   ];
   return responses[Math.floor(Math.random() * responses.length)];
+};
+
+/**
+ * Returns mock case creation metadata.
+ *
+ * @returns {CaseCreationMetadata} Mock case creation metadata.
+ */
+export const getCaseCreationMetadata = (): CaseCreationMetadata => {
+  return mockCaseCreationMetadata;
+};
+
+/**
+ * Returns a generated issue title.
+ *
+ * @returns {string} Generated issue title.
+ */
+export const getGeneratedIssueTitle = (): string => {
+  return "Unstable API Manager Performance in Production";
+};
+
+/**
+ * Returns a generated issue description based on conversation.
+ *
+ * @returns {string} Generated issue description.
+ */
+export const getGeneratedIssueDescription = (): string => {
+  return "The customer is experiencing intermittent latencies in their Production environment. Based on our conversation, we have identified that this happens during peak load and might be related to thread pool exhaustion. They have already checked the basic logs but need deep analysis.";
 };
