@@ -22,6 +22,7 @@ import SubscriptionWidget from "@/components/common/sideNavBar/SubscriptionWidge
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: { children: any }) => <div>{children}</div>,
   Button: ({ children }: { children: any }) => <button>{children}</button>,
+  Paper: ({ children }: { children: any }) => <div>{children}</div>,
   Typography: ({ children }: { children: any }) => <span>{children}</span>,
 }));
 
