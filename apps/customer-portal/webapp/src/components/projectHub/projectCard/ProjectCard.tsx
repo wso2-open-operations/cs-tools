@@ -132,7 +132,7 @@ export default function ProjectCard({
         openCases={resolvedOpenCases}
       />
       {/* project card actions */}
-      <ProjectCardActions />
+      <ProjectCardActions onViewDashboard={handleViewDashboard} />
     </Form.CardButton>
   );
 }
