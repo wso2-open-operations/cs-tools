@@ -684,7 +684,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if isInValidLimitOffset('limit, offset) {
+        if isInvalidLimitOffset('limit, offset) {
             return <http:BadRequest>{
                 body: {
                     message: ERR_LIMIT_OFFSET_INVALID
@@ -752,7 +752,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        if isInValidLimitOffset('limit, offset) {
+        if isInvalidLimitOffset('limit, offset) {
             return <http:BadRequest>{
                 body: {
                     message: ERR_LIMIT_OFFSET_INVALID
