@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import FilterPopover, { type FilterField } from "../FilterPopover";
 
 // Mock Oxygen UI components
@@ -31,7 +31,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
   DialogActions: ({ children }: any) => (
     <div data-testid="dialog-actions">{children}</div>
   ),
-  Grid: ({ children }: any) => <div data-testid="grid">{children}</div>,
+
+  InputLabel: ({ children, id }: any) => <label id={id}>{children}</label>,
   Select: ({ children, value, onChange }: any) => (
     <select
       data-testid="select"
@@ -57,13 +58,16 @@ vi.mock("@wso2/oxygen-ui", () => ({
   FormControl: ({ children }: any) => (
     <div data-testid="form-control">{children}</div>
   ),
-  TextField: ({ value, onChange, placeholder }: any) => (
-    <input
-      data-testid="text-field"
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-    />
+  TextField: ({ value, onChange, placeholder, label }: any) => (
+    <div>
+      <label>{label}</label>
+      <input
+        data-testid="text-field"
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+      />
+    </div>
   ),
 }));
 
@@ -101,6 +105,10 @@ describe("FilterPopover", () => {
   const mockOnClose = vi.fn();
   const mockOnSearch = vi.fn();
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("should render correctly when open", () => {
     render(
       <FilterPopover
@@ -116,7 +124,6 @@ describe("FilterPopover", () => {
     expect(screen.getByText("Advanced Search")).toBeInTheDocument();
     expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Priority")).toBeInTheDocument();
-    // Search appears as label and button
     expect(screen.getAllByText("Search").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByTestId("select")).toHaveLength(2);
     expect(screen.getByTestId("text-field")).toBeInTheDocument();
