@@ -86,4 +86,9 @@ describe("CasesTrendChart", () => {
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
     expect(screen.getByTestId("chart-legend")).toBeInTheDocument();
   });
+
+  it("should not crash and render empty chart when data is undefined", () => {
+    render(<CasesTrendChart data={undefined as any} isLoading={false} />);
+    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
+  });
 });

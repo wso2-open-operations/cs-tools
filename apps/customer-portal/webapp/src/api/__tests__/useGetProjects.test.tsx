@@ -85,4 +85,16 @@ describe("useGetProjects", () => {
     expect(response?.pages[0].offset).toBe(0);
     expect(response?.pages[0].limit).toBe(10);
   });
+
+  it("should use 'all' query key and larger limit when fetchAll is true", async () => {
+    const { result } = renderHook(() => useGetProjects(undefined, true), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const response = result.current.data;
+    // fetchAll sets limit to 100
+    expect(response?.pages[0].limit).toBe(100);
+  });
 });
