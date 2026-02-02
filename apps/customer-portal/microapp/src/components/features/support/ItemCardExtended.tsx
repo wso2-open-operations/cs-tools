@@ -1,7 +1,7 @@
-import { Card, Chip, Divider, Stack, SvgIcon, Typography } from "@mui/material";
-import type { Priority, ServiceCategory, Status } from "./ItemCard";
+import { Box, Card, Chip, Divider, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { Calendar, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
-import { CalendarMonth, ChevronRight } from "@mui/icons-material";
+import type { Priority, ServiceCategory, Status } from "./ItemCard";
 import { PriorityChip, StatusChip } from "./Chip";
 import { TYPE_CONFIG } from "./config";
 
@@ -56,16 +56,16 @@ export type ItemCardExtendedProps =
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
   const { id, title, description, type, status, updated, to } = props;
-  const { icon, color } = TYPE_CONFIG[type];
+  const { icon: Icon, color } = TYPE_CONFIG[type];
 
   return (
-    <Card component={Link} to={to} elevation={0} sx={{ textDecoration: "none" }}>
-      <Stack bgcolor="background.paper" borderRadius={1} p={2} gap={2}>
+    <Card component={Link} to={to} sx={{ textDecoration: "none" }}>
+      <Stack bgcolor="background.paper" p={2} gap={2}>
         <Stack gap={0.8}>
-          <Stack direction="row" justifyContent="space-between" alignItems="" gap={5}>
+          <Stack direction="row" justifyContent="space-between" gap={5}>
             <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
-              <SvgIcon component={icon} sx={(theme) => ({ color: color, fontSize: theme.typography.pxToRem(21) })} />
-              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+              <Icon size={pxToRem(19)} color={color} />
+              <Typography variant="subtitle2" color="text.secondary">
                 {id}
               </Typography>
               {(type === "case" || type === "service") && <PriorityChip size="small" priority={props.priority} />}
@@ -77,7 +77,9 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
             </Stack>
             <Stack direction="row" gap={2}>
               <StatusChip size="small" status={status} />
-              <ChevronRight sx={{ color: "text.tertiary" }} />
+              <Box color="text.secondary">
+                <ChevronRight size={pxToRem(18)} />
+              </Box>
             </Stack>
           </Stack>
 
@@ -85,14 +87,16 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
             <Typography variant="body1" color="text.primary">
               {title}
             </Typography>
-            <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+            <Typography variant="subtitle2" color="text.secondary">
               {description}
             </Typography>
           </Stack>
           {type === "change" && (
             <Stack direction="row" alignItems="center" gap={1}>
-              <CalendarMonth sx={(theme) => ({ fontSize: theme.typography.pxToRem(18), color: "text.secondary" })} />
-              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+              <Box color="text.secondary">
+                <Calendar size={pxToRem(16)} />
+              </Box>
+              <Typography variant="subtitle2" color="text.secondary">
                 Scheduled: {props.scheduled}
               </Typography>
             </Stack>
@@ -104,7 +108,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={5}>
           <Stack direction="row" gap={3}>
             <Stack>
-              <Typography sx={(theme) => ({ fontSize: theme.typography.pxToRem(14) })} color="text.secondary">
+              <Typography variant="subtitle2" color="text.secondary">
                 {(() => {
                   switch (type) {
                     case "case":
@@ -118,7 +122,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                   }
                 })()}
               </Typography>
-              <Typography sx={(theme) => ({ fontSize: theme.typography.pxToRem(14) })}>
+              <Typography variant="body2">
                 {(() => {
                   switch (type) {
                     case "case":
@@ -134,7 +138,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
               </Typography>
             </Stack>
             <Stack>
-              <Typography sx={(theme) => ({ fontSize: theme.typography.pxToRem(14) })} color="text.secondary">
+              <Typography variant="subtitle2" color="text.secondary">
                 {(() => {
                   switch (type) {
                     case "case":
@@ -148,7 +152,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                   }
                 })()}
               </Typography>
-              <Typography sx={(theme) => ({ fontSize: theme.typography.pxToRem(14) })}>
+              <Typography variant="body2">
                 {(() => {
                   switch (type) {
                     case "case":
@@ -164,11 +168,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
               </Typography>
             </Stack>
           </Stack>
-          <Typography
-            fontWeight="regular"
-            color="text.secondary"
-            sx={(theme) => ({ fontSize: theme.typography.pxToRem(14) })}
-          >
+          <Typography variant="subtitle2" color="text.secondary">
             Updated {updated}
           </Typography>
         </Stack>

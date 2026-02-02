@@ -80,7 +80,7 @@ export function ItemCard(props: ItemCardProps) {
             {(type === "case" || type === "service") && <PriorityChip size="small" priority={props.priority} />}
             {type === "change" && <PriorityChip size="small" prefix="Impact" priority={props.impact} />}
           </Stack>
-          <ChevronRight color={theme.palette.text.secondary} />
+          <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary">

@@ -20,7 +20,7 @@ import {
   type FilterSlotBuilderProps,
   type ItemCardProps,
 } from "@components/features/support";
-import { Stack } from "@mui/material";
+import { Stack } from "@wso2/oxygen-ui";
 import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
 import { useLayoutEffect } from "react";
