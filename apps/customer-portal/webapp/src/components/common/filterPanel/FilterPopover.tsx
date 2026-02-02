@@ -131,24 +131,34 @@ const FilterPopover = <T extends Record<string, any>>({
               <Grid size={8}>
                 <FormControl fullWidth size="small">
                   {field.type === "select" ? (
-                    <Select
+                    <Select<string>
                       value={tempFilters[field.id] || ""}
                       displayEmpty
                       onChange={handleSelectChange(field.id)}
                       renderValue={(selected) => {
-                        if ((selected as string).length === 0) {
+                        if (selected.length === 0) {
                           return (
-                            <Typography variant="body2" color="text.disabled">
+                            <Typography variant="caption" color="text.disabled">
                               {field.placeholder || `Select ${field.label}`}
                             </Typography>
                           );
                         }
-                        return selected as string;
+                        const selectedOption = field.options?.find((opt) =>
+                          typeof opt === "string"
+                            ? opt === selected
+                            : opt.value === selected,
+                        );
+                        if (selectedOption) {
+                          return typeof selectedOption === "string"
+                            ? selectedOption
+                            : selectedOption.label;
+                        }
+                        return selected;
                       }}
                     >
                       {/* filter popover select menu item */}
                       <MenuItem value="">
-                        <Typography variant="body2" color="text.disabled">
+                        <Typography variant="caption" color="text.disabled">
                           {field.placeholder || `Select ${field.label}`}
                         </Typography>
                       </MenuItem>
