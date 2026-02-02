@@ -24,4 +24,5 @@ export const ApiQueryKeys = {
   CASE_CREATION_METADATA: "case-creation-metadata",
   CASES_STATS: "cases-stats",
   DASHBOARD_STATS: "dashboard-stats",
+  PROJECT_CASES: "project-cases",
 } as const;
