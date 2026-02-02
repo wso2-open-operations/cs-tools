@@ -18,6 +18,7 @@ import type { JSX } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router";
 import ProjectHub from "@/pages/ProjectHub";
 import ProjectPage from "@/pages/ProjectPage";
+import DashboardPage from "@/pages/DashboardPage";
 import SupportPage from "@/pages/SupportPage";
 import NoveraChatPage from "@/pages/NoveraChatPage";
 import CreateCasePage from "@/pages/CreateCasePage";
@@ -36,10 +37,7 @@ export default function App(): JSX.Element {
           <Route path="/:projectId">
             {/* Dashboard */}
             <Route index element={<Navigate to="dashboard" replace />} />
-            <Route
-              path="dashboard"
-              element={<ProjectPage title="Dashboard" />}
-            />
+            <Route path="dashboard" element={<DashboardPage />} />
             {/* Project Details */}
             <Route
               path="project-details"
