@@ -18,6 +18,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import DashboardPage from "@/pages/DashboardPage";
 import { DASHBOARD_STATS } from "@/constants/dashboardConstants";
+import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
+import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
 
 const mockNavigate = vi.fn();
 
@@ -27,36 +29,48 @@ vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-// Mock useGetDashboardMockStats
-vi.mock("@/api/useGetDashboardMockStats", () => ({
-  useGetDashboardMockStats: () => ({
-    data: {
-      totalCases: {
-        trend: { value: "12%", direction: "up", color: "success" },
-      },
-      openCases: { trend: { value: "5%", direction: "down", color: "error" } },
-      resolvedCases: {
-        trend: { value: "8%", direction: "up", color: "success" },
-      },
-      avgResponseTime: {
-        trend: { value: "0.5h", direction: "down", color: "error" },
-      },
-    },
-    isLoading: false,
+// Mock useLogger
+vi.mock("@/hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   }),
 }));
 
-// Mock useGetProjectCasesStats
-vi.mock("@/api/useGetProjectCasesStats", () => ({
-  useGetProjectCasesStats: () => ({
-    data: {
-      totalCases: 150,
-      openCases: 25,
-      averageResponseTime: 4.5,
-      resolvedCases: { total: 125 },
+const mockMockStats = {
+  data: {
+    totalCases: { trend: { value: "12%", direction: "up", color: "success" } },
+    openCases: { trend: { value: "5%", direction: "down", color: "error" } },
+    resolvedCases: {
+      trend: { value: "8%", direction: "up", color: "success" },
     },
-    isLoading: false,
-  }),
+    avgResponseTime: {
+      trend: { value: "0.5h", direction: "down", color: "error" },
+    },
+  },
+  isLoading: false,
+  isError: false,
+};
+
+const mockCasesStats = {
+  data: {
+    totalCases: 150,
+    openCases: 25,
+    averageResponseTime: 4.5,
+    resolvedCases: { total: 125 },
+  },
+  isLoading: false,
+  isError: false,
+};
+
+vi.mock("@/api/useGetDashboardMockStats", () => ({
+  useGetDashboardMockStats: vi.fn(() => mockMockStats),
+}));
+
+vi.mock("@/api/useGetProjectCasesStats", () => ({
+  useGetProjectCasesStats: vi.fn(() => mockCasesStats),
 }));
 
 // Mock StatCard
@@ -121,5 +135,37 @@ describe("DashboardPage", () => {
     fireEvent.click(button);
 
     expect(mockNavigate).toHaveBeenCalledWith("/project-1/support/chat");
+  });
+
+  it("should render error message when statistics fail to load", () => {
+    vi.mocked(useGetDashboardMockStats).mockReturnValueOnce({
+      ...mockMockStats,
+      isError: true,
+      data: undefined,
+    } as any);
+
+    render(<DashboardPage />);
+
+    expect(
+      screen.getByText(
+        "Error loading dashboard statistics. Please try again later.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("should render error message when cases statistics fail to load", () => {
+    vi.mocked(useGetProjectCasesStats).mockReturnValueOnce({
+      ...mockCasesStats,
+      isError: true,
+      data: undefined,
+    } as any);
+
+    render(<DashboardPage />);
+
+    expect(
+      screen.getByText(
+        "Error loading dashboard statistics. Please try again later.",
+      ),
+    ).toBeInTheDocument();
   });
 });
