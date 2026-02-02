@@ -1,6 +1,6 @@
-import { AccessTime, AttachmentOutlined, CheckCircle, CircleOutlined, RadioButtonChecked } from "@mui/icons-material";
+import { Avatar, Box, Card, Stack, Typography, useTheme, pxToRem } from "@wso2/oxygen-ui";
+import { Circle, CircleCheck, CircleDot, Clock4, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } from "@mui/lab";
-import { Avatar, Box, Card, Stack, Typography } from "@mui/material";
 
 interface TimelineEntryBaseProps {
   timestamp?: string;
@@ -32,6 +32,7 @@ export interface StepTimelineEntryProps extends TimelineEntryBaseProps {
 export type TimelineEntryProps = ActivityTimelineEntryProps | ProgressTimelineEntryProps | StepTimelineEntryProps;
 
 export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEntryProps) {
+  const theme = useTheme();
   const activity = props.variant === "activity";
   const progress = props.variant === "progress";
   const step = props.variant === "step";
@@ -39,10 +40,23 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
   const Indicator = () => {
     switch (props.variant) {
       case "progress":
-        if (props.status === "completed") return <CheckCircle sx={{ color: "primary.main", fontSize: 22 }} />;
+        if (props.status === "completed")
+          return (
+            <Box color="primary.contrastText" sx={{ fill: "primary.main" }}>
+              <CircleCheck size={pxToRem(24)} fill={theme.palette.primary.main} />
+            </Box>
+          );
         if (props.status === "active")
-          return <RadioButtonChecked sx={{ color: "primary.main", fontSize: 22, fontWeight: "bold" }} />;
-        return <CircleOutlined sx={{ color: "text.disabled", fontSize: 22 }} />;
+          return (
+            <Box color="primary.contrastText" sx={{ fill: "primary.main" }}>
+              <CircleDot size={pxToRem(24)} fill={theme.palette.primary.main} />
+            </Box>
+          );
+        return (
+          <Box color="text.disabled">
+            <Circle size={pxToRem(20)} />
+          </Box>
+        );
 
       case "step":
         return (
@@ -63,7 +77,11 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
         );
 
       default:
-        return <CircleOutlined sx={{ color: "text.tertiary", fontSize: 20 }} />;
+        return (
+          <Box color="text.disabled">
+            <Circle size={pxToRem(20)} />
+          </Box>
+        );
     }
   };
 
@@ -101,7 +119,9 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
             </Stack>
             <Stack direction="row" alignItems="center" gap={1}>
               {progress && timestamp && (
-                <AccessTime sx={(theme) => ({ fontSize: theme.typography.pxToRem(18), color: "text.tertiary" })} />
+                <Box color="text.secondary">
+                  <Clock4 size={pxToRem(14)} />
+                </Box>
               )}
               <Typography variant="subtitle2" fontWeight="regular" color="text.disabled" flexShrink={0}>
                 {timestamp}
@@ -117,11 +137,13 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
 
 function Comment({ children, attachment }: { children: string; attachment?: string }) {
   return (
-    <Card variant="outlined" sx={{ p: 1.5, bgcolor: "action.hover", border: "none" }}>
+    <Card sx={{ p: 1.5, bgcolor: "action.hover" }}>
       <Typography variant="body2">{children}</Typography>
       {attachment && (
         <Stack direction="row" alignItems="center" pt={1} gap={1}>
-          <AttachmentOutlined sx={(theme) => ({ fontSize: theme.typography.pxToRem(20), color: "text.secondary" })} />
+          <Box color="text.secondary">
+            <Paperclip size={pxToRem(16)} />
+          </Box>
           <Typography variant="subtitle1" color="text.secondary">
             {attachment}
           </Typography>

@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { PeopleAlt, Person } from "@mui/icons-material";
-import { Grid, Stack } from "@mui/material";
+import { useLayoutEffect, useState } from "react";
+import { User, Users } from "@wso2/oxygen-ui-icons-react";
+import { Grid, Stack } from "@wso2/oxygen-ui";
 import { InfoField, OverlineSlot, StickyCommentBar, TimelineEntry } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { useLayoutEffect, useState } from "react";
 import { SectionCard } from "@components/shared";
 import { Timeline } from "@components/ui";
 import { useLayout } from "@context/layout";
@@ -68,10 +68,10 @@ export default function CaseDetailPage() {
               />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Assignee" value="Support Team" icon={PeopleAlt} />
+              <InfoField label="Assignee" value="Support Team" icon={Users} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Reporter" value="John Smith" icon={Person} />
+              <InfoField label="Reporter" value="John Smith" icon={User} />
             </Grid>
             <Grid size={6}>
               <InfoField label="Category" value="Technical Issue" />
