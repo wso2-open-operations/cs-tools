@@ -22,7 +22,11 @@ import {
 } from "@/models/mockData";
 import type { CaseCreationMetadata } from "@/models/mockData";
 
-import type { ProjectSupportStats } from "@/models/responses";
+import type {
+  ProjectCasesStats,
+  ProjectSupportStats,
+  DashboardMockStats,
+} from "@/models/responses";
 
 /**
  * Returns a random status from the mock status options.
@@ -72,6 +76,43 @@ export const getMockProjectSupportStats = (): ProjectSupportStats => {
 };
 
 /**
+ * Returns mock case statistics for a project.
+ *
+ * @returns {ProjectCasesStats} Mock project case statistics.
+ */
+export const getMockProjectCasesStats = (): ProjectCasesStats => {
+  const workInProgress = Math.floor(Math.random() * 10);
+  const waitingOnClient = Math.floor(Math.random() * 5);
+  const waitingOnWso2 = Math.floor(Math.random() * 5);
+
+  const medium = Math.floor(Math.random() * 8);
+  const high = Math.floor(Math.random() * 4);
+  const critical = Math.floor(Math.random() * 2);
+
+  return {
+    activeCases: {
+      total: workInProgress + waitingOnClient + waitingOnWso2,
+      waitingOnClient,
+      waitingOnWso2,
+      workInProgress,
+    },
+    averageResponseTime: Number((Math.random() * 24).toFixed(1)),
+    openCases: workInProgress + waitingOnClient + waitingOnWso2,
+    outstandingIncidents: {
+      critical,
+      high,
+      medium,
+      total: medium + high + critical,
+    },
+    resolvedCases: {
+      currentMonth: Math.floor(Math.random() * 10) + 5,
+      total: Math.floor(Math.random() * 50) + 20,
+    },
+    totalCases: Math.floor(Math.random() * 100) + 50,
+  };
+};
+
+/**
  * Returns a random AI response from Novera.
  *
  * @returns {string} A random AI response.
@@ -112,4 +153,30 @@ export const getGeneratedIssueTitle = (): string => {
  */
 export const getGeneratedIssueDescription = (): string => {
   return "The customer is experiencing intermittent latencies in their Production environment. Based on our conversation, we have identified that this happens during peak load and might be related to thread pool exhaustion. They have already checked the basic logs but need deep analysis.";
+};
+
+/**
+ * Returns mock dashboard statistics.
+ *
+ * @returns {DashboardMockStats} Mock dashboard statistics.
+ */
+export const getMockDashboardStats = (): DashboardMockStats => {
+  return {
+    totalCases: {
+      value: 156,
+      trend: { value: "12%", direction: "up", color: "success" },
+    },
+    openCases: {
+      value: 42,
+      trend: { value: "5%", direction: "down", color: "error" },
+    },
+    resolvedCases: {
+      value: 114,
+      trend: { value: "8%", direction: "up", color: "success" },
+    },
+    avgResponseTime: {
+      value: "4.5h",
+      trend: { value: "0.5h", direction: "down", color: "error" },
+    },
+  };
 };
