@@ -106,19 +106,22 @@ describe("ActiveCasesChart", () => {
     expect(screen.getByText(mockData.total.toString())).toBeInTheDocument();
   });
 
-  it("should handle missing data values gracefully (fallback to 0)", () => {
+  it("should render all chart segments even with missing data values", () => {
     const incompleteData = {
       workInProgress: 10,
       waitingOnClient: 5,
-      // waitingOnWso2 missing
       total: 15,
     } as any;
 
     render(<ActiveCasesChart data={incompleteData} isLoading={false} />);
 
-    // Verify that all segments are still rendered (even the one with 0 value)
+    // Verify that all segments are still rendered (value will be undefined)
     const segments = screen.getAllByTestId("pie-segment");
     // We expect 3 segments because ACTIVE_CASES_CHART_DATA has 3 items
     expect(segments).toHaveLength(3);
+
+    // Verify that the missing value was defaulted to 0
+    const values = segments.map((s) => s.getAttribute("data-value"));
+    expect(values).toContain("0");
   });
 });
