@@ -47,9 +47,6 @@ export default function NoveraChatPage(): JSX.Element {
     }
   };
 
-  /**
-   * Handle navigation to create case review page.
-   */
   const handleCreateCase = () => {
     if (projectId) {
       navigate(`/${projectId}/support/chat/create-case`);

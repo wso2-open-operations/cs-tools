@@ -31,52 +31,23 @@ import { ArrowRight, MessageSquare } from "@wso2/oxygen-ui-icons-react";
  * @returns {JSX.Element} The rendered Dashboard page.
  */
 export default function DashboardPage(): JSX.Element {
-  /**
-   * Navigation hook.
-   */
   const navigate = useNavigate();
-
-  /**
-   * Logger hook.
-   */
   const logger = useLogger();
-
-  /**
-   * Get project ID from URL.
-   */
   const { projectId } = useParams<{ projectId: string }>();
-
-  /**
-   * Get dashboard mock stats.
-   */
   const {
     data: mockStats,
     isLoading: isMockLoading,
     isError: isErrorMock,
   } = useGetDashboardMockStats(projectId || "");
-
-  /**
-   * Get project cases stats.
-   */
   const {
     data: casesStats,
     isLoading: isCasesLoading,
     isError: isErrorCases,
   } = useGetProjectCasesStats(projectId || "");
 
-  /**
-   * Loading state.
-   */
   const isLoading = isMockLoading || isCasesLoading;
-
-  /**
-   * Error state.
-   */
   const isError = isErrorMock || isErrorCases;
 
-  /**
-   * Use effect to log errors when they occur.
-   */
   useEffect(() => {
     if (isErrorMock) {
       logger.error(`Failed to load mock stats for project ID: ${projectId}`);
@@ -86,18 +57,12 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [isErrorMock, isErrorCases, logger, projectId]);
 
-  /**
-   * Use effect to log success when data is loaded.
-   */
   useEffect(() => {
     if (mockStats && casesStats) {
       logger.debug(`Dashboard data loaded for project ID: ${projectId}`);
     }
   }, [mockStats, casesStats, logger, projectId]);
 
-  /**
-   * Handle support click.
-   */
   const handleSupportClick = () => {
     if (projectId) {
       navigate(`/${projectId}/support/chat`);

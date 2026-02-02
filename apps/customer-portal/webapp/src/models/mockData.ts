@@ -16,9 +16,7 @@
 
 import type { ProjectListItem, UserProfile } from "@/models/responses";
 
-/**
- * Interface for case creation metadata.
- */
+// Interface for case creation metadata.
 export interface CaseCreationMetadata {
   projects: string[];
   products: string[];
@@ -36,9 +34,7 @@ export interface CaseCreationMetadata {
   };
 }
 
-/**
- * Sample projects for the project switcher.
- */
+// Sample projects for the project switcher.
 export const mockProjects: ProjectListItem[] = [
   {
     id: "1890347890",
@@ -74,28 +70,20 @@ export const mockProjects: ProjectListItem[] = [
   },
 ];
 
-/**
- * Mock status options for projects.
- */
+// Mock status options for projects.
 export const mockStatusOptions: string[] = [
   "All Good",
   "Need Attention",
   "Critical Issues",
 ];
 
-/**
- * Mock open cases counts for projects.
- */
+// Mock open cases counts for projects.
 export const mockOpenCasesOptions: number[] = [0, 5, 12, 24, 48, 72];
 
-/**
- * Mock active chats counts for projects.
- */
+// Mock active chats counts for projects.
 export const mockActiveChatsOptions: number[] = [0, 2, 5, 10, 15, 20];
 
-/**
- * Sample user for the user menu.
- */
+// Sample user for the user menu.
 export const mockUser: UserProfile = {
   name: "John Doe",
   email: "John@example.com",
@@ -103,9 +91,7 @@ export const mockUser: UserProfile = {
   role: "Admin",
 };
 
-/**
- * Mock metadata for case creation.
- */
+// Mock metadata for case creation.
 export const mockCaseCreationMetadata: CaseCreationMetadata = {
   projects: [
     "Production Environment-Main",
