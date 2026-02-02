@@ -29,6 +29,14 @@ vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
 
+vi.mock("@/constants/apiConstants", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    API_MOCK_DELAY: 0,
+  };
+});
+
 describe("useGetProjectCasesStats", () => {
   let queryClient: QueryClient;
 
