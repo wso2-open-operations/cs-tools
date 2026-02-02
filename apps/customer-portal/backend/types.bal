@@ -218,3 +218,30 @@ public type CommentsResponse record {|
     int totalRecords;
     *entity:Pagination;
 |};
+
+# Attachment data.
+public type Attachment record {|
+    # ID of the attachment
+    string id;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # File size in bytes
+    string sizeBytes;
+    # User who created the attachment
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Download URL
+    string downloadUrl;
+|};
+
+# Attachments response.
+public type AttachmentsResponse record {|
+    # List of attachments
+    Attachment[] attachments;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};
