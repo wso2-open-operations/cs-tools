@@ -146,8 +146,8 @@ public type ProjectCaseStats record {|
     decimal averageResponseTime;
     # Active case count breakdown
     entity:ActiveCaseCount activeCases;
-    # Outstanding incidents count breakdown
-    entity:OutstandingIncidentsCount outstandingIncidents;
+    # Outstanding cases count breakdown
+    entity:OutstandingCasesCount outstandingCases;
     # Resolved case count breakdown
     entity:ResolvedCaseCount resolvedCases;
 |};
@@ -172,6 +172,8 @@ public type ProjectStats record {|
     int activeChats;
     # Deployments count
     int deployments;
+    # SLA status
+    string slaStatus;
 |};
 
 # Recent activity details.
@@ -214,6 +216,33 @@ public type Comment record {|
 public type CommentsResponse record {|
     # List of comments
     Comment[] comments;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};
+
+# Attachment data.
+public type Attachment record {|
+    # ID of the attachment
+    string id;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # File size in bytes
+    string sizeBytes;
+    # User who created the attachment
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Download URL
+    string downloadUrl;
+|};
+
+# Attachments response.
+public type AttachmentsResponse record {|
+    # List of attachments
+    Attachment[] attachments;
     # Total records count
     int totalRecords;
     *entity:Pagination;

@@ -123,7 +123,7 @@ public isolated function logForbiddenProjectAccess(string id, string uuid) =>
     log:printWarn(string `Access to project ID: ${id} is forbidden for user: ${uuid}`);
 
 # Log forbidden case access attempt.
-# 
+#
 # + id - Case ID
 # + uuid - User UUID
 public isolated function logForbiddenCaseAccess(string id, string uuid) =>
@@ -146,6 +146,38 @@ public isolated function mapCommentsResponse(entity:CommentsResponse response) r
 
     return {
         comments,
+        totalRecords: response.totalRecords,
+        'limit: response.'limit,
+        offset: response.offset
+    };
+}
+
+# Validate limit and offset values.
+#
+# + limit - Limit value
+# + offset - Offset value
+# + return - True if invalid, else false
+public function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =>
+    ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0);
+
+# Map attachments response to map to desired structure.
+# 
+# + response - Attachments response from the entity service
+# + return - Mapped attachments response
+public isolated function mapAttachmentsResponse(entity:AttachmentsResponse response) returns AttachmentsResponse {
+    Attachment[] attachments = from entity:Attachment attachment in response.attachments
+        select {
+            id: attachment.id,
+            name: attachment.name,
+            'type: attachment.'type,
+            sizeBytes: attachment.sizeBytes,
+            createdBy: attachment.createdBy,
+            createdOn: attachment.createdOn,
+            downloadUrl: attachment.downloadUrl
+        };
+
+    return {
+        attachments,
         totalRecords: response.totalRecords,
         'limit: response.'limit,
         offset: response.offset
