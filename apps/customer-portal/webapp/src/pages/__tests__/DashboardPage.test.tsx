@@ -83,9 +83,9 @@ vi.mock("@/api/useGetProjectCasesStats", () => ({
   useGetProjectCasesStats: vi.fn(() => mockCasesStats),
 }));
 
-// Mock IncidentCharts
-vi.mock("@/components/dashboard/charts/IncidentCharts", () => ({
-  default: () => <div data-testid="incident-charts" />,
+// Mock ChartLayout
+vi.mock("@/components/dashboard/charts/ChartLayout", () => ({
+  default: () => <div data-testid="chart-layout" />,
 }));
 
 // Mock StatCard
@@ -119,6 +119,14 @@ vi.mock("@wso2/oxygen-ui", () => ({
   LinearProgress: ({ color }: any) => (
     <div data-testid="linear-progress" data-color={color}></div>
   ),
+  colors: {
+    common: { white: "#ffffff" },
+    blue: { 500: "#3B82F6" },
+    green: { 500: "#22C55E" },
+    orange: { 500: "#F97316" },
+    red: { 500: "#EF4444" },
+    yellow: { 600: "#EAB308" },
+  },
 }));
 
 // Mock icons
@@ -141,7 +149,7 @@ describe("DashboardPage", () => {
     expect(screen.getAllByTestId("stat-card")).toHaveLength(
       DASHBOARD_STATS.length,
     );
-    expect(screen.getByTestId("incident-charts")).toBeInTheDocument();
+    expect(screen.getByTestId("chart-layout")).toBeInTheDocument();
     expect(screen.getByText("Get Support")).toBeInTheDocument();
   });
 
