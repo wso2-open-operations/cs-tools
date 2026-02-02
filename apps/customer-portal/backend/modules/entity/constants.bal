@@ -16,4 +16,4 @@
 
 # Default pagination values.
 const DEFAULT_OFFSET = 0;
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 20;

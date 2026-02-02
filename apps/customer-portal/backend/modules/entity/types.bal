@@ -55,10 +55,10 @@ public type UserResponse record {|
     string id;
     # Email address
     string email;
-    # First name
-    string firstName;
     # Last name
     string lastName;
+    # First name
+    string? firstName;
     # Time zone
     string? timeZone;
     json...;
@@ -79,8 +79,8 @@ public type Project record {|
     json...;
 |};
 
-# Request body for searching projects.
-public type ProjectPayload record {|
+# Payload for searching projects.
+public type ProjectSearchPayload record {|
     # Pagination details
     Pagination pagination = {};
 |};
@@ -95,20 +95,18 @@ public type ProjectsResponse record {|
     json...;
 |};
 
-# Project details information.
-public type ProjectDetailsResponse record {|
+# Project information.
+public type ProjectResponse record {|
     *Project;
     # Project type
     string 'type;
-    # SLA status
-    string slaStatus;
     # Subscription information
-    ProjectSubscription? subscription;
+    Subscription? subscription;
     json...;
 |};
 
 # Project subscription information.
-public type ProjectSubscription record {|
+public type Subscription record {|
     # Subscription start date
     string? startDate;
     # Subscription end date
@@ -237,11 +235,11 @@ public type SortBy record {|
 
 # Case metadata response.
 public type CaseMetadataResponse record {|
-    # List of available case states
+    # List of available case states (eg: Open, Closed, etc.)
     ChoiceListItem[] states;
-    # List of available case severities
+    # List of available case severities (eg: S0, S1, etc.)
     ChoiceListItem[] severities;
-    # List of available case types
+    # List of available case types (eg: Incident, Service Request, etc.)
     ReferenceTableItem[] caseTypes;
     json...;
 |};
@@ -254,6 +252,8 @@ public type ProjectStatsResponse record {|
     decimal billableHours;
     # System health status
     string systemHealth;
+    # SLA status
+    string slaStatus;
     json...;
 |};
 
@@ -270,8 +270,8 @@ public type ActiveCaseCount record {|
     json...;
 |};
 
-# Outstanding incidents count breakdown.
-public type OutstandingIncidentsCount record {|
+# Outstanding cases count breakdown.
+public type OutstandingCasesCount record {|
     # Medium severity count
     int medium;
     # High severity count
@@ -302,8 +302,8 @@ public type ProjectCaseStatsResponse record {|
     decimal averageResponseTime;
     # Active case count breakdown
     ActiveCaseCount activeCount;
-    # Outstanding incidents count breakdown
-    OutstandingIncidentsCount outstandingIncidentsCount;
+    # Outstanding cases count breakdown
+    OutstandingCasesCount outstandingCasesCount;
     # Resolved case count breakdown
     ResolvedCaseCount resolvedCount;
     json...;
@@ -332,7 +332,7 @@ public type ProjectDeploymentStatsResponse record {|
 public type Comment record {|
     # ID
     string id;
-    # Reference ID associated with the comment
+    # Reference ID associated with the comment(query ID, incident ID, service request ID, etc.)
     string referenceId;
     # Content of the comment
     string content;
@@ -357,10 +357,40 @@ public type CommentsResponse record {|
     json...;
 |};
 
-# Request payload for searching comments.
-public type CommentRequestPayload record {|
-    # Reference ID to filter comments
+# Reference search payload to search comments, attachments, etc.
+public type ReferenceSearchPayload record {|
+    # Reference ID to filter related resources(query ID, incident ID, service request ID, etc.)
     string referenceId;
     # Pagination details
     Pagination pagination?;
+|};
+
+# Attachment data.
+public type Attachment record {|
+    # ID of the attachment
+    string id;
+    # Reference ID associated with the attachment(query ID, incident ID, service request ID, etc.)
+    string referenceId;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # File size in bytes
+    string sizeBytes;
+    # User who created the attachment
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Download URL
+    string downloadUrl;
+    json...;
+|};
+
+# Attachments response.
+public type AttachmentsResponse record {|
+    # List of attachments
+    Attachment[] attachments;
+    # Total records count
+    int totalRecords;
+    *Pagination;
 |};
