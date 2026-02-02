@@ -97,3 +97,76 @@ export interface ProjectSupportStats {
   resolvedChats: number;
 }
 
+/**
+ * Project cases statistics.
+ */
+export interface ProjectCasesStats {
+  /**
+   * Total number of cases.
+   */
+  totalCases: number;
+  /**
+   * Number of open cases.
+   */
+  openCases: number;
+  /**
+   * Average response time in hours.
+   */
+  averageResponseTime: number;
+  /**
+   * Active cases breakdown.
+   */
+  activeCases: {
+    workInProgress: number;
+    waitingOnClient: number;
+    waitingOnWso2: number;
+    total: number;
+  };
+  /**
+   * Outstanding incidents by severity.
+   */
+  outstandingIncidents: {
+    medium: number;
+    high: number;
+    critical: number;
+    total: number;
+  };
+  /**
+   * Resolved cases info.
+   */
+  resolvedCases: {
+    total: number;
+    currentMonth: number;
+  };
+}
+
+/**
+ * Trend information for a statistic - Mock.
+ */
+export interface TrendData {
+  value: string;
+  direction: "up" | "down";
+  color: "success" | "error" | "info" | "warning";
+}
+
+/**
+ * Dashboard mock statistics.
+ */
+export interface DashboardMockStats {
+  totalCases: {
+    value: number;
+    trend: TrendData;
+  };
+  openCases: {
+    value: number;
+    trend: TrendData;
+  };
+  resolvedCases: {
+    value: number;
+    trend: TrendData;
+  };
+  avgResponseTime: {
+    value: string;
+    trend?: TrendData;
+  };
+}
