@@ -21,14 +21,16 @@
 isolated function generateHeaders(string token) returns map<string|string[]> => {"x-user-id-token": token};
 
 # Get comments for a given entity ID with pagination.
-# 
+#
 # + idToken - ID token for authorization
 # + id - Entity ID to filter comments
 # + limit - Number of comments to retrieve
 # + offset - Offset for pagination
 # + return - Comments response or error
-public isolated function getComments(string idToken, string id, int? 'limit, int? offset) returns CommentsResponse|error {
-    CommentRequestPayload payload = {
+public isolated function getComments(string idToken, string id, int? 'limit, int? offset)
+    returns CommentsResponse|error {
+
+    ReferenceSearchPayload payload = {
         referenceId: id,
         pagination: {
             'limit: 'limit ?: DEFAULT_LIMIT,
@@ -36,4 +38,24 @@ public isolated function getComments(string idToken, string id, int? 'limit, int
         }
     };
     return searchComments(idToken, payload);
+}
+
+# Get attachments for a given entity ID with pagination.
+#
+# + idToken - ID token for authorization
+# + id - Entity ID to filter attachments
+# + limit - Number of attachments to retrieve
+# + offset - Offset for pagination
+# + return - Attachments response or error
+public isolated function getAttachments(string idToken, string id, int? 'limit, int? offset)
+    returns AttachmentsResponse|error {
+
+    ReferenceSearchPayload payload = {
+        referenceId: id,
+        pagination: {
+            'limit: 'limit ?: DEFAULT_LIMIT,
+            offset: offset ?: DEFAULT_OFFSET
+        }
+    };
+    return searchAttachments(idToken, payload);
 }
