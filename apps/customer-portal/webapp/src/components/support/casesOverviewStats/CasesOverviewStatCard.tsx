@@ -43,12 +43,12 @@ export default function CasesOverviewStatCard({
           mb: 3,
         }}
       >
-        {SUPPORT_STAT_CONFIGS.map((stat, index) => {
+        {SUPPORT_STAT_CONFIGS.map((stat) => {
           const SecondaryIcon = stat.secondaryIcon;
 
           return (
             <Grid
-              key={index}
+              key={stat.key}
               size={{
                 xs: 12,
                 sm: 6,

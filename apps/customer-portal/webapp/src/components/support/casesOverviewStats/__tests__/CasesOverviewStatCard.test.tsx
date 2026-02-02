@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CasesOverviewStatCard from "@/components/support/casesOverviewStats/CasesOverviewStatCard";
+import { SUPPORT_STAT_CONFIGS } from "@/constants/supportConstants";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -65,7 +66,10 @@ describe("CasesOverviewStatCard", () => {
     render(<CasesOverviewStatCard isLoading={true} stats={undefined} />);
 
     const skeletons = screen.getAllByTestId("skeleton");
-    expect(skeletons).toHaveLength(4);
+    expect(skeletons).toHaveLength(SUPPORT_STAT_CONFIGS.length);
+
+    // Verify all configured icons are present
+
     expect(screen.getByTestId("icon-file-text")).toBeInTheDocument();
     expect(screen.getByTestId("icon-message")).toBeInTheDocument();
     expect(screen.getByTestId("icon-trending-up")).toBeInTheDocument();
@@ -89,9 +93,10 @@ describe("CasesOverviewStatCard", () => {
 
     expect(screen.getByTestId("icon-trending-up")).toBeInTheDocument();
     expect(screen.getByTestId("icon-bot")).toBeInTheDocument();
-    expect(screen.getByText("Ongoing Cases")).toBeInTheDocument();
-    expect(screen.getByText("Chat Sessions")).toBeInTheDocument();
-    expect(screen.getByText("Resolved via Chat")).toBeInTheDocument();
-    expect(screen.getByText("Active Chats")).toBeInTheDocument();
+
+    // Verify all labels from config are rendered
+    SUPPORT_STAT_CONFIGS.forEach((config) => {
+      expect(screen.getByText(config.label)).toBeInTheDocument();
+    });
   });
 });
