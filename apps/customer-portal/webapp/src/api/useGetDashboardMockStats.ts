@@ -38,9 +38,7 @@ export function useGetDashboardMockStats(
         `Fetching dashboard mock stats for project ID: ${projectId}`,
       );
 
-      /**
-       * Mock behavior: simulate network latency.
-       */
+      // Mock behavior: simulate network latency.
       await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const stats: DashboardMockStats = getMockDashboardStats();
