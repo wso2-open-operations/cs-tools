@@ -18,13 +18,7 @@ import { Box, Typography } from "@wso2/oxygen-ui";
 import { useParams } from "react-router";
 import type { JSX } from "react";
 
-/**
- * ProjectPageProps interface.
- */
 interface ProjectPageProps {
-  /**
-   * The title of the project page.
-   */
   title: string;
 }
 
@@ -35,9 +29,6 @@ interface ProjectPageProps {
  * @returns {JSX.Element} The ProjectPage component.
  */
 export default function ProjectPage({ title }: ProjectPageProps): JSX.Element {
-  /**
-   * Get the project ID from the URL.
-   */
   const { projectId } = useParams<{ projectId: string }>();
 
   return (

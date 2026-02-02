@@ -14,26 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Pagination metadata for search requests.
- */
+// Pagination metadata for search requests.
 export interface PaginationRequest {
-  /**
-   * The number of records to skip.
-   */
   offset?: number;
-  /**
-   * The number of records to return.
-   */
   limit?: number;
 }
 
-/**
- * Request body for searching projects.
- */
+// Request body for searching projects.
 export interface SearchProjectsRequest {
-  /**
-   * Pagination information.
-   */
   pagination?: PaginationRequest;
 }

@@ -27,45 +27,16 @@ import {
   getMockStatus,
 } from "@/models/mockFunctions";
 
-/**
- * Props for the ProjectCard component.
- */
+// Props for the ProjectCard component.
 export interface ProjectCardProps {
-  /**
-   * Number of active chats in the project.
-   */
   activeChats?: number;
-  /**
-   * Date the project was created.
-   */
   date: string;
-  /**
-   * Unique identifier for the project.
-   */
   id: string;
-  /**
-   * Callback function for viewing the dashboard.
-   */
   onViewDashboard?: () => void;
-  /**
-   * Number of open support cases in the project.
-   */
   openCases?: number;
-  /**
-   * Key identifier for the project.
-   */
   projectKey: string;
-  /**
-   * Current status of the project.
-   */
   status?: string;
-  /**
-   * Brief description or subtitle of the project.
-   */
   subtitle: string;
-  /**
-   * Name or title of the project.
-   */
   title: string;
 }
 
@@ -86,21 +57,13 @@ export default function ProjectCard({
   date,
   onViewDashboard,
 }: ProjectCardProps): JSX.Element {
-  /**
-   * Hook to navigate between routes.
-   */
+  // Hook to navigate between routes.
   const navigate = useNavigate();
 
-  /**
-   * Handles the click event for the Project Card to view the dashboard.
-   */
   const handleViewDashboard = () => {
     if (onViewDashboard) {
       onViewDashboard();
     } else {
-      /**
-       * Navigate to the project dashboard page.
-       */
       navigate(`/${id}/dashboard`);
     }
   };

@@ -23,21 +23,10 @@ import {
 import { type JSX } from "react";
 import { formatProjectDate } from "@/utils/projectCard";
 
-/**
- * Props for the ProjectCardStats component.
- */
+
 interface ProjectCardStatsProps {
-  /**
-   * The number of active chats.
-   */
   activeChats: number;
-  /**
-   * The date string to display.
-   */
   date: string;
-  /**
-   * The number of open cases.
-   */
   openCases: number;
 }
 

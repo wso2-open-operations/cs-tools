@@ -36,11 +36,7 @@ export function useGetProjectCasesStats(
     queryFn: async (): Promise<ProjectCasesStats> => {
       logger.debug(`Fetching case stats for project ID: ${id}`);
 
-      /**
-       * Mock behavior: simulate network latency for the in-memory mock data.
-       * This is intended only for development/demo use and should be removed or
-       * replaced when wiring this hook to the real backend API.
-       */
+      // Mock behavior: simulate network latency for the in-memory mock data.
       await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const stats: ProjectCasesStats = getMockProjectCasesStats();

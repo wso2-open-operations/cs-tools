@@ -24,25 +24,11 @@ import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import type { ProjectListItem } from "@/models/responses";
 
-/**
- * Props for the ProjectSwitcher component.
- */
+// Props for the ProjectSwitcher component.
 interface ProjectSwitcherProps {
-  /**
-   * List of projects.
-   */
   projects: ProjectListItem[];
-  /**
-   * Currently selected project.
-   */
   selectedProject?: ProjectListItem;
-  /**
-   * Callback function to handle project change.
-   */
   onProjectChange: (projectId: string) => void;
-  /**
-   * If true, the component is in a loading state.
-   */
   isLoading?: boolean;
 }
 

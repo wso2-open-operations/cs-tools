@@ -14,9 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Log levels for the application.
- */
+// Log levels for the application.
 export const LogLevel = {
   DEBUG: 0,
   INFO: 1,
@@ -26,9 +24,7 @@ export const LogLevel = {
 
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
-/**
- * Interface for the Logger service.
- */
+// Interface for the Logger service.
 export interface ILogger {
   debug(message: string, ...args: any[]): void;
   info(message: string, ...args: any[]): void;
@@ -36,10 +32,7 @@ export interface ILogger {
   error(message: string, ...args: any[]): void;
 }
 
-/**
- * Logger service that handles application-wide logging.
- * It respects the log level set in environment variables and provides formatted output.
- */
+// Logger service that handles application-wide logging.
 export class Logger implements ILogger {
   private level: LogLevel;
   private prefix: string;
@@ -49,17 +42,13 @@ export class Logger implements ILogger {
     this.prefix = prefix;
   }
 
-  /**
-   * Formats the log message with a timestamp, level, and prefix.
-   */
+  // Formats the log message with a timestamp, level, and prefix.
   private formatMessage(level: string, message: string): string {
     const timestamp = new Date().toISOString();
     return `[${timestamp}] [${level}] [${this.prefix}] ${message}`;
   }
 
-  /**
-   * Core logging method that checks the current log level.
-   */
+  // Core logging method that checks the current log level.
   private log(
     level: LogLevel,
     levelName: string,
@@ -104,9 +93,7 @@ export class Logger implements ILogger {
     this.log(LogLevel.ERROR, "ERROR", message, ...args);
   }
 
-  /**
-   * Static method to get the log level from string.
-   */
+  // Static method to get the log level from string.
   static parseLogLevel(levelString?: string): LogLevel {
     switch (levelString?.toUpperCase()) {
       case "DEBUG":

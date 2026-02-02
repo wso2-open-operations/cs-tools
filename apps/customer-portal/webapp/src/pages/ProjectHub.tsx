@@ -28,14 +28,7 @@ import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
  * @returns {JSX.Element} The ProjectHub component.
  */
 export default function ProjectHub(): JSX.Element {
-  /**
-   * Logger hook.
-   */
   const logger = useLogger();
-
-  /**
-   * Fetch projects from the API.
-   */
   const {
     data: projectsResponse,
     fetchNextPage,
@@ -45,44 +38,29 @@ export default function ProjectHub(): JSX.Element {
     isError,
   } = useGetProjects({}, true);
 
-  /**
-   * Drain all pages if fetch-all flag is set.
-   */
   useEffect(() => {
     if (hasNextPage && !isFetchingNextPage && !isError) {
       fetchNextPage();
     }
   }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
 
-  /**
-   * Get projects from the response.
-   */
   const projects = useMemo(
     () => projectsResponse?.pages.flatMap((page) => page.projects) || [],
     [projectsResponse?.pages],
   );
 
-  /**
-   * Use effect to log errors when they occur.
-   */
   useEffect(() => {
     if (isError) {
       logger.error("Failed to load projects in ProjectHub");
     }
   }, [isError, logger]);
 
-  /**
-   * Use effect to log projects loaded.
-   */
   useEffect(() => {
     if (projects.length > 0) {
       logger.debug(`${projects.length} projects loaded in ProjectHub`);
     }
   }, [projects.length, logger]);
 
-  /**
-   * Render content based on the state.
-   */
   const renderContent = () => {
     if (isLoading) {
       return (
@@ -122,9 +100,6 @@ export default function ProjectHub(): JSX.Element {
       );
     }
 
-    /**
-     * Log error if projects are not loaded.
-     */
     if (isError) {
       return (
         <Typography variant="h6" color="error">
@@ -133,9 +108,6 @@ export default function ProjectHub(): JSX.Element {
       );
     }
 
-    /**
-     * Log error if projects are not loaded.
-     */
     if (!projects || projects.length === 0) {
       return (
         <Typography variant="h6" color="text.secondary">

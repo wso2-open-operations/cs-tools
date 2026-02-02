@@ -18,9 +18,6 @@ import { Box } from "@wso2/oxygen-ui";
 import { type JSX, type RefObject } from "react";
 import ChatMessageBubble from "@/components/support/noveraAIAssistant/noveraChatPage/ChatMessageBubble";
 
-/**
- * Interface for a chat message.
- */
 interface Message {
   id: string;
   text: string;
@@ -28,16 +25,18 @@ interface Message {
   timestamp: Date;
 }
 
-/**
- * Interface for ChatMessageList component.
- */
 interface ChatMessageListProps {
   messages: Message[];
   messagesEndRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
- * ChatMessageList component for NoveraChatPage.
+ * Renders the list of chat messages.
+ *
+ * Displays messages in chronological order with appropriate styling
+ * for user and bot messages.
+ *
+ * @returns The ChatMessageList JSX element.
  */
 export default function ChatMessageList({
   messages,

@@ -18,17 +18,9 @@ import { Box, Chip, Form } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { getStatusColor } from "@/utils/projectCard";
 
-/**
- * Props for the ProjectCardBadges component.
- */
+
 interface ProjectCardBadgesProps {
-  /**
-   * The project key to display.
-   */
   projectKey: string;
-  /**
-   * The status of the project.
-   */
   status: string;
 }
 

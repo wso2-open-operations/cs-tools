@@ -21,25 +21,11 @@ import { useLocation, useParams, Link as NavigateLink } from "react-router";
 import SubscriptionWidget from "@/components/common/sideNavBar/SubscriptionWidget";
 import { APP_SHELL_NAV_ITEMS } from "@/constants/appLayoutConstants";
 
-/**
- * Props for the SideBar component.
- */
+// Props for the SideBar component.
 interface SideBarProps {
-  /**
-   * Whether the sidebar is collapsed.
-   */
   collapsed: boolean;
-  /**
-   * List of expanded menu IDs.
-   */
   expandedMenus?: Record<string, boolean>;
-  /**
-   * Callback to handle menu item selection.
-   */
   onSelect?: (id: string) => void;
-  /**
-   * Callback to handle menu expansion toggle.
-   */
   onToggleExpand?: (id: string) => void;
 }
 
@@ -49,18 +35,10 @@ export default function SideBar({
   onSelect,
   onToggleExpand,
 }: SideBarProps): JSX.Element {
-  /**
-   * Get the current location.
-   */
   const location = useLocation();
-  /**
-   * Get the project ID from the URL parameters.
-   */
   const { projectId } = useParams<{ projectId?: string }>();
 
-  /**
-   * Get the active item from the location pathname.
-   */
+  // Get the active item from the location pathname.
   const pathSegments: string[] = location.pathname.split("/").filter(Boolean);
   const projectIdIndex: number = projectId
     ? pathSegments.indexOf(projectId)

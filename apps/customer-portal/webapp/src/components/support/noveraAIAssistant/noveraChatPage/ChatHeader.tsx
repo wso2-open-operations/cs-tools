@@ -23,7 +23,11 @@ interface ChatHeaderProps {
 }
 
 /**
- * ChatHeader component for NoveraChatPage.
+ * Renders the header section for the Novera Chat page.
+ *
+ * Includes navigation controls such as the back action.
+ *
+ * @returns The ChatHeader JSX element.
  */
 export default function ChatHeader({ onBack }: ChatHeaderProps): JSX.Element {
   return (

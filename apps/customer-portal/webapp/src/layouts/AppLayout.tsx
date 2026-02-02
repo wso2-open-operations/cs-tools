@@ -29,21 +29,12 @@ import SideBar from "@/components/common/sideNavBar/SideBar";
  * @returns {JSX.Element} The AppLayout component.
  */
 export default function AppLayout(): JSX.Element {
-  /**
-   * Get the current location.
-   */
   const location = useLocation();
 
-  /**
-   * Initialize the app shell.
-   */
   const { state: shellState, actions: shellActions } = useAppShell({
     initialCollapsed: false,
   });
 
-  /**
-   * Check if current path is the project hub.
-   */
   const isProjectHub = location.pathname === "/";
 
   return (

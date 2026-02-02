@@ -53,6 +53,12 @@ const mockMockStats = {
     avgResponseTime: {
       trend: { value: "0.5h", direction: "down", color: "error" },
     },
+    casesTrend: {
+      "Type A": 10,
+      "Type B": 20,
+      "Type C": 30,
+      "Type D": 40,
+    },
   },
   isLoading: false,
   isError: false,
@@ -75,6 +81,11 @@ vi.mock("@/api/useGetDashboardMockStats", () => ({
 
 vi.mock("@/api/useGetProjectCasesStats", () => ({
   useGetProjectCasesStats: vi.fn(() => mockCasesStats),
+}));
+
+// Mock IncidentCharts
+vi.mock("@/components/dashboard/charts/IncidentCharts", () => ({
+  default: () => <div data-testid="incident-charts" />,
 }));
 
 // Mock StatCard
@@ -130,6 +141,7 @@ describe("DashboardPage", () => {
     expect(screen.getAllByTestId("stat-card")).toHaveLength(
       DASHBOARD_STATS.length,
     );
+    expect(screen.getByTestId("incident-charts")).toBeInTheDocument();
     expect(screen.getByText("Get Support")).toBeInTheDocument();
   });
 

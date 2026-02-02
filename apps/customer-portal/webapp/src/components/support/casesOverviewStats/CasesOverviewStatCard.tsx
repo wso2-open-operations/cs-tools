@@ -19,17 +19,8 @@ import { type JSX } from "react";
 import { SUPPORT_STAT_CONFIGS } from "@/constants/supportConstants";
 import type { ProjectSupportStats } from "@/models/responses";
 
-/**
- * Props for the CasesOverviewStatCard component.
- */
 export interface CasesOverviewStatCardProps {
-  /**
-   * Is the data loading?
-   */
   isLoading: boolean;
-  /**
-   * The support statistics to display.
-   */
   stats: ProjectSupportStats | undefined;
 }
 

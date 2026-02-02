@@ -22,9 +22,6 @@ import ChatInput from "@/components/support/noveraAIAssistant/noveraChatPage/Cha
 import ChatMessageList from "@/components/support/noveraAIAssistant/noveraChatPage/ChatMessageList";
 import { getNoveraResponse } from "@/models/mockFunctions";
 
-/**
- * Interface for a chat message.
- */
 interface Message {
   id: string;
   text: string;
@@ -38,19 +35,10 @@ interface Message {
  * @returns {JSX.Element} The rendered NoveraChatPage.
  */
 export default function NoveraChatPage(): JSX.Element {
-  /**
-   * Navigation Hook.
-   */
   const navigate = useNavigate();
 
-  /**
-   * Project ID Hook.
-   */
   const { projectId } = useParams<{ projectId: string }>();
 
-  /**
-   * Handle back navigation.
-   */
   const handleBack = () => {
     if (projectId) {
       navigate(`/${projectId}/support`);
@@ -81,16 +69,10 @@ export default function NoveraChatPage(): JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingTimeoutsRef = useRef<number[]>([]);
 
-  /**
-   * Scroll to the bottom of the message list whenever messages change.
-   */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /**
-   * Cleanup pending timeouts on unmount.
-   */
   useEffect(() => {
     return () => {
       pendingTimeoutsRef.current.forEach((id) => {
@@ -100,9 +82,6 @@ export default function NoveraChatPage(): JSX.Element {
     };
   }, []);
 
-  /**
-   * Handle sending a new message.
-   */
   const handleSendMessage = () => {
     if (!inputValue.trim()) return;
 

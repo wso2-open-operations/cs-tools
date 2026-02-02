@@ -27,9 +27,6 @@ import {
 import { Pencil, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-/**
- * Basic information section's interface
- */
 interface BasicInformationSectionProps {
   project: string;
   setProject: (value: string) => void;
@@ -42,7 +39,12 @@ interface BasicInformationSectionProps {
 }
 
 /**
- * Basic Information section for case creation.
+ * Renders the Basic Information section used during case creation.
+ *
+ * This section allows users to select project, product, and deployment
+ * details and displays related metadata.
+ *
+ * @returns The Basic Information section JSX element.
  */
 export const BasicInformationSection = ({
   project,

@@ -19,9 +19,6 @@ import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
 interface ProjectCardActionsProps {
-  /**
-   * Callback function for viewing the dashboard.
-   */
   onViewDashboard?: () => void;
 }
 

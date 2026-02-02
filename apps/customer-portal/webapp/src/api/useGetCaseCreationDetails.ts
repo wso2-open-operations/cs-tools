@@ -36,9 +36,7 @@ export function useGetCaseCreationDetails(): UseQueryResult<
     queryFn: async (): Promise<CaseCreationMetadata> => {
       logger.debug("Fetching case creation metadata");
 
-      /**
-       * Mock behavior: simulate network latency for the in-memory mock data.
-       */
+      // Mock behavior: simulate network latency for the in-memory mock data.
       await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const metadata: CaseCreationMetadata = getCaseCreationMetadata();
@@ -47,6 +45,6 @@ export function useGetCaseCreationDetails(): UseQueryResult<
 
       return metadata;
     },
-    staleTime: 60 * 60 * 1000, // Metadata is fairly static, 1 hour stale time
+    staleTime: 60 * 60 * 1000,
   });
 }

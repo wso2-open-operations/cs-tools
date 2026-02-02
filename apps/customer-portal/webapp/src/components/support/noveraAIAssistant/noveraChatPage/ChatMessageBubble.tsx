@@ -18,9 +18,6 @@ import { Box, Paper, Typography } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
-/**
- * Interface for a chat message.
- */
 interface Message {
   id: string;
   text: string;
@@ -28,15 +25,17 @@ interface Message {
   timestamp: Date;
 }
 
-/**
- * Interface for ChatMessageBubble component.
- */
 interface ChatMessageBubbleProps {
   message: Message;
 }
 
 /**
- * ChatMessageBubble component for NoveraChatPage.
+ * Renders a single chat message bubble.
+ *
+ * Supports both user and bot messages with appropriate styling
+ * and avatar display.
+ *
+ * @returns The ChatMessageBubble JSX element.
  */
 export default function ChatMessageBubble({
   message,

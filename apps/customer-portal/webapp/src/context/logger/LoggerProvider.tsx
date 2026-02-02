@@ -20,9 +20,6 @@ import { useMemo, type PropsWithChildren, type ReactElement } from "react";
 import { Logger, type ILogger } from "@/utils/logger";
 import LoggerContext from "@/context/logger/LoggerContext";
 
-/**
- * Props for the LoggerProvider.
- */
 interface LoggerProviderProps {
   logger?: ILogger;
   config?: {

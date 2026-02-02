@@ -43,27 +43,11 @@ import {
  * @returns {JSX.Element} The rendered CreateCasePage.
  */
 export default function CreateCasePage(): JSX.Element {
-  /**
-   * Navigation hook to navigate to different pages.
-   */
   const navigate = useNavigate();
-  /**
-   * useParams hook to get the project ID from the URL.
-   */
   const { projectId } = useParams<{ projectId: string }>();
-  /**
-   * Logger hook to log messages.
-   */
   const logger = useLogger();
-
-  /**
-   * useGetCaseCreationDetails hook to get the case creation details.
-   */
   const { data: metadata, isLoading, isError } = useGetCaseCreationDetails();
 
-  /**
-   * State for form fields.
-   */
   const [project, setProject] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -72,9 +56,6 @@ export default function CreateCasePage(): JSX.Element {
   const [deployment, setDeployment] = useState("");
   const [severity, setSeverity] = useState("");
 
-  /**
-   * Populate initial values when metadata is loaded.
-   */
   useEffect(() => {
     if (metadata) {
       setProject(metadata.projects?.[0] || "");
@@ -87,18 +68,12 @@ export default function CreateCasePage(): JSX.Element {
     }
   }, [metadata]);
 
-  /**
-   * Use effect to log errors when they occur.
-   */
   useEffect(() => {
     if (isError) {
       logger.error("Failed to load case creation details in CreateCasePage");
     }
   }, [isError, logger]);
 
-  /**
-   * Handle back button click.
-   */
   const handleBack = () => {
     if (projectId) {
       navigate(`/${projectId}/support/chat`);
@@ -107,16 +82,10 @@ export default function CreateCasePage(): JSX.Element {
     }
   };
 
-  /**
-   * Handle form submission.
-   */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
   };
 
-  /**
-   * Render the main content.
-   */
   const renderContent = () => {
     if (isError) {
       return (

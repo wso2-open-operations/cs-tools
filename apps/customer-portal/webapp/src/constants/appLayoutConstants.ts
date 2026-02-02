@@ -27,31 +27,14 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { ComponentType } from "react";
 
-/**
- * Interface for app shell navigation items.
- */
 interface AppShellNavItem {
-  /**
-   * The ID of the navigation item.
-   */
   id: string;
-  /**
-   * The label of the navigation item.
-   */
   label: string;
-  /**
-   * The path of the navigation item.
-   */
   path: string;
-  /**
-   * The icon of the navigation item.
-   */
   icon: ComponentType;
 }
 
-/**
- * Navigation items for the app shell.
- */
+// Navigation items for the app shell.
 export const APP_SHELL_NAV_ITEMS: AppShellNavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "dashboard", icon: Home },
   { id: "support", label: "Support", path: "support", icon: Headset },
@@ -89,22 +72,14 @@ export const APP_SHELL_NAV_ITEMS: AppShellNavItem[] = [
   },
 ];
 
-/**
- * URL for privacy policy.
- */
+// URL for privacy policy.
 export const PRIVACY_POLICY_URL: string = "https://wso2.com/privacy-policy/";
 
-/**
- * URL for terms of service.
- */
+// URL for terms of service.
 export const TERMS_OF_SERVICE_URL: string = "https://wso2.com/terms-of-use/";
 
-/**
- * Company name.
- */
+// Company name.
 export const COMPANY_NAME: string = "WSO2 LLC";
 
-/**
- * URL for join our community.
- */
+// URL for join our community.
 export const JOIN_COMMUNITY_URL: string = "https://wso2.com/community";

@@ -28,7 +28,12 @@ interface ChatInputProps {
 }
 
 /**
- * ChatInput component for NoveraChatPage.
+ * Renders the input area for the Novera Chat page.
+ *
+ * Handles message input, sending messages, and optionally displays
+ * an escalation banner for creating support cases.
+ *
+ * @returns The ChatInput JSX element.
  */
 export default function ChatInput({
   inputValue,

@@ -22,6 +22,7 @@ import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
 import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
 import { DASHBOARD_STATS } from "@/constants/dashboardConstants";
 import { StatCard } from "@/components/dashboard/stats/StatCard";
+import ChartLayout from "@/components/dashboard/charts/ChartLayout";
 import { ArrowRight, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 
 /**
@@ -187,6 +188,29 @@ export default function DashboardPage(): JSX.Element {
             );
           })}
         </Grid>
+      )}
+      {/* Charts row - TODO - Need to display error componenet if error occured when loading data without displaying fall back values */}
+      {!isError && (
+        <ChartLayout
+          outstandingIncidents={
+            casesStats?.outstandingIncidents || {
+              medium: 0,
+              high: 0,
+              critical: 0,
+              total: 0,
+            }
+          }
+          activeCases={
+            casesStats?.activeCases || {
+              workInProgress: 0,
+              waitingOnClient: 0,
+              waitingOnWso2: 0,
+              total: 0,
+            }
+          }
+          casesTrend={mockStats?.casesTrend || []}
+          isLoading={isLoading}
+        />
       )}
     </Box>
   );

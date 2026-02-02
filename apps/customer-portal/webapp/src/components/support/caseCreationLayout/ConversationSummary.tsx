@@ -25,9 +25,6 @@ import {
 import { Bot, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-/**
- * Interface for conversation summary component.
- */
 interface ConversationSummaryProps {
   metadata?: any;
   isLoading: boolean;

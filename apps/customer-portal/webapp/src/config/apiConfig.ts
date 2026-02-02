@@ -14,9 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Base URL for the API service.
- */
+// Base URL for the API service.
 export const BACKEND_BASE_URL = import.meta.env
   .CUSTOMER_PORTAL_BACKEND_BASE_URL;
 
@@ -24,16 +22,12 @@ if (!BACKEND_BASE_URL) {
   throw new Error("Missing required env variables: baseUrl");
 }
 
-/**
- * Interface for the API configuration.
- */
+// Interface for the API configuration.
 interface ApiConfig {
   backendUrl: string;
 }
 
-/**
- * Configuration for the API service.
- */
+// Configuration for the API service.
 export const apiConfig: ApiConfig = {
   backendUrl: BACKEND_BASE_URL,
 };

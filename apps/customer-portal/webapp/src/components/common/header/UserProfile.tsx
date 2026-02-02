@@ -26,14 +26,10 @@ import { useLogger } from "@/hooks/useLogger";
  * @returns {JSX.Element} The User profile component.
  */
 export default function UserProfile(): JSX.Element {
-  /**
-   * Navigation hook.
-   */
+  // Navigation hook.
   const navigate = useNavigate();
 
-  /**
-   * Logger hook.
-   */
+  // Logger hook.
   const logger = useLogger();
 
   return (

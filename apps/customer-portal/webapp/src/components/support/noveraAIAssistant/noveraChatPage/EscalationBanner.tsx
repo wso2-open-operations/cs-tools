@@ -18,16 +18,18 @@ import { Box, Button, colors, Paper, Typography } from "@wso2/oxygen-ui";
 import { CircleAlert } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
-/**
- * Interface for EscalationBanner component.
- */
 interface EscalationBannerProps {
   visible: boolean;
   onCreateCase: () => void;
 }
 
 /**
- * EscalationBanner component for NoveraChatPage.
+ * Renders an escalation banner for creating support cases.
+ *
+ * Displays a warning message and a button to create a support case
+ * with the conversation details.
+ *
+ * @returns The EscalationBanner JSX element or null if not visible.
  */
 export default function EscalationBanner({
   visible,

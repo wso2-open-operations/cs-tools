@@ -18,9 +18,6 @@ import { Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-/**
- * Interface for the Case Creation Header component.
- */
 interface CaseCreationHeaderProps {
   onBack: () => void;
 }

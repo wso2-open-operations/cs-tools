@@ -30,9 +30,6 @@ import {
 import { Pencil, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-/**
- * Interface for case details section componenet.
- */
 interface CaseDetailsSectionProps {
   title: string;
   setTitle: (value: string) => void;
@@ -47,7 +44,12 @@ interface CaseDetailsSectionProps {
 }
 
 /**
- * Case Details section for case creation.
+ * Renders the Case Details section for case creation.
+ *
+ * This section captures the case title, description, issue type,
+ * severity, and related metadata.
+ *
+ * @returns The Case Details section JSX element.
  */
 export const CaseDetailsSection = ({
   title,

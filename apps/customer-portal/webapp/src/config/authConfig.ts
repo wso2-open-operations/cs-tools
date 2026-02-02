@@ -16,9 +16,7 @@
 
 import { type BaseURLAuthClientConfig } from "@asgardeo/auth-react";
 
-/**
- * Configuration for the Auth service.
- */
+// Configuration for the Auth service.
 const authBaseUrl = import.meta.env.CUSTOMER_PORTAL_AUTH_BASE_URL;
 const authClientId = import.meta.env.CUSTOMER_PORTAL_AUTH_CLIENT_ID;
 const signInRedirectURL = import.meta.env

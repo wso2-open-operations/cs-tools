@@ -17,17 +17,9 @@
 import { Form, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 
-/**
- * Props for the ProjectCardInfo component.
- */
+
 interface ProjectCardInfoProps {
-  /**
-   * The title of the project.
-   */
   title: string;
-  /**
-   * The subtitle/description of the project.
-   */
   subtitle: string;
 }
 

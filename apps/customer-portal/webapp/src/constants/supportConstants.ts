@@ -25,35 +25,16 @@ import {
 import { type ComponentType } from "react";
 import type { ProjectSupportStats } from "@/models/responses";
 
-/**
- * Interface for support statistics card configuration.
- */
+// Interface for support statistics card configuration.
 export interface SupportStatConfig {
-  /**
-   * Color for the icon.
-   */
   iconColor: "primary" | "secondary" | "success" | "error" | "info" | "warning";
-  /**
-   * Icon component to display.
-   */
   icon: ComponentType;
-  /**
-   * The key in the stats response.
-   */
   key: keyof ProjectSupportStats;
-  /**
-   * Label for the statistic.
-   */
   label: string;
-  /**
-   * Optional secondary icon component to display in the top right corner.
-   */
   secondaryIcon?: ComponentType;
 }
 
-/**
- * Configuration for the support statistics cards.
- */
+// Configuration for the support statistics cards.
 export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
   {
     icon: FileText,

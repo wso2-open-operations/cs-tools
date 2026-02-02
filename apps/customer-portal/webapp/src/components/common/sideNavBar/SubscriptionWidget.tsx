@@ -18,9 +18,7 @@ import { Box, Button, Paper, Typography } from "@wso2/oxygen-ui";
 import { Crown } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-/**
- * Subscription widget component props interface.
- */
+// Props for the SubscriptionWidget component.
 interface SubscriptionWidgetProps {
   collapsed?: boolean;
 }

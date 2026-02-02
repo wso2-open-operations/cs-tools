@@ -22,9 +22,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type DashboardMockStats } from "@/models/responses";
 
-/**
- * Valid color types for the stat card icons.
- */
+// Valid color types for the stat card icons.
 export type StatCardColor =
   | "primary"
   | "secondary"
@@ -33,35 +31,16 @@ export type StatCardColor =
   | "info"
   | "success";
 
-/**
- * Configuration for a single statistic card.
- */
+// Configuration for a single statistic card.
 export interface StatConfigItem {
-  /**
-   * Unique identifier matching the keys in DashboardMockStats.
-   */
-  id: keyof DashboardMockStats;
-  /**
-   * Display label for the statistic.
-   */
+  id: Exclude<keyof DashboardMockStats, "casesTrend">;
   label: string;
-  /**
-   * Icon component to display.
-   */
   icon: any;
-  /**
-   * Color theme for the icon.
-   */
   iconColor: StatCardColor;
-  /**
-   * Text to display in the tooltip.
-   */
   tooltipText: string;
 }
 
-/**
- * Dashboard statistics list.
- */
+// Dashboard statistics list.
 export const DASHBOARD_STATS: StatConfigItem[] = [
   {
     id: "totalCases",
@@ -90,5 +69,81 @@ export const DASHBOARD_STATS: StatConfigItem[] = [
     icon: Activity,
     iconColor: "info",
     tooltipText: "Average time taken to first respond to a case",
+  },
+];
+
+// Configuration for Active Cases Chart data mapping.
+export const ACTIVE_CASES_CHART_DATA = [
+  {
+    name: "Work in progress",
+    key: "workInProgress",
+    color: "#3B82F6",
+  },
+  {
+    name: "Waiting on client",
+    key: "waitingOnClient",
+    color: "#22C55E",
+  },
+  {
+    name: "Waiting on WSO2",
+    key: "waitingOnWso2",
+    color: "#EAB308",
+  },
+] as const;
+
+// Configuration for Outstanding Incidents Chart data mapping.
+export const OUTSTANDING_INCIDENTS_CHART_DATA = [
+  {
+    name: "Medium",
+    key: "medium",
+    color: "#3B82F6",
+  },
+  {
+    name: "High",
+    key: "high",
+    color: "#F97316",
+  },
+  {
+    name: "Critical",
+    key: "critical",
+    color: "#EF4444",
+  },
+] as const;
+
+/**
+ * Type definition for Cases Trend Chart data item.
+ */
+export interface CasesTrendChartDataItem {
+  name: string;
+  key: string;
+  color: string;
+  radius?: [number, number, number, number];
+  border?: boolean;
+}
+
+// Configuration for Cases Trend Chart data mapping.
+export const CASES_TREND_CHART_DATA: CasesTrendChartDataItem[] = [
+  {
+    name: "Type A",
+    key: "TypeA",
+    color: "#3B82F6",
+    radius: [0, 0, 4, 4],
+  },
+  {
+    name: "Type B",
+    key: "TypeB",
+    color: "#22C55E",
+  },
+  {
+    name: "Type C",
+    key: "TypeC",
+    color: "#F97316",
+  },
+  {
+    name: "Type D",
+    key: "TypeD",
+    color: "#EAB308",
+    radius: [4, 4, 0, 0],
+    border: true,
   },
 ];

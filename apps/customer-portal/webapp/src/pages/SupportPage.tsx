@@ -28,37 +28,22 @@ import { useLogger } from "@/hooks/useLogger";
  * @returns {JSX.Element} The rendered Support page.
  */
 export default function SupportPage(): JSX.Element {
-  /**
-   * Logger hook.
-   */
   const logger = useLogger();
 
-  /**
-   * Get the project ID from the URL.
-   */
   const { projectId } = useParams<{ projectId: string }>();
 
-  /**
-   * Fetch support statistics for the project.
-   */
   const {
     data: stats,
     isLoading,
     isError,
   } = useGetProjectSupportStats(projectId || "");
 
-  /**
-   * Use effect to log errors when they occur.
-   */
   useEffect(() => {
     if (isError) {
       logger.error(`Failed to load support stats for project: ${projectId}`);
     }
   }, [isError, projectId, logger]);
 
-  /**
-   * Use effect to log when stats are loaded.
-   */
   useEffect(() => {
     if (stats) {
       logger.debug(`Support stats loaded for project: ${projectId}`);
