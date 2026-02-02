@@ -17,7 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { getMockProjectSupportStats } from "@/models/mockFunctions";
 import { useLogger } from "@/hooks/useLogger";
-import { ApiQueryKeys } from "@/constants/apiQueryKeys";
+import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
 import type { ProjectSupportStats } from "@/models/responses";
 
 /**
@@ -41,7 +41,7 @@ export function useGetProjectSupportStats(
        * This is intended only for development/demo use and should be removed or
        * replaced when wiring this hook to the real backend API.
        */
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const stats: ProjectSupportStats = getMockProjectSupportStats();
 
