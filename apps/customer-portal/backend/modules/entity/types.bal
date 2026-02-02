@@ -332,7 +332,7 @@ public type ProjectDeploymentStatsResponse record {|
 public type Comment record {|
     # ID
     string id;
-    # Reference ID associated with the comment(caseId, serviceRequestId, etc.)
+    # Reference ID associated with the comment(query ID, incident ID, service request ID, etc.)
     string referenceId;
     # Content of the comment
     string content;
