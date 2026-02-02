@@ -44,7 +44,11 @@ export default defineConfig({
     css: true,
     server: {
       deps: {
-        inline: ["@wso2/oxygen-ui", "@wso2/oxygen-ui-icons-react"],
+        inline: [
+          "@wso2/oxygen-ui",
+          "@wso2/oxygen-ui-icons-react",
+          "@wso2/oxygen-ui-charts-react",
+        ],
       },
     },
   },
