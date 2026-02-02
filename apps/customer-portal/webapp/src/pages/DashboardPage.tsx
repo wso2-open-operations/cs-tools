@@ -18,7 +18,7 @@ import { Box, Button, Grid, LinearProgress, Typography } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { useEffect, type JSX } from "react";
 import { useLogger } from "@/hooks/useLogger";
-import { useLoader } from "@/context/LoaderContext";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
 import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
 import { DASHBOARD_STATS } from "@/constants/dashboardConstants";

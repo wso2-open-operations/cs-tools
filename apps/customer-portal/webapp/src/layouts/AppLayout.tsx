@@ -17,7 +17,7 @@
 import { notificationBannerConfig } from "@/config/notificationBannerConfig";
 import { AppShell, Box, useAppShell, LinearProgress } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import { useLoader } from "@/context/LoaderContext";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { useLocation, Outlet } from "react-router";
 import GlobalNotificationBanner from "@/components/common/notificationBanner/GlobalNotificationBanner";
 import Footer from "@/components/common/footer/Footer";

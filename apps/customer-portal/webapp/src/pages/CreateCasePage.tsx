@@ -14,19 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Button,
-  Divider,
-  Grid,
-  Typography,
-} from "@wso2/oxygen-ui";
+import { Box, Button, Divider, Grid, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useState, useEffect, useRef, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useGetCaseCreationDetails } from "@/api/useGetCaseCreationDetails";
 import { useLogger } from "@/hooks/useLogger";
-import { useLoader } from "@/context/LoaderContext";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { AIInfoCard } from "@/components/support/caseCreationLayout/AIInfoCard";
 import { BasicInformationSection } from "@/components/support/caseCreationLayout/BasicInformationSection";
 import { CaseCreationHeader } from "@/components/support/caseCreationLayout/CaseCreationHeader";
