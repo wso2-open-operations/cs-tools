@@ -178,3 +178,30 @@ export const getSubscriptionColor = (
 
   return "default";
 };
+
+/**
+ * Calculates the percentage of time elapsed between two dates.
+ *
+ * @param {string} start - The start date string.
+ * @param {string} end - The end date string.
+ * @returns {number} The progress percentage (0-100).
+ */
+export const calculateProgress = (start: string, end: string): number => {
+  if (!start || !end) {
+    return 0;
+  }
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return 0;
+  }
+
+  const today = new Date();
+  const total = endDate.getTime() - startDate.getTime();
+  const elapsed = today.getTime() - startDate.getTime();
+
+  if (total <= 0) return 100;
+  return Math.min(100, Math.max(0, (elapsed / total) * 100));
+};
