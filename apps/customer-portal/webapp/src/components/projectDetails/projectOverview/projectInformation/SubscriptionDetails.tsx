@@ -25,6 +25,7 @@ import type { JSX } from "react";
 import {
   getSubscriptionStatus,
   getSubscriptionColor,
+  calculateProgress,
 } from "@/utils/projectStats";
 
 interface SubscriptionDetailsProps {
@@ -40,11 +41,21 @@ const SubscriptionDetails = ({
 }: SubscriptionDetailsProps): JSX.Element => {
   const subscriptionStatus = getSubscriptionStatus(endDate);
   const subscriptionColor = getSubscriptionColor(subscriptionStatus);
+  const progress =
+    subscriptionStatus === "Expired"
+      ? 100
+      : calculateProgress(startDate, endDate);
 
   return (
     <Box sx={{ pt: 3, borderTop: 1, borderColor: "divider" }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
-        <Typography variant="body2">Subscription Period</Typography>
+        <Typography
+          variant="body2"
+          fontWeight="medium"
+          sx={{ display: "block", mb: 0.5 }}
+        >
+          Subscription Period
+        </Typography>
         {isLoading ? (
           <Skeleton variant="rounded" width={70} height={24} />
         ) : (
@@ -63,7 +74,7 @@ const SubscriptionDetails = ({
         ) : (
           <LinearProgress
             variant="determinate"
-            value={subscriptionStatus === "Expired" ? 100 : 75}
+            value={progress}
             color={
               subscriptionColor === "default" ? "primary" : subscriptionColor
             }
