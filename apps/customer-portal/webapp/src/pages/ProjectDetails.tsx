@@ -60,11 +60,10 @@ export default function ProjectDetails(): JSX.Element {
   const isLoading = isProjectLoading || isStatsLoading;
 
   useEffect(() => {
-    if (isLoading) {
-      showLoader();
-    } else {
-      hideLoader();
+    if (!isLoading) {
+      return;
     }
+    showLoader();
     return () => hideLoader();
   }, [isLoading, showLoader, hideLoader]);
 

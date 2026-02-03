@@ -41,7 +41,9 @@ vi.mock("@/utils/projectStats", () => ({
   getSubscriptionColor: vi.fn((status) =>
     status === "Expired" ? "error" : "success",
   ),
-  calculateProgress: vi.fn(() => 50),
+  calculateProgress: vi.fn((_start, end) =>
+    end === "expired-date" ? 100 : 50,
+  ),
 }));
 
 describe("SubscriptionDetails", () => {
