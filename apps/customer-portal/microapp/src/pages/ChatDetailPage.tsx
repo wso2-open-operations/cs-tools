@@ -1,10 +1,10 @@
 import { useLayoutEffect, useState } from "react";
+import { Box, Card, Grid, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { BookOpen, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "@components/features/support";
-import { Card, Grid, Stack, Typography } from "@mui/material";
 import { InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import { ConversationFeedback, MessageBubble, type ChatMessage } from "@components/features/chat";
 import { useLayout } from "@context/layout";
-import { Article, ChatBubble } from "@mui/icons-material";
 
 export default function ChatDetailPage() {
   const layout = useLayout();
@@ -96,13 +96,17 @@ export default function ChatDetailPage() {
       <StatusChip status="resolved" size="small" />
       <Stack direction="row" gap={3}>
         <Stack direction="row" alignItems="center" gap={1}>
-          <ChatBubble sx={(theme) => ({ fontSize: theme.typography.pxToRem(20), color: "text.secondary" })} />
+          <Box color="text.secondary">
+            <MessageSquare size={pxToRem(16)} />
+          </Box>
           <Typography variant="subtitle1" color="text.secondary">
             8 messages
           </Typography>
         </Stack>
         <Stack direction="row" alignItems="center" gap={1}>
-          <Article sx={(theme) => ({ fontSize: theme.typography.pxToRem(20), color: "text.secondary" })} />
+          <Box color="text.secondary">
+            <BookOpen size={pxToRem(16)} />
+          </Box>
           <Typography variant="subtitle1" color="text.secondary">
             3 KB articles
           </Typography>
@@ -145,13 +149,13 @@ export default function ChatDetailPage() {
             </Grid>
           </Grid>
         </Card>
-        <Card component={Stack} p={1.5} gap={1.5} elevation={0}>
+        <Card component={Stack} p={1.5} gap={1.5}>
           <Typography variant="h5" fontWeight="medium">
             Conversation
           </Typography>
           <Stack gap={2} mt={1}>
             {messages.map((message, index) => (
-              <MessageBubble key={index} {...message} sx={{ bgcolor: "background.card" }} />
+              <MessageBubble key={index} {...message} sx={{ bgcolor: "background.default" }} />
             ))}
           </Stack>
         </Card>

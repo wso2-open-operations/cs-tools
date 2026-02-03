@@ -1,14 +1,15 @@
-import { ThumbDownAlt, ThumbDownOffAlt, ThumbUpAlt, ThumbUpOffAlt } from "@mui/icons-material";
-import { Card, IconButton, Stack, Typography } from "@mui/material";
 import { useState } from "react";
+import { Card, IconButton, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { ThumbsDown, ThumbsUp } from "@wso2/oxygen-ui-icons-react";
 
 export function ConversationFeedback() {
+  const theme = useTheme();
   const [feedback, setFeedback] = useState<"up" | "down" | undefined>(undefined);
   const up = feedback === "up";
   const down = feedback === "down";
 
   return (
-    <Card component={Stack} direction="row" justifyContent="space-between" p={1.5} elevation={0}>
+    <Card component={Stack} direction="row" justifyContent="space-between" p={1.5}>
       <Stack>
         <Typography variant="body1" fontWeight="medium">
           Was this conversation helpful?
@@ -23,10 +24,14 @@ export function ConversationFeedback() {
           sx={{ color: up ? "primary.main" : "text.secondary" }}
           disableRipple
         >
-          {up ? <ThumbUpAlt /> : <ThumbUpOffAlt />}
+          <ThumbsUp size={pxToRem(18)} fill={up ? theme.palette.primary.main : "none"} />
         </IconButton>
-        <IconButton onClick={() => setFeedback("down")} sx={{ color: "text.secondary" }} disableRipple>
-          {down ? <ThumbDownAlt /> : <ThumbDownOffAlt />}
+        <IconButton
+          onClick={() => setFeedback("down")}
+          sx={{ color: down ? "primary.main" : "text.secondary" }}
+          disableRipple
+        >
+          <ThumbsDown size={pxToRem(18)} fill={down ? theme.palette.primary.main : "none"} />
         </IconButton>
       </Stack>
     </Card>
