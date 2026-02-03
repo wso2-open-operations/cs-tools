@@ -1,0 +1,77 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { AppShell, useAppShell } from "@wso2/oxygen-ui";
+import { type JSX } from "react";
+import { useLocation, Outlet } from "react-router";
+import Footer from "@/components/footer/Footer";
+import Header from "@/components/header/Header";
+import SideBar from "@/components/sideNavBar/SideBar";
+
+/**
+ * AppLayout component.
+ *
+ * @returns {JSX.Element} The AppLayout component.
+ */
+export default function AppLayout(): JSX.Element {
+  /**
+   * Get the current location.
+   */
+  const location = useLocation();
+
+  /**
+   * Initialize the app shell.
+   */
+  const { state: shellState, actions: shellActions } = useAppShell({
+    initialCollapsed: false,
+  });
+
+  /**
+   * Check if current path is the project hub.
+   */
+  const isProjectHub = location.pathname === "/";
+
+  return (
+    <AppShell>
+      {/* Header component. */}
+      <AppShell.Navbar>
+        <Header onToggleSidebar={shellActions.toggleSidebar} />
+      </AppShell.Navbar>
+
+      {/* Side bar component. */}
+      {!isProjectHub && (
+        <AppShell.Sidebar>
+          <SideBar
+            collapsed={shellState.sidebarCollapsed}
+            expandedMenus={shellState.expandedMenus}
+            onSelect={shellActions.setActiveMenuItem}
+            onToggleExpand={shellActions.toggleMenu}
+          />
+        </AppShell.Sidebar>
+      )}
+
+      {/* Main content. */}
+      <AppShell.Main>
+        <Outlet />
+      </AppShell.Main>
+
+      {/* Footer component. */}
+      <AppShell.Footer>
+        <Footer />
+      </AppShell.Footer>
+    </AppShell>
+  );
+}

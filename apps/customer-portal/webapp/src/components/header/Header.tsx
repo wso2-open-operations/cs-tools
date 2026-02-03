@@ -1,0 +1,176 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useState, useEffect, type JSX } from "react";
+import { Header as HeaderUI } from "@wso2/oxygen-ui";
+import { useNavigate, useLocation, useParams } from "react-router";
+import useSearchProjects from "@/api/useSearchProjects";
+import { useLogger } from "@/hooks/useLogger";
+import type { ProjectListItem } from "@/models/responses";
+import Brand from "./Brand";
+import Actions from "./Actions";
+import SearchBar from "./SearchBar";
+import ProjectSwitcher from "./ProjectSwitcher";
+
+/**
+ * Props for the Header component.
+ */
+interface HeaderProps {
+  /**
+   * Callback function to toggle the sidebar.
+   */
+  onToggleSidebar: () => void;
+}
+
+/**
+ * Header component for the application.
+ *
+ * @param {HeaderProps} props - The props for the component.
+ * @returns {JSX.Element} The Header component.
+ */
+export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
+  /**
+   * Navigation hook.
+   */
+  const navigate = useNavigate();
+  /**
+   * Location hook.
+   */
+  const location = useLocation();
+  /**
+   * Logger hook.
+   */
+  const logger = useLogger();
+  /**
+   * Project ID from URL parameters.
+   */
+  const { projectId } = useParams<{
+    projectId?: string;
+  }>();
+
+  /**
+   * Check if the current location is the project hub.
+   */
+  const isProjectHub = location.pathname === "/";
+
+  /**
+   * Fetch projects.
+   */
+  const {
+    data: projectsResponse,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useSearchProjects({}, true);
+
+  /**
+   * Fetch next page of projects if available.
+   */
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  /**
+   * Flatten the projects response.
+   */
+  const projects =
+    projectsResponse?.pages.flatMap((page) => page.projects) || [];
+
+  /**
+   * Find the project from the URL parameters.
+   */
+  const projectFromUrl = projects.find((project) => project.key === projectId);
+
+  /**
+   * State for the selected project.
+   */
+  const [selectedProject, setProject] = useState<ProjectListItem | undefined>(
+    projectFromUrl,
+  );
+
+  /**
+   * Effect to update the selected project when the URL parameters change.
+   */
+  useEffect(() => {
+    if (projectId) {
+      /**
+       * Find the project from the URL parameters.
+       */
+      const project = projects.find((project) => project.key === projectId);
+      /**
+       * Set the selected project if it is different from the current selected project.
+       */
+      if (project && project.key !== selectedProject?.key) {
+        setProject(project);
+      }
+    }
+  }, [projectId, selectedProject?.key, projects]);
+
+  /**
+   * Handles the project change.
+   *
+   * @param {string} projectKey - Key of the project to switch to.
+   */
+  const handleProjectChange = (projectKey: string) => {
+    const project = projects.find((p) => p.key === projectKey);
+    if (project) {
+      logger.debug(`Switching to project: ${project.name} (${project.key})`);
+      /**
+       * Set the selected project.
+       */
+      setProject(project);
+      /**
+       * Get the sub path from the current location.
+       */
+      const subPath = location.pathname.split("/").slice(2).join("/");
+      /**
+       * Navigate to the new project.
+       */
+      navigate(`/${project.key}/${subPath || "dashboard"}`);
+    } else {
+      logger.warn(`Project with key ${projectKey} not found for switching`);
+    }
+  };
+
+  return (
+    <HeaderUI>
+      {!isProjectHub && (
+        /* header sidebar toggle */
+        <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
+      )}
+      {/* header brand logo and title */}
+      <Brand />
+      {!isProjectHub && (
+        <>
+          {/* header project switcher */}
+          <ProjectSwitcher
+            projects={projects}
+            selectedProject={selectedProject}
+            onProjectChange={handleProjectChange}
+          />
+          {/* header search bar */}
+          <SearchBar />
+        </>
+      )}
+      {/* header spacer */}
+      <HeaderUI.Spacer />
+      {/* header action buttons */}
+      <Actions />
+    </HeaderUI>
+  );
+}

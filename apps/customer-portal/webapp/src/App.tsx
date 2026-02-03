@@ -14,8 +14,71 @@
 // specific language governing permissions and limitations
 // under the License.
 
-function App() {
-  return <></>;
-}
+import type { JSX } from "react";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router";
+import ProjectHub from "@/pages/ProjectHub";
+import ProjectPage from "@/pages/ProjectPage";
+import AppLayout from "@/layouts/AppLayout";
 
-export default App;
+export default function App(): JSX.Element {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* AppLayout component */}
+        <Route element={<AppLayout />}>
+          {/* ProjectHub Page */}
+          <Route path="/" element={<ProjectHub />} />
+
+          {/* Project Specific Routes */}
+          <Route path="/:projectId">
+            {/* Dashboard */}
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route
+              path="dashboard"
+              element={<ProjectPage title="Dashboard" />}
+            />
+            {/* Project Details */}
+            <Route
+              path="project-details"
+              element={<ProjectPage title="Project Details" />}
+            />
+            {/* Support */}
+            <Route path="support" element={<ProjectPage title="Support" />} />
+            {/* Updates */}
+            <Route path="updates" element={<ProjectPage title="Updates" />} />
+            {/* SecurityCenter */}
+            <Route
+              path="security-center"
+              element={<ProjectPage title="Security Center" />}
+            />
+            {/* Engagements */}
+            <Route
+              path="engagements"
+              element={<ProjectPage title="Engagements" />}
+            />
+            {/* LegalContracts */}
+            <Route
+              path="legal-contracts"
+              element={<ProjectPage title="Legal Contracts" />}
+            />
+            {/* Community */}
+            <Route
+              path="community"
+              element={<ProjectPage title="Community" />}
+            />
+            {/* Announcements */}
+            <Route
+              path="announcements"
+              element={<ProjectPage title="Announcements" />}
+            />
+            {/* Settings */}
+            <Route path="settings" element={<ProjectPage title="Settings" />} />
+          </Route>
+        </Route>
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

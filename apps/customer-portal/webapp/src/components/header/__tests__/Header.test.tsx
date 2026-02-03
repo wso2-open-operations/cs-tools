@@ -1,0 +1,210 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import Header from "@/components/header/Header";
+import { mockProjects } from "@/models/mockData";
+
+// Mock @wso2/oxygen-ui
+vi.mock("@wso2/oxygen-ui", () => ({
+  Header: Object.assign(
+    ({ children }: { children: any }) => <header>{children}</header>,
+    {
+      Toggle: ({ onToggle }: { onToggle: any }) => (
+        <button onClick={onToggle}>Toggle</button>
+      ),
+      Brand: ({ children }: { children: any }) => <div>{children}</div>,
+      BrandLogo: ({ children }: { children: any }) => <div>{children}</div>,
+      BrandTitle: ({ children }: { children: any }) => <h1>{children}</h1>,
+      Switchers: ({ children }: { children: any }) => <div>{children}</div>,
+      Spacer: () => <div />,
+      Actions: ({ children }: { children: any }) => <div>{children}</div>,
+    },
+  ),
+  ComplexSelect: Object.assign(
+    ({
+      value,
+      onChange,
+      children,
+    }: {
+      value: any;
+      onChange: any;
+      children: any;
+    }) => (
+      <select value={value} onChange={onChange} data-testid="project-select">
+        {children}
+      </select>
+    ),
+    {
+      MenuItem: Object.assign(
+        ({ value, children }: { value: any; children: any }) => (
+          <option value={value}>{children}</option>
+        ),
+        {
+          Text: ({ primary }: { primary: string }) => primary,
+        },
+      ),
+    },
+  ),
+  ColorSchemeToggle: () => <button>ThemeToggle</button>,
+  Divider: () => <hr />,
+}));
+
+// Mock icons
+vi.mock("@wso2/oxygen-ui-icons-react", () => {
+  const mockIcon = (name: string) => () => <svg data-testid={`icon-${name}`} />;
+  return {
+    Briefcase: mockIcon("Briefcase"),
+    FileText: mockIcon("FileText"),
+    FolderOpen: mockIcon("FolderOpen"),
+    Headset: mockIcon("Headset"),
+    Home: mockIcon("Home"),
+    Megaphone: mockIcon("Megaphone"),
+    RefreshCw: mockIcon("RefreshCw"),
+    Shield: mockIcon("Shield"),
+    Users: mockIcon("Users"),
+    Settings: mockIcon("Settings"),
+    WSO2: () => <svg data-testid="wso2-logo" />,
+  };
+});
+
+// Mock react-router
+const mockNavigate = vi.fn();
+const mockLocation = { pathname: "/" };
+const mockParams = { projectId: "" };
+
+vi.mock("react-router", () => ({
+  useNavigate: () => mockNavigate,
+  useLocation: () => mockLocation,
+  useParams: () => mockParams,
+}));
+
+// Mock hooks
+vi.mock("@/hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
+vi.mock("@/api/useSearchProjects", () => ({
+  default: vi.fn(() => ({
+    data: {
+      pages: [{ projects: mockProjects }],
+    },
+    fetchNextPage: vi.fn(),
+    hasNextPage: false,
+    isFetchingNextPage: false,
+  })),
+}));
+
+// Mock sub-components
+vi.mock("../Brand", () => ({
+  default: () => <div data-testid="brand" />,
+}));
+
+vi.mock("../Actions", () => ({
+  default: () => <div data-testid="actions" />,
+}));
+
+vi.mock("../SearchBar", () => ({
+  default: () => <div data-testid="search-bar" />,
+}));
+
+vi.mock("../ProjectSwitcher", () => ({
+  default: ({ onProjectChange }: any) => (
+    <div data-testid="project-switcher">
+      <select
+        data-testid="project-select"
+        onChange={(e) => onProjectChange(e.target.value)}
+      >
+        {mockProjects.map((p: any) => (
+          <option key={p.key} value={p.key}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  ),
+}));
+
+// Mock UserProfile
+vi.mock("../UserProfile", () => ({
+  default: () => <div data-testid="user-profile" />,
+}));
+
+describe("Header", () => {
+  const mockOnToggleSidebar = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLocation.pathname = "/";
+    mockParams.projectId = "";
+  });
+
+  it("should render the brand component", () => {
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+    expect(screen.getByTestId("brand")).toBeInTheDocument();
+  });
+
+  it("should NOT render toggle or switcher on Project Hub", () => {
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+    expect(screen.queryByText("Toggle")).toBeNull();
+    expect(screen.queryByTestId("project-select")).toBeNull();
+  });
+
+  it("should render toggle and switcher on a project page", () => {
+    mockLocation.pathname = "/project-1/dashboard";
+    mockParams.projectId = "project-1";
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    expect(screen.getByText("Toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("project-select")).toBeInTheDocument();
+  });
+
+  it("should call onToggleSidebar when toggle is clicked", () => {
+    mockLocation.pathname = "/project-1/dashboard";
+    mockParams.projectId = "project-1";
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    fireEvent.click(screen.getByText("Toggle"));
+    expect(mockOnToggleSidebar).toHaveBeenCalled();
+  });
+
+  it("should navigate when a different project is selected", () => {
+    mockLocation.pathname = "/project-1/dashboard";
+    mockParams.projectId = "project-1";
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    const select = screen.getByTestId("project-select");
+    fireEvent.change(select, { target: { value: mockProjects[1].key } });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      `/${mockProjects[1].key}/dashboard`,
+    );
+  });
+
+  it("should render Actions", () => {
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+    expect(screen.getByTestId("actions")).toBeInTheDocument();
+  });
+});
