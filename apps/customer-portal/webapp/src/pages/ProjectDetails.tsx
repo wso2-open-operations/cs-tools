@@ -14,11 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Typography } from "@wso2/oxygen-ui";
-import { useParams } from "react-router";
-import { useState, type JSX } from "react";
+import { Box, Typography, Grid } from "@wso2/oxygen-ui";
+import { useParams, useOutletContext } from "react-router";
+import { useState, useEffect, type JSX } from "react";
 import TabBar from "@/components/common/tabBar/TabBar";
 import { PROJECT_DETAILS_TABS } from "@/constants/projectDetailsConstants";
+import ProjectInformationCard from "@/components/projectDetails/projectOverview/projectInformation/ProjectInformationCard";
+import ProjectStatisticsCard from "@/components/projectDetails/projectOverview/projectStatistics/ProjectStatisticsCard";
+import ContactInfoCard from "@/components/projectDetails/projectOverview/contactInfo/ContactInfoCard";
+import RecentActivityCard from "@/components/projectDetails/projectOverview/recentActivity/RecentActivityCard";
+import useGetProjectDetails from "@/api/useGetProjectDetails";
+import { useGetProjectStat } from "@/api/useGetProjectStat";
+import { useLogger } from "@/hooks/useLogger";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 
 /**
  * ProjectDetails component.
@@ -28,14 +36,85 @@ import { PROJECT_DETAILS_TABS } from "@/constants/projectDetailsConstants";
 export default function ProjectDetails(): JSX.Element {
   const [activeTab, setActiveTab] = useState<string>("overview");
 
+  const logger = useLogger();
+  const { showLoader, hideLoader } = useLoader();
+
+  const { sidebarCollapsed } = useOutletContext<{
+    sidebarCollapsed: boolean;
+  }>() || { sidebarCollapsed: false };
+
+  const { projectId } = useParams<{ projectId: string }>();
+
+  const {
+    data: project,
+    isLoading: isProjectLoading,
+    error: projectError,
+  } = useGetProjectDetails(projectId || "");
+
+  const {
+    data: stats,
+    isLoading: isStatsLoading,
+    error: statsError,
+  } = useGetProjectStat(projectId || "");
+
+  const isLoading = isProjectLoading || isStatsLoading;
+
+  useEffect(() => {
+    if (isLoading) {
+      showLoader();
+    } else {
+      hideLoader();
+    }
+    return () => hideLoader();
+  }, [isLoading, showLoader, hideLoader]);
+
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
+        if (!projectId) {
+          return (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography color="error">
+                Invalid Project ID. Please check the URL.
+              </Typography>
+            </Box>
+          );
+        }
+
+        if (projectError) {
+          logger.error("Error loading project details:", projectError);
+        }
+        if (statsError) {
+          logger.error("Error loading project stats:", statsError);
+        }
+
         return (
-          <Box sx={{ p: 3, textAlign: "center" }}>
-            <Typography variant="h6" color="text.secondary">
-              Overview (Coming Soon)
-            </Typography>
+          <Box>
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <ProjectInformationCard
+                  project={project}
+                  slaStatus={stats?.projectStats?.slaStatus || "N/A"}
+                  isLoading={isLoading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <ProjectStatisticsCard
+                  stats={stats?.projectStats}
+                  isLoading={isLoading}
+                  isSidebarOpen={!sidebarCollapsed}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <ContactInfoCard />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <RecentActivityCard
+                  activity={stats?.recentActivity}
+                  isLoading={isLoading}
+                />
+              </Grid>
+            </Grid>
           </Box>
         );
       case "deployments":
@@ -60,14 +139,7 @@ export default function ProjectDetails(): JSX.Element {
   };
 
   return (
-    <Box
-      sx={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <>
       {/* project page tabs */}
       <TabBar
         tabs={PROJECT_DETAILS_TABS}
@@ -76,7 +148,7 @@ export default function ProjectDetails(): JSX.Element {
       />
 
       {/* project page content */}
-      <Box sx={{ flex: 1, mt: 2 }}>{renderContent()}</Box>
-    </Box>
+      <Box sx={{ flex: 1 }}>{renderContent()}</Box>
+    </>
   );
 }
