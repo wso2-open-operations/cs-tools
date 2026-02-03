@@ -1,4 +1,4 @@
-import { Avatar, Box, Card, Stack, Typography, useTheme, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Card, Stack, Typography, useTheme, pxToRem } from "@wso2/oxygen-ui";
 import { Circle, CircleCheck, CircleDot, Clock4, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } from "@mui/lab";
 
@@ -60,20 +60,21 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
 
       case "step":
         return (
-          <Avatar
-            sx={(theme) => ({
-              width: 20,
-              height: 20,
-              fontSize: theme.typography.pxToRem(12),
-              fontWeight: "medium",
-              bgcolor: "transparent",
-              border: "2px solid",
-              borderColor: "text.tertiary",
-              color: "text.primary",
-            })}
+          <Box
+            sx={{
+              display: "grid",
+              placeItems: "center",
+              width: pxToRem(20),
+              height: pxToRem(20),
+              position: "relative",
+              color: "text.disabled",
+            }}
           >
-            {props.index}
-          </Avatar>
+            <Circle size={pxToRem(20)} strokeWidth={2} />
+            <Typography variant="subtitle2" color="text.primary" position="absolute">
+              {props.index}
+            </Typography>
+          </Box>
         );
 
       default:

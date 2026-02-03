@@ -1,14 +1,14 @@
 import { useLayoutEffect, useState } from "react";
-import { Card, Chip, Grid, Stack, Typography } from "@mui/material";
+import { Box, Card, Chip, colors, Grid, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { InfoField, OverlineSlot, StakeholderItem, StickyCommentBar, TimelineEntry } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { CalendarMonth, PeopleAlt, Person, Warning } from "@mui/icons-material";
 import { ChecklistItem } from "@components/features/chat";
 import { SectionCard } from "@components/shared";
 import { Timeline } from "@components/ui";
 import { useLayout } from "@context/layout";
 
-import { MOCK_ACTIVITY_TIMELINE, MOCK_IMPLEMENTATION_STEPS, MOCK_STAKEHOLDERS } from "../mocks/data/change";
+import { MOCK_ACTIVITY_TIMELINE, MOCK_IMPLEMENTATION_STEPS, MOCK_STAKEHOLDERS } from "@src/mocks/data/change";
+import { Calendar, TriangleAlert, User, Users } from "@wso2/oxygen-ui-icons-react";
 
 export default function ChangeDetailPage() {
   const layout = useLayout();
@@ -54,10 +54,10 @@ export default function ChangeDetailPage() {
               />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Change Owner" value="Sarah Chen" icon={Person} />
+              <InfoField label="Change Owner" value="Sarah Chen" icon={User} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Requested By" value="Security Team" icon={PeopleAlt} />
+              <InfoField label="Requested By" value="Security Team" icon={Users} />
             </Grid>
             <Grid size={6}>
               <InfoField label="Priority" value={<PriorityChip size="small" priority="medium" />} />
@@ -96,7 +96,7 @@ export default function ChangeDetailPage() {
               <InfoField
                 label="Rollback Plan"
                 value={
-                  <ChecklistItem icon={Warning} color="warning">
+                  <ChecklistItem icon={TriangleAlert} color="warning">
                     Automated rollback to previous policy version available
                   </ChecklistItem>
                 }
@@ -148,10 +148,11 @@ export function MaintenanceNoticeCard() {
       px={2}
       py={1.5}
       gap={2}
-      elevation={0}
-      sx={{ bgcolor: "components.popover.state.active.background" }}
+      sx={{ bgcolor: colors.yellow[50] }}
     >
-      <CalendarMonth fontSize="large" color="primary" />
+      <Box color="primary.main">
+        <Calendar size={pxToRem(26)} />
+      </Box>
       <Stack>
         <Typography variant="body1" fontWeight="medium" color="primary">
           Scheduled Maintenance Window

@@ -1,18 +1,13 @@
-import { Person } from "@mui/icons-material";
-import { Card, Stack, Typography } from "@mui/material";
+import { Box, Card, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { User } from "@wso2/oxygen-ui-icons-react";
 
 export function StakeholderItem({ name, role }: { name: string; role: string }) {
   return (
-    <Card
-      component={Stack}
-      direction="row"
-      justifyContent="space-between"
-      elevation={0}
-      p={1}
-      sx={{ bgcolor: "background.card" }}
-    >
+    <Card component={Stack} direction="row" justifyContent="space-between" p={1}>
       <Stack direction="row" gap={1}>
-        <Person sx={{ color: "text.secondary" }} />
+        <Box color="text.secondary">
+          <User size={pxToRem(18)} />
+        </Box>
         <Typography variant="body1" fontWeight="medium">
           {name}
         </Typography>
