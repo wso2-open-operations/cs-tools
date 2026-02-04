@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useLogger } from "@/hooks/useLogger";
 import {
   createContext,
   useContext,
@@ -36,15 +37,41 @@ export const MockConfigProvider = ({
 }: {
   children: ReactNode;
 }): JSX.Element => {
-  // Initialize from localStorage or fallback to false
+  const logger = useLogger();
   const [isMockEnabled, setIsMockEnabledState] = useState<boolean>(() => {
-    const storedValue = localStorage.getItem("isMockEnabled");
-    return storedValue !== null ? storedValue === "true" : false;
+    if (
+      typeof window === "undefined" ||
+      typeof window.localStorage === "undefined"
+    ) {
+      return false;
+    }
+
+    try {
+      const storedValue = window.localStorage.getItem("isMockEnabled");
+      return storedValue !== null ? storedValue === "true" : false;
+    } catch {
+      return false;
+    }
   });
 
   const setMockEnabled = (enabled: boolean) => {
     setIsMockEnabledState(enabled);
-    localStorage.setItem("isMockEnabled", String(enabled));
+
+    if (
+      typeof window === "undefined" ||
+      typeof window.localStorage === "undefined"
+    ) {
+      return;
+    }
+
+    try {
+      localStorage.setItem("isMockEnabled", String(enabled));
+    } catch (error) {
+      logger.error(
+        "Failed to persist 'isMockEnabled' in localStorage.",
+        error,
+      );
+    }
   };
 
   return (
