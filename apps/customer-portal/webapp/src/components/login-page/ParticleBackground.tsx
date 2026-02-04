@@ -50,7 +50,11 @@ export default function ParticleBackground(): JSX.Element {
       });
     }
 
+    let animationId: number;
+    let isActive = true;
+
     const animate = () => {
+      if (!isActive) return;
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "rgba(100, 100, 100, 0.5)";
       ctx.lineWidth = 0.5;
@@ -85,7 +89,7 @@ export default function ParticleBackground(): JSX.Element {
         }
       });
 
-      requestAnimationFrame(animate);
+      animationId = requestAnimationFrame(animate);
     };
 
     const handleResize = () => {
@@ -94,9 +98,10 @@ export default function ParticleBackground(): JSX.Element {
     };
 
     window.addEventListener("resize", handleResize);
-    const animationId = requestAnimationFrame(animate);
+    animationId = requestAnimationFrame(animate);
 
     return () => {
+      isActive = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
     };
