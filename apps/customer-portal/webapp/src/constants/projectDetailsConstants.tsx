@@ -136,3 +136,57 @@ export const getRecentActivityItems = (
     chipColor: getSystemHealthColor(activity?.systemHealth || ""),
   },
 ];
+
+export const SUBSCRIPTION_STATUS = {
+  EXPIRED: "Expired",
+  EXPIRING_SOON: "Expiring Soon",
+  ACTIVE: "Active",
+} as const;
+
+export type SubscriptionStatus =
+  (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
+
+export const SUPPORT_TIER = {
+  ENTERPRISE: "Enterprise",
+  STANDARD: "Standard",
+} as const;
+
+export type SupportTier = (typeof SUPPORT_TIER)[keyof typeof SUPPORT_TIER];
+
+export const PROJECT_TYPE = {
+  SUBSCRIPTION: "Subscription",
+  FREE: "Free",
+} as const;
+
+export type ProjectType = (typeof PROJECT_TYPE)[keyof typeof PROJECT_TYPE];
+
+export const SYSTEM_HEALTH = {
+  HEALTHY: "Healthy",
+  CRITICAL: "Critical",
+} as const;
+
+export type SystemHealth = (typeof SYSTEM_HEALTH)[keyof typeof SYSTEM_HEALTH];
+
+export const SLA_STATUS = {
+  GOOD: "Good",
+  BAD: "Bad",
+} as const;
+
+export type SLAStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
+
+export const CASE_PRIORITY = {
+  CRITICAL: "Critical",
+  HIGH: "High",
+  MEDIUM: "Medium",
+  LOW: "Low",
+} as const;
+
+export type CasePriority = (typeof CASE_PRIORITY)[keyof typeof CASE_PRIORITY];
+
+export const CASE_STATUS = {
+  OPEN: "Open",
+  IN_PROGRESS: "In Progress",
+  RESOLVED: "Resolved",
+} as const;
+
+export type CaseStatus = (typeof CASE_STATUS)[keyof typeof CASE_STATUS];
