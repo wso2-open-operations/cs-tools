@@ -70,11 +70,26 @@ vi.mock("@wso2/oxygen-ui", () => ({
       />
     </div>
   ),
+  Skeleton: ({ variant, width, height }: any) => (
+    <div
+      data-testid="skeleton"
+      data-variant={variant}
+      style={{ width, height }}
+    >
+      Loading...
+    </div>
+  ),
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   X: () => <span data-testid="icon-x" />,
+}));
+
+vi.mock("@/components/common/errorIndicator/ErrorIndicator", () => ({
+  default: ({ entityName }: any) => (
+    <div data-testid="error-indicator">Error loading {entityName}</div>
+  ),
 }));
 
 describe("FilterPopover", () => {
@@ -272,5 +287,38 @@ describe("FilterPopover", () => {
     fireEvent.click(screen.getByText("Reset"));
 
     expect(statusSelect).toHaveValue("");
+  });
+
+  it("should render skeletons when isLoading is true", () => {
+    render(
+      <FilterPopover
+        open={true}
+        onClose={mockOnClose}
+        onSearch={mockOnSearch}
+        initialFilters={mockFilters}
+        fields={mockFields}
+        isLoading={true}
+      />,
+    );
+
+    expect(screen.getAllByTestId("skeleton")).toHaveLength(6); // 2 skeletons per field (text and rectangular)
+  });
+
+  it("should render error message when isError is true", () => {
+    render(
+      <FilterPopover
+        open={true}
+        onClose={mockOnClose}
+        onSearch={mockOnSearch}
+        initialFilters={mockFilters}
+        fields={mockFields}
+        isError={true}
+      />,
+    );
+
+    expect(screen.getByTestId("error-indicator")).toBeInTheDocument();
+    expect(
+      screen.getByText("Failed to load filter options"),
+    ).toBeInTheDocument();
   });
 });
