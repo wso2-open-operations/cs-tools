@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Box,
   Button,
   ColorSchemeToggle,
   Divider,
@@ -25,12 +26,19 @@ import type { JSX } from "react";
 import { JOIN_COMMUNITY_URL } from "@/constants/appLayoutConstants";
 import UserProfile from "@/components/common/header/UserProfile";
 
+interface ActionsProps {
+  showUserProfile?: boolean;
+}
+
 /**
  * Actions component for the header.
  *
+ * @param {ActionsProps} props - The props for the component.
  * @returns {JSX.Element} The HeaderActions component.
  */
-export default function Actions(): JSX.Element {
+export default function Actions({
+  showUserProfile = true,
+}: ActionsProps): JSX.Element {
   return (
     <HeaderUI.Actions>
       {/* join community button */}
@@ -51,10 +59,19 @@ export default function Actions(): JSX.Element {
       <Divider
         orientation="vertical"
         flexItem
-        sx={{ mx: 1, display: { xs: "none", sm: "block" } }}
+        sx={{
+          mx: 1,
+          display: { xs: "none", sm: "block" },
+          visibility: showUserProfile ? "visible" : "hidden",
+        }}
       />
-      {/* user profile menu */}
-      <UserProfile />
+      {showUserProfile ? (
+        /* user profile menu */
+        <UserProfile />
+      ) : (
+        /* Placeholder for user profile to prevent layout shift */
+        <Box sx={{ width: 40, height: 40 }} />
+      )}
     </HeaderUI.Actions>
   );
 }
