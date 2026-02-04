@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import SubscriptionDetails from "../SubscriptionDetails";
-import { SubscriptionStatus } from "@/models/responses";
+import { SUBSCRIPTION_STATUS } from "@/constants/projectDetailsConstants";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -32,17 +32,21 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <div data-testid="linear-progress" data-value={value} data-color={color} />
   ),
   Skeleton: () => <div data-testid="skeleton" />,
+  colors: {
+    blue: { 700: "#1976d2" },
+    purple: { 400: "#ab47bc" },
+  },
 }));
 
 // Mock utils
 vi.mock("@/utils/projectStats", () => ({
   getSubscriptionStatus: vi.fn((date) =>
     date === "expired-date"
-      ? SubscriptionStatus.Expired
-      : SubscriptionStatus.Active,
+      ? SUBSCRIPTION_STATUS.EXPIRED
+      : SUBSCRIPTION_STATUS.ACTIVE,
   ),
   getSubscriptionColor: vi.fn((status) =>
-    status === SubscriptionStatus.Expired ? "error" : "success",
+    status === SUBSCRIPTION_STATUS.EXPIRED ? "error" : "success",
   ),
   calculateProgress: vi.fn((_start, end) =>
     end === "expired-date" ? 100 : 50,
@@ -60,7 +64,7 @@ describe("SubscriptionDetails", () => {
     render(<SubscriptionDetails {...defaultProps} />);
 
     expect(screen.getByText("Subscription Period")).toBeInTheDocument();
-    expect(screen.getByText(SubscriptionStatus.Active)).toBeInTheDocument();
+    expect(screen.getByText(SUBSCRIPTION_STATUS.ACTIVE)).toBeInTheDocument();
     expect(screen.getByText("Start")).toBeInTheDocument();
     expect(screen.getByText("Jan 1, 2023")).toBeInTheDocument();
     expect(screen.getByText("End")).toBeInTheDocument();
@@ -85,7 +89,7 @@ describe("SubscriptionDetails", () => {
       />,
     );
 
-    expect(screen.getByText(SubscriptionStatus.Expired)).toBeInTheDocument();
+    expect(screen.getByText(SUBSCRIPTION_STATUS.EXPIRED)).toBeInTheDocument();
     expect(screen.getByText(/Expired on/)).toBeInTheDocument();
 
     const progress = screen.getByTestId("linear-progress");
