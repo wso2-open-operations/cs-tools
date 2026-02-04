@@ -29,7 +29,11 @@ import SideBar from "@/components/common/sideNavBar/SideBar";
  *
  * @returns {JSX.Element} The AppLayout component.
  */
-export default function AppLayout(): JSX.Element {
+interface AppLayoutProps {
+  children?: React.ReactNode;
+}
+
+export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
 
   const { state: shellState, actions: shellActions } = useAppShell({
@@ -97,9 +101,11 @@ export default function AppLayout(): JSX.Element {
                 p: 3,
               }}
             >
-              <Outlet
-                context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
-              />
+              {children || (
+                <Outlet
+                  context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
+                />
+              )}
             </Box>
           </Box>
         </AppShell.Main>
