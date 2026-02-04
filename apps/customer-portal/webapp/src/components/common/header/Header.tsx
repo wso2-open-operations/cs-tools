@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, useEffect, type JSX, useMemo } from "react";
+import { useState, useEffect, type JSX, useMemo, useCallback } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useNavigate, useLocation, useParams } from "react-router";
 import useGetProjects from "@/api/useGetProjects";
@@ -101,6 +101,24 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
   const projectFromUrl = projects.find((project) => project.id === projectId);
 
   /**
+   * Use effect to log errors when they occur.
+   */
+  useEffect(() => {
+    if (isError) {
+      logger.error("Failed to fetch projects in Header");
+    }
+  }, [isError, logger]);
+
+  /**
+   * Use effect to log projects loaded.
+   */
+  useEffect(() => {
+    if (projects.length > 0) {
+      logger.debug(`${projects.length} projects loaded in Header`);
+    }
+  }, [projects.length, logger]);
+
+  /**
    * State for the selected project.
    */
   const [selectedProject, setProject] = useState<ProjectListItem | undefined>(
@@ -140,26 +158,29 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
    *
    * @param {string} projectId - ID of the project to switch to.
    */
-  const handleProjectChange = (id: string) => {
-    const project = projects.find((p) => p.id === id);
-    if (project) {
-      logger.debug(`Switching to project: ${project.name} (${project.id})`);
-      /**
-       * Set the selected project.
-       */
-      setProject(project);
-      /**
-       * Get the sub path from the current location.
-       */
-      const subPath = location.pathname.split("/").slice(2).join("/");
-      /**
-       * Navigate to the new project.
-       */
-      navigate(`/${project.id}/${subPath || "dashboard"}`);
-    } else {
-      logger.warn(`Project with ID: ${id} not found for switching`);
-    }
-  };
+  const handleProjectChange = useCallback(
+    (id: string) => {
+      const project = projects.find((p) => p.id === id);
+      if (project) {
+        logger.debug(`Switching to project: ${project.name} (${project.id})`);
+        /**
+         * Set the selected project.
+         */
+        setProject(project);
+        /**
+         * Get the sub path from the current location.
+         */
+        const subPath = location.pathname.split("/").slice(2).join("/");
+        /**
+         * Navigate to the new project.
+         */
+        navigate(`/${project.id}/${subPath || "dashboard"}`);
+      } else {
+        logger.warn(`Project with ID ${id} not found for switching`);
+      }
+    },
+    [projects, logger, location.pathname, navigate],
+  );
 
   return (
     <HeaderUI>

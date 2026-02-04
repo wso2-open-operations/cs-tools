@@ -19,6 +19,7 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router";
 import ProjectHub from "@/pages/ProjectHub";
 import ProjectPage from "@/pages/ProjectPage";
 import SupportPage from "@/pages/SupportPage";
+import NoveraChatPage from "@/pages/NoveraChatPage";
 import AppLayout from "@/layouts/AppLayout";
 
 export default function App(): JSX.Element {
@@ -44,7 +45,10 @@ export default function App(): JSX.Element {
               element={<ProjectPage title="Project Details" />}
             />
             {/* Support */}
-            <Route path="support" element={<SupportPage />} />
+            <Route path="support">
+              <Route index element={<SupportPage />} />
+              <Route path="chat" element={<NoveraChatPage />} />
+            </Route>
             {/* Updates */}
             <Route path="updates" element={<ProjectPage title="Updates" />} />
             {/* SecurityCenter */}

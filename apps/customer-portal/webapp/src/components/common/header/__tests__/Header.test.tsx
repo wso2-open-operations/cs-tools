@@ -94,13 +94,15 @@ vi.mock("react-router", () => ({
 }));
 
 // Mock hooks
+const mockLogger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+};
+
 vi.mock("@/hooks/useLogger", () => ({
-  useLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
+  useLogger: () => mockLogger,
 }));
 
 const mockFetchNextPage = vi.fn();
@@ -220,6 +222,31 @@ describe("Header", () => {
 
     expect(mockNavigate).toHaveBeenCalledWith(
       `/${mockProjects[1].id}/dashboard`,
+    );
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Switching to project"),
+    );
+  });
+
+  it("should log error when project fetch fails", () => {
+    mockUseSearchProjects.mockReturnValue({
+      data: null,
+      isLoading: false,
+      isError: true,
+    });
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to fetch projects"),
+    );
+  });
+
+  it("should log debug message when projects are loaded", () => {
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("projects loaded"),
     );
   });
 

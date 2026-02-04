@@ -68,3 +68,19 @@ export const getMockProjectSupportStats = (): ProjectSupportStats => {
     totalCases: Math.floor(Math.random() * 50),
   };
 };
+
+/**
+ * Returns a random AI response from Novera.
+ *
+ * @returns {string} A random AI response.
+ */
+export const getNoveraResponse = (): string => {
+  const responses = [
+    "I understand the issue. Let me look into that for you.",
+    "That sounds like a configuration problem. Have you checked your environment variables?",
+    "I can help with that. Could you provide more details about the error message?",
+    "I'm analyzing the logs now. One moment please.",
+    "It seems like a known issue. I'll guide you through the fix.",
+  ];
+  return responses[Math.floor(Math.random() * responses.length)];
+};

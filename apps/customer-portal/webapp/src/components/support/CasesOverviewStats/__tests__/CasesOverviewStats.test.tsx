@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import CasesOverviewStats from "@/components/support/CasesOverviewStats";
+import CasesOverviewStats from "../CasesOverviewStats";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -26,13 +26,22 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {children}
     </div>
   ),
-  StatCard: ({ label, value, icon }: any) => (
-    <div data-testid="oxygen-stat-card">
-      <div data-testid="stat-card-icon">{icon}</div>
-      <span>{label}</span>
-      <div data-testid="stat-card-value">{value}</div>
-    </div>
-  ),
+  StatCard: ({ label, value, icon }: any) => {
+    const ValueSkeleton =
+      value && typeof value === "object" && "Skeleton" in value
+        ? (value as any).Skeleton
+        : null;
+
+    return (
+      <div data-testid="oxygen-stat-card">
+        <div data-testid="stat-card-icon">{icon}</div>
+        <span>{label}</span>
+        <div data-testid="stat-card-value">
+          {ValueSkeleton ? <ValueSkeleton variant="text" /> : value}
+        </div>
+      </div>
+    );
+  },
   Skeleton: ({ variant }: any) => (
     <div data-testid="skeleton" data-variant={variant} />
   ),

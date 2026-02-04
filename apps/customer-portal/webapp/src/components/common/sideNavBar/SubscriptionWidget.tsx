@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Paper, Typography } from "@wso2/oxygen-ui";
 import { Crown } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
@@ -41,7 +41,7 @@ const SubscriptionWidget = ({
   return (
     <>
       {/* subscription widget container */}
-      <Box
+      <Paper
         sx={{
           p: 1.5,
           m: 1.5,
@@ -76,7 +76,7 @@ const SubscriptionWidget = ({
         <Button variant="outlined" size="small" fullWidth color="primary">
           View Details
         </Button>
-      </Box>
+      </Paper>
     </>
   );
 };
