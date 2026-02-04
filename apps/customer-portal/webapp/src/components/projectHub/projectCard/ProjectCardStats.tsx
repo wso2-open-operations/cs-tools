@@ -21,13 +21,14 @@ import {
   MessageSquare,
 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { formatProjectDate } from "@/utils/projectCard";
-
 
 interface ProjectCardStatsProps {
   activeChats: number;
   date: string;
   openCases: number;
+  isError?: boolean;
 }
 
 /**
@@ -40,6 +41,7 @@ export default function ProjectCardStats({
   openCases,
   activeChats,
   date,
+  isError,
 }: ProjectCardStatsProps): JSX.Element {
   return (
     <Form.CardContent sx={{ width: "100%", pb: 0 }}>
@@ -63,9 +65,13 @@ export default function ProjectCardStats({
               Open Cases
             </Typography>
           </Box>
-          <Typography variant="body2" color="primary">
-            {openCases}
-          </Typography>
+          {isError ? (
+            <ErrorIndicator entityName="Open Cases" />
+          ) : (
+            <Typography variant="body2" color="primary">
+              {openCases}
+            </Typography>
+          )}
         </Box>
 
         {/* Active Chats */}
@@ -81,9 +87,13 @@ export default function ProjectCardStats({
               Active Chats
             </Typography>
           </Box>
-          <Typography variant="body2" color={colors.blue[500]}>
-            {activeChats}
-          </Typography>
+          {isError ? (
+            <ErrorIndicator entityName="Active Chats" />
+          ) : (
+            <Typography variant="body2" color={colors.blue[500]}>
+              {activeChats}
+            </Typography>
+          )}
         </Box>
 
         {/* Date */}
