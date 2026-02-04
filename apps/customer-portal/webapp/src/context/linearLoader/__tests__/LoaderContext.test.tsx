@@ -1,0 +1,87 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { render, screen, act } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { LoaderProvider, useLoader } from "../LoaderContext";
+
+// Mock Oxygen UI
+vi.mock("@wso2/oxygen-ui", () => ({
+  LinearProgress: () => <div data-testid="linear-progress" />,
+  Box: ({ children, sx }: any) => (
+    <div data-testid="loader-box" style={sx}>
+      {children}
+    </div>
+  ),
+}));
+
+// Test component to consume the context
+const TestComponent = () => {
+  const { showLoader, hideLoader, isVisible } = useLoader();
+
+  return (
+    <div>
+      <span data-testid="is-visible">{isVisible.toString()}</span>
+      <button onClick={showLoader}>Show</button>
+      <button onClick={hideLoader}>Hide</button>
+    </div>
+  );
+};
+
+describe("LoaderContext", () => {
+  it("should provide loader state and functions", () => {
+    render(
+      <LoaderProvider>
+        <TestComponent />
+      </LoaderProvider>,
+    );
+
+    expect(screen.getByTestId("is-visible")).toHaveTextContent("false");
+
+    // Show loader
+    act(() => {
+      screen.getByText("Show").click();
+    });
+    expect(screen.getByTestId("is-visible")).toHaveTextContent("true");
+
+    // Hide loader
+    act(() => {
+      screen.getByText("Hide").click();
+    });
+    expect(screen.getByTestId("is-visible")).toHaveTextContent("false");
+  });
+
+  it("should throw error if used outside provider", () => {
+    // Suppress console.error for this test as React logs the error
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(() => render(<TestComponent />)).toThrow(
+      "useLoader must be used within a LoaderProvider",
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("should render children", () => {
+    render(
+      <LoaderProvider>
+        <div data-testid="child">Child Content</div>
+      </LoaderProvider>,
+    );
+
+    expect(screen.getByTestId("child")).toBeInTheDocument();
+  });
+});

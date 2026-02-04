@@ -101,3 +101,42 @@ export interface DashboardMockStats {
     TypeD: number;
   }>;
 }
+
+// Case List Item
+export interface CaseListItem {
+  id: string;
+  internalId: string;
+  number: string;
+  createdOn: string;
+  title: string;
+  description: string;
+  assignedEngineer: string | null;
+  project: {
+    id: string;
+    label: string;
+  };
+  type: {
+    id: string;
+    label: string;
+  } | null;
+  deployment: {
+    id: string;
+    label: string;
+  } | null;
+  severity: {
+    id: string;
+    label: string;
+  } | null;
+  status: {
+    id: string;
+    label: string;
+  } | null;
+}
+
+// Case Search Response
+export interface CaseSearchResponse {
+  cases: CaseListItem[];
+  totalRecords: number;
+  offset: number;
+  limit: number;
+}

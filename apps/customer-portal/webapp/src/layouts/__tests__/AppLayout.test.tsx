@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import AppLayout from "@/layouts/AppLayout";
+import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
 
 // Mock @wso2/oxygen-ui
 const mockShellActions = {
@@ -110,7 +111,11 @@ describe("AppLayout", () => {
   });
 
   it("should render Header, Sidebar, Main, and Footer on a project page", () => {
-    render(<AppLayout />);
+    render(
+      <LoaderProvider>
+        <AppLayout />
+      </LoaderProvider>,
+    );
 
     expect(screen.getByTestId("header")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
@@ -121,14 +126,22 @@ describe("AppLayout", () => {
 
   it("should NOT render Sidebar on the project hub (landing page)", () => {
     mockLocation.pathname = "/";
-    render(<AppLayout />);
+    render(
+      <LoaderProvider>
+        <AppLayout />
+      </LoaderProvider>,
+    );
 
     expect(screen.getByTestId("header")).toBeInTheDocument();
     expect(screen.queryByTestId("sidebar")).toBeNull();
   });
 
   it("should call toggleSidebar when header toggle is clicked", () => {
-    render(<AppLayout />);
+    render(
+      <LoaderProvider>
+        <AppLayout />
+      </LoaderProvider>,
+    );
 
     const toggleButton = screen.getByText("Toggle");
     toggleButton.click();
@@ -137,7 +150,11 @@ describe("AppLayout", () => {
   });
 
   it("should pass shell actions to SideBar", () => {
-    render(<AppLayout />);
+    render(
+      <LoaderProvider>
+        <AppLayout />
+      </LoaderProvider>,
+    );
 
     screen.getByText("Select").click();
     expect(mockShellActions.setActiveMenuItem).toHaveBeenCalledWith("item-1");
@@ -148,7 +165,11 @@ describe("AppLayout", () => {
 
   it("should pass shell state to SideBar", () => {
     mockShellState.sidebarCollapsed = true;
-    render(<AppLayout />);
+    render(
+      <LoaderProvider>
+        <AppLayout />
+      </LoaderProvider>,
+    );
 
     expect(screen.getByText("Collapsed: true")).toBeInTheDocument();
   });

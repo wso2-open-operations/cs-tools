@@ -14,19 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Button,
-  Divider,
-  Grid,
-  LinearProgress,
-  Typography,
-} from "@wso2/oxygen-ui";
+import { Box, Button, Divider, Grid, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useState, useEffect, useRef, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useGetCaseCreationDetails } from "@/api/useGetCaseCreationDetails";
 import { useLogger } from "@/hooks/useLogger";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { AIInfoCard } from "@/components/support/caseCreationLayout/AIInfoCard";
 import { BasicInformationSection } from "@/components/support/caseCreationLayout/BasicInformationSection";
 import { CaseCreationHeader } from "@/components/support/caseCreationLayout/CaseCreationHeader";
@@ -46,6 +40,7 @@ export default function CreateCasePage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const logger = useLogger();
+  const { showLoader, hideLoader } = useLoader();
   const { data: metadata, isLoading, isError } = useGetCaseCreationDetails();
 
   const [project, setProject] = useState("");
@@ -57,6 +52,15 @@ export default function CreateCasePage(): JSX.Element {
   const [severity, setSeverity] = useState("");
 
   const hasInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoading) {
+      showLoader();
+    } else {
+      hideLoader();
+    }
+    return () => hideLoader();
+  }, [isLoading, showLoader, hideLoader]);
 
   useEffect(() => {
     if (metadata && !hasInitializedRef.current) {
@@ -163,20 +167,6 @@ export default function CreateCasePage(): JSX.Element {
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
-      {/* progress bar for loading state */}
-      {isLoading && (
-        <LinearProgress
-          color="warning"
-          sx={{
-            position: "absolute",
-            top: "-1.5rem",
-            left: "-1.5rem",
-            right: "-1.5rem",
-            zIndex: 1,
-          }}
-        />
-      )}
-
       {/* header section */}
       <CaseCreationHeader onBack={handleBack} />
 

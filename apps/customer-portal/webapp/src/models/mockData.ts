@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProjectListItem, UserProfile } from "@/models/responses";
+import type {
+  CaseListItem,
+  ProjectListItem,
+  UserProfile,
+} from "@/models/responses";
 
 // Interface for case creation metadata.
 export interface CaseCreationMetadata {
@@ -133,3 +137,168 @@ export const mockCaseCreationMetadata: CaseCreationMetadata = {
     kbArticlesReviewed: "3 articles suggested",
   },
 };
+
+// Mock cases for the cases table.
+export const mockCases: CaseListItem[] = [
+  {
+    id: "case-001",
+    internalId: "CUPRSUB-101",
+    number: "CS0001001",
+    createdOn: "2026-01-31 10:45:12",
+    title: "Application crashes on startup",
+    description:
+      "App crashes immediately after launch with a null pointer error.",
+    assignedEngineer: null,
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "type-incident",
+      label: "Incident",
+    },
+    deployment: {
+      id: "deployment-prod",
+      label: "Production",
+    },
+    severity: {
+      id: "1",
+      label: "Critical (P1)",
+    },
+    status: {
+      id: "status-open",
+      label: "Open",
+    },
+  },
+  {
+    id: "case-002",
+    internalId: "CUPRSUB-102",
+    number: "CS0001002",
+    createdOn: "2026-01-30 18:20:05",
+    title: "High latency in API Gateway",
+    description: "Observed increased response times during peak hours.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "type-incident",
+      label: "Incident",
+    },
+    deployment: null,
+    severity: {
+      id: "2",
+      label: "High (P2)",
+    },
+    status: {
+      id: "status-in-progress",
+      label: "In Progress",
+    },
+  },
+  {
+    id: "case-003",
+    internalId: "CUPRSUB-103",
+    number: "CS0001003",
+    createdOn: "2026-01-28 09:10:44",
+    title: "Question about deployment options",
+    description: "Need clarification on supported deployment environments.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "type-query",
+      label: "Query",
+    },
+    deployment: null,
+    severity: null,
+    status: {
+      id: "status-open",
+      label: "Open",
+    },
+  },
+  {
+    id: "case-004",
+    internalId: "CUPRSUB-104",
+    number: "CS0001004",
+    createdOn: "2026-01-25 14:30:00",
+    title: "Request for new feature in dashboard",
+    description: "User wants a custom widget for tracking API usage.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "type-feature",
+      label: "Feature Request",
+    },
+    deployment: null,
+    severity: {
+      id: "3",
+      label: "Low (P3)",
+    },
+    status: {
+      id: "status-open",
+      label: "Open",
+    },
+  },
+  {
+    id: "case-005",
+    internalId: "CUPRSUB-105",
+    number: "CS0001005",
+    createdOn: "2026-01-22 11:15:20",
+    title: "Login failure on staging",
+    description:
+      "Unable to login to staging environment with admin credentials.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    type: {
+      id: "type-incident",
+      label: "Incident",
+    },
+    deployment: {
+      id: "deployment-staging",
+      label: "Staging",
+    },
+    severity: {
+      id: "2",
+      label: "High (P2)",
+    },
+    status: {
+      id: "status-open",
+      label: "Open",
+    },
+  },
+  {
+    id: "case-006",
+    internalId: "CUPRSUB-106",
+    number: "CS0001006",
+    createdOn: "2026-01-20 09:00:00",
+    title: "Documentation update request",
+    description: "Update API documentation for version 2.0.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "type-task",
+      label: "Task",
+    },
+    deployment: null,
+    severity: {
+      id: "4",
+      label: "Minimal (P4)",
+    },
+    status: {
+      id: "status-resolved",
+      label: "Resolved",
+    },
+  },
+];

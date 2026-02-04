@@ -24,3 +24,18 @@ export interface PaginationRequest {
 export interface SearchProjectsRequest {
   pagination?: PaginationRequest;
 }
+
+// Request body for searching cases.
+export interface CaseSearchRequest {
+  filters?: {
+    caseTypes?: string[];
+    deploymentId?: string;
+    severityId?: number;
+    statusId?: number;
+  };
+  pagination: PaginationRequest;
+  sortBy?: {
+    field: string;
+    order: "asc" | "desc";
+  };
+}

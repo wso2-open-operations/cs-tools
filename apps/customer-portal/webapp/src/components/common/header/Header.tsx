@@ -25,14 +25,9 @@ import Actions from "@/components/common/header/Actions";
 import SearchBar from "@/components/common/header/SearchBar";
 import ProjectSwitcher from "@/components/common/header/ProjectSwitcher";
 
-/**
- * Props for the Header component.
- */
 interface HeaderProps {
-  /**
-   * Callback function to toggle the sidebar.
-   */
   onToggleSidebar: () => void;
+  collapsed?: boolean;
 }
 
 /**
@@ -41,34 +36,18 @@ interface HeaderProps {
  * @param {HeaderProps} props - The props for the component.
  * @returns {JSX.Element} The Header component.
  */
-export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
-  /**
-   * Navigation hook.
-   */
+export default function Header({
+  onToggleSidebar,
+  collapsed = false,
+}: HeaderProps): JSX.Element {
   const navigate = useNavigate();
-  /**
-   * Location hook.
-   */
   const location = useLocation();
-  /**
-   * Logger hook.
-   */
   const logger = useLogger();
-  /**
-   * Project ID from URL parameters.
-   */
   const { projectId } = useParams<{
     projectId?: string;
   }>();
 
-  /**
-   * Check if the current location is the project hub.
-   */
   const isProjectHub = location.pathname === "/";
-
-  /**
-   * Fetch projects.
-   */
   const {
     data: projectsResponse,
     fetchNextPage,
@@ -78,66 +57,39 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     isError,
   } = useGetProjects({}, true);
 
-  /**
-   * Fetch next page of projects if available.
-   */
   useEffect(() => {
     if (hasNextPage && !isFetchingNextPage && !isError) {
       fetchNextPage();
     }
   }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
 
-  /**
-   * Flatten the projects response.
-   */
   const projects = useMemo(
     () => projectsResponse?.pages.flatMap((page) => page.projects) || [],
     [projectsResponse?.pages],
   );
 
-  /**
-   * Find the project from the URL parameters.
-   */
   const projectFromUrl = projects.find((project) => project.id === projectId);
 
-  /**
-   * Use effect to log errors when they occur.
-   */
   useEffect(() => {
     if (isError) {
       logger.error("Failed to fetch projects in Header");
     }
   }, [isError, logger]);
 
-  /**
-   * Use effect to log projects loaded.
-   */
   useEffect(() => {
     if (projects.length > 0) {
       logger.debug(`${projects.length} projects loaded in Header`);
     }
   }, [projects.length, logger]);
 
-  /**
-   * State for the selected project.
-   */
   const [selectedProject, setProject] = useState<ProjectListItem | undefined>(
     projectFromUrl,
   );
 
-  /**
-   * Effect to update the selected project when the URL parameters change.
-   */
   useEffect(() => {
     if (projectId) {
-      /**
-       * Find the project from the URL parameters.
-       */
       const project = projects.find((p) => p.id === projectId);
-      /**
-       * Set the selected project if it is different from the current selected project.
-       * If no matching project is found, clear the selection.
-       */
+
       if (project) {
         if (project.id !== selectedProject?.id) {
           setProject(project);
@@ -146,9 +98,6 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
         setProject(undefined);
       }
     } else if (selectedProject) {
-      /**
-       * If projectId is missing (e.g., on the project hub), clear the selection.
-       */
       setProject(undefined);
     }
   }, [projectId, selectedProject?.id, projects]);
@@ -163,17 +112,11 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
       const project = projects.find((p) => p.id === id);
       if (project) {
         logger.debug(`Switching to project: ${project.name} (${project.id})`);
-        /**
-         * Set the selected project.
-         */
+
         setProject(project);
-        /**
-         * Get the sub path from the current location.
-         */
+
         const subPath = location.pathname.split("/").slice(2).join("/");
-        /**
-         * Navigate to the new project.
-         */
+
         navigate(`/${project.id}/${subPath || "dashboard"}`);
       } else {
         logger.warn(`Project with ID ${id} not found for switching`);

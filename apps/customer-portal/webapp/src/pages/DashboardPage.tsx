@@ -18,11 +18,13 @@ import { Box, Button, Grid, LinearProgress, Typography } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { useEffect, type JSX } from "react";
 import { useLogger } from "@/hooks/useLogger";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
 import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
 import { DASHBOARD_STATS } from "@/constants/dashboardConstants";
 import { StatCard } from "@/components/dashboard/stats/StatCard";
 import ChartLayout from "@/components/dashboard/charts/ChartLayout";
+import CasesTable from "@/components/dashboard/casesTable/CasesTable";
 import { ArrowRight, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 
 /**
@@ -34,6 +36,8 @@ export default function DashboardPage(): JSX.Element {
   const navigate = useNavigate();
   const logger = useLogger();
   const { projectId } = useParams<{ projectId: string }>();
+  const { showLoader, hideLoader } = useLoader();
+
   const {
     data: mockStats,
     isLoading: isMockLoading,
@@ -47,6 +51,15 @@ export default function DashboardPage(): JSX.Element {
 
   const isLoading = isMockLoading || isCasesLoading;
   const isError = isErrorMock || isErrorCases;
+
+  useEffect(() => {
+    if (isLoading) {
+      showLoader();
+    } else {
+      hideLoader();
+    }
+    return () => hideLoader();
+  }, [isLoading, showLoader, hideLoader]);
 
   useEffect(() => {
     if (isErrorMock) {
@@ -73,19 +86,6 @@ export default function DashboardPage(): JSX.Element {
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
-      {/* Loading progress bar */}
-      {isLoading && (
-        <LinearProgress
-          color="warning"
-          sx={{
-            left: "-1.5rem",
-            position: "absolute",
-            right: "-1.5rem",
-            top: "-1.5rem",
-            zIndex: 1,
-          }}
-        />
-      )}
       {/* Get support button */}
       <Box
         sx={{
@@ -176,6 +176,12 @@ export default function DashboardPage(): JSX.Element {
           casesTrend={mockStats?.casesTrend || []}
           isLoading={isLoading}
         />
+      )}
+      {/* Cases Table */}
+      {!isError && projectId && (
+        <Box sx={{ mt: 3 }}>
+          <CasesTable projectId={projectId} />
+        </Box>
       )}
     </Box>
   );

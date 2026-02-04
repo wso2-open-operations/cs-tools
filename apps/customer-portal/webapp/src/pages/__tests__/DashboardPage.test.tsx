@@ -20,6 +20,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import { DASHBOARD_STATS } from "@/constants/dashboardConstants";
 import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
 import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
+import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
 
 const mockNavigate = vi.fn();
 
@@ -98,6 +99,11 @@ vi.mock("@/components/dashboard/stats/StatCard", () => ({
   ),
 }));
 
+// Mock CasesTable
+vi.mock("@/components/dashboard/casesTable/CasesTable", () => ({
+  default: () => <div data-testid="cases-table" />,
+}));
+
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
@@ -144,7 +150,11 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 
 describe("DashboardPage", () => {
   it("should render correctly", () => {
-    render(<DashboardPage />);
+    render(
+      <LoaderProvider>
+        <DashboardPage />
+      </LoaderProvider>,
+    );
 
     expect(screen.getAllByTestId("stat-card")).toHaveLength(
       DASHBOARD_STATS.length,
@@ -154,7 +164,11 @@ describe("DashboardPage", () => {
   });
 
   it("should navigate to support chat on button click", () => {
-    render(<DashboardPage />);
+    render(
+      <LoaderProvider>
+        <DashboardPage />
+      </LoaderProvider>,
+    );
     const button = screen.getByText("Get Support");
     fireEvent.click(button);
 
@@ -168,7 +182,11 @@ describe("DashboardPage", () => {
       data: undefined,
     } as any);
 
-    render(<DashboardPage />);
+    render(
+      <LoaderProvider>
+        <DashboardPage />
+      </LoaderProvider>,
+    );
 
     expect(
       screen.getByText(
@@ -184,7 +202,11 @@ describe("DashboardPage", () => {
       data: undefined,
     } as any);
 
-    render(<DashboardPage />);
+    render(
+      <LoaderProvider>
+        <DashboardPage />
+      </LoaderProvider>,
+    );
 
     expect(
       screen.getByText(

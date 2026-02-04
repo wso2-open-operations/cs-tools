@@ -15,8 +15,9 @@
 // under the License.
 
 import { notificationBannerConfig } from "@/config/notificationBannerConfig";
-import { AppShell, Box, useAppShell } from "@wso2/oxygen-ui";
+import { AppShell, Box, useAppShell, LinearProgress } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { useLocation, Outlet } from "react-router";
 import GlobalNotificationBanner from "@/components/common/notificationBanner/GlobalNotificationBanner";
 import Footer from "@/components/common/footer/Footer";
@@ -35,6 +36,8 @@ export default function AppLayout(): JSX.Element {
     initialCollapsed: false,
   });
 
+  const { isVisible } = useLoader();
+
   const isProjectHub = location.pathname === "/";
 
   return (
@@ -43,7 +46,10 @@ export default function AppLayout(): JSX.Element {
       <AppShell>
         {/* Header component. */}
         <AppShell.Navbar>
-          <Header onToggleSidebar={shellActions.toggleSidebar} />
+          <Header
+            onToggleSidebar={shellActions.toggleSidebar}
+            collapsed={shellState.sidebarCollapsed}
+          />
         </AppShell.Navbar>
 
         {/* Side bar component. */}
@@ -60,8 +66,39 @@ export default function AppLayout(): JSX.Element {
 
         {/* Main content. */}
         <AppShell.Main>
-          <Box sx={{ p: 3, flex: 1, overflow: "auto" }}>
-            <Outlet />
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "100%",
+              width: "100%",
+              flex: 1,
+              overflow: "hidden",
+              position: "relative",
+            }}
+          >
+            {isVisible && (
+              <LinearProgress
+                color="warning"
+                sx={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  zIndex: 1300,
+                  height: 3,
+                }}
+              />
+            )}
+            <Box
+              sx={{
+                flex: 1,
+                overflow: "auto",
+                p: 3,
+              }}
+            >
+              <Outlet />
+            </Box>
           </Box>
         </AppShell.Main>
 

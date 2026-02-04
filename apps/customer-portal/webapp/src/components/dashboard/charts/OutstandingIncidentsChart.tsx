@@ -22,7 +22,7 @@ import {
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { ChartLegend } from "./ChartLegend";
+import { ChartLegend } from "@/components/dashboard/charts/ChartLegend";
 import { OUTSTANDING_INCIDENTS_CHART_DATA } from "@/constants/dashboardConstants";
 
 interface OutstandingIncidentsChartProps {

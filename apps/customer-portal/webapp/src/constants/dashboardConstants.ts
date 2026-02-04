@@ -22,6 +22,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type DashboardMockStats } from "@/models/responses";
 import { colors } from "@wso2/oxygen-ui";
+import { type FilterField } from "@/components/common/filterPanel/FilterPopover";
 
 // Valid color types for the stat card icons.
 export type StatCardColor =
@@ -146,5 +147,57 @@ export const CASES_TREND_CHART_DATA: CasesTrendChartDataItem[] = [
     color: colors.yellow[600],
     radius: [4, 4, 0, 0],
     border: true,
+  },
+];
+
+// Filter fields for the cases table.
+export const FILTER_FIELDS: FilterField[] = [
+  {
+    id: "deploymentId",
+    label: "Deployment",
+    type: "select",
+    options: [
+      { label: "Development", value: "Development" },
+      { label: "Production", value: "production" },
+      { label: "QA", value: "QA" },
+      { label: "Staging", value: "Staging" },
+    ],
+  },
+  {
+    id: "severityId",
+    label: "Severity",
+    type: "select",
+    options: [
+      { label: "Critical", value: "0" },
+      { label: "High", value: "1" },
+      { label: "Medium", value: "2" },
+      { label: "Low", value: "3" },
+      { label: "Minimal", value: "4" },
+    ],
+  },
+  {
+    id: "statusId",
+    label: "Status",
+    type: "select",
+    options: [
+      { label: "Open", value: "0" },
+      { label: "In Progress", value: "1" },
+      { label: "Awaiting Response", value: "2" },
+      { label: "Resolved", value: "3" },
+      { label: "Closed", value: "4" },
+    ],
+  },
+  {
+    id: "caseTypes",
+    label: "Case Type",
+    type: "select",
+    options: [
+      "Total Outage",
+      "Partial Outage",
+      "Performance Degradation",
+      "Question",
+      "Security or Compliance",
+      "Error",
+    ],
   },
 ];

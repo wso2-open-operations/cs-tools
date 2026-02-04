@@ -75,11 +75,7 @@ export default function ProjectSwitcher({
         size="small"
         sx={{ minWidth: 200 }}
         renderValue={(selected) => {
-          /**
-           * Find the project from the URL parameters.
-           */
           const project = projects.find((project) => project.id === selected);
-
           return (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <FolderOpen size={16} />

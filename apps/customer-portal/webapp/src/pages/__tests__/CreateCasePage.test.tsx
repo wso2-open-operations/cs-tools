@@ -19,6 +19,7 @@ import { BrowserRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { useGetCaseCreationDetails } from "@/api/useGetCaseCreationDetails";
 import CreateCasePage from "@/pages/CreateCasePage";
+import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -146,9 +147,11 @@ vi.mock("@/api/useGetCaseCreationDetails", () => ({
 describe("CreateCasePage", () => {
   it("should render all sections correctly", () => {
     render(
-      <BrowserRouter>
-        <CreateCasePage />
-      </BrowserRouter>,
+      <LoaderProvider>
+        <BrowserRouter>
+          <CreateCasePage />
+        </BrowserRouter>
+      </LoaderProvider>,
     );
 
     // Header logic
@@ -174,9 +177,11 @@ describe("CreateCasePage", () => {
 
   it("should have a back button that navigates back", () => {
     render(
-      <BrowserRouter>
-        <CreateCasePage />
-      </BrowserRouter>,
+      <LoaderProvider>
+        <BrowserRouter>
+          <CreateCasePage />
+        </BrowserRouter>
+      </LoaderProvider>,
     );
 
     const backButtons = screen.getAllByText("Back to Chat");
@@ -192,9 +197,11 @@ describe("CreateCasePage", () => {
     } as any);
 
     render(
-      <BrowserRouter>
-        <CreateCasePage />
-      </BrowserRouter>,
+      <LoaderProvider>
+        <BrowserRouter>
+          <CreateCasePage />
+        </BrowserRouter>
+      </LoaderProvider>,
     );
 
     expect(
