@@ -78,8 +78,8 @@ export default function UserProfile(): JSX.Element {
         user={userToRender as any}
         onProfileClick={() => logger.debug("Profile clicked")}
         onSettingsClick={() => logger.debug("Settings clicked")}
-        onLogout={() => {
-          signOut();
+        onLogout={async () => {
+          await signOut();
           navigate("/");
         }}
       />
