@@ -15,8 +15,10 @@
 // under the License.
 
 import { useAsgardeo } from "@asgardeo/react";
-import { type JSX } from "react";
+import { useEffect, type JSX } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
+
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 
 /**
  * AuthGuard component to protect routes.
@@ -26,12 +28,16 @@ import { Navigate, Outlet, useLocation } from "react-router";
 export default function AuthGuard(): JSX.Element {
   const { isSignedIn, isLoading } = useAsgardeo();
   const location = useLocation();
+  const { showLoader, hideLoader } = useLoader();
 
-  if (isLoading) {
-    return <Outlet />;
-  }
+  useEffect(() => {
+    if (isLoading) {
+      showLoader();
+      return () => hideLoader();
+    }
+  }, [isLoading, showLoader, hideLoader]);
 
-  if (!isSignedIn) {
+  if (!isLoading && !isSignedIn) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
