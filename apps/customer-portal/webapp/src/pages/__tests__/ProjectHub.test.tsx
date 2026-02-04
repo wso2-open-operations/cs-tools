@@ -34,9 +34,28 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   FolderOpen: () => <svg data-testid="folder-icon" />,
 }));
 
+// Mock useAsgardeo
+const mockUseAsgardeo = vi.fn();
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => mockUseAsgardeo(),
+}));
+
+// Mock useMockConfig
+const mockUseMockConfig = vi.fn();
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => mockUseMockConfig(),
+}));
+
 // Mock sub-components
 vi.mock("@/components/projectHub/projectCard/ProjectCard", () => ({
-  default: ({ title }: any) => <div data-testid="project-card">{title}</div>,
+  default: ({ title, isStatsError }: any) => (
+    <div
+      data-testid="project-card"
+      data-stats-error={isStatsError ? "true" : "false"}
+    >
+      {title}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/projectHub/projectCard/ProjectCardSkeleton", () => ({
@@ -62,6 +81,15 @@ vi.mock("@/hooks/useLogger", () => ({
 describe("ProjectHub", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAsgardeo.mockReturnValue({ isLoading: false });
+    mockUseMockConfig.mockReturnValue({ isMockEnabled: true });
+    mockUseGetProjects.mockReturnValue({
+      isLoading: false,
+      data: {
+        projects: mockProjects,
+      },
+      isError: false,
+    });
   });
 
   it("should render loading skeletons when isLoading is true", () => {
@@ -76,21 +104,44 @@ describe("ProjectHub", () => {
     expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3);
   });
 
-  it("should render project cards when data is loaded", () => {
+  it("should render loading skeletons when isAuthLoading is true", () => {
+    mockUseAsgardeo.mockReturnValue({ isLoading: true });
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
-      data: {
-        pages: [{ projects: mockProjects }],
-      },
+      data: null, // Data might not be available yet
       isError: false,
     });
 
+    render(<ProjectHub />);
+
+    expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3);
+  });
+
+  it("should render project cards when data is loaded", () => {
     render(<ProjectHub />);
 
     expect(screen.getAllByTestId("project-card")).toHaveLength(
       mockProjects.length,
     );
     expect(screen.getByText(mockProjects[0].name)).toBeInTheDocument();
+  });
+
+  it("should pass isStatsError=true to ProjectCard when mocks are disabled", () => {
+    mockUseMockConfig.mockReturnValue({ isMockEnabled: false });
+
+    render(<ProjectHub />);
+
+    const cards = screen.getAllByTestId("project-card");
+    expect(cards[0]).toHaveAttribute("data-stats-error", "true");
+  });
+
+  it("should pass isStatsError=false to ProjectCard when mocks are enabled", () => {
+    mockUseMockConfig.mockReturnValue({ isMockEnabled: true });
+
+    render(<ProjectHub />);
+
+    const cards = screen.getAllByTestId("project-card");
+    expect(cards[0]).toHaveAttribute("data-stats-error", "false");
   });
 
   it("should render error message when isError is true", async () => {
@@ -114,7 +165,7 @@ describe("ProjectHub", () => {
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: {
-        pages: [{ projects: [] }],
+        projects: [],
       },
       isError: false,
     });
@@ -125,37 +176,11 @@ describe("ProjectHub", () => {
   });
 
   it("should log debug message when projects are loaded", async () => {
-    mockUseGetProjects.mockReturnValue({
-      isLoading: false,
-      data: {
-        pages: [{ projects: mockProjects }],
-      },
-      isError: false,
-    });
-
     render(<ProjectHub />);
     await waitFor(() => {
       expect(mockLogger.debug).toHaveBeenCalledWith(
         expect.stringContaining("projects loaded"),
       );
     });
-  });
-
-  it("should call fetchNextPage when hasNextPage is true", () => {
-    const mockFetchNextPage = vi.fn();
-    mockUseGetProjects.mockReturnValue({
-      isLoading: false,
-      data: {
-        pages: [{ projects: mockProjects }],
-      },
-      fetchNextPage: mockFetchNextPage,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      isError: false,
-    });
-
-    render(<ProjectHub />);
-
-    expect(mockFetchNextPage).toHaveBeenCalled();
   });
 });
