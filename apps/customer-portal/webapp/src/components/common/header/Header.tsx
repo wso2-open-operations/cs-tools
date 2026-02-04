@@ -157,7 +157,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
        */
       navigate(`/${project.id}/${subPath || "dashboard"}`);
     } else {
-      logger.warn(`Project with id ${id} not found for switching`);
+      logger.warn(`Project with ID ${id} not found for switching`);
     }
   };
 
