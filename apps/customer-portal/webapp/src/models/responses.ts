@@ -51,8 +51,15 @@ export interface UserProfile {
   name: string;
   email: string;
   avatar: string;
-  role: string;
-  status?: string;
+}
+
+// User details response from API.
+export interface UserDetails {
+  id: string;
+  email: string;
+  lastName: string;
+  firstName: string;
+  timeZone: string;
 }
 
 // Project support statistics.
