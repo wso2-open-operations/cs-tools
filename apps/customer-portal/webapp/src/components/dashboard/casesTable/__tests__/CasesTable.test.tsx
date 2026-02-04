@@ -18,6 +18,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import CasesTable from "../CasesTable";
 import useGetProjectCases from "@/api/useGetProjectCases";
+import useGetCasesFilters from "@/api/useGetCasesFilters";
 
 // Mock dependencies
 vi.mock("react-router", () => ({
@@ -25,6 +26,14 @@ vi.mock("react-router", () => ({
 }));
 
 vi.mock("@/api/useGetProjectCases");
+vi.mock("@/api/useGetCasesFilters");
+
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isLoading: false,
+    isSignedIn: true,
+  }),
+}));
 
 vi.mock("@wso2/oxygen-ui", () => ({
   ListingTable: {
@@ -37,6 +46,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
     grey: { 500: "#9e9e9e" },
     red: { 500: "#f44336" },
     yellow: { 600: "#fdd835" },
+    purple: { 400: "#ab47bc" },
   },
 }));
 
@@ -70,9 +80,13 @@ vi.mock("../CasesList", () => ({
 }));
 
 vi.mock("@/components/common/filterPanel/FilterPopover", () => ({
-  default: ({ open, onClose, onSearch }: any) =>
+  default: ({ open, onClose, onSearch, isLoading, isError }: any) =>
     open ? (
       <div data-testid="filter-popover">
+        {isLoading && (
+          <span data-testid="filters-loading">Filters Loading</span>
+        )}
+        {isError && <span data-testid="filters-error">Filters Error</span>}
         <button onClick={onClose}>Close</button>
         <button onClick={() => onSearch({ statusId: "1", severityId: "2" })}>
           Search
@@ -84,12 +98,18 @@ vi.mock("@/components/common/filterPanel/FilterPopover", () => ({
 describe("CasesTable", () => {
   const mockProjectId = "proj-123";
   const mockUseGetProjectCases = vi.mocked(useGetProjectCases);
+  const mockUseGetCasesFilters = vi.mocked(useGetCasesFilters);
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseGetProjectCases.mockReturnValue({
       data: { cases: [], totalRecords: 0, offset: 0, limit: 10 },
       isLoading: false,
+    } as any);
+    mockUseGetCasesFilters.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
     } as any);
   });
 
@@ -189,5 +209,20 @@ describe("CasesTable", () => {
         }),
       );
     });
+  });
+
+  it("should propagate loading and error states to FilterPopover", () => {
+    mockUseGetCasesFilters.mockReturnValue({
+      isLoading: true,
+      isError: true,
+    } as any);
+
+    render(<CasesTable projectId={mockProjectId} />);
+
+    // Open filter
+    fireEvent.click(screen.getByText("Filter"));
+
+    expect(screen.getByTestId("filters-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("filters-error")).toBeInTheDocument();
   });
 });
