@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MockConfigProvider, useMockConfig } from "../MockConfigProvider";
 
 // Test component to consume context
