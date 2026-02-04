@@ -18,12 +18,12 @@ import type { JSX } from "react";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import App from "@/App";
 import { AuthProvider } from "@asgardeo/auth-react";
 import { authConfig } from "@/config/authConfig";
 import { themeConfig } from "@/config/themeConfig";
 import { loggerConfig } from "@/config/loggerConfig";
 import LoggerProvider from "@/context/logger/LoggerProvider";
-import App from "@/App";
 
 const queryClient: QueryClient = new QueryClient();
 

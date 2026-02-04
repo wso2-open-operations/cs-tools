@@ -17,7 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { getCaseCreationMetadata } from "@/models/mockFunctions";
 import { useLogger } from "@/hooks/useLogger";
-import { ApiQueryKeys } from "@/constants/apiQueryKeys";
+import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
 import type { CaseCreationMetadata } from "@/models/mockData";
 
 /**
@@ -39,7 +39,7 @@ export function useGetCaseCreationDetails(): UseQueryResult<
       /**
        * Mock behavior: simulate network latency for the in-memory mock data.
        */
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const metadata: CaseCreationMetadata = getCaseCreationMetadata();
 

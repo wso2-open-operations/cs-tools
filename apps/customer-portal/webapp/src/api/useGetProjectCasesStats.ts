@@ -15,26 +15,26 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { getMockProjectSupportStats } from "@/models/mockFunctions";
+import { getMockProjectCasesStats } from "@/models/mockFunctions";
 import { useLogger } from "@/hooks/useLogger";
 import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
-import type { ProjectSupportStats } from "@/models/responses";
+import type { ProjectCasesStats } from "@/models/responses";
 
 /**
- * Custom hook to fetch project support statistics by ID.
+ * Custom hook to fetch project case statistics by ID.
  *
  * @param {string} id - The ID of the project.
- * @returns {UseQueryResult<ProjectSupportStats, Error>} The query result object.
+ * @returns {UseQueryResult<ProjectCasesStats, Error>} The query result object.
  */
-export function useGetProjectSupportStats(
+export function useGetProjectCasesStats(
   id: string,
-): UseQueryResult<ProjectSupportStats, Error> {
+): UseQueryResult<ProjectCasesStats, Error> {
   const logger = useLogger();
 
-  return useQuery<ProjectSupportStats, Error>({
-    queryKey: [ApiQueryKeys.SUPPORT_STATS, id],
-    queryFn: async (): Promise<ProjectSupportStats> => {
-      logger.debug(`Fetching support stats for project ID: ${id}`);
+  return useQuery<ProjectCasesStats, Error>({
+    queryKey: [ApiQueryKeys.CASES_STATS, id],
+    queryFn: async (): Promise<ProjectCasesStats> => {
+      logger.debug(`Fetching case stats for project ID: ${id}`);
 
       /**
        * Mock behavior: simulate network latency for the in-memory mock data.
@@ -43,16 +43,16 @@ export function useGetProjectSupportStats(
        */
       await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
-      const stats: ProjectSupportStats = getMockProjectSupportStats();
+      const stats: ProjectCasesStats = getMockProjectCasesStats();
 
       logger.debug(
-        `Support stats fetched successfully for project ID: ${id}`,
+        `Case stats fetched successfully for project ID: ${id}`,
         stats,
       );
 
       return stats;
     },
     enabled: !!id,
-    staleTime: 5 * 60 * 1000, // TODO : Need to decide on the stale time
+    staleTime: 5 * 60 * 1000,
   });
 }

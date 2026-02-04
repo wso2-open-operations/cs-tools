@@ -15,6 +15,12 @@
 // under the License.
 
 /**
+ * Global mock delay for API hooks to simulate network latency.
+ * This can be overridden in tests to improve execution time.
+ */
+export const API_MOCK_DELAY = 800;
+
+/**
  * Constants for API-related query keys.
  */
 export const ApiQueryKeys = {
@@ -30,4 +36,12 @@ export const ApiQueryKeys = {
    * Key for case creation metadata api call.
    */
   CASE_CREATION_METADATA: "case-creation-metadata",
+  /**
+   * Key for project cases statistics api call.
+   */
+  CASES_STATS: "cases-stats",
+  /**
+   * Key for dashboard mock statistics api call.
+   */
+  DASHBOARD_STATS: "dashboard-stats",
 } as const;

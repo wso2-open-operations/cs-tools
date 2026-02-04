@@ -26,6 +26,14 @@ vi.mock("@/models/mockFunctions", () => ({
   getCaseCreationMetadata: vi.fn(),
 }));
 
+vi.mock("@/constants/apiConstants", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    API_MOCK_DELAY: 0,
+  };
+});
+
 vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => ({
     debug: vi.fn(),

@@ -36,9 +36,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
           )}
     </div>
   ),
-  Grid: ({ children, container }: any) => (
-    <div data-testid="grid">{children}</div>
-  ),
+  Grid: ({ children }: any) => <div data-testid="grid">{children}</div>,
   MenuItem: ({ children, value }: any) => (
     <option value={value}>{children}</option>
   ),

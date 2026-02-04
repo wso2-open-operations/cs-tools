@@ -21,7 +21,7 @@ import {
 } from "@tanstack/react-query";
 import { useLogger } from "@/hooks/useLogger";
 import { mockProjects } from "@/models/mockData";
-import { ApiQueryKeys } from "@/constants/apiQueryKeys";
+import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
 import type { SearchProjectsRequest } from "@/models/requests";
 import type { SearchProjectsResponse } from "@/models/responses";
 
@@ -67,7 +67,7 @@ export default function useGetProjects(
        * This is intended only for development/demo use and should be removed or
        * replaced when wiring this hook to the real backend API.
        */
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
       const offset = typeof pageParam === "number" ? pageParam : 0;
 

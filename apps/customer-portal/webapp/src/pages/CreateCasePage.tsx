@@ -85,7 +85,7 @@ export default function CreateCasePage(): JSX.Element {
       setTitle(getGeneratedIssueTitle());
       setDescription(getGeneratedIssueDescription());
     }
-  }, [metadata, projectId]);
+  }, [metadata]);
 
   /**
    * Use effect to log errors when they occur.

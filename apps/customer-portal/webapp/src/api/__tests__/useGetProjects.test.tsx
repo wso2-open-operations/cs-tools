@@ -21,6 +21,14 @@ import useGetProjects from "@/api/useGetProjects";
 import { mockProjects } from "@/models/mockData";
 import type { ReactNode } from "react";
 
+vi.mock("@/constants/apiConstants", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    API_MOCK_DELAY: 0,
+  };
+});
+
 // Mock useLogger
 vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => ({

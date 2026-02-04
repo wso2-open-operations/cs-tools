@@ -16,7 +16,7 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useGetProjectSupportStats } from "@/api/useGetProjectSupportStats";
+import { useGetProjectCasesStats } from "@/api/useGetProjectCasesStats";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -37,7 +37,7 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
-describe("useGetProjectSupportStats", () => {
+describe("useGetProjectCasesStats", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -57,37 +57,33 @@ describe("useGetProjectSupportStats", () => {
   );
 
   it("should return loading state initially", async () => {
-    const { result } = renderHook(
-      () => useGetProjectSupportStats("project-1"),
-      {
-        wrapper,
-      },
-    );
+    const { result } = renderHook(() => useGetProjectCasesStats("project-1"), {
+      wrapper,
+    });
 
     expect(result.current.isLoading).toBe(true);
   });
 
   it("should return data after fetching", async () => {
-    const { result } = renderHook(
-      () => useGetProjectSupportStats("project-1"),
-      {
-        wrapper,
-      },
-    );
+    const { result } = renderHook(() => useGetProjectCasesStats("project-1"), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toBeDefined();
-    expect(result.current.data?.totalCases).toBeGreaterThanOrEqual(0);
+    expect(result.current.data?.totalCases).toBeGreaterThanOrEqual(50);
+    expect(result.current.data?.activeCases).toBeDefined();
+    expect(result.current.data?.outstandingIncidents).toBeDefined();
+    expect(result.current.data?.resolvedCases).toBeDefined();
+
     expect(mockLogger.debug).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Fetching support stats for project ID: project-1",
-      ),
+      expect.stringContaining("Fetching case stats for project ID: project-1"),
     );
   });
 
   it("should not fetch if id is missing", () => {
-    const { result } = renderHook(() => useGetProjectSupportStats(""), {
+    const { result } = renderHook(() => useGetProjectCasesStats(""), {
       wrapper,
     });
 

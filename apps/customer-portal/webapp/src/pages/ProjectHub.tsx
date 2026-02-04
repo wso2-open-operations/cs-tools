@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Typography } from "@wso2/oxygen-ui";
-import { useEffect, type JSX } from "react";
+import { useEffect, useMemo, type JSX } from "react";
 import useGetProjects from "@/api/useGetProjects";
 import { useLogger } from "@/hooks/useLogger";
 import ProjectCard from "@/components/projectHub/projectCard/ProjectCard";
@@ -57,8 +57,10 @@ export default function ProjectHub(): JSX.Element {
   /**
    * Get projects from the response.
    */
-  const projects =
-    projectsResponse?.pages.flatMap((page) => page.projects) || [];
+  const projects = useMemo(
+    () => projectsResponse?.pages.flatMap((page) => page.projects) || [],
+    [projectsResponse?.pages],
+  );
 
   /**
    * Use effect to log errors when they occur.
