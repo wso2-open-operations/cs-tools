@@ -40,9 +40,7 @@ export default function LoginSlogan(): JSX.Element {
             <div style={{ display: "flex", alignItems: "center" }}>
               {item.icon}
             </div>
-            <Typography sx={{ fontWeight: "medium", fontSize: "1.1rem" }}>
-              {item.title}
-            </Typography>
+            <Typography sx={{ fontSize: "1rem" }}>{item.title}</Typography>
           </Stack>
         ))}
       </Stack>

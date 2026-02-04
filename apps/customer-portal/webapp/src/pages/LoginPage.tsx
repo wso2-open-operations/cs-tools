@@ -38,8 +38,8 @@ export default function LoginPage(): JSX.Element {
           size={{ xs: 12, md: 8 }}
           sx={{
             display: "flex",
-            alignItems: "top",
-            justifyContent: "left",
+            alignItems: "flex-start",
+            justifyContent: "flex-start",
             padding: 18,
             textAlign: "left",
             position: "relative",
