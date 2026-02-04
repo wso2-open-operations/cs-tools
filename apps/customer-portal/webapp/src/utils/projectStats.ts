@@ -14,7 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { SubscriptionStatus } from "@/models/responses";
+import {
+  SUBSCRIPTION_STATUS,
+  type SubscriptionStatus,
+  SLA_STATUS,
+  SUPPORT_TIER,
+  PROJECT_TYPE,
+  SYSTEM_HEALTH,
+} from "@/constants/projectDetailsConstants";
 
 /**
  * Formats a date string into "MMM DD, YYYY" format.
@@ -46,11 +53,11 @@ export const getSLAStatusColor = (
 ): "success" | "error" | "default" | "warning" => {
   const normalizedStatus = status?.toLowerCase();
 
-  if (normalizedStatus === "good") {
+  if (normalizedStatus === SLA_STATUS.GOOD.toLowerCase()) {
     return "success";
   }
 
-  if (normalizedStatus === "bad") {
+  if (normalizedStatus === SLA_STATUS.BAD.toLowerCase()) {
     return "error";
   }
 
@@ -68,11 +75,11 @@ export const getSupportTierColor = (
 ): "primary" | "info" | "default" | "success" | "warning" | "error" => {
   const normalizedTier = tier?.toLowerCase();
 
-  if (normalizedTier === "enterprise") {
+  if (normalizedTier === SUPPORT_TIER.ENTERPRISE.toLowerCase()) {
     return "warning";
   }
 
-  if (normalizedTier === "standard") {
+  if (normalizedTier === SUPPORT_TIER.STANDARD.toLowerCase()) {
     return "info";
   }
 
@@ -90,11 +97,11 @@ export const getProjectTypeColor = (
 ): "primary" | "info" | "default" | "success" | "warning" | "error" => {
   const normalizedType = type?.toLowerCase();
 
-  if (normalizedType === "subscription") {
+  if (normalizedType === PROJECT_TYPE.SUBSCRIPTION.toLowerCase()) {
     return "info";
   }
 
-  if (normalizedType === "free") {
+  if (normalizedType === PROJECT_TYPE.FREE.toLowerCase()) {
     return "warning";
   }
 
@@ -112,11 +119,11 @@ export const getSystemHealthColor = (
 ): "primary" | "info" | "default" | "success" | "warning" | "error" => {
   const normalizedStatus = status?.toLowerCase();
 
-  if (normalizedStatus === "healthy") {
+  if (normalizedStatus === SYSTEM_HEALTH.HEALTHY.toLowerCase()) {
     return "success";
   }
 
-  if (normalizedStatus === "critical") {
+  if (normalizedStatus === SYSTEM_HEALTH.CRITICAL.toLowerCase()) {
     return "error";
   }
 
@@ -133,7 +140,7 @@ export const getSubscriptionStatus = (
   endDateString: string,
 ): SubscriptionStatus => {
   if (!endDateString) {
-    return SubscriptionStatus.Active;
+    return SUBSCRIPTION_STATUS.ACTIVE;
   }
 
   const today = new Date();
@@ -145,14 +152,14 @@ export const getSubscriptionStatus = (
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
-    return SubscriptionStatus.Expired;
+    return SUBSCRIPTION_STATUS.EXPIRED;
   }
 
   if (diffDays <= 30) {
-    return SubscriptionStatus.ExpiringSoon;
+    return SUBSCRIPTION_STATUS.EXPIRING_SOON;
   }
 
-  return SubscriptionStatus.Active;
+  return SUBSCRIPTION_STATUS.ACTIVE;
 };
 
 /**
@@ -166,15 +173,15 @@ export const getSubscriptionColor = (
 ): "primary" | "info" | "default" | "success" | "warning" | "error" => {
   const normalizedStatus = status?.toLowerCase();
 
-  if (normalizedStatus === SubscriptionStatus.Expired.toLowerCase()) {
+  if (normalizedStatus === SUBSCRIPTION_STATUS.EXPIRED.toLowerCase()) {
     return "error";
   }
 
-  if (normalizedStatus === SubscriptionStatus.ExpiringSoon.toLowerCase()) {
+  if (normalizedStatus === SUBSCRIPTION_STATUS.EXPIRING_SOON.toLowerCase()) {
     return "warning";
   }
 
-  if (normalizedStatus === SubscriptionStatus.Active.toLowerCase()) {
+  if (normalizedStatus === SUBSCRIPTION_STATUS.ACTIVE.toLowerCase()) {
     return "success";
   }
 
