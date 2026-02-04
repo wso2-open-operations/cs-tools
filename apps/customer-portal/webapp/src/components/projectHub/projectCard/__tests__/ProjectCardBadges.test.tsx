@@ -48,6 +48,13 @@ vi.mock("@/utils/projectCard", () => ({
   }),
 }));
 
+// Mock ErrorIndicator
+vi.mock("@/components/common/errorIndicator/ErrorIndicator", () => ({
+  default: ({ entityName }: any) => (
+    <div data-testid="error-indicator">Error: {entityName}</div>
+  ),
+}));
+
 describe("ProjectCardBadges", () => {
   it("should render project key and status", () => {
     const props = {
@@ -72,5 +79,18 @@ describe("ProjectCardBadges", () => {
     const chips = screen.getAllByTestId("chip");
     const statusChip = chips.find((chip) => chip.textContent === props.status);
     expect(statusChip?.getAttribute("data-color")).toBe("warning");
+  });
+
+  it("should render error indicator for status when isError is true", () => {
+    const props = {
+      projectKey: "PROJ-1",
+      status: "All Good",
+      isError: true,
+    };
+
+    render(<ProjectCardBadges {...props} />);
+
+    expect(screen.getByText("Error: Status")).toBeInTheDocument();
+    expect(screen.queryByText(props.status)).not.toBeInTheDocument();
   });
 });
