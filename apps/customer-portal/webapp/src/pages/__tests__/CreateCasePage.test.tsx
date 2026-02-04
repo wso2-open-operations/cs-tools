@@ -52,7 +52,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
     ({ children, value }: any) => <select value={value}>{children}</select>,
     {
       MenuItem: Object.assign(
-        ({ children, value }: any) => <option value={value}>{children}</option>,
+        ({ value }: any) => <option value={value}>{value}</option>,
         {
           Icon: () => null,
           Text: ({ primary }: any) => primary,

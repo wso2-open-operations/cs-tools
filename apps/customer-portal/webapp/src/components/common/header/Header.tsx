@@ -119,7 +119,7 @@ export default function Header({
 
         navigate(`/${project.id}/${subPath || "dashboard"}`);
       } else {
-        logger.warn(`Project with id ${id} not found for switching`);
+        logger.warn(`Project with ID ${id} not found for switching`);
       }
     },
     [projects, logger, location.pathname, navigate],
