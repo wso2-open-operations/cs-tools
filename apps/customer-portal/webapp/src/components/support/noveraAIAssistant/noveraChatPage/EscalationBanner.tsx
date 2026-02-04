@@ -64,7 +64,7 @@ export default function EscalationBanner({
       <Button
         variant="contained"
         size="medium"
-        color="warning"
+        color="primary"
         onClick={onCreateCase}
       >
         Create Case

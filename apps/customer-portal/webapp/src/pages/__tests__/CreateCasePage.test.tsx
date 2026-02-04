@@ -18,6 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { BrowserRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { useGetCaseCreationDetails } from "@/api/useGetCaseCreationDetails";
+import useGetProjectDetails from "@/api/useGetProjectDetails";
 import CreateCasePage from "@/pages/CreateCasePage";
 import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
 
@@ -76,6 +77,11 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {children}
     </div>
   ),
+  IconButton: ({ children, onClick }: any) => (
+    <button onClick={onClick} data-testid="icon-button">
+      {children}
+    </button>
+  ),
   InputLabel: ({ children }: any) => <label>{children}</label>,
   MenuItem: ({ children, value }: any) => (
     <option value={value}>{children}</option>
@@ -109,6 +115,7 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   CircleCheck: () => <svg data-testid="icon-check" />,
   MessageSquare: () => <svg data-testid="icon-message" />,
   Pencil: () => <svg data-testid="icon-pencil" />,
+  PencilLine: () => <svg data-testid="icon-pencil-line" />,
   Sparkles: () => <svg data-testid="icon-sparkles" />,
 }));
 
@@ -141,6 +148,15 @@ vi.mock("@/api/useGetCaseCreationDetails", () => ({
       },
     },
     isLoading: false,
+  })),
+}));
+
+// Mock useGetProjectDetails hook
+vi.mock("@/api/useGetProjectDetails", () => ({
+  default: vi.fn(() => ({
+    data: { id: "123", name: "WSO2 Super App", key: "WSA" },
+    isLoading: false,
+    error: null,
   })),
 }));
 
@@ -194,6 +210,13 @@ describe("CreateCasePage", () => {
       data: null,
       isLoading: false,
       isError: true,
+    } as any);
+
+    // Ensure project details don't fail properly (can mock return null/loading for this test scenario if needed, but not strictly required for this test case's focus)
+    vi.mocked(useGetProjectDetails).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: new Error("Failed"),
     } as any);
 
     render(

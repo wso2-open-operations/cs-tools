@@ -36,10 +36,7 @@ interface HeaderProps {
  * @param {HeaderProps} props - The props for the component.
  * @returns {JSX.Element} The Header component.
  */
-export default function Header({
-  onToggleSidebar,
-  collapsed = false,
-}: HeaderProps): JSX.Element {
+export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const logger = useLogger();

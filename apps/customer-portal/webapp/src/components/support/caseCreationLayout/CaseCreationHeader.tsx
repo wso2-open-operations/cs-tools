@@ -65,6 +65,7 @@ export const CaseCreationHeader = ({
         icon={<Sparkles size={10} />}
         label="AI Generated"
         color="warning"
+        variant="outlined"
         sx={{ p: 0.5 }}
       />
     </Box>

@@ -18,6 +18,7 @@ import type { JSX } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router";
 import ProjectHub from "@/pages/ProjectHub";
 import ProjectPage from "@/pages/ProjectPage";
+import ProjectDetails from "@/pages/ProjectDetails";
 import DashboardPage from "@/pages/DashboardPage";
 import SupportPage from "@/pages/SupportPage";
 import NoveraChatPage from "@/pages/NoveraChatPage";
@@ -41,10 +42,7 @@ export default function App(): JSX.Element {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
               {/* Project Details */}
-              <Route
-                path="project-details"
-                element={<ProjectPage title="Project Details" />}
-              />
+              <Route path="project-details" element={<ProjectDetails />} />
               {/* Support */}
               <Route path="support">
                 <Route index element={<SupportPage />} />

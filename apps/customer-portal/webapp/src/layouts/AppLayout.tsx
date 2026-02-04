@@ -97,7 +97,9 @@ export default function AppLayout(): JSX.Element {
                 p: 3,
               }}
             >
-              <Outlet />
+              <Outlet
+                context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
+              />
             </Box>
           </Box>
         </AppShell.Main>

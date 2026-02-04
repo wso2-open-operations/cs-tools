@@ -20,9 +20,11 @@ export const API_MOCK_DELAY = 800;
 // Constants for API-related query keys.
 export const ApiQueryKeys = {
   PROJECTS: "projects",
+  PROJECT_DETAILS: "project-details",
   SUPPORT_STATS: "support-stats",
   CASE_CREATION_METADATA: "case-creation-metadata",
   CASES_STATS: "cases-stats",
   DASHBOARD_STATS: "dashboard-stats",
+  PROJECT_STATS: "project-stats",
   PROJECT_CASES: "project-cases",
 } as const;

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Grid, LinearProgress, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { useEffect, type JSX } from "react";
 import { useLogger } from "@/hooks/useLogger";

@@ -23,6 +23,21 @@ export interface ProjectListItem {
   description: string;
 }
 
+// Detailed project information including subscription details.
+export interface ProjectDetails {
+  id: string;
+  name: string;
+  key: string;
+  description: string;
+  createdOn: string;
+  type: string;
+  subscription: {
+    startDate: string;
+    endDate: string;
+    supportTier: string;
+  };
+}
+
 // Project Search Response.
 export interface SearchProjectsResponse {
   offset: number;
@@ -37,6 +52,7 @@ export interface UserProfile {
   email: string;
   avatar: string;
   role: string;
+  status?: string;
 }
 
 // Project support statistics.
@@ -139,4 +155,24 @@ export interface CaseSearchResponse {
   totalRecords: number;
   offset: number;
   limit: number;
+  projects?: {
+    id: string;
+    label: string;
+  }[];
+}
+
+// Project Stats Response
+export interface ProjectStatsResponse {
+  projectStats: {
+    activeChats: number;
+    deployments: number;
+    openCases: number;
+    slaStatus: string;
+  };
+  recentActivity: {
+    billableHours: number;
+    lastDeploymentOn: string;
+    systemHealth: string;
+    totalTimeLogged: number;
+  };
 }

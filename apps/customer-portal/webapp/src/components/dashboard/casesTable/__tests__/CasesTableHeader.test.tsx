@@ -52,7 +52,6 @@ describe("CasesTableHeader", () => {
     onUpdateFilter: vi.fn(),
     onFilterClick: vi.fn(),
     onCreateCase: vi.fn(),
-    projectId: "proj-1",
   };
 
   it("should render title and buttons", () => {

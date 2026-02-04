@@ -17,7 +17,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import AppLayout from "@/layouts/AppLayout";
-import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
 
 // Mock @wso2/oxygen-ui
 const mockShellActions = {
@@ -63,6 +62,18 @@ vi.mock("@wso2/oxygen-ui", () => ({
         <p>{message}</p>
       </div>
     ) : null,
+  LinearProgress: () => <div data-testid="linear-progress" />,
+}));
+
+// Mock useLoader
+const mockUseLoader = {
+  isVisible: false,
+  showLoader: vi.fn(),
+  hideLoader: vi.fn(),
+};
+
+vi.mock("@/context/linearLoader/LoaderContext", () => ({
+  useLoader: () => mockUseLoader,
 }));
 
 // Mock react-router
@@ -108,14 +119,11 @@ describe("AppLayout", () => {
     mockLocation.pathname = "/dashboard";
     mockShellState.sidebarCollapsed = false;
     mockShellState.expandedMenus = {};
+    mockUseLoader.isVisible = false;
   });
 
   it("should render Header, Sidebar, Main, and Footer on a project page", () => {
-    render(
-      <LoaderProvider>
-        <AppLayout />
-      </LoaderProvider>,
-    );
+    render(<AppLayout />);
 
     expect(screen.getByTestId("header")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
@@ -126,22 +134,28 @@ describe("AppLayout", () => {
 
   it("should NOT render Sidebar on the project hub (landing page)", () => {
     mockLocation.pathname = "/";
-    render(
-      <LoaderProvider>
-        <AppLayout />
-      </LoaderProvider>,
-    );
+    render(<AppLayout />);
 
     expect(screen.getByTestId("header")).toBeInTheDocument();
     expect(screen.queryByTestId("sidebar")).toBeNull();
   });
 
+  it("should render global loader when isVisible is true", () => {
+    mockUseLoader.isVisible = true;
+    render(<AppLayout />);
+
+    expect(screen.getByTestId("linear-progress")).toBeInTheDocument();
+  });
+
+  it("should NOT render global loader when isVisible is false", () => {
+    mockUseLoader.isVisible = false;
+    render(<AppLayout />);
+
+    expect(screen.queryByTestId("linear-progress")).toBeNull();
+  });
+
   it("should call toggleSidebar when header toggle is clicked", () => {
-    render(
-      <LoaderProvider>
-        <AppLayout />
-      </LoaderProvider>,
-    );
+    render(<AppLayout />);
 
     const toggleButton = screen.getByText("Toggle");
     toggleButton.click();
@@ -150,11 +164,7 @@ describe("AppLayout", () => {
   });
 
   it("should pass shell actions to SideBar", () => {
-    render(
-      <LoaderProvider>
-        <AppLayout />
-      </LoaderProvider>,
-    );
+    render(<AppLayout />);
 
     screen.getByText("Select").click();
     expect(mockShellActions.setActiveMenuItem).toHaveBeenCalledWith("item-1");
@@ -165,11 +175,7 @@ describe("AppLayout", () => {
 
   it("should pass shell state to SideBar", () => {
     mockShellState.sidebarCollapsed = true;
-    render(
-      <LoaderProvider>
-        <AppLayout />
-      </LoaderProvider>,
-    );
+    render(<AppLayout />);
 
     expect(screen.getByText("Collapsed: true")).toBeInTheDocument();
   });

@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Divider, Grid, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useState, useEffect, useRef, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useGetCaseCreationDetails } from "@/api/useGetCaseCreationDetails";
+import useGetProjectDetails from "@/api/useGetProjectDetails";
 import { useLogger } from "@/hooks/useLogger";
 import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { AIInfoCard } from "@/components/support/caseCreationLayout/AIInfoCard";
@@ -42,6 +43,8 @@ export default function CreateCasePage(): JSX.Element {
   const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
   const { data: metadata, isLoading, isError } = useGetCaseCreationDetails();
+  const { data: projectDetails, isLoading: isProjectLoading } =
+    useGetProjectDetails(projectId || "");
 
   const [project, setProject] = useState("");
   const [title, setTitle] = useState("");
@@ -54,17 +57,25 @@ export default function CreateCasePage(): JSX.Element {
   const hasInitializedRef = useRef(false);
 
   useEffect(() => {
-    if (isLoading) {
+    if (isLoading || isProjectLoading) {
       showLoader();
     } else {
       hideLoader();
     }
     return () => hideLoader();
-  }, [isLoading, showLoader, hideLoader]);
+  }, [isLoading, isProjectLoading, showLoader, hideLoader]);
+
+  useEffect(() => {
+    if (projectDetails?.name) {
+      setProject(projectDetails.name);
+    }
+  }, [projectDetails]);
 
   useEffect(() => {
     if (metadata && !hasInitializedRef.current) {
-      setProject(metadata.projects?.[0] || "");
+      if (!project && !projectId && metadata.projects?.[0]) {
+        setProject(metadata.projects[0]);
+      }
       setProduct(metadata.products?.[0] || "");
       setDeployment(metadata.deploymentTypes?.[0] || "");
       setIssueType(metadata.issueTypes?.[0] || "");
@@ -73,7 +84,7 @@ export default function CreateCasePage(): JSX.Element {
       setDescription(getGeneratedIssueDescription());
       hasInitializedRef.current = true;
     }
-  }, [metadata]);
+  }, [metadata, project, projectId]);
 
   useEffect(() => {
     if (isError) {
@@ -118,13 +129,12 @@ export default function CreateCasePage(): JSX.Element {
 
             <BasicInformationSection
               project={project}
-              setProject={setProject}
               product={product}
               setProduct={setProduct}
               deployment={deployment}
               setDeployment={setDeployment}
               metadata={metadata}
-              isLoading={isLoading}
+              isLoading={isLoading || isProjectLoading}
             />
 
             <CaseDetailsSection
@@ -140,15 +150,14 @@ export default function CreateCasePage(): JSX.Element {
               isLoading={isLoading}
             />
 
-            <Divider />
             {/* form actions container */}
-            <Box sx={{ display: "flex", justifyContent: "right", pt: 3 }}>
+            <Box sx={{ display: "flex", justifyContent: "right" }}>
               {/* submit button */}
               <Button
                 type="submit"
                 variant="contained"
                 startIcon={<CircleCheck size={18} />}
-                color="warning"
+                color="primary"
                 disabled={isLoading}
               >
                 Create Support Case

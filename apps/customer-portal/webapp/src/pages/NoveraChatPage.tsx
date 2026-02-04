@@ -22,7 +22,7 @@ import ChatInput from "@/components/support/noveraAIAssistant/noveraChatPage/Cha
 import ChatMessageList from "@/components/support/noveraAIAssistant/noveraChatPage/ChatMessageList";
 import { getNoveraResponse } from "@/models/mockFunctions";
 
-interface Message {
+export interface Message {
   id: string;
   text: string;
   sender: "user" | "bot";

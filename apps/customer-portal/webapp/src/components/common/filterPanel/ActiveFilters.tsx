@@ -96,7 +96,7 @@ const ActiveFilters = <T extends Record<string, any>>({
               icon={hasOptions ? <ChevronDown size={14} /> : undefined}
               size="small"
               variant="outlined"
-              color={isActive ? "primary" : "default"}
+              color={isActive ? "warning" : "default"}
               sx={{
                 "& .MuiChip-label": { order: 1, pr: 1 },
                 "& .MuiChip-icon": { order: 2, mr: 0.5, ml: 0 },
@@ -121,7 +121,7 @@ const ActiveFilters = <T extends Record<string, any>>({
           const optionValue =
             typeof option === "string" ? option : option.value;
           const isSelected =
-            appliedFilters[activeField.id] === optionLabel || // Check against display label which is currently stored in appliesFilters map (need to verify this assumption from CasesTable)
+            appliedFilters[activeField.id] === optionLabel ||
             appliedFilters[activeField.id] === optionValue;
 
           return (

@@ -64,6 +64,45 @@ describe("LoaderContext", () => {
     expect(screen.getByTestId("is-visible")).toHaveTextContent("false");
   });
 
+  it("should handle concurrent requests correctly (ref counting)", () => {
+    render(
+      <LoaderProvider>
+        <TestComponent />
+      </LoaderProvider>,
+    );
+
+    const showBtn = screen.getByText("Show");
+    const hideBtn = screen.getByText("Hide");
+    const isVisibleSpan = screen.getByTestId("is-visible");
+
+    // Initial state
+    expect(isVisibleSpan).toHaveTextContent("false");
+
+    // First request
+    act(() => {
+      showBtn.click();
+    });
+    expect(isVisibleSpan).toHaveTextContent("true");
+
+    // Second request (simulating concurrent operation)
+    act(() => {
+      showBtn.click();
+    });
+    expect(isVisibleSpan).toHaveTextContent("true");
+
+    // First completion
+    act(() => {
+      hideBtn.click();
+    });
+    expect(isVisibleSpan).toHaveTextContent("true"); // Should still be visible
+
+    // Second completion
+    act(() => {
+      hideBtn.click();
+    });
+    expect(isVisibleSpan).toHaveTextContent("false"); // Should now be hidden
+  });
+
   it("should throw error if used outside provider", () => {
     // Suppress console.error for this test as React logs the error
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});

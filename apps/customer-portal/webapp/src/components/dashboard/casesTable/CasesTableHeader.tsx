@@ -30,7 +30,6 @@ interface CasesTableHeaderProps {
   onUpdateFilter: (field: string, value: any) => void;
   onFilterClick: () => void;
   onCreateCase: () => void;
-  projectId: string;
 }
 
 const CasesTableHeader = ({

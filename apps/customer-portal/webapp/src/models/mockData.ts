@@ -17,8 +17,14 @@
 import type {
   CaseListItem,
   ProjectListItem,
+  ProjectDetails,
   UserProfile,
 } from "@/models/responses";
+import {
+  PROJECT_TYPE,
+  SUPPORT_TIER,
+  CASE_STATUS,
+} from "@/constants/projectDetailsConstants";
 
 // Interface for case creation metadata.
 export interface CaseCreationMetadata {
@@ -71,6 +77,66 @@ export const mockProjects: ProjectListItem[] = [
     description:
       "A dedicated portal for WSO2 partners to manage collaborations, access resources, track integrations, and view partner analytics.",
     createdOn: "2025-10-10 08:45:10",
+  },
+];
+
+// Mock detailed project data including subscription information.
+export const mockProjectDetails: ProjectDetails[] = [
+  {
+    id: "1890347890",
+    key: "CON2026",
+    name: "WSO2 Con App",
+    description:
+      "Official conference management app for WSO2 events, providing schedules, sessions, speaker details, and attendee engagement features.",
+    createdOn: "2025-07-17 09:06:14",
+    type: PROJECT_TYPE.FREE,
+    subscription: {
+      startDate: "2025-07-01",
+      endDate: "2026-07-01",
+      supportTier: SUPPORT_TIER.ENTERPRISE,
+    },
+  },
+  {
+    id: "27494027489",
+    key: "SUPERAPP2026",
+    name: "WSO2 Super App",
+    description:
+      "A unified platform that brings multiple WSO2 services and tools into a single application for seamless user experience.",
+    createdOn: "2025-08-15 10:30:00",
+    type: PROJECT_TYPE.SUBSCRIPTION,
+    subscription: {
+      startDate: "2025-08-01",
+      endDate: "2026-08-01",
+      supportTier: SUPPORT_TIER.ENTERPRISE,
+    },
+  },
+  {
+    id: "3678392038",
+    key: "PITSTOP2026",
+    name: "WSO2 Pitstop",
+    description:
+      "An internal support and operations tool designed to streamline issue tracking, quick fixes, and service monitoring.",
+    createdOn: "2025-09-02 14:15:22",
+    type: PROJECT_TYPE.SUBSCRIPTION,
+    subscription: {
+      startDate: "2025-09-01",
+      endDate: "2026-09-01",
+      supportTier: SUPPORT_TIER.STANDARD,
+    },
+  },
+  {
+    id: "49830478390",
+    key: "PARTNERPORTAL2026",
+    name: "WSO2 Partner Portal",
+    description:
+      "A dedicated portal for WSO2 partners to manage collaborations, access resources, track integrations, and view partner analytics.",
+    createdOn: "2025-10-10 08:45:10",
+    type: PROJECT_TYPE.SUBSCRIPTION,
+    subscription: {
+      startDate: "2025-10-01",
+      endDate: "2026-10-01",
+      supportTier: SUPPORT_TIER.ENTERPRISE,
+    },
   },
 ];
 
@@ -167,7 +233,7 @@ export const mockCases: CaseListItem[] = [
     },
     status: {
       id: "status-open",
-      label: "Open",
+      label: CASE_STATUS.OPEN,
     },
   },
   {
@@ -193,7 +259,7 @@ export const mockCases: CaseListItem[] = [
     },
     status: {
       id: "status-in-progress",
-      label: "In Progress",
+      label: CASE_STATUS.IN_PROGRESS,
     },
   },
   {
@@ -216,7 +282,7 @@ export const mockCases: CaseListItem[] = [
     severity: null,
     status: {
       id: "status-open",
-      label: "Open",
+      label: CASE_STATUS.OPEN,
     },
   },
   {
@@ -242,7 +308,7 @@ export const mockCases: CaseListItem[] = [
     },
     status: {
       id: "status-open",
-      label: "Open",
+      label: CASE_STATUS.OPEN,
     },
   },
   {
@@ -272,7 +338,7 @@ export const mockCases: CaseListItem[] = [
     },
     status: {
       id: "status-open",
-      label: "Open",
+      label: CASE_STATUS.OPEN,
     },
   },
   {
@@ -298,7 +364,7 @@ export const mockCases: CaseListItem[] = [
     },
     status: {
       id: "status-resolved",
-      label: "Resolved",
+      label: CASE_STATUS.RESOLVED,
     },
   },
 ];

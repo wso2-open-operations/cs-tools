@@ -26,6 +26,7 @@ import type {
   ProjectCasesStats,
   ProjectSupportStats,
   DashboardMockStats,
+  ProjectStatsResponse,
 } from "@/models/responses";
 
 /**
@@ -229,5 +230,27 @@ export const getMockDashboardStats = (): DashboardMockStats => {
         TypeD: 210,
       },
     ],
+  };
+};
+
+/**
+ * Returns mock project statistics.
+ *
+ * @returns {ProjectStatsResponse} Mock project statistics.
+ */
+export const getMockProjectStats = (): ProjectStatsResponse => {
+  return {
+    projectStats: {
+      activeChats: Math.floor(Math.random() * 10),
+      deployments: Math.floor(Math.random() * 20),
+      openCases: Math.floor(Math.random() * 15),
+      slaStatus: Math.random() > 0.5 ? "Good" : "Bad",
+    },
+    recentActivity: {
+      billableHours: Math.floor(Math.random() * 100),
+      lastDeploymentOn: new Date().toISOString(),
+      systemHealth: Math.random() > 0.8 ? "Critical" : "Healthy",
+      totalTimeLogged: Math.floor(Math.random() * 200),
+    },
   };
 };

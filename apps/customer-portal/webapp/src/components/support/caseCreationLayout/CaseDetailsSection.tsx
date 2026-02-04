@@ -21,14 +21,15 @@ import {
   Form,
   FormControl,
   Grid,
+  IconButton,
   MenuItem,
   Paper,
   Select,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Pencil, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { PencilLine, Sparkles } from "@wso2/oxygen-ui-icons-react";
+import { useState, type JSX } from "react";
 
 interface CaseDetailsSectionProps {
   title: string;
@@ -62,244 +63,258 @@ export const CaseDetailsSection = ({
   setSeverity,
   metadata,
   isLoading,
-}: CaseDetailsSectionProps): JSX.Element => (
-  <Paper sx={{ p: 3 }}>
-    {/* section header container */}
-    <Box
-      sx={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        mb: 3,
-      }}
-    >
-      <Typography variant="h6">Case Details</Typography>
-      <Pencil size={18} />
-    </Box>
+}: CaseDetailsSectionProps): JSX.Element => {
+  const [isEditing, setIsEditing] = useState(false);
 
-    {/* main form fields container */}
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      {/* issue title field wrapper */}
-      <Box>
-        {/* issue title field label container */}
-        <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="caption">
-            Issue Title{" "}
-            <Box component="span" sx={{ color: "warning.main" }}>
-              *
-            </Box>
-          </Typography>
-          <Chip
-            label="Generated from chat"
-            size="small"
-            variant="outlined"
-            icon={<Sparkles size={10} />}
-            sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+  return (
+    <Paper sx={{ p: 3 }}>
+      {/* section header container */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 3,
+        }}
+      >
+        <Typography variant="h6">Case Details</Typography>
+        <IconButton>
+          <PencilLine
+            aria-label="Edit case details"
+            size={18}
+            onClick={() => setIsEditing(true)}
           />
-        </Box>
-        <Form.ElementWrapper label="" name="title">
-          <TextField
-            id="title"
-            fullWidth
-            multiline
-            minRows={1}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Enter issue title"
-            disabled={isLoading}
-          />
-        </Form.ElementWrapper>
+        </IconButton>
       </Box>
 
-      {/* case description field wrapper */}
-      <Box>
-        {/* case description field label container */}
-        <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="caption">
-            Case Description{" "}
-            <Box component="span" sx={{ color: "warning.main" }}>
-              *
-            </Box>
-          </Typography>
-          <Chip
-            label="From conversation"
-            size="small"
-            variant="outlined"
-            icon={<Sparkles size={10} />}
-            sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-          />
-        </Box>
-        <Form.ElementWrapper label="" name="description">
-          <TextField
-            id="description"
-            fullWidth
-            multiline
-            minRows={6}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe the issue in detail"
-            disabled={isLoading}
-          />
-        </Form.ElementWrapper>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ mt: 1, display: "block" }}
-        >
-          This includes all the information you shared with Novera
-        </Typography>
-      </Box>
-
-      {/* issue type and severity grid container */}
-      <Grid container spacing={3}>
-        {/* issue type selection field wrapper */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          {/* issue type field label container */}
+      {/* main form fields container */}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {/* issue title field wrapper */}
+        <Box>
+          {/* issue title field label container */}
           <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
             <Typography variant="caption">
-              Issue Type{" "}
+              Title{" "}
               <Box component="span" sx={{ color: "warning.main" }}>
                 *
               </Box>
             </Typography>
             <Chip
-              label="AI classified"
+              label="Generated from chat"
               size="small"
               variant="outlined"
               icon={<Sparkles size={10} />}
               sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
             />
           </Box>
-          <FormControl fullWidth size="small" disabled={isLoading}>
-            <Select
-              value={issueType}
-              onChange={(e) => setIssueType(e.target.value)}
-              displayEmpty
-              renderValue={(value) =>
-                value === "" ? "Select Issue Type..." : value
-              }
+          <Form.ElementWrapper label="" name="title">
+            <TextField
+              id="title"
+              fullWidth
+              multiline
+              minRows={1}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter issue title"
+              disabled={isLoading || !isEditing}
+            />
+          </Form.ElementWrapper>
+        </Box>
+
+        {/* case description field wrapper */}
+        <Box>
+          {/* case description field label container */}
+          <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="caption">
+              Description{" "}
+              <Box component="span" sx={{ color: "warning.main" }}>
+                *
+              </Box>
+            </Typography>
+            <Chip
+              label="From conversation"
+              size="small"
+              variant="outlined"
+              icon={<Sparkles size={10} />}
+              sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+            />
+          </Box>
+          <Form.ElementWrapper label="" name="description">
+            <TextField
+              id="description"
+              fullWidth
+              multiline
+              minRows={6}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe the issue in detail"
+              disabled={isLoading || !isEditing}
+            />
+          </Form.ElementWrapper>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ mt: 1, display: "block" }}
+          >
+            This includes all the information you shared with Novera
+          </Typography>
+        </Box>
+
+        {/* issue type and severity grid container */}
+        <Grid container spacing={3}>
+          {/* issue type selection field wrapper */}
+          <Grid size={{ xs: 12 }}>
+            {/* issue type field label container */}
+            <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="caption">
+                Issue Type{" "}
+                <Box component="span" sx={{ color: "warning.main" }}>
+                  *
+                </Box>
+              </Typography>
+              <Chip
+                label="AI classified"
+                size="small"
+                variant="outlined"
+                icon={<Sparkles size={10} />}
+                sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+              />
+            </Box>
+            <FormControl
+              fullWidth
+              size="small"
+              disabled={isLoading || !isEditing}
             >
-              <MenuItem value="" disabled>
-                Select Issue Type...
-              </MenuItem>
-              {metadata?.issueTypes?.map((type: string) => (
-                <MenuItem key={type} value={type}>
-                  {type}
+              <Select
+                value={issueType}
+                onChange={(e) => setIssueType(e.target.value)}
+                displayEmpty
+                renderValue={(value) =>
+                  value === "" ? "Select Issue Type..." : value
+                }
+              >
+                <MenuItem value="" disabled>
+                  Select Issue Type...
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-        {/* severity level selection field wrapper */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          {/* severity level field label container */}
-          <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="caption">
-              Severity Level{" "}
-              <Box component="span" sx={{ color: "warning.main" }}>
-                *
-              </Box>
-            </Typography>
-            <Chip
-              label="AI assessed"
+                {metadata?.issueTypes?.map((type: string) => (
+                  <MenuItem key={type} value={type}>
+                    {type}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          {/* severity level selection field wrapper */}
+          <Grid size={{ xs: 12 }}>
+            {/* severity level field label container */}
+            <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="caption">
+                Severity Level{" "}
+                <Box component="span" sx={{ color: "warning.main" }}>
+                  *
+                </Box>
+              </Typography>
+              <Chip
+                label="AI assessed"
+                size="small"
+                variant="outlined"
+                icon={<Sparkles size={10} />}
+                sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+              />
+            </Box>
+            <ComplexSelect
+              fullWidth
               size="small"
-              variant="outlined"
-              icon={<Sparkles size={10} />}
-              sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-            />
-          </Box>
-          <ComplexSelect
-            fullWidth
-            size="small"
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value as string)}
-            disabled={isLoading}
-            displayEmpty
-            renderValue={(value) => {
-              if (value === "") {
-                return "Select Severity Level...";
-              }
-              const selectedLevel = metadata?.severityLevels?.find(
-                (level: any) => level.id === value,
-              );
-              if (!selectedLevel) {
-                return value as string;
-              }
-              return (
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <Box
-                    sx={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      bgcolor:
-                        selectedLevel.id === "S1"
-                          ? "error.main"
-                          : selectedLevel.id === "S2"
-                            ? "warning.main"
-                            : selectedLevel.id === "S3"
-                              ? "info.main"
-                              : "success.main",
-                      flexShrink: 0,
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexDirection: "column",
-                      minWidth: 0,
-                    }}
-                  >
-                    <Typography variant="body2">
-                      {selectedLevel.label}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value as string)}
+              disabled={isLoading || !isEditing}
+              displayEmpty
+              renderValue={(value) => {
+                if (value === "") {
+                  return "Select Severity Level...";
+                }
+                const selectedLevel = metadata?.severityLevels?.find(
+                  (level: any) => level.id === value,
+                );
+                if (!selectedLevel) {
+                  return value as string;
+                }
+                return (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                    <Box
                       sx={{
-                        display: "block",
-                        lineHeight: 1.2,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        bgcolor:
+                          selectedLevel.id === "S1"
+                            ? "error.main"
+                            : selectedLevel.id === "S2"
+                              ? "warning.main"
+                              : selectedLevel.id === "S3"
+                                ? "info.main"
+                                : "success.main",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        minWidth: 0,
                       }}
                     >
-                      {selectedLevel.description}
-                    </Typography>
+                      <Typography variant="body2">
+                        {selectedLevel.label}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          display: "block",
+                          lineHeight: 1.2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {selectedLevel.description}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
-              );
-            }}
-          >
-            {metadata?.severityLevels?.map((lvl: any) => (
-              <ComplexSelect.MenuItem key={lvl.id} value={lvl.id}>
-                <ComplexSelect.MenuItem.Icon>
-                  {/* severity status color dot */}
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: "50%",
-                      bgcolor:
-                        lvl.id === "S1"
-                          ? "error.main"
-                          : lvl.id === "S2"
-                            ? "warning.main"
-                            : lvl.id === "S3"
-                              ? "info.main"
-                              : "success.main",
-                    }}
+                );
+              }}
+            >
+              {metadata?.severityLevels?.map((lvl: any) => (
+                <ComplexSelect.MenuItem key={lvl.id} value={lvl.id}>
+                  <ComplexSelect.MenuItem.Icon>
+                    {/* severity status color dot */}
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        bgcolor:
+                          lvl.id === "S1"
+                            ? "error.main"
+                            : lvl.id === "S2"
+                              ? "warning.main"
+                              : lvl.id === "S3"
+                                ? "info.main"
+                                : "success.main",
+                      }}
+                    />
+                  </ComplexSelect.MenuItem.Icon>
+                  <ComplexSelect.MenuItem.Text
+                    primary={lvl.label}
+                    secondary={lvl.description}
                   />
-                </ComplexSelect.MenuItem.Icon>
-                <ComplexSelect.MenuItem.Text
-                  primary={lvl.label}
-                  secondary={lvl.description}
-                />
-              </ComplexSelect.MenuItem>
-            ))}
-          </ComplexSelect>
+                </ComplexSelect.MenuItem>
+              ))}
+            </ComplexSelect>
+          </Grid>
         </Grid>
-      </Grid>
-    </Box>
-  </Paper>
-);
+      </Box>
+    </Paper>
+  );
+};

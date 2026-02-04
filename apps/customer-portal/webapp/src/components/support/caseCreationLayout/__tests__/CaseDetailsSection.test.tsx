@@ -94,11 +94,18 @@ vi.mock("@wso2/oxygen-ui", () => ({
     />
   ),
   Typography: ({ children }: any) => <span>{children}</span>,
+  IconButton: ({ children, onClick }: any) => (
+    <button onClick={onClick} data-testid="icon-button">
+      {children}
+    </button>
+  ),
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Pencil: () => <svg data-testid="icon-pencil" />,
+  PencilLine: ({ onClick }: any) => (
+    <svg data-testid="icon-pencil" onClick={onClick} />
+  ),
   Sparkles: () => <svg data-testid="icon-sparkles" />,
 }));
 
@@ -124,7 +131,7 @@ describe("CaseDetailsSection", () => {
     isLoading: false,
   };
 
-  it("should render all fields correctly", () => {
+  it("should render and have fields disabled by default", () => {
     render(<CaseDetailsSection {...defaultProps} />);
 
     expect(screen.getByText("Case Details")).toBeInTheDocument();
@@ -132,10 +139,31 @@ describe("CaseDetailsSection", () => {
     expect(screen.getByTestId("input-description")).toHaveValue("Old Desc");
     expect(screen.getByTestId("select")).toHaveValue("Performance");
     expect(screen.getByTestId("complex-select")).toHaveValue("S2");
+
+    // All fields disabled by default
+    expect(screen.getByTestId("input-title")).toBeDisabled();
+    expect(screen.getByTestId("input-description")).toBeDisabled();
+    expect(screen.getByTestId("select")).toBeDisabled();
+    expect(screen.getByTestId("complex-select")).toBeDisabled();
   });
 
-  it("should call setters when inputs change", () => {
+  it("should enable fields when edit mode is toggled", () => {
     render(<CaseDetailsSection {...defaultProps} />);
+
+    const pencilIcon = screen.getByTestId("icon-pencil");
+    fireEvent.click(pencilIcon);
+
+    expect(screen.getByTestId("input-title")).not.toBeDisabled();
+    expect(screen.getByTestId("input-description")).not.toBeDisabled();
+    expect(screen.getByTestId("select")).not.toBeDisabled();
+    expect(screen.getByTestId("complex-select")).not.toBeDisabled();
+  });
+
+  it("should call setters when inputs change in edit mode", () => {
+    render(<CaseDetailsSection {...defaultProps} />);
+
+    // Enable edit mode
+    fireEvent.click(screen.getByTestId("icon-pencil"));
 
     fireEvent.change(screen.getByTestId("input-title"), {
       target: { value: "New Title" },
@@ -156,14 +184,5 @@ describe("CaseDetailsSection", () => {
       target: { value: "S1" },
     });
     expect(defaultProps.setSeverity).toHaveBeenCalledWith("S1");
-  });
-
-  it("should disable fields when loading", () => {
-    render(<CaseDetailsSection {...defaultProps} isLoading={true} />);
-
-    expect(screen.getByTestId("input-title")).toBeDisabled();
-    expect(screen.getByTestId("input-description")).toBeDisabled();
-    expect(screen.getByTestId("select")).toBeDisabled();
-    expect(screen.getByTestId("complex-select")).toBeDisabled();
   });
 });
