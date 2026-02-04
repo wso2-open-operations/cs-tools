@@ -31,9 +31,9 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 // Mock sub-components
 vi.mock("../ProjectCardBadges", () => ({
-  default: ({ projectKey, status }: any) => (
+  default: ({ projectKey, status, isError }: any) => (
     <div data-testid="badges">
-      {projectKey} {status}
+      {projectKey} {status} {isError ? "Error" : "No Error"}
     </div>
   ),
 }));
@@ -47,9 +47,9 @@ vi.mock("../ProjectCardInfo", () => ({
 }));
 
 vi.mock("../ProjectCardStats", () => ({
-  default: ({ activeChats, date, openCases }: any) => (
+  default: ({ activeChats, date, openCases, isError }: any) => (
     <div data-testid="stats">
-      {activeChats} {date} {openCases}
+      {activeChats} {date} {openCases} {isError ? "Error" : "No Error"}
     </div>
   ),
 }));
@@ -113,5 +113,12 @@ describe("ProjectCard", () => {
 
     expect(onViewDashboard).toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("should pass isError to sub-components when isStatsError is true", () => {
+    render(<ProjectCard {...defaultProps} isStatsError={true} />);
+
+    expect(screen.getByTestId("badges")).toHaveTextContent("Error");
+    expect(screen.getByTestId("stats")).toHaveTextContent("Error");
   });
 });
