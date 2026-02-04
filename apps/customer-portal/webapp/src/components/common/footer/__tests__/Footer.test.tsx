@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import Footer from "@/components/footer/Footer";
+import Footer from "@/components/common/footer/Footer";
 import {
   COMPANY_NAME,
   PRIVACY_POLICY_URL,

@@ -16,12 +16,19 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ProjectSwitcher from "@/components/header/ProjectSwitcher";
+import ProjectSwitcher from "@/components/common/header/ProjectSwitcher";
 import { mockProjects } from "@/models/mockData";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: { children: any }) => <div>{children}</div>,
+  Skeleton: ({ variant, width, height }: any) => (
+    <div
+      data-testid="skeleton"
+      data-variant={variant}
+      style={{ width, height }}
+    />
+  ),
   ComplexSelect: Object.assign(
     ({ value, onChange, children }: any) => (
       <select
@@ -37,7 +44,11 @@ vi.mock("@wso2/oxygen-ui", () => ({
       MenuItem: Object.assign(
         ({ value, children }: any) => <option value={value}>{children}</option>,
         {
-          Text: ({ primary }: any) => primary,
+          Text: ({ primary, secondary }: any) => (
+            <>
+              {primary} {secondary}
+            </>
+          ),
         },
       ),
     },
@@ -70,7 +81,12 @@ describe("ProjectSwitcher", () => {
 
     expect(screen.getByTestId("project-select")).toBeInTheDocument();
     mockProjects.forEach((project) => {
-      expect(screen.getByText(project.name)).toBeInTheDocument();
+      expect(
+        screen.getByText(project.name, { exact: false }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(project.key, { exact: false }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -87,5 +103,19 @@ describe("ProjectSwitcher", () => {
     fireEvent.change(select, { target: { value: mockProjects[1].id } });
 
     expect(mockOnProjectChange).toHaveBeenCalledWith(mockProjects[1].id);
+  });
+
+  it("should render skeleton when isLoading is true", () => {
+    render(
+      <ProjectSwitcher
+        projects={mockProjects}
+        onProjectChange={mockOnProjectChange}
+        isLoading={true}
+      />,
+    );
+
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+    expect(screen.getByTestId("icon-FolderOpen")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-select")).not.toBeInTheDocument();
   });
 });

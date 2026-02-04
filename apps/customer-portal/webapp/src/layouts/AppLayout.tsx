@@ -17,9 +17,9 @@
 import { AppShell, Box, useAppShell } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { useLocation, Outlet } from "react-router";
-import Footer from "@/components/footer/Footer";
-import Header from "@/components/header/Header";
-import SideBar from "@/components/sideNavBar/SideBar";
+import Footer from "@/components/common/footer/Footer";
+import Header from "@/components/common/header/Header";
+import SideBar from "@/components/common/sideNavBar/SideBar";
 
 /**
  * AppLayout component.

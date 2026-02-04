@@ -15,12 +15,12 @@
 // under the License.
 
 import { Form } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import { useMemo, type JSX } from "react";
 import { useNavigate } from "react-router";
-import ProjectCardActions from "@/components/projectCard/ProjectCardActions";
-import ProjectCardBadges from "@/components/projectCard/ProjectCardBadges";
-import ProjectCardInfo from "@/components/projectCard/ProjectCardInfo";
-import ProjectCardStats from "@/components/projectCard/ProjectCardStats";
+import ProjectCardActions from "@/components/projectHub/projectCard/ProjectCardActions";
+import ProjectCardBadges from "@/components/projectHub/projectCard/ProjectCardBadges";
+import ProjectCardInfo from "@/components/projectHub/projectCard/ProjectCardInfo";
+import ProjectCardStats from "@/components/projectHub/projectCard/ProjectCardStats";
 import {
   getMockActiveChats,
   getMockOpenCases,
@@ -80,9 +80,9 @@ export default function ProjectCard({
   projectKey,
   title,
   subtitle,
-  status = getMockStatus(),
-  openCases = getMockOpenCases(),
-  activeChats = getMockActiveChats(),
+  status,
+  openCases,
+  activeChats,
   date,
   onViewDashboard,
 }: ProjectCardProps): JSX.Element {
@@ -105,6 +105,13 @@ export default function ProjectCard({
     }
   };
 
+  const mockStatus = useMemo(() => getMockStatus(), []);
+  const mockOpenCases = useMemo(() => getMockOpenCases(), []);
+  const mockActiveChats = useMemo(() => getMockActiveChats(), []);
+  const resolvedStatus = status ?? mockStatus;
+  const resolvedOpenCases = openCases ?? mockOpenCases;
+  const resolvedActiveChats = activeChats ?? mockActiveChats;
+
   return (
     <Form.CardButton
       onClick={handleViewDashboard}
@@ -115,14 +122,14 @@ export default function ProjectCard({
       }}
     >
       {/* project card badges */}
-      <ProjectCardBadges projectKey={projectKey} status={status} />
+      <ProjectCardBadges projectKey={projectKey} status={resolvedStatus} />
       {/* project card info */}
       <ProjectCardInfo subtitle={subtitle} title={title} />
       {/* project card stats */}
       <ProjectCardStats
-        activeChats={activeChats}
+        activeChats={resolvedActiveChats}
         date={date}
-        openCases={openCases}
+        openCases={resolvedOpenCases}
       />
       {/* project card actions */}
       <ProjectCardActions />

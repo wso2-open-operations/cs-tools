@@ -35,11 +35,11 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 }));
 
 // Mock sub-components
-vi.mock("@/components/projectCard/ProjectCard", () => ({
+vi.mock("@/components/projectHub/projectCard/ProjectCard", () => ({
   default: ({ title }: any) => <div data-testid="project-card">{title}</div>,
 }));
 
-vi.mock("@/components/projectCard/ProjectCardSkeleton", () => ({
+vi.mock("@/components/projectHub/projectCard/ProjectCardSkeleton", () => ({
   default: () => <div data-testid="project-skeleton" />,
 }));
 
@@ -139,5 +139,23 @@ describe("ProjectHub", () => {
         expect.stringContaining("projects loaded"),
       );
     });
+  });
+
+  it("should call fetchNextPage when hasNextPage is true", () => {
+    const mockFetchNextPage = vi.fn();
+    mockUseGetProjects.mockReturnValue({
+      isLoading: false,
+      data: {
+        pages: [{ projects: mockProjects }],
+      },
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: true,
+      isFetchingNextPage: false,
+      isError: false,
+    });
+
+    render(<ProjectHub />);
+
+    expect(mockFetchNextPage).toHaveBeenCalled();
   });
 });

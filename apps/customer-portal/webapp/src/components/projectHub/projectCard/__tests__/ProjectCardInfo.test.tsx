@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import ProjectCardInfo from "@/components/projectCard/ProjectCardInfo";
+import ProjectCardInfo from "@/components/projectHub/projectCard/ProjectCardInfo";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({

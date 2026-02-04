@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import SideBar from "@/components/sideNavBar/SideBar";
+import SideBar from "@/components/common/sideNavBar/SideBar";
 import { APP_SHELL_NAV_ITEMS } from "@/constants/appLayoutConstants";
 
 // Mock @wso2/oxygen-ui
@@ -70,7 +70,7 @@ vi.mock("react-router", () => ({
 }));
 
 // Mock SubscriptionWidget
-vi.mock("../SubscriptionWidget", () => ({
+vi.mock("@/components/common/sideNavBar/SubscriptionWidget", () => ({
   default: () => <div data-testid="subscription-widget" />,
 }));
 

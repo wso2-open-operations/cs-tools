@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import SubscriptionWidget from "@/components/sideNavBar/SubscriptionWidget";
+import SubscriptionWidget from "@/components/common/sideNavBar/SubscriptionWidget";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({

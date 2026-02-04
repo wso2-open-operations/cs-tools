@@ -20,10 +20,10 @@ import { useNavigate, useLocation, useParams } from "react-router";
 import useGetProjects from "@/api/useGetProjects";
 import { useLogger } from "@/hooks/useLogger";
 import type { ProjectListItem } from "@/models/responses";
-import Brand from "@/components/header/Brand";
-import Actions from "@/components/header/Actions";
-import SearchBar from "@/components/header/SearchBar";
-import ProjectSwitcher from "@/components/header/ProjectSwitcher";
+import Brand from "@/components/common/header/Brand";
+import Actions from "@/components/common/header/Actions";
+import SearchBar from "@/components/common/header/SearchBar";
+import ProjectSwitcher from "@/components/common/header/ProjectSwitcher";
 
 /**
  * Props for the Header component.
@@ -73,6 +73,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     data: projectsResponse,
     fetchNextPage,
     hasNextPage,
+    isLoading,
     isFetchingNextPage,
     isError,
   } = useGetProjects({}, true);
@@ -175,6 +176,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
             projects={projects}
             selectedProject={selectedProject}
             onProjectChange={handleProjectChange}
+            isLoading={isLoading}
           />
           {/* header search bar */}
           <SearchBar />

@@ -14,7 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, ComplexSelect, Header as HeaderUI } from "@wso2/oxygen-ui";
+import {
+  Box,
+  ComplexSelect,
+  Header as HeaderUI,
+  Skeleton,
+} from "@wso2/oxygen-ui";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import type { ProjectListItem } from "@/models/responses";
@@ -35,6 +40,10 @@ interface ProjectSwitcherProps {
    * Callback function to handle project change.
    */
   onProjectChange: (projectId: string) => void;
+  /**
+   * If true, the component is in a loading state.
+   */
+  isLoading?: boolean;
 }
 
 /**
@@ -47,7 +56,30 @@ export default function ProjectSwitcher({
   projects,
   selectedProject,
   onProjectChange,
+  isLoading,
 }: ProjectSwitcherProps): JSX.Element {
+  if (isLoading) {
+    return (
+      <HeaderUI.Switchers showDivider={false}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            height: 40,
+            px: 1.5,
+            border: "1px solid",
+            borderColor: "action.disabledBackground",
+            borderRadius: "4px",
+          }}
+        >
+          <FolderOpen size={16} />
+          <Skeleton variant="rounded" width={150} height={20} />
+        </Box>
+      </HeaderUI.Switchers>
+    );
+  }
+
   return (
     <HeaderUI.Switchers showDivider={false}>
       {/* project switcher select */}
@@ -61,9 +93,7 @@ export default function ProjectSwitcher({
            * Find the project from the URL parameters.
            */
           const project = projects.find((project) => project.id === selected);
-          /**
-           * Return the project name and icon.
-           */
+
           return (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <FolderOpen size={16} />
@@ -80,7 +110,7 @@ export default function ProjectSwitcher({
           <ComplexSelect.MenuItem key={project.id} value={project.id}>
             <ComplexSelect.MenuItem.Text
               primary={project.name}
-              secondary={project.description}
+              secondary={project.key}
             />
           </ComplexSelect.MenuItem>
         ))}

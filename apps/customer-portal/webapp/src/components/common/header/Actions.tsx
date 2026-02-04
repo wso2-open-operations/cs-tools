@@ -23,7 +23,7 @@ import {
 import { Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { JOIN_COMMUNITY_URL } from "@/constants/appLayoutConstants";
-import UserProfile from "@/components/header/UserProfile";
+import UserProfile from "@/components/common/header/UserProfile";
 
 /**
  * Actions component for the header.

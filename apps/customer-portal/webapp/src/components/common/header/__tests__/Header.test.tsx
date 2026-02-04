@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import Header from "@/components/header/Header";
+import Header from "@/components/common/header/Header";
 import { mockProjects } from "@/models/mockData";
 
 // Mock @wso2/oxygen-ui
@@ -133,10 +133,11 @@ vi.mock("../SearchBar", () => ({
 }));
 
 vi.mock("../ProjectSwitcher", () => ({
-  default: ({ projects, selectedProject, onProjectChange }: any) => (
+  default: ({ projects, selectedProject, onProjectChange, isLoading }: any) => (
     <div
       data-testid="project-switcher"
       data-selected-id={selectedProject?.id || ""}
+      data-loading={isLoading ? "true" : "false"}
     >
       <select
         data-testid="project-select"
@@ -274,5 +275,22 @@ describe("Header", () => {
   it("should render Actions", () => {
     render(<Header onToggleSidebar={mockOnToggleSidebar} />);
     expect(screen.getByTestId("actions")).toBeInTheDocument();
+  });
+
+  it("should pass isLoading to ProjectSwitcher", () => {
+    mockLocation.pathname = "/project-1/dashboard";
+    mockParams.projectId = "project-1";
+    mockUseSearchProjects.mockReturnValue({
+      data: { pages: [{ projects: mockProjects }] },
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isLoading: true,
+      isError: false,
+    });
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    const switcher = screen.getByTestId("project-switcher");
+    expect(switcher).toHaveAttribute("data-loading", "true");
   });
 });
