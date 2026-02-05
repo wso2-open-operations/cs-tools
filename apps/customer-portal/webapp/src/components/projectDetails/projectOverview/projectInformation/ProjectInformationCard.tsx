@@ -29,28 +29,30 @@ interface ProjectInformationCardProps {
   project?: ProjectDetails;
   slaStatus: string;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const ProjectInformationCard = ({
   project,
   slaStatus,
   isLoading,
+  isError,
 }: ProjectInformationCardProps): JSX.Element => {
-  const getKey = () => project?.key || "N/A";
-  const getName = () => project?.name || "N/A";
-  const getDescription = () => project?.description || "N/A";
+  const getKey = () => project?.key || "--";
+  const getName = () => project?.name || "--";
+  const getDescription = () => project?.description || "--";
   const getCreatedDate = () =>
-    project?.createdOn ? formatProjectDate(project.createdOn) : "N/A";
-  const getType = () => project?.type || "N/A";
-  const getSupportTier = () => project?.subscription?.supportTier || "N/A";
+    project?.createdOn ? formatProjectDate(project.createdOn) : "--";
+  const getType = () => project?.type || "--";
+  const getSupportTier = () => project?.subscription?.supportTier || "--";
   const getStartDate = () =>
     project?.subscription?.startDate
       ? formatProjectDate(project.subscription.startDate)
-      : "N/A";
+      : "--";
   const getEndDate = () =>
     project?.subscription?.endDate
       ? formatProjectDate(project.subscription.endDate)
-      : "N/A";
+      : "--";
 
   return (
     <Card sx={{ height: "100%" }}>
@@ -62,11 +64,13 @@ const ProjectInformationCard = ({
             name={getName()}
             projectKey={getKey()}
             isLoading={isLoading}
+            isError={isError}
           />
 
           <ProjectDescription
             description={getDescription()}
             isLoading={isLoading}
+            isError={isError}
           />
 
           <ProjectMetadata
@@ -75,12 +79,14 @@ const ProjectInformationCard = ({
             supportTier={getSupportTier()}
             slaStatus={slaStatus}
             isLoading={isLoading}
+            isError={isError}
           />
 
           <SubscriptionDetails
             startDate={getStartDate()}
             endDate={getEndDate()}
             isLoading={isLoading}
+            isError={isError}
           />
         </Box>
       </CardContent>
