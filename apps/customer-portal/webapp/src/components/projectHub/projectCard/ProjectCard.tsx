@@ -30,16 +30,12 @@ import {
 
 // Props for the ProjectCard component.
 export interface ProjectCardProps {
-  activeChats?: number;
   date: string;
   id: string;
   onViewDashboard?: () => void;
-  openCases?: number;
   projectKey: string;
-  status?: string;
   subtitle: string;
   title: string;
-  isStatsError?: boolean;
 }
 
 /**
@@ -53,12 +49,8 @@ export default function ProjectCard({
   projectKey,
   title,
   subtitle,
-  status,
-  openCases,
-  activeChats,
   date,
   onViewDashboard,
-  isStatsError,
 }: ProjectCardProps): JSX.Element {
   // Hook to navigate between routes.
   const navigate = useNavigate();
@@ -82,14 +74,12 @@ export default function ProjectCard({
   const mockOpenCases = useMemo(() => getMockOpenCases(), []);
   const mockActiveChats = useMemo(() => getMockActiveChats(), []);
 
-  const resolvedStatus =
-    status ?? statsData?.projectStats?.slaStatus ?? mockStatus;
-  const resolvedOpenCases =
-    openCases ?? statsData?.projectStats?.openCases ?? mockOpenCases;
+  const resolvedStatus = statsData?.projectStats?.slaStatus ?? mockStatus;
+  const resolvedOpenCases = statsData?.projectStats?.openCases ?? mockOpenCases;
   const resolvedActiveChats =
-    activeChats ?? statsData?.projectStats?.activeChats ?? mockActiveChats;
+    statsData?.projectStats?.activeChats ?? mockActiveChats;
 
-  const resolvedIsStatsError = isStatsError || isStatsQueryError;
+  const resolvedIsStatsError = isStatsQueryError;
 
   return (
     <Form.CardButton
