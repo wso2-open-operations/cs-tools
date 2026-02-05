@@ -29,6 +29,22 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: vi.fn(),
+    isSignedIn: true,
+    isLoading: false,
+  }),
+}));
+
+// Mock MockConfigProvider
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({
+    isMockEnabled: true,
+  }),
+}));
+
 // Mock useLogger
 vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => ({
@@ -66,12 +82,11 @@ describe("useGetProjects", () => {
 
     const response = result.current.data;
     expect(response).toBeDefined();
-    expect(response?.pages).toHaveLength(1);
-    expect(response?.pages[0].projects).toHaveLength(2);
-    expect(response?.pages[0].totalRecords).toBe(mockProjects.length);
-    expect(response?.pages[0].projects[0].name).toBe(mockProjects[0].name);
-    expect(response?.pages[0].offset).toBe(0);
-    expect(response?.pages[0].limit).toBe(2);
+    expect(response?.projects).toHaveLength(2);
+    expect(response?.totalRecords).toBe(mockProjects.length);
+    expect(response?.projects[0].name).toBe(mockProjects[0].name);
+    expect(response?.offset).toBe(0);
+    expect(response?.limit).toBe(2);
   });
 
   it("should handle default pagination if none provided", async () => {
@@ -82,8 +97,8 @@ describe("useGetProjects", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const response = result.current.data;
-    expect(response?.pages[0].offset).toBe(0);
-    expect(response?.pages[0].limit).toBe(10);
+    expect(response?.offset).toBe(0);
+    expect(response?.limit).toBe(10);
   });
 
   it("should use 'all' query key and larger limit when fetchAll is true", async () => {
@@ -95,6 +110,6 @@ describe("useGetProjects", () => {
 
     const response = result.current.data;
     // fetchAll sets limit to 100
-    expect(response?.pages[0].limit).toBe(100);
+    expect(response?.limit).toBe(100);
   });
 });
