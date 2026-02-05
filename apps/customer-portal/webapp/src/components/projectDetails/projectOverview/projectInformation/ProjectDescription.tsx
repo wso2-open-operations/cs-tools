@@ -17,6 +17,7 @@
 import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
+import { stripHtmlTags } from "@/utils/projectCard";
 
 interface ProjectDescriptionProps {
   description: string;
@@ -44,7 +45,7 @@ const ProjectDescription = ({
         <ErrorIndicator entityName="project description" />
       ) : (
         <Typography variant="body2" color="text.secondary">
-          {description}
+          {stripHtmlTags(description)}
         </Typography>
       )}
     </Box>
