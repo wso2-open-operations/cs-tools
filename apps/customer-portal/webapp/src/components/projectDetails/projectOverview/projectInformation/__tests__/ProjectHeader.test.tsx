@@ -22,6 +22,10 @@ import ProjectHeader from "../ProjectHeader";
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div>{children}</div>,
   Typography: ({ children }: any) => <span>{children}</span>,
+  colors: {
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
+  },
 }));
 
 // Mock icons
