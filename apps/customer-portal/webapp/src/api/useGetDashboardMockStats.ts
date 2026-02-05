@@ -14,7 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useAsgardeo } from "@asgardeo/react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useMockConfig } from "@/providers/MockConfigProvider";
 import { getMockDashboardStats } from "@/models/mockFunctions";
 import { useLogger } from "@/hooks/useLogger";
 import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
@@ -30,13 +32,21 @@ export function useGetDashboardMockStats(
   projectId: string,
 ): UseQueryResult<DashboardMockStats, Error> {
   const logger = useLogger();
+  const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
 
   return useQuery<DashboardMockStats, Error>({
-    queryKey: [ApiQueryKeys.DASHBOARD_STATS, projectId],
+    queryKey: [ApiQueryKeys.DASHBOARD_STATS, projectId, isMockEnabled],
     queryFn: async (): Promise<DashboardMockStats> => {
       logger.debug(
-        `Fetching dashboard mock stats for project ID: ${projectId}`,
+        `Fetching dashboard mock stats for project ID: ${projectId}, mock: ${isMockEnabled}`,
       );
+
+      if (!isMockEnabled) {
+        throw new Error(
+          "Real API for dashboard stats (trend) is not implemented yet.",
+        );
+      }
 
       // Mock behavior: simulate network latency.
       await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
@@ -50,7 +60,7 @@ export function useGetDashboardMockStats(
 
       return stats;
     },
-    enabled: !!projectId,
+    enabled: !!projectId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
     staleTime: 5 * 60 * 1000,
   });
 }
