@@ -123,8 +123,10 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
   useEffect(() => {
     if (tableLoading) {
       showLoader();
-      return () => hideLoader();
+    } else {
+      hideLoader();
     }
+    return () => hideLoader();
   }, [tableLoading, showLoader, hideLoader]);
 
   const handleFilterSearch = (newFilters: Record<string, any>) => {

@@ -89,43 +89,40 @@ export const ActiveCasesChart = ({
           <Skeleton variant="circular" width={160} height={160} />
         </Box>
       ) : (
-        <Box sx={{ height: 240, position: "relative" }}>
+        <Box
+          sx={{
+            height: 240,
+            position: "relative",
+            opacity: isError ? 0.3 : 1,
+            filter: isError ? "grayscale(1)" : "none",
+          }}
+        >
           <ResponsiveContainer width="100%" height="100%">
-            {/* Pie chart */}
-            <Box
-              sx={{
-                width: "100%",
-                height: "100%",
-                opacity: isError ? 0.3 : 1,
-                filter: isError ? "grayscale(1)" : "none",
-              }}
-            >
-              <PieChart legend={{ show: false }} tooltip={{ show: !isError }}>
-                <Pie
-                  data={chartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={0}
-                  minAngle={15}
-                  dataKey="value"
-                  nameKey="name"
-                  startAngle={90}
-                  endAngle={-270}
-                  label={false}
-                  labelLine={false}
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.color}
-                      stroke={colors.common.white}
-                    />
-                  ))}
-                </Pie>
-              </PieChart>
-            </Box>
+            <PieChart legend={{ show: false }} tooltip={{ show: !isError }}>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={0}
+                minAngle={15}
+                dataKey="value"
+                nameKey="name"
+                startAngle={90}
+                endAngle={-270}
+                label={false}
+                labelLine={false}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.color}
+                    stroke={colors.common.white}
+                  />
+                ))}
+              </Pie>
+            </PieChart>
           </ResponsiveContainer>
           {/* Center content (Total count or Error indicator) */}
           <Box
