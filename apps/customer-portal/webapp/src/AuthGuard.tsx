@@ -33,10 +33,8 @@ export default function AuthGuard(): JSX.Element {
   useEffect(() => {
     if (isLoading) {
       showLoader();
-    } else {
-      hideLoader();
+      return () => hideLoader();
     }
-    return () => hideLoader();
   }, [isLoading, showLoader, hideLoader]);
 
   if (!isLoading && !isSignedIn) {
