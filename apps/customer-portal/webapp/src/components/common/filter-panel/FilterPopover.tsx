@@ -31,7 +31,7 @@ import {
   Skeleton,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { useState, useEffect, type JSX, type ChangeEvent } from "react";
 

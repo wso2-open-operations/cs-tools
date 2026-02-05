@@ -20,11 +20,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import App from "@/App";
 import { AsgardeoProvider } from "@asgardeo/react";
-import { themeConfig } from "@/config/themeConfig";
-import { loggerConfig } from "@/config/loggerConfig";
-import LoggerProvider from "@/context/logger/LoggerProvider";
-import { MockConfigProvider } from "@/providers/MockConfigProvider";
-import { authConfig } from "@/config/auth-config";
+import { themeConfig } from "@config/themeConfig";
+import { loggerConfig } from "@config/loggerConfig";
+import LoggerProvider from "@context/logger/LoggerProvider";
+import { MockConfigProvider } from "@providers/MockConfigProvider";
+import { authConfig } from "@config/authConfig";
 
 const queryClient: QueryClient = new QueryClient();
 

@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import FilterPopover, { type FilterField } from "../FilterPopover";
+import FilterPopover, { type FilterField } from "@components/common/filter-panel/FilterPopover";
 
 // Mock Oxygen UI components
 vi.mock("@wso2/oxygen-ui", () => ({

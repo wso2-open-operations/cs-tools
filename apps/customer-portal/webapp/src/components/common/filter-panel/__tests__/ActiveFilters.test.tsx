@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ActiveFilters from "../ActiveFilters";
+import ActiveFilters from "@components/common/filter-panel/ActiveFilters";
 
 // Mock Oxygen UI components
 vi.mock("@wso2/oxygen-ui", () => ({
