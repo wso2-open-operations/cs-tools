@@ -22,7 +22,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type DashboardMockStats } from "@/models/responses";
 import { colors } from "@wso2/oxygen-ui";
-import { type FilterField } from "@/components/common/filterPanel/FilterPopover";
+import { type FilterField } from "@/components/common/filter-panel/FilterPopover";
 
 // Valid color types for the stat card icons.
 export type StatCardColor =
