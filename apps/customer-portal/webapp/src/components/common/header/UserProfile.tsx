@@ -18,11 +18,11 @@ import { Skeleton, UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
-import { useMockConfig } from "@/providers/MockConfigProvider";
+import { useMockConfig } from "@providers/MockConfigProvider";
 import { User } from "@wso2/oxygen-ui-icons-react";
-import { useLogger } from "@/hooks/useLogger";
-import useGetUserDetails from "@/api/useGetUserDetails";
-import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
+import { useLogger } from "@hooks/useLogger";
+import useGetUserDetails from "@api/useGetUserDetails";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 /**
  * User profile component.

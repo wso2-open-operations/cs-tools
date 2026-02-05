@@ -23,8 +23,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { JOIN_COMMUNITY_URL } from "@/constants/appLayoutConstants";
-import UserProfile from "@/components/common/header/UserProfile";
+import { JOIN_COMMUNITY_URL } from "@constants/appLayoutConstants";
+import UserProfile from "@components/common/header/UserProfile";
 
 interface ActionsProps {
   showUserProfile?: boolean;

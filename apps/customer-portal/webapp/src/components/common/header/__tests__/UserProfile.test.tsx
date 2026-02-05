@@ -16,8 +16,8 @@
 
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import UserProfile from "@/components/common/header/UserProfile";
-import { mockUserDetails } from "@/models/mockData";
+import UserProfile from "@components/common/header/UserProfile";
+import { mockUserDetails } from "@models/mockData";
 
 // Mock UserMenu and Skeleton from @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({

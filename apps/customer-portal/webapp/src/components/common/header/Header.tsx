@@ -17,13 +17,13 @@
 import { useState, useEffect, type JSX, useMemo, useCallback } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useNavigate, useLocation, useParams } from "react-router";
-import useGetProjects from "@/api/useGetProjects";
-import { useLogger } from "@/hooks/useLogger";
-import type { ProjectListItem } from "@/models/responses";
-import Brand from "@/components/common/header/Brand";
-import Actions from "@/components/common/header/Actions";
-import SearchBar from "@/components/common/header/SearchBar";
-import ProjectSwitcher from "@/components/common/header/ProjectSwitcher";
+import useGetProjects from "@api/useGetProjects";
+import { useLogger } from "@hooks/useLogger";
+import type { ProjectListItem } from "@models/responses";
+import Brand from "@components/common/header/Brand";
+import Actions from "@components/common/header/Actions";
+import SearchBar from "@components/common/header/SearchBar";
+import ProjectSwitcher from "@components/common/header/ProjectSwitcher";
 import { useAsgardeo } from "@asgardeo/react";
 
 interface HeaderProps {
