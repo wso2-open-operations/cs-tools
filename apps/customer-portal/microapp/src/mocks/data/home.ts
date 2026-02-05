@@ -14,10 +14,10 @@ export const MOCK_PIE_DATA_ACTIVE_CASES: PieDataItem[] = [
 ];
 
 export const MOCK_BAR_CHART_SERIES_CASES_TREND: BarSeriesConfig[] = [
-  { dataKey: "acme", label: "Acme", stack: "total", color: colors.blue[500] },
-  { dataKey: "bites", label: "Bites", stack: "total", color: colors.cyan[500] },
-  { dataKey: "cupertino", label: "CupertinoHQ", stack: "total", color: colors.red[500] },
-  { dataKey: "dunlop", label: "Dunlop", stack: "total", color: colors.orange[500] },
+  { dataKey: "acme", name: "Acme", stackId: "total", color: colors.blue[500] },
+  { dataKey: "bites", name: "Bites", stackId: "total", color: colors.cyan[500] },
+  { dataKey: "cupertino", name: "CupertinoHQ", stackId: "total", color: colors.red[500] },
+  { dataKey: "dunlop", name: "Dunlop", stackId: "total", color: colors.orange[500] },
 ];
 
 export const MOCK_BAR_CHART_DATA_CASES_TREND = [

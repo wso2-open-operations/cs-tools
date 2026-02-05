@@ -1,10 +1,11 @@
-import { BarChart } from "@mui/x-charts";
+import { BarChart } from "@wso2/oxygen-ui-charts-react";
 import { WidgetBox } from "@components/ui";
+import { Box } from "@wso2/oxygen-ui";
 
 export interface BarSeriesConfig {
   dataKey: string;
-  label: string;
-  stack: string;
+  name: string;
+  stackId: string;
   color: string;
 }
 
@@ -19,24 +20,18 @@ interface BarChartWidgetProps {
 export function BarChartWidget({ title, data, series, xAxisKey, height = 200 }: BarChartWidgetProps) {
   return (
     <WidgetBox title={title}>
-      <BarChart
-        dataset={data}
-        xAxis={[{ scaleType: "band", dataKey: xAxisKey }]}
-        series={series.map((s) => ({
-          dataKey: s.dataKey,
-          label: s.label,
-          stack: s.stack,
-          color: s.color,
-        }))}
-        height={height}
-        margin={{ left: 0 }}
-        slotProps={{
-          legend: {
-            direction: "horizontal",
-            position: { vertical: "bottom", horizontal: "center" },
-          },
-        }}
-      />
+      <Box mt={2}>
+        <BarChart
+          height={height}
+          data={data}
+          colors={series.map((item) => item.color)}
+          xAxisDataKey={xAxisKey}
+          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+          bars={series}
+          tooltip={{ show: false }}
+          grid={{ show: false }}
+        />
+      </Box>
     </WidgetBox>
   );
 }
