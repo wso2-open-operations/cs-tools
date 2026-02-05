@@ -47,6 +47,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
   colors: {
     orange: { 700: "#c2410c" },
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
   },
   ComplexSelect: Object.assign(
     ({ children, value }: any) => <select value={value}>{children}</select>,
@@ -117,6 +119,13 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Pencil: () => <svg data-testid="icon-pencil" />,
   PencilLine: () => <svg data-testid="icon-pencil-line" />,
   Sparkles: () => <svg data-testid="icon-sparkles" />,
+  Info: () => <svg data-testid="icon-info" />,
+  Server: () => <svg data-testid="icon-server" />,
+  Clock: () => <svg data-testid="icon-clock" />,
+  User: () => <svg data-testid="icon-user" />,
+  Shield: () => <svg data-testid="icon-shield" />,
+  Rocket: () => <svg data-testid="icon-rocket" />,
+  CircleAlert: () => <svg data-testid="icon-alert" />,
 }));
 
 // Mock useLogger hook

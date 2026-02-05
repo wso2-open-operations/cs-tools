@@ -37,6 +37,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
       </div>
     ),
   },
+  Skeleton: () => <div data-testid="skeleton" />,
 }));
 
 // Mock utils
@@ -92,5 +93,17 @@ describe("ProjectCardBadges", () => {
 
     expect(screen.getByText("Error: Status")).toBeInTheDocument();
     expect(screen.queryByText(props.status)).not.toBeInTheDocument();
+  });
+
+  it("should render skeleton when isLoading is true", () => {
+    const props = {
+      projectKey: "PROJ-1",
+      status: "All Good",
+      isLoading: true,
+    };
+
+    render(<ProjectCardBadges {...props} />);
+
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
   });
 });

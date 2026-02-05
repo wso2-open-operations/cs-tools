@@ -37,8 +37,8 @@ export const getPriorityColor = (
  * @param label - Status label
  * @returns Color string
  */
-export const getStatusColor = (label: string): string => {
-  const normalized = label.toLowerCase();
+export const getStatusColor = (label?: string): string => {
+  const normalized = label?.toLowerCase() || "";
   if (normalized.includes("open")) return "primary.main";
   if (normalized.includes("awaiting")) return "info.main";
   if (normalized.includes("progress")) return "warning.main";

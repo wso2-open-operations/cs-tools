@@ -104,12 +104,12 @@ describe("ProjectStatisticsCard", () => {
     expect(screen.queryByText("5")).toBeNull();
   });
 
-  it("should render N/A for missing stats", () => {
+  it("should render -- for missing stats", () => {
     // Provide empty stats object or partially missing
     render(<ProjectStatisticsCard stats={{} as any} />);
 
     const values = screen.getAllByTestId("stat-value");
-    expect(values[0]).toHaveTextContent("N/A");
+    expect(values[0]).toHaveTextContent("--");
   });
 
   it("should handle sidebar open/close for grid sizing", () => {

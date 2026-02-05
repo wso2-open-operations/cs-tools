@@ -29,6 +29,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
   colors: {
     blue: { 500: "#2196f3" },
   },
+  Skeleton: () => <div data-testid="skeleton" />,
 }));
 
 // Mock icons
@@ -92,5 +93,18 @@ describe("ProjectCardStats", () => {
     expect(screen.getByText("Error: Open Cases")).toBeInTheDocument();
     expect(screen.getByText("Error: Active Chats")).toBeInTheDocument();
     expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("should render skeletons when isLoading is true", () => {
+    const props = {
+      openCases: 0,
+      activeChats: 0,
+      date: "2025-07-17",
+      isLoading: true,
+    };
+
+    render(<ProjectCardStats {...props} />);
+
+    expect(screen.getAllByTestId("skeleton")).toHaveLength(2);
   });
 });

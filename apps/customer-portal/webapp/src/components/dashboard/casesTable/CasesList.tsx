@@ -33,10 +33,12 @@ import { ExternalLink, MoreVertical } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
 import type { CaseSearchResponse } from "@/models/responses";
 import { getPriorityColor, getStatusColor } from "@/utils/casesTable";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import CasesTableSkeleton from "./CasesTableSkeleton";
 
 interface CasesListProps {
   isLoading: boolean;
+  isError?: boolean;
   data: CaseSearchResponse | undefined;
   page: number;
   rowsPerPage: number;
@@ -46,6 +48,7 @@ interface CasesListProps {
 
 const CasesList = ({
   isLoading,
+  isError,
   data,
   page,
   rowsPerPage,
@@ -70,6 +73,24 @@ const CasesList = ({
           <TableBody>
             {isLoading ? (
               <CasesTableSkeleton rowsPerPage={rowsPerPage} />
+            ) : isError ? (
+              <TableRow>
+                <TableCell colSpan={7} align="center">
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 1,
+                    }}
+                  >
+                    <ErrorIndicator entityName="cases" />
+                    <Typography variant="body2" color="error">
+                      Failed to fetch outstanding cases
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
             ) : data?.cases.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} align="center">
@@ -82,10 +103,10 @@ const CasesList = ({
                   <TableCell>
                     <Box>
                       <Typography variant="body2" color="text.primary">
-                        {row.createdOn.split(" ")[0]}
+                        {row.createdOn ? row.createdOn.split(" ")[0] : "--"}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {row.createdOn.split(" ")[1] || ""}
+                        {row.createdOn ? row.createdOn.split(" ")[1] || "" : ""}
                       </Typography>
                     </Box>
                   </TableCell>
@@ -103,7 +124,7 @@ const CasesList = ({
                           "&:hover": { color: "primary.main" },
                         }}
                       >
-                        {row.title}
+                        {row.title || "--"}
                         <ExternalLink size={12} style={{ opacity: 0.5 }} />
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
@@ -113,13 +134,13 @@ const CasesList = ({
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
-                      TODO
+                      --
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                       <Avatar sx={{ width: 24, height: 24, fontSize: 12 }}>
-                        {row.assignedEngineer
+                        {typeof row.assignedEngineer === "string"
                           ? row.assignedEngineer
                               .split("-")
                               .map((s) => s[0].toUpperCase())
@@ -128,13 +149,15 @@ const CasesList = ({
                           : "?"}
                       </Avatar>
                       <Typography variant="body2" color="text.primary">
-                        {row.assignedEngineer || "Unassigned"}
+                        {typeof row.assignedEngineer === "string"
+                          ? row.assignedEngineer
+                          : "--"}
                       </Typography>
                     </Box>
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={row.severity?.label || "N/A"}
+                      label={row.severity?.label || "--"}
                       size="small"
                       color={getPriorityColor(row.severity?.label)}
                       variant="outlined"
@@ -153,7 +176,7 @@ const CasesList = ({
                         }}
                       />
                       <Typography variant="body2" color="text.primary">
-                        {row.status?.label || "N/A"}
+                        {row.status?.label || "--"}
                       </Typography>
                     </Box>
                   </TableCell>

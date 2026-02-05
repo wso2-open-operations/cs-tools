@@ -47,8 +47,12 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   PieChart: ({ children }: any) => (
     <div data-testid="pie-chart">{children}</div>
   ),
-  Pie: ({ data, children }: any) => (
-    <div data-testid="pie">
+  Pie: ({ data, paddingAngle, minAngle, children }: any) => (
+    <div
+      data-testid="pie"
+      data-padding-angle={paddingAngle}
+      data-min-angle={minAngle}
+    >
       {data.map((item: any, index: number) => (
         <div key={index} data-testid="pie-segment" data-value={item.value}>
           {item.name}
@@ -84,7 +88,7 @@ describe("OutstandingIncidentsChart", () => {
 
   it("should render title correctly", () => {
     render(<OutstandingIncidentsChart data={mockData} isLoading={false} />);
-    expect(screen.getByText("Outstanding incidents")).toBeInTheDocument();
+    expect(screen.getByText("Outstanding cases")).toBeInTheDocument();
   });
 
   it("should render skeleton when loading", () => {
@@ -131,5 +135,12 @@ describe("OutstandingIncidentsChart", () => {
       <OutstandingIncidentsChart data={undefined as any} isLoading={false} />,
     );
     expect(screen.getByText("N/A")).toBeInTheDocument();
+  });
+
+  it("should have correct paddingAngle and minAngle", () => {
+    render(<OutstandingIncidentsChart data={mockData} isLoading={false} />);
+    const pie = screen.getByTestId("pie");
+    expect(pie.getAttribute("data-padding-angle")).toBe("0");
+    expect(pie.getAttribute("data-min-angle")).toBe("15");
   });
 });

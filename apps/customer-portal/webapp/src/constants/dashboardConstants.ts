@@ -150,6 +150,16 @@ export const CASES_TREND_CHART_DATA: CasesTrendChartDataItem[] = [
   },
 ];
 
+// Placeholder data for Cases Trend Chart when in error state.
+export const TREND_CHART_ERROR_PLACEHOLDER_DATA = [
+  { name: "Jan", TypeA: 40, TypeB: 24, TypeC: 24, TypeD: 20 },
+  { name: "Feb", TypeA: 30, TypeB: 13, TypeC: 22, TypeD: 30 },
+  { name: "Mar", TypeA: 20, TypeB: 98, TypeC: 22, TypeD: 10 },
+  { name: "Apr", TypeA: 27, TypeB: 39, TypeC: 20, TypeD: 40 },
+  { name: "May", TypeA: 18, TypeB: 48, TypeC: 21, TypeD: 50 },
+  { name: "Jun", TypeA: 23, TypeB: 38, TypeC: 25, TypeD: 30 },
+];
+
 // Filter fields for the cases table.
 export const FILTER_FIELDS: FilterField[] = [
   {

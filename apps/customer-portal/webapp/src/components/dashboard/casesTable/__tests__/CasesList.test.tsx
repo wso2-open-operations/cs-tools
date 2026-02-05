@@ -192,4 +192,40 @@ describe("CasesList", () => {
     });
     expect(mockOnRowsPerPageChange).toHaveBeenCalled();
   });
+
+  it("should render '--' for null or undefined values", () => {
+    const dataWithNulls = {
+      cases: [
+        {
+          id: "3",
+          createdOn: null,
+          title: null,
+          number: "CS-003",
+          assignedEngineer: null,
+          severity: null,
+          status: null,
+          project: { id: "p1", name: "Project 1" },
+        },
+      ],
+      totalRecords: 1,
+      offset: 0,
+      limit: 10,
+    } as any;
+
+    render(
+      <CasesList
+        isLoading={false}
+        data={dataWithNulls}
+        page={0}
+        rowsPerPage={10}
+        onPageChange={mockOnPageChange}
+        onRowsPerPageChange={mockOnRowsPerPageChange}
+      />,
+    );
+
+    // Check for '--' in place of title, severity, status, assignedEngineer, and date
+    // Note: title is rendered inside a Typography, date has two display parts
+    const dashes = screen.getAllByText("--");
+    expect(dashes.length).toBeGreaterThanOrEqual(4); // title, assignedEngineer, severity, status parts
+  });
 });

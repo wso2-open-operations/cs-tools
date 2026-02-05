@@ -16,15 +16,19 @@
 
 import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
+import { stripHtmlTags } from "@/utils/projectCard";
 
 interface ProjectDescriptionProps {
   description: string;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const ProjectDescription = ({
   description,
   isLoading,
+  isError,
 }: ProjectDescriptionProps): JSX.Element => {
   return (
     <Box>
@@ -36,12 +40,13 @@ const ProjectDescription = ({
         Description
       </Typography>
       {isLoading ? (
-        <Box>
-          <Skeleton variant="text" width="100%" />
-          <Skeleton variant="text" width="80%" />
-        </Box>
+        <Skeleton variant="text" width="100%" height={60} />
+      ) : isError ? (
+        <ErrorIndicator entityName="project description" />
       ) : (
-        <Typography variant="caption">{description}</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {stripHtmlTags(description)}
+        </Typography>
       )}
     </Box>
   );

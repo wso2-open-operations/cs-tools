@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { ChartLegend } from "@/components/dashboard/charts/ChartLegend";
 import { OUTSTANDING_INCIDENTS_CHART_DATA } from "@/constants/dashboardConstants";
 
@@ -33,6 +34,7 @@ interface OutstandingIncidentsChartProps {
     total: number;
   };
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 /**
@@ -46,6 +48,7 @@ interface OutstandingIncidentsChartProps {
 export const OutstandingIncidentsChart = ({
   data,
   isLoading,
+  isError,
 }: OutstandingIncidentsChartProps): JSX.Element => {
   const safeData = data ?? {
     medium: 0,
@@ -54,21 +57,27 @@ export const OutstandingIncidentsChart = ({
     total: 0,
   };
 
-  const chartData = isLoading
-    ? []
-    : OUTSTANDING_INCIDENTS_CHART_DATA.map((item) => ({
+  const chartData = isError
+    ? OUTSTANDING_INCIDENTS_CHART_DATA.map((item) => ({
         name: item.name,
-        value: safeData[item.key] || 0,
-        color: item.color,
-      }));
+        value: 1,
+        color: colors.grey[300],
+      }))
+    : isLoading
+      ? []
+      : OUTSTANDING_INCIDENTS_CHART_DATA.map((item) => ({
+          name: item.name,
+          value: safeData[item.key] || 0,
+          color: item.color,
+        }));
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
       {/* Title */}
       <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
-        Outstanding incidents
+        Outstanding cases
       </Typography>
-      {/* Loading state */}
+      {/* Chart state */}
       {isLoading ? (
         <Box
           sx={{
@@ -81,17 +90,24 @@ export const OutstandingIncidentsChart = ({
           <Skeleton variant="circular" width={160} height={160} />
         </Box>
       ) : (
-        <Box sx={{ height: 240, position: "relative" }}>
+        <Box
+          sx={{
+            height: 240,
+            position: "relative",
+            opacity: isError ? 0.3 : 1,
+            filter: isError ? "grayscale(1)" : "none",
+          }}
+        >
           <ResponsiveContainer width="100%" height="100%">
-            {/* Pie chart */}
-            <PieChart legend={{ show: false }} tooltip={{ show: true }}>
+            <PieChart legend={{ show: false }} tooltip={{ show: !isError }}>
               <Pie
                 data={chartData}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
                 outerRadius={80}
-                paddingAngle={5}
+                paddingAngle={0}
+                minAngle={15}
                 dataKey="value"
                 nameKey="name"
                 startAngle={90}
@@ -109,7 +125,7 @@ export const OutstandingIncidentsChart = ({
               </Pie>
             </PieChart>
           </ResponsiveContainer>
-          {/* Total count */}
+          {/* Center content (Total count or Error indicator) */}
           <Box
             sx={{
               position: "absolute",
@@ -120,10 +136,25 @@ export const OutstandingIncidentsChart = ({
               pointerEvents: "none",
             }}
           >
-            <Typography variant="h4">
-              {data ? safeData.total : "N/A"}
-            </Typography>
-            <Typography variant="caption">Total</Typography>
+            {isError ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <ErrorIndicator entityName="outstanding cases" />
+                <Typography variant="caption">Total</Typography>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="h4">
+                  {data ? safeData.total : "N/A"}
+                </Typography>
+                <Typography variant="caption">Total</Typography>
+              </>
+            )}
           </Box>
         </Box>
       )}
@@ -142,7 +173,14 @@ export const OutstandingIncidentsChart = ({
           ))}
         </Box>
       ) : (
-        <ChartLegend data={chartData} />
+        <ChartLegend
+          data={OUTSTANDING_INCIDENTS_CHART_DATA.map((item) => ({
+            name: item.name,
+            value: 0,
+            color: item.color,
+          }))}
+          isError={isError}
+        />
       )}
     </Card>
   );

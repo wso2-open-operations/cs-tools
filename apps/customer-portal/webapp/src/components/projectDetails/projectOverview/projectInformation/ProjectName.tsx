@@ -16,17 +16,20 @@
 
 import { Box, Typography, Chip, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 interface ProjectNameProps {
   name: string;
   projectKey: string;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const ProjectName = ({
   name,
   projectKey,
   isLoading,
+  isError,
 }: ProjectNameProps): JSX.Element => {
   return (
     <Box>
@@ -43,6 +46,8 @@ const ProjectName = ({
             <Skeleton variant="text" width={150} />
             <Skeleton variant="rounded" width={60} height={24} />
           </>
+        ) : isError ? (
+          <ErrorIndicator entityName="project name" />
         ) : (
           <>
             <Typography variant="caption">{name}</Typography>

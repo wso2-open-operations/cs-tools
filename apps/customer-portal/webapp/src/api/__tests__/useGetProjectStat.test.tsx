@@ -29,6 +29,22 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: vi.fn(),
+    isSignedIn: true,
+    isLoading: false,
+  }),
+}));
+
+// Mock MockConfigProvider
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({
+    isMockEnabled: true,
+  }),
+}));
+
 // Mock useLogger
 vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => ({

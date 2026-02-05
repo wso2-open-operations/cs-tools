@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { ChartLegend } from "./ChartLegend";
 import { ACTIVE_CASES_CHART_DATA } from "@/constants/dashboardConstants";
 
@@ -33,6 +34,7 @@ interface ActiveCasesChartProps {
     total: number;
   };
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 /**
@@ -45,6 +47,7 @@ interface ActiveCasesChartProps {
 export const ActiveCasesChart = ({
   data,
   isLoading,
+  isError,
 }: ActiveCasesChartProps): JSX.Element => {
   const safeData = data ?? {
     workInProgress: 0,
@@ -53,13 +56,19 @@ export const ActiveCasesChart = ({
     total: 0,
   };
 
-  const chartData = isLoading
-    ? []
-    : ACTIVE_CASES_CHART_DATA.map((item) => ({
+  const chartData = isError
+    ? ACTIVE_CASES_CHART_DATA.map((item) => ({
         name: item.name,
-        value: safeData[item.key] || 0,
-        color: item.color,
-      }));
+        value: 1,
+        color: colors.grey[300],
+      }))
+    : isLoading
+      ? []
+      : ACTIVE_CASES_CHART_DATA.map((item) => ({
+          name: item.name,
+          value: safeData[item.key] || 0,
+          color: item.color,
+        }));
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
@@ -67,7 +76,7 @@ export const ActiveCasesChart = ({
       <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
         Active cases
       </Typography>
-      {/* Loading state */}
+      {/* Chart state */}
       {isLoading ? (
         <Box
           sx={{
@@ -80,17 +89,24 @@ export const ActiveCasesChart = ({
           <Skeleton variant="circular" width={160} height={160} />
         </Box>
       ) : (
-        <Box sx={{ height: 240, position: "relative" }}>
+        <Box
+          sx={{
+            height: 240,
+            position: "relative",
+            opacity: isError ? 0.3 : 1,
+            filter: isError ? "grayscale(1)" : "none",
+          }}
+        >
           <ResponsiveContainer width="100%" height="100%">
-            {/* Pie chart */}
-            <PieChart legend={{ show: false }} tooltip={{ show: true }}>
+            <PieChart legend={{ show: false }} tooltip={{ show: !isError }}>
               <Pie
                 data={chartData}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
                 outerRadius={80}
-                paddingAngle={5}
+                paddingAngle={0}
+                minAngle={15}
                 dataKey="value"
                 nameKey="name"
                 startAngle={90}
@@ -108,7 +124,7 @@ export const ActiveCasesChart = ({
               </Pie>
             </PieChart>
           </ResponsiveContainer>
-          {/* Total cases */}
+          {/* Center content (Total count or Error indicator) */}
           <Box
             sx={{
               position: "absolute",
@@ -119,10 +135,25 @@ export const ActiveCasesChart = ({
               pointerEvents: "none",
             }}
           >
-            <Typography variant="h4">
-              {data ? safeData.total : "N/A"}
-            </Typography>
-            <Typography variant="caption">Total</Typography>
+            {isError ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <ErrorIndicator entityName="active cases" />
+                <Typography variant="caption">Total</Typography>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="h4">
+                  {data ? safeData.total : "N/A"}
+                </Typography>
+                <Typography variant="caption">Total</Typography>
+              </>
+            )}
           </Box>
         </Box>
       )}
@@ -141,7 +172,14 @@ export const ActiveCasesChart = ({
           ))}
         </Box>
       ) : (
-        <ChartLegend data={chartData} />
+        <ChartLegend
+          data={ACTIVE_CASES_CHART_DATA.map((item) => ({
+            name: item.name,
+            value: 0,
+            color: item.color,
+          }))}
+          isError={isError}
+        />
       )}
     </Card>
   );

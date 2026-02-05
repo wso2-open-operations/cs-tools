@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Grid } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { useEffect, type JSX } from "react";
+import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@/hooks/useLogger";
 import { useLoader } from "@/context/linearLoader/LoaderContext";
 import { useGetDashboardMockStats } from "@/api/useGetDashboardMockStats";
@@ -38,28 +39,32 @@ export default function DashboardPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const { showLoader, hideLoader } = useLoader();
 
+  const { isLoading: isAuthLoading } = useAsgardeo();
+
   const {
     data: mockStats,
-    isLoading: isMockLoading,
+    isFetching: isMockFetching,
     isError: isErrorMock,
   } = useGetDashboardMockStats(projectId || "");
   const {
     data: casesStats,
-    isLoading: isCasesLoading,
+    isFetching: isCasesFetching,
     isError: isErrorCases,
   } = useGetProjectCasesStats(projectId || "");
 
-  const isLoading = isMockLoading || isCasesLoading;
-  const isError = isErrorMock || isErrorCases;
+  const isDashboardLoading =
+    isAuthLoading ||
+    isMockFetching ||
+    isCasesFetching ||
+    (!mockStats && !isErrorMock) ||
+    (!casesStats && !isErrorCases);
 
   useEffect(() => {
-    if (isLoading) {
+    if (isDashboardLoading) {
       showLoader();
-    } else {
-      hideLoader();
+      return () => hideLoader();
     }
-    return () => hideLoader();
-  }, [isLoading, showLoader, hideLoader]);
+  }, [isDashboardLoading, showLoader, hideLoader]);
 
   useEffect(() => {
     if (isErrorMock) {
@@ -108,77 +113,78 @@ export default function DashboardPage(): JSX.Element {
         </Button>
       </Box>
       {/* Dashboard stats grid */}
-      {isError ? (
-        <Typography variant="h6" color="error" sx={{ mt: 2 }}>
-          Error loading dashboard statistics. Please try again later.
-        </Typography>
-      ) : (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          {DASHBOARD_STATS.map((stat) => {
-            const trend = mockStats ? mockStats[stat.id]?.trend : undefined;
-            let value: string | number = 0;
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {DASHBOARD_STATS.map((stat) => {
+          const trend = mockStats ? mockStats[stat.id]?.trend : undefined;
+          let value: string | number = 0;
 
-            if (casesStats) {
-              switch (stat.id) {
-                case "totalCases":
-                  value = casesStats.totalCases;
-                  break;
-                case "openCases":
-                  value = casesStats.openCases;
-                  break;
-                case "resolvedCases":
-                  value = casesStats.resolvedCases.total;
-                  break;
-                case "avgResponseTime":
-                  value = `${casesStats.averageResponseTime}h`;
-                  break;
-                default:
-                  break;
-              }
-            }
-
-            return (
-              <Grid key={stat.id} size={{ xs: 12, sm: 6, md: 3 }}>
-                {/* Stat card for each statistic */}
-                <StatCard
-                  label={stat.label}
-                  value={value}
-                  icon={<stat.icon size={20} />}
-                  iconColor={stat.iconColor}
-                  tooltipText={stat.tooltipText}
-                  trend={trend}
-                  isLoading={isLoading}
-                />
-              </Grid>
-            );
-          })}
-        </Grid>
-      )}
-      {/* Charts row - TODO - Need to display error componenet if error occured when loading data without displaying fall back values */}
-      {!isError && (
-        <ChartLayout
-          outstandingIncidents={
-            casesStats?.outstandingIncidents || {
-              medium: 0,
-              high: 0,
-              critical: 0,
-              total: 0,
+          if (casesStats) {
+            switch (stat.id) {
+              case "totalCases":
+                value = casesStats.totalCases;
+                break;
+              case "openCases":
+                value = casesStats.openCases;
+                break;
+              case "resolvedCases":
+                value = casesStats.resolvedCases.total;
+                break;
+              case "avgResponseTime":
+                value = `${casesStats.averageResponseTime}h`;
+                break;
+              default:
+                break;
             }
           }
-          activeCases={
-            casesStats?.activeCases || {
-              workInProgress: 0,
-              waitingOnClient: 0,
-              waitingOnWso2: 0,
-              total: 0,
-            }
+
+          return (
+            <Grid key={stat.id} size={{ xs: 12, sm: 6, md: 3 }}>
+              {/* Stat card for each statistic */}
+              <StatCard
+                label={stat.label}
+                value={value}
+                icon={<stat.icon size={20} />}
+                iconColor={stat.iconColor}
+                tooltipText={stat.tooltipText}
+                trend={trend}
+                isLoading={(isDashboardLoading || !casesStats) && !isErrorCases}
+                isError={isErrorCases}
+                isTrendError={isErrorMock}
+              />
+            </Grid>
+          );
+        })}
+      </Grid>
+      {/* Charts row */}
+      <ChartLayout
+        outstandingCases={
+          casesStats?.outstandingCases || {
+            medium: 0,
+            high: 0,
+            critical: 0,
+            total: 0,
           }
-          casesTrend={mockStats?.casesTrend || []}
-          isLoading={isLoading}
-        />
-      )}
+        }
+        activeCases={
+          casesStats?.activeCases || {
+            workInProgress: 0,
+            waitingOnClient: 0,
+            waitingOnWso2: 0,
+            total: 0,
+          }
+        }
+        casesTrend={mockStats?.casesTrend || []}
+        isLoading={
+          (isDashboardLoading || !casesStats || !mockStats) &&
+          !isErrorCases &&
+          !isErrorMock
+        }
+        isErrorOutstanding={isErrorCases}
+        isErrorActiveCases={isErrorCases}
+        isErrorTrend={isErrorMock}
+      />
       {/* Cases Table */}
-      {!isError && projectId && (
+      {projectId && (
         <Box sx={{ mt: 3 }}>
           <CasesTable projectId={projectId} />
         </Box>

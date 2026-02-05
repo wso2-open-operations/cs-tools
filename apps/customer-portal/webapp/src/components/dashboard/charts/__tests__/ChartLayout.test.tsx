@@ -37,8 +37,8 @@ vi.mock("../CasesTrendChart", () => ({
 
 vi.mock("../OutstandingIncidentsChart", () => ({
   OutstandingIncidentsChart: ({ isLoading }: any) => (
-    <div data-testid="outstanding-incidents-chart" data-loading={isLoading}>
-      Outstanding Incidents Chart
+    <div data-testid="outstanding-cases-chart" data-loading={isLoading}>
+      Outstanding cases Chart
     </div>
   ),
 }));
@@ -54,7 +54,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 describe("ChartLayout", () => {
   const mockProps = {
-    outstandingIncidents: {
+    outstandingCases: {
       medium: 5,
       high: 3,
       critical: 1,
@@ -75,9 +75,7 @@ describe("ChartLayout", () => {
 
     expect(screen.getByTestId("active-cases-chart")).toBeInTheDocument();
     expect(screen.getByTestId("cases-trend-chart")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("outstanding-incidents-chart"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("outstanding-cases-chart")).toBeInTheDocument();
   });
 
   it("should pass isLoading prop to child components", () => {
@@ -91,7 +89,7 @@ describe("ChartLayout", () => {
       "data-loading",
       "true",
     );
-    expect(screen.getByTestId("outstanding-incidents-chart")).toHaveAttribute(
+    expect(screen.getByTestId("outstanding-cases-chart")).toHaveAttribute(
       "data-loading",
       "true",
     );

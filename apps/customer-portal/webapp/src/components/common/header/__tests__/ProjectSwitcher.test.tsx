@@ -56,11 +56,22 @@ vi.mock("@wso2/oxygen-ui", () => ({
   Header: {
     Switchers: ({ children }: any) => <div>{children}</div>,
   },
+  colors: {
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
+  },
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   FolderOpen: () => <svg data-testid="icon-FolderOpen" />,
+  Info: () => <svg data-testid="icon-Info" />,
+  Server: () => <svg data-testid="icon-Server" />,
+  Clock: () => <svg data-testid="icon-Clock" />,
+  User: () => <svg data-testid="icon-User" />,
+  Shield: () => <svg data-testid="icon-Shield" />,
+  Rocket: () => <svg data-testid="icon-Rocket" />,
+  CircleAlert: () => <svg data-testid="icon-CircleAlert" />,
 }));
 
 // Mock ErrorIndicator

@@ -21,7 +21,7 @@ import { CasesTrendChart } from "./CasesTrendChart";
 import { OutstandingIncidentsChart } from "./OutstandingIncidentsChart";
 
 interface ChartLayoutProps {
-  outstandingIncidents: {
+  outstandingCases: {
     medium: number;
     high: number;
     critical: number;
@@ -41,6 +41,9 @@ interface ChartLayoutProps {
     TypeD: number;
   }>;
   isLoading?: boolean;
+  isErrorOutstanding?: boolean;
+  isErrorActiveCases?: boolean;
+  isErrorTrend?: boolean;
 }
 
 /**
@@ -55,29 +58,41 @@ interface ChartLayoutProps {
  * @returns {JSX.Element} The chart layout element.
  */
 const ChartLayout = ({
-  outstandingIncidents,
+  outstandingCases,
   activeCases,
   casesTrend,
   isLoading,
+  isErrorOutstanding,
+  isErrorActiveCases,
+  isErrorTrend,
 }: ChartLayoutProps): JSX.Element => {
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>
       {/* Outstanding Incidents */}
       <Grid size={{ xs: 12, md: 4 }}>
         <OutstandingIncidentsChart
-          data={outstandingIncidents}
+          data={outstandingCases}
           isLoading={isLoading}
+          isError={isErrorOutstanding}
         />
       </Grid>
 
       {/* Active Cases */}
       <Grid size={{ xs: 12, md: 4 }}>
-        <ActiveCasesChart data={activeCases} isLoading={isLoading} />
+        <ActiveCasesChart
+          data={activeCases}
+          isLoading={isLoading}
+          isError={isErrorActiveCases}
+        />
       </Grid>
 
       {/* Cases Trend */}
       <Grid size={{ xs: 12, md: 4 }}>
-        <CasesTrendChart data={casesTrend} isLoading={isLoading} />
+        <CasesTrendChart
+          data={casesTrend}
+          isLoading={isLoading}
+          isError={isErrorTrend}
+        />
       </Grid>
     </Grid>
   );

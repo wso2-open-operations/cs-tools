@@ -14,7 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Divider, Form, Typography, colors } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Divider,
+  Form,
+  Skeleton,
+  Typography,
+  colors,
+} from "@wso2/oxygen-ui";
 import {
   Calendar,
   CircleAlert,
@@ -29,6 +36,7 @@ interface ProjectCardStatsProps {
   date: string;
   openCases: number;
   isError?: boolean;
+  isLoading?: boolean;
 }
 
 /**
@@ -42,6 +50,7 @@ export default function ProjectCardStats({
   activeChats,
   date,
   isError,
+  isLoading,
 }: ProjectCardStatsProps): JSX.Element {
   return (
     <Form.CardContent sx={{ width: "100%", pb: 0 }}>
@@ -65,7 +74,9 @@ export default function ProjectCardStats({
               Open Cases
             </Typography>
           </Box>
-          {isError ? (
+          {isLoading ? (
+            <Skeleton variant="text" width={20} />
+          ) : isError ? (
             <ErrorIndicator entityName="Open Cases" />
           ) : (
             <Typography variant="body2" color="primary">
@@ -87,7 +98,9 @@ export default function ProjectCardStats({
               Active Chats
             </Typography>
           </Box>
-          {isError ? (
+          {isLoading ? (
+            <Skeleton variant="text" width={20} />
+          ) : isError ? (
             <ErrorIndicator entityName="Active Chats" />
           ) : (
             <Typography variant="body2" color={colors.blue[500]}>

@@ -127,25 +127,31 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
   colors: {
     common: { white: "#FFFFFF" },
-    blue: { 500: "#3B82F6" },
+    blue: { 500: "#3B82F6", 700: "#1d4ed8" },
     green: { 500: "#22C55E" },
     orange: { 500: "#F97316" },
     red: { 500: "#EF4444" },
     yellow: { 600: "#EAB308" },
+    purple: { 400: "#a78bfa" },
   },
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  MessageSquare: () => <svg data-testid="icon-message-square" />,
-  ArrowRight: () => <svg data-testid="icon-arrow-right" />,
-  Clock: () => <svg data-testid="icon-clock" />,
-  AlertCircle: () => <svg data-testid="icon-alert-circle" />,
-  CheckCircle: () => <svg data-testid="icon-check-circle" />,
   Activity: () => <svg data-testid="icon-activity" />,
-  TrendingUp: () => <svg data-testid="icon-trending-up" />,
-  TrendingDown: () => <svg data-testid="icon-trending-down" />,
+  AlertCircle: () => <svg data-testid="icon-alert-circle" />,
+  ArrowRight: () => <svg data-testid="icon-arrow-right" />,
+  CheckCircle: () => <svg data-testid="icon-check-circle" />,
+  CircleAlert: () => <svg data-testid="icon-circle-alert" />,
+  Clock: () => <svg data-testid="icon-clock" />,
   Info: () => <svg data-testid="icon-info" />,
+  MessageSquare: () => <svg data-testid="icon-message-square" />,
+  TrendingDown: () => <svg data-testid="icon-trending-down" />,
+  TrendingUp: () => <svg data-testid="icon-trending-up" />,
+  Server: () => <svg data-testid="icon-server" />,
+  Shield: () => <svg data-testid="icon-shield" />,
+  User: () => <svg data-testid="icon-user" />,
+  Rocket: () => <svg data-testid="icon-rocket" />,
 }));
 
 describe("DashboardPage", () => {

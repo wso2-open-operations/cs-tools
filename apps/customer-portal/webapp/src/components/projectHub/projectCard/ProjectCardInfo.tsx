@@ -16,7 +16,7 @@
 
 import { Form, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-
+import { stripHtmlTags } from "@/utils/projectCard";
 
 interface ProjectCardInfoProps {
   title: string;
@@ -55,7 +55,7 @@ export default function ProjectCardInfo({
             minHeight: "5rem",
           }}
         >
-          {subtitle}
+          {stripHtmlTags(subtitle)}
         </Typography>
       }
     />

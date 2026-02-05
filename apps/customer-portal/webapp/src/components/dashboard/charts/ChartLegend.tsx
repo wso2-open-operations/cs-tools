@@ -14,11 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 interface ChartLegendProps {
   data: { name: string; value: number; color: string }[];
+  isError?: boolean;
 }
 
 /**
@@ -29,13 +31,16 @@ interface ChartLegendProps {
  * Each item should contain a label and a color.
  * @returns {JSX.Element} The chart legend element.
  */
-export const ChartLegend = ({ data }: ChartLegendProps): JSX.Element => (
+export const ChartLegend = ({
+  data,
+  isError,
+}: ChartLegendProps): JSX.Element => (
   <Box
     sx={{
       mt: 2,
       display: "flex",
       flexWrap: "wrap",
-      gap: 1,
+      gap: 1.5,
       justifyContent: "center",
     }}
   >
@@ -48,15 +53,19 @@ export const ChartLegend = ({ data }: ChartLegendProps): JSX.Element => (
           gap: 0.5,
         }}
       >
-        {/* Legend color box */}
-        <Box
-          sx={{
-            width: 12,
-            height: 12,
-            borderRadius: "50%",
-            bgcolor: entry.color,
-          }}
-        />
+        {/* Legend icon/box */}
+        {isError ? (
+          <ErrorIndicator entityName="chart's stats" />
+        ) : (
+          <Box
+            sx={{
+              width: 12,
+              height: 12,
+              borderRadius: "50%",
+              bgcolor: entry.color,
+            }}
+          />
+        )}
         {/* Legend text */}
         <Typography variant="caption" color="text.secondary">
           {entry.name}

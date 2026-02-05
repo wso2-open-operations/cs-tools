@@ -14,14 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Card, Typography, Box, Skeleton } from "@wso2/oxygen-ui";
+import { Card, Typography, Box, Skeleton, colors } from "@wso2/oxygen-ui";
 import {
   BarChart,
   Bar,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { CASES_TREND_CHART_DATA } from "@/constants/dashboardConstants";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
+import {
+  CASES_TREND_CHART_DATA,
+  TREND_CHART_ERROR_PLACEHOLDER_DATA,
+} from "@/constants/dashboardConstants";
 import { ChartLegend } from "./ChartLegend";
 
 interface CasesTrendChartProps {
@@ -33,6 +37,7 @@ interface CasesTrendChartProps {
     TypeD: number;
   }>;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 /**
@@ -43,7 +48,10 @@ interface CasesTrendChartProps {
 export const CasesTrendChart = ({
   data,
   isLoading,
+  isError,
 }: CasesTrendChartProps): JSX.Element => {
+  const chartData = isError ? TREND_CHART_ERROR_PLACEHOLDER_DATA : data || [];
+
   return (
     <Card sx={{ p: 2, height: "100%" }}>
       {/* Title */}
@@ -55,29 +63,55 @@ export const CasesTrendChart = ({
           <Skeleton variant="rectangular" width="100%" height="100%" />
         </Box>
       ) : (
-        <Box sx={{ height: 240 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            {/* Bar chart */}
-            <BarChart
-              data={data || []}
-              grid={{ show: true }}
-              xAxis={{ show: true }}
-              yAxis={{ show: true }}
-              tooltip={{ show: true }}
-              legend={{ show: false }}
-              margin={{ top: 10, right: 0, left: -20, bottom: 0 }}
+        <Box sx={{ height: 240, position: "relative" }}>
+          {isError && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1,
+                pointerEvents: "none",
+              }}
             >
-              {CASES_TREND_CHART_DATA.map((item) => (
-                <Bar
-                  key={item.key}
-                  dataKey={item.key}
-                  stackId="a"
-                  fill={item.color}
-                  radius={item.radius}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+              <ErrorIndicator entityName="cases trend" />
+            </Box>
+          )}
+          <Box
+            sx={{
+              height: "100%",
+              opacity: isError ? 0.3 : 1,
+              filter: isError ? "grayscale(1)" : "none",
+            }}
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              {/* Bar chart */}
+              <BarChart
+                data={chartData}
+                grid={{ show: true }}
+                xAxis={{ show: true }}
+                yAxis={{ show: true }}
+                tooltip={{ show: !isError }}
+                legend={{ show: false }}
+                margin={{ top: 10, right: 0, left: -20, bottom: 0 }}
+              >
+                {CASES_TREND_CHART_DATA.map((item) => (
+                  <Bar
+                    key={item.key}
+                    dataKey={item.key}
+                    stackId="a"
+                    fill={isError ? colors.grey[300] : item.color}
+                    radius={item.radius}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </Box>
         </Box>
       )}
       {/* Custom Trend Legend */}
@@ -101,6 +135,7 @@ export const CasesTrendChart = ({
             value: 0,
             color: item.color,
           }))}
+          isError={isError}
         />
       )}
     </Card>

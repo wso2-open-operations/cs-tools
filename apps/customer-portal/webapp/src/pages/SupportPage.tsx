@@ -17,6 +17,7 @@
 import { useParams } from "react-router";
 import { useEffect, type JSX } from "react";
 import { Typography, Box } from "@wso2/oxygen-ui";
+import { useAsgardeo } from "@asgardeo/react";
 import CasesOverviewStatCard from "@/components/support/casesOverviewStats/CasesOverviewStatCard";
 import NoveraChatBanner from "@/components/support/noveraAIAssistant/noveraChatBanner/NoveraChatBanner";
 import { useGetProjectSupportStats } from "@/api/useGetProjectSupportStats";
@@ -34,9 +35,13 @@ export default function SupportPage(): JSX.Element {
 
   const {
     data: stats,
-    isLoading,
+    isFetching,
     isError,
   } = useGetProjectSupportStats(projectId || "");
+
+  const { isLoading: isAuthLoading } = useAsgardeo();
+
+  const isActuallyLoading = isAuthLoading || isFetching || (!stats && !isError);
 
   useEffect(() => {
     if (isError) {
@@ -62,7 +67,7 @@ export default function SupportPage(): JSX.Element {
 
   return (
     <Box>
-      <CasesOverviewStatCard isLoading={isLoading} stats={stats} />
+      <CasesOverviewStatCard isLoading={isActuallyLoading} stats={stats} />
       <NoveraChatBanner />
     </Box>
   );

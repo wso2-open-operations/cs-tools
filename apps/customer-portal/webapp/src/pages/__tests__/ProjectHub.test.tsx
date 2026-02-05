@@ -22,16 +22,27 @@ import { mockProjects } from "@/models/mockData";
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
-  Typography: ({ children, color }: any) => (
-    <div data-testid="typography" data-color={color}>
+  Typography: ({ children, variant }: any) => (
+    <div data-testid="typography" data-variant={variant}>
       {children}
     </div>
   ),
+  colors: {
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
+  },
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   FolderOpen: () => <svg data-testid="folder-icon" />,
+  Info: () => <div data-testid="info-icon" />,
+  Server: () => <div data-testid="server-icon" />,
+  Clock: () => <div data-testid="clock-icon" />,
+  User: () => <div data-testid="user-icon" />,
+  Shield: () => <div data-testid="shield-icon" />,
+  Rocket: () => <div data-testid="rocket-icon" />,
+  CircleAlert: () => <div data-testid="alert-icon" />,
 }));
 
 // Mock useAsgardeo

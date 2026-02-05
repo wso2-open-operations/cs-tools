@@ -26,6 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Activity } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 import type { ProjectStatsResponse } from "@/models/responses";
 import { statItems } from "@/constants/projectDetailsConstants";
@@ -33,12 +34,14 @@ import { statItems } from "@/constants/projectDetailsConstants";
 interface ProjectStatisticsCardProps {
   stats?: ProjectStatsResponse["projectStats"];
   isLoading?: boolean;
+  isError?: boolean;
   isSidebarOpen?: boolean;
 }
 
 const ProjectStatisticsCard = ({
   stats,
   isLoading,
+  isError,
   isSidebarOpen = false,
 }: ProjectStatisticsCardProps): JSX.Element => {
   const gridSize = isSidebarOpen ? { xs: 12, xl: 4 } : { xs: 12, lg: 4 };
@@ -60,8 +63,10 @@ const ProjectStatisticsCard = ({
                   isLoading
                     ? ((
                         <Skeleton variant="text" width="40%" height={24} />
-                      ) as unknown as string)
-                    : (stats?.[stat.key] ?? "N/A").toString()
+                      ) as any)
+                    : isError
+                      ? ((<ErrorIndicator entityName={stat.label} />) as any)
+                      : (stats?.[stat.key] ?? "--").toString()
                 }
                 icon={stat.icon}
                 iconColor={stat.iconColor}

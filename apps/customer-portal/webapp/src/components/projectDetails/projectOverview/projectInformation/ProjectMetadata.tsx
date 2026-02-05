@@ -21,6 +21,7 @@ import {
   getSupportTierColor,
   getSLAStatusColor,
 } from "@/utils/projectStats";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 interface ProjectMetadataProps {
   createdDate: string;
@@ -28,6 +29,7 @@ interface ProjectMetadataProps {
   supportTier: string;
   slaStatus: string;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const ProjectMetadata = ({
@@ -36,6 +38,7 @@ const ProjectMetadata = ({
   supportTier,
   slaStatus,
   isLoading,
+  isError,
 }: ProjectMetadataProps): JSX.Element => {
   return (
     <Box sx={{ pt: 3, borderTop: 1, borderColor: "divider" }}>
@@ -50,7 +53,9 @@ const ProjectMetadata = ({
             Created Date
           </Typography>
           {isLoading ? (
-            <Skeleton variant="text" width={80} />
+            <Skeleton variant="text" width="60%" />
+          ) : isError ? (
+            <ErrorIndicator entityName="project metadata" />
           ) : (
             <Typography variant="caption">{createdDate}</Typography>
           )}

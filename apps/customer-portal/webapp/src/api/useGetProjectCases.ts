@@ -15,6 +15,8 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useAsgardeo } from "@asgardeo/react";
+import { useMockConfig } from "@/providers/MockConfigProvider";
 import { useLogger } from "@/hooks/useLogger";
 import { mockCases } from "@/models/mockData";
 import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
@@ -34,37 +36,87 @@ export default function useGetProjectCases(
 ): UseQueryResult<CaseSearchResponse, Error> {
   const logger = useLogger();
 
+  const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
+
   return useQuery<CaseSearchResponse, Error>({
-    queryKey: [ApiQueryKeys.PROJECT_CASES, projectId, requestBody],
+    queryKey: [
+      ApiQueryKeys.PROJECT_CASES,
+      projectId,
+      requestBody,
+      isMockEnabled,
+    ],
     queryFn: async (): Promise<CaseSearchResponse> => {
       logger.debug(
         `Fetching cases for project: ${projectId} with params:`,
         requestBody,
+        `mock: ${isMockEnabled}`,
       );
 
-      await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
+      if (isMockEnabled) {
+        await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
-      // TODO: Filter logic need be implemented here
+        // TODO: Filter logic need be implemented here
 
-      const { offset = 0, limit = 10 } = requestBody.pagination;
-      const filteredCases = mockCases.filter(
-        (cases) => cases.project.id === projectId || projectId === "all",
-      );
+        const { offset = 0, limit = 5 } = requestBody.pagination;
+        const filteredCases = mockCases.filter(
+          (cases) => cases.project.id === projectId || projectId === "all",
+        );
 
-      // slice for pagination
-      const pagedCases = filteredCases.slice(offset, offset + limit);
+        // slice for pagination
+        const pagedCases = filteredCases.slice(offset, offset + limit);
 
-      const response: CaseSearchResponse = {
-        cases: pagedCases.length > 0 ? pagedCases : mockCases.slice(0, limit),
-        totalRecords:
-          filteredCases.length > 0 ? filteredCases.length : mockCases.length,
-        offset,
-        limit,
-      };
+        const response: CaseSearchResponse = {
+          cases: pagedCases.length > 0 ? pagedCases : mockCases.slice(0, limit),
+          totalRecords:
+            filteredCases.length > 0 ? filteredCases.length : mockCases.length,
+          offset,
+          limit,
+        };
 
-      logger.debug("Cases fetched successfully", response);
-      return response;
+        logger.debug("Cases fetched successfully (mock)", response);
+        return response;
+      }
+
+      try {
+        const idToken = await getIdToken();
+        const baseUrl = import.meta.env.CUSTOMER_PORTAL_BACKEND_BASE_URL;
+
+        if (!baseUrl) {
+          throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
+        }
+
+        const requestUrl = `${baseUrl}/projects/${projectId}/cases/search`;
+
+        const response = await fetch(requestUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${idToken}`,
+            "x-user-id-token": idToken,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        logger.debug(
+          `[useGetProjectCases] Response status: ${response.status}`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Error fetching project cases: ${response.statusText}`,
+          );
+        }
+
+        const data: CaseSearchResponse = await response.json();
+        logger.debug("[useGetProjectCases] Data received:", data);
+        return data;
+      } catch (error) {
+        logger.error("[useGetProjectCases] Error:", error);
+        throw error;
+      }
     },
-    enabled: !!projectId,
+    enabled: !!projectId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
   });
 }

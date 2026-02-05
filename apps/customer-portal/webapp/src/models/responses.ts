@@ -32,9 +32,9 @@ export interface ProjectDetails {
   createdOn: string;
   type: string;
   subscription: {
-    startDate: string;
-    endDate: string;
-    supportTier: string;
+    startDate: string | null;
+    endDate: string | null;
+    supportTier: string | null;
   };
 }
 
@@ -81,7 +81,7 @@ export interface ProjectCasesStats {
     waitingOnWso2: number;
     total: number;
   };
-  outstandingIncidents: {
+  outstandingCases: {
     medium: number;
     high: number;
     critical: number;
@@ -182,4 +182,17 @@ export interface ProjectStatsResponse {
     systemHealth: string;
     totalTimeLogged: number;
   };
+}
+
+// Metadata Item (Status, Severity, CaseType)
+export interface MetadataItem {
+  id: string;
+  label: string;
+}
+
+// Response for case metadata (fetching possible statuses, severities, types)
+export interface CaseMetadataResponse {
+  statuses: MetadataItem[];
+  severities: MetadataItem[];
+  caseTypes: MetadataItem[];
 }

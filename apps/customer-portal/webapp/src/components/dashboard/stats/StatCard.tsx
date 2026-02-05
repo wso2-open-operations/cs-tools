@@ -25,6 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Info } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { TrendIndicator } from "./TrendIndicator";
 import { type StatCardColor } from "@/constants/dashboardConstants";
 import { type TrendData } from "@/models/responses";
@@ -38,6 +39,8 @@ interface StatCardProps {
   tooltipText: string;
   trend?: TrendData;
   isLoading?: boolean;
+  isError?: boolean;
+  isTrendError?: boolean;
 }
 
 /**
@@ -54,6 +57,8 @@ export const StatCard = ({
   tooltipText,
   trend,
   isLoading,
+  isError,
+  isTrendError,
 }: StatCardProps): JSX.Element => {
   const theme = useTheme();
 
@@ -94,7 +99,11 @@ export const StatCard = ({
         </Box>
 
         {/* Trend indicator */}
-        <TrendIndicator trend={trend} isLoading={isLoading} />
+        <TrendIndicator
+          trend={trend}
+          isLoading={isLoading}
+          isError={isTrendError}
+        />
       </Box>
 
       {/* Value and label */}
@@ -103,6 +112,8 @@ export const StatCard = ({
         <Typography variant="h4">
           {isLoading ? (
             <Skeleton variant="text" width="40%" height={28} />
+          ) : isError ? (
+            <ErrorIndicator entityName={label.toLowerCase()} />
           ) : (
             (value ?? "N/A")
           )}

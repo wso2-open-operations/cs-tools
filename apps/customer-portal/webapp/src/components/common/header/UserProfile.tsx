@@ -18,6 +18,7 @@ import { Skeleton, UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
+import { useMockConfig } from "@/providers/MockConfigProvider";
 import { User } from "@wso2/oxygen-ui-icons-react";
 import { useLogger } from "@/hooks/useLogger";
 import useGetUserDetails from "@/api/useGetUserDetails";
@@ -30,10 +31,14 @@ import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
  */
 export default function UserProfile(): JSX.Element {
   const navigate = useNavigate();
-  const { signOut, isLoading: isAuthLoading } = useAsgardeo();
+  const { signOut, isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
   const { data: userDetails, isLoading, isError } = useGetUserDetails();
   const logger = useLogger();
 
+  if (!isAuthLoading && !isSignedIn && !isMockEnabled) {
+    return <></>;
+  }
   const user = userDetails
     ? {
         name:

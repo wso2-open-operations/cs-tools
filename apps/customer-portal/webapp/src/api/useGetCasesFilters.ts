@@ -17,51 +17,38 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useMockConfig } from "@/providers/MockConfigProvider";
-import { getMockProjectStats } from "@/models/mockFunctions";
-import { mockProjects } from "@/models/mockData";
 import { useLogger } from "@/hooks/useLogger";
+import { mockCaseMetadata } from "@/models/mockData";
 import { ApiQueryKeys, API_MOCK_DELAY } from "@/constants/apiConstants";
-import type { ProjectStatsResponse } from "@/models/responses";
+import type { CaseMetadataResponse } from "@/models/responses";
 
 /**
- * Custom hook to fetch project statistics.
+ * Custom hook to fetch case filters for a specific project.
  *
- * @param {string} projectId - The ID of the project.
- * @returns {UseQueryResult<ProjectStatsResponse, Error>} The query result object.
+ * @param {string} projectId - The ID of the project to fetch filters for.
+ * @returns {UseQueryResult<CaseMetadataResponse, Error>} The query result object.
  */
-export function useGetProjectStat(
+export default function useGetCasesFilters(
   projectId: string,
-): UseQueryResult<ProjectStatsResponse, Error> {
+): UseQueryResult<CaseMetadataResponse, Error> {
   const logger = useLogger();
   const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { isMockEnabled } = useMockConfig();
 
-  return useQuery<ProjectStatsResponse, Error>({
-    queryKey: [ApiQueryKeys.PROJECT_STATS, projectId, isMockEnabled],
-    queryFn: async (): Promise<ProjectStatsResponse> => {
+  return useQuery<CaseMetadataResponse, Error>({
+    queryKey: [ApiQueryKeys.PROJECT_CASES, "filters", projectId, isMockEnabled],
+    queryFn: async (): Promise<CaseMetadataResponse> => {
       logger.debug(
-        `Fetching project stats for project ID: ${projectId}, mock: ${isMockEnabled}`,
+        `Fetching case filters for project: ${projectId} mock: ${isMockEnabled}`,
       );
 
       if (isMockEnabled) {
-        // Mock behavior: simulate network latency.
         await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
-
-        // Validate project ID (using mock data for validation)
-        const projectExists = mockProjects.some((p) => p.id === projectId);
-        if (!projectExists) {
-          logger.error(`Project stats not found for ID: ${projectId}`);
-          throw new Error(`Project stats not found for ID: ${projectId}`);
-        }
-
-        const stats: ProjectStatsResponse = getMockProjectStats();
-
         logger.debug(
-          `Project stats fetched successfully for project ID: ${projectId} (mock)`,
-          stats,
+          "Case filters fetched successfully (mock)",
+          mockCaseMetadata,
         );
-
-        return stats;
+        return mockCaseMetadata;
       }
 
       try {
@@ -72,7 +59,7 @@ export function useGetProjectStat(
           throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
         }
 
-        const requestUrl = `${baseUrl}/projects/${projectId}/stats`;
+        const requestUrl = `${baseUrl}/projects/${projectId}/cases/filters`;
 
         const response = await fetch(requestUrl, {
           method: "GET",
@@ -84,25 +71,21 @@ export function useGetProjectStat(
           },
         });
 
-        logger.debug(
-          `[useGetProjectStat] Response status for ${projectId}: ${response.status}`,
-        );
-
         if (!response.ok) {
           throw new Error(
-            `Error fetching project stats: ${response.statusText}`,
+            `Error fetching case filters: ${response.statusText}`,
           );
         }
 
-        const data: ProjectStatsResponse = await response.json();
-        logger.debug("[useGetProjectStat] Data received:", data);
+        const data: CaseMetadataResponse = await response.json();
+        logger.debug("[useGetCasesFilters] Data received:", data);
         return data;
       } catch (error) {
-        logger.error("[useGetProjectStat] Error:", error);
+        logger.error("[useGetCasesFilters] Error:", error);
         throw error;
       }
     },
     enabled: !!projectId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000, // Filters don't change often, keep for 10 mins
   });
 }

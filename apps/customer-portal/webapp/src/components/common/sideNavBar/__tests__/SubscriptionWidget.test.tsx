@@ -24,11 +24,19 @@ vi.mock("@wso2/oxygen-ui", () => ({
   Button: ({ children }: { children: any }) => <button>{children}</button>,
   Paper: ({ children }: { children: any }) => <div>{children}</div>,
   Typography: ({ children }: { children: any }) => <span>{children}</span>,
+  colors: {
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
+  },
 }));
 
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Crown: () => <svg data-testid="icon-Crown" />,
+  Info: () => <svg data-testid="icon-Info" />,
+  Server: () => <svg data-testid="icon-Server" />,
+  Clock: () => <svg data-testid="icon-Clock" />,
+  Zap: () => <svg data-testid="icon-Zap" />,
 }));
 
 describe("SubscriptionWidget", () => {

@@ -29,6 +29,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      buffer: "buffer",
+      "buffer/": "buffer/index.js",
     },
   },
   envPrefix: ["CUSTOMER_PORTAL_"],
@@ -46,6 +48,9 @@ export default defineConfig({
           "@wso2/oxygen-ui",
           "@wso2/oxygen-ui-icons-react",
           "@wso2/oxygen-ui-charts-react",
+          "@mui/x-data-grid",
+          "@asgardeo/browser",
+          "buffer",
         ],
       },
     },

@@ -51,6 +51,10 @@ vi.mock("@wso2/oxygen-ui", () => {
     Link: ({ children, to }: { children: any; to: string }) => (
       <a href={to}>{children}</a>
     ),
+    colors: {
+      blue: { 700: "#1d4ed8" },
+      purple: { 400: "#a78bfa" },
+    },
   };
 });
 
@@ -69,6 +73,9 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => {
     Users: mockIcon("Users"),
     Settings: mockIcon("Settings"),
     Crown: mockIcon("Crown"),
+    Info: mockIcon("Info"),
+    Server: mockIcon("Server"),
+    Clock: mockIcon("Clock"),
   };
 });
 

@@ -21,8 +21,8 @@ import { useLogger } from "@/hooks/useLogger";
 import ProjectCard from "@/components/projectHub/projectCard/ProjectCard";
 import ProjectCardSkeleton from "@/components/projectHub/projectCard/ProjectCardSkeleton";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
-import { useMockConfig } from "@/providers/MockConfigProvider";
 import { useAsgardeo } from "@asgardeo/react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 /**
  * ProjectHub component.
@@ -32,7 +32,6 @@ import { useAsgardeo } from "@asgardeo/react";
 export default function ProjectHub(): JSX.Element {
   const logger = useLogger();
   const { isLoading: isAuthLoading } = useAsgardeo();
-  const { isMockEnabled } = useMockConfig();
   const {
     data: projectsResponse,
     isLoading,
@@ -104,9 +103,9 @@ export default function ProjectHub(): JSX.Element {
 
     if (isError) {
       return (
-        <Typography variant="h6" color="error">
-          Error loading projects. Please try again later.
-        </Typography>
+        <Box sx={{ py: 5 }}>
+          <ErrorIndicator entityName="projects" />
+        </Box>
       );
     }
 
@@ -155,7 +154,6 @@ export default function ProjectHub(): JSX.Element {
               title={project.name}
               subtitle={project.description}
               date={project.createdOn}
-              isStatsError={!isMockEnabled}
             />
           </Box>
         ))}

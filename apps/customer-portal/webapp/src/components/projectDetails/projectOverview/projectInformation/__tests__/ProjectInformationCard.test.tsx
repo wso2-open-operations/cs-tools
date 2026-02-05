@@ -102,7 +102,7 @@ describe("ProjectInformationCard", () => {
     );
   });
 
-  it("should handle missing project data gracefully (N/A defaults)", () => {
+  it("should handle missing project data gracefully (-- defaults)", () => {
     render(
       <ProjectInformationCard
         project={undefined}
@@ -111,8 +111,8 @@ describe("ProjectInformationCard", () => {
       />,
     );
 
-    expect(screen.getByTestId("project-name")).toHaveTextContent("N/A - N/A");
-    expect(screen.getByTestId("project-description")).toHaveTextContent("N/A");
+    expect(screen.getByTestId("project-name")).toHaveTextContent("-- - --");
+    expect(screen.getByTestId("project-description")).toHaveTextContent("--");
     // Ensure it doesn't crash
     expect(screen.getByTestId("project-metadata")).toBeInTheDocument();
   });

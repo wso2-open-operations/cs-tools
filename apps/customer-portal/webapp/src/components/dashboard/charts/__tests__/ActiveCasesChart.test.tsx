@@ -53,8 +53,12 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   PieChart: ({ children }: any) => (
     <div data-testid="pie-chart">{children}</div>
   ),
-  Pie: ({ data, children }: any) => (
-    <div data-testid="pie">
+  Pie: ({ data, paddingAngle, minAngle, children }: any) => (
+    <div
+      data-testid="pie"
+      data-padding-angle={paddingAngle}
+      data-min-angle={minAngle}
+    >
       {data.map((item: any, index: number) => (
         <div key={index} data-testid="pie-segment" data-value={item.value}>
           {item.name}
@@ -123,5 +127,12 @@ describe("ActiveCasesChart", () => {
     // Verify that the missing value was defaulted to 0
     const values = segments.map((s) => s.getAttribute("data-value"));
     expect(values).toContain("0");
+  });
+
+  it("should have correct paddingAngle and minAngle", () => {
+    render(<ActiveCasesChart data={mockData} isLoading={false} />);
+    const pie = screen.getByTestId("pie");
+    expect(pie.getAttribute("data-padding-angle")).toBe("0");
+    expect(pie.getAttribute("data-min-angle")).toBe("15");
   });
 });

@@ -99,7 +99,7 @@ export const getMockProjectCasesStats = (): ProjectCasesStats => {
     },
     averageResponseTime: Number((Math.random() * 24).toFixed(1)),
     openCases: workInProgress + waitingOnClient + waitingOnWso2,
-    outstandingIncidents: {
+    outstandingCases: {
       critical,
       high,
       medium,

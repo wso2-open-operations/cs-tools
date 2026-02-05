@@ -37,6 +37,22 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: vi.fn(),
+    isSignedIn: true,
+    isLoading: false,
+  }),
+}));
+
+// Mock MockConfigProvider
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({
+    isMockEnabled: true,
+  }),
+}));
+
 describe("useGetProjectCasesStats", () => {
   let queryClient: QueryClient;
 
@@ -74,12 +90,27 @@ describe("useGetProjectCasesStats", () => {
     expect(result.current.data).toBeDefined();
     expect(result.current.data?.totalCases).toBeGreaterThanOrEqual(50);
     expect(result.current.data?.activeCases).toBeDefined();
-    expect(result.current.data?.outstandingIncidents).toBeDefined();
+    expect(result.current.data?.outstandingCases).toBeDefined();
     expect(result.current.data?.resolvedCases).toBeDefined();
 
     expect(mockLogger.debug).toHaveBeenCalledWith(
-      expect.stringContaining("Fetching case stats for project ID: project-1"),
+      expect.stringContaining(
+        "Fetching case stats for project ID: project-1, mock: true",
+      ),
     );
+  });
+
+  it("should have correct query options", () => {
+    renderHook(() => useGetProjectCasesStats("project-1"), {
+      wrapper,
+    });
+
+    const query = queryClient.getQueryCache().findAll({
+      queryKey: ["cases-stats", "project-1", true],
+    })[0];
+
+    expect((query?.options as any).staleTime).toBe(5 * 60 * 1000);
+    expect((query?.options as any).refetchOnWindowFocus).toBeUndefined();
   });
 
   it("should not fetch if id is missing", () => {

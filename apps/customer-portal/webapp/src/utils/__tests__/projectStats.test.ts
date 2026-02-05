@@ -45,7 +45,9 @@ describe("projectStats utils", () => {
   });
 
   describe("getSLAStatusColor", () => {
-    it("should return 'success' for 'Good'", () => {
+    it("should return 'success' for 'All Good' or 'Good'", () => {
+      expect(getSLAStatusColor("All Good")).toBe("success");
+      expect(getSLAStatusColor("all good")).toBe("success");
       expect(getSLAStatusColor("Good")).toBe("success");
       expect(getSLAStatusColor("good")).toBe("success");
     });

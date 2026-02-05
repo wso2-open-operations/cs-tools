@@ -36,16 +36,15 @@ vi.mock("@wso2/oxygen-ui", () => ({
 }));
 
 describe("ProjectCardInfo", () => {
-  it("should render title and subtitle correctly", () => {
+  it("should strip HTML tags from subtitle", () => {
     const props = {
       title: "Test Project",
-      subtitle: "This is a test subtitle",
+      subtitle: "<p>This is a test subtitle</p>",
     };
 
     render(<ProjectCardInfo {...props} />);
 
-    expect(screen.getByText(props.title)).toBeInTheDocument();
-    expect(screen.getByText(props.subtitle)).toBeInTheDocument();
+    expect(screen.getByText("This is a test subtitle")).toBeInTheDocument();
   });
 
   it("should use correct Typography variants", () => {

@@ -17,6 +17,7 @@
 import { Box, Typography, Grid } from "@wso2/oxygen-ui";
 import { useParams, useOutletContext } from "react-router";
 import { useState, useEffect, type JSX } from "react";
+import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@/components/common/tabBar/TabBar";
 import { PROJECT_DETAILS_TABS } from "@/constants/projectDetailsConstants";
 import ProjectInformationCard from "@/components/projectDetails/projectOverview/projectInformation/ProjectInformationCard";
@@ -38,6 +39,7 @@ export default function ProjectDetails(): JSX.Element {
 
   const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
+  const { isLoading: isAuthLoading } = useAsgardeo();
 
   const { sidebarCollapsed } = useOutletContext<{
     sidebarCollapsed: boolean;
@@ -47,25 +49,31 @@ export default function ProjectDetails(): JSX.Element {
 
   const {
     data: project,
-    isLoading: isProjectLoading,
+    isFetching: isProjectFetching,
     error: projectError,
   } = useGetProjectDetails(projectId || "");
 
   const {
     data: stats,
-    isLoading: isStatsLoading,
+    isFetching: isStatsFetching,
     error: statsError,
   } = useGetProjectStat(projectId || "");
 
-  const isLoading = isProjectLoading || isStatsLoading;
+  const isDetailsLoading =
+    isAuthLoading ||
+    isProjectFetching ||
+    isStatsFetching ||
+    (!project && !projectError) ||
+    (!stats && !statsError);
 
   useEffect(() => {
-    if (!isLoading) {
-      return;
+    if (isDetailsLoading) {
+      showLoader();
+    } else {
+      hideLoader();
     }
-    showLoader();
     return () => hideLoader();
-  }, [isLoading, showLoader, hideLoader]);
+  }, [isDetailsLoading, showLoader, hideLoader]);
 
   useEffect(() => {
     if (projectError) {
@@ -95,14 +103,16 @@ export default function ProjectDetails(): JSX.Element {
               <Grid size={{ xs: 12, md: 6 }}>
                 <ProjectInformationCard
                   project={project}
-                  slaStatus={stats?.projectStats?.slaStatus || "N/A"}
-                  isLoading={isLoading}
+                  slaStatus={stats?.projectStats?.slaStatus || "--"}
+                  isLoading={(isDetailsLoading || !project) && !projectError}
+                  isError={!!projectError}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
                 <ProjectStatisticsCard
                   stats={stats?.projectStats}
-                  isLoading={isLoading}
+                  isLoading={(isDetailsLoading || !stats) && !statsError}
+                  isError={!!statsError}
                   isSidebarOpen={!sidebarCollapsed}
                 />
               </Grid>
@@ -112,7 +122,8 @@ export default function ProjectDetails(): JSX.Element {
               <Grid size={{ xs: 12, md: 6 }}>
                 <RecentActivityCard
                   activity={stats?.recentActivity}
-                  isLoading={isLoading}
+                  isLoading={(isDetailsLoading || !stats) && !statsError}
+                  isError={!!statsError}
                 />
               </Grid>
             </Grid>

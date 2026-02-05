@@ -62,3 +62,14 @@ export const getStatusColor = (
       return "default";
   }
 };
+
+/**
+ * Removes HTML tags from a string.
+ *
+ * @param {string} str - The string to clean.
+ * @returns {string} The cleaned string.
+ */
+export const stripHtmlTags = (str: string): string => {
+  if (!str) return "";
+  return str.replace(/<[^>]*>?/gm, "");
+};

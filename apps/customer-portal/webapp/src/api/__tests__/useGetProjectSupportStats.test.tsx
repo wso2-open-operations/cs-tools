@@ -37,6 +37,24 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react
+const mockGetIdToken = vi.fn().mockResolvedValue("mock-token");
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: mockGetIdToken,
+    isSignedIn: true,
+    isLoading: false,
+  }),
+}));
+
+// Mock MockConfigProvider
+let mockIsMockEnabled = true;
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({
+    isMockEnabled: mockIsMockEnabled,
+  }),
+}));
+
 describe("useGetProjectSupportStats", () => {
   let queryClient: QueryClient;
 
@@ -50,6 +68,8 @@ describe("useGetProjectSupportStats", () => {
     });
     mockLogger.debug.mockClear();
     mockLogger.error.mockClear();
+    mockIsMockEnabled = true;
+    vi.clearAllMocks();
   });
 
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -67,7 +87,8 @@ describe("useGetProjectSupportStats", () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("should return data after fetching", async () => {
+  it("should return mock data when mock is enabled", async () => {
+    mockIsMockEnabled = true;
     const { result } = renderHook(
       () => useGetProjectSupportStats("project-1"),
       {
@@ -81,9 +102,83 @@ describe("useGetProjectSupportStats", () => {
     expect(result.current.data?.totalCases).toBeGreaterThanOrEqual(0);
     expect(mockLogger.debug).toHaveBeenCalledWith(
       expect.stringContaining(
-        "Fetching support stats for project ID: project-1",
+        "Fetching support stats for project ID: project-1, mock: true",
       ),
     );
+  });
+
+  it("should have correct query options", () => {
+    renderHook(() => useGetProjectSupportStats("project-1"), {
+      wrapper,
+    });
+
+    const query = queryClient.getQueryCache().findAll({
+      queryKey: ["support-stats", "project-1", true],
+    })[0];
+
+    expect((query?.options as any).staleTime).toBe(5 * 60 * 1000);
+    expect((query?.options as any).refetchOnWindowFocus).toBeUndefined();
+  });
+
+  it("should fetch real data when mock is disabled", async () => {
+    mockIsMockEnabled = false;
+    const mockResponse = {
+      totalCases: 47,
+      activeChats: 0,
+      sessionChats: 0,
+      resolvedChats: 0,
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+        status: 200,
+      } as Response),
+    );
+
+    const { result } = renderHook(
+      () => useGetProjectSupportStats("project-1"),
+      {
+        wrapper,
+      },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toEqual(mockResponse);
+    expect(mockGetIdToken).toHaveBeenCalled();
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Fetching support stats for project ID: project-1, mock: false",
+      ),
+    );
+  });
+
+  it("should handle API error when mock is disabled", async () => {
+    mockIsMockEnabled = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: "Internal Server Error",
+        status: 500,
+      } as Response),
+    );
+
+    const { result } = renderHook(
+      () => useGetProjectSupportStats("project-1"),
+      {
+        wrapper,
+      },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain(
+      "Error fetching support stats: Internal Server Error",
+    );
+    expect(mockLogger.error).toHaveBeenCalled();
   });
 
   it("should not fetch if id is missing", () => {

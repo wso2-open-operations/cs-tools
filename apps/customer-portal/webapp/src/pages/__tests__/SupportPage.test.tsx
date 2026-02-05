@@ -58,9 +58,9 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
   colors: {
     red: { 500: "#f44336" },
-    blue: { 500: "#2196f3" },
+    blue: { 500: "#2196f3", 700: "#1d4ed8" },
     green: { 500: "#4caf50" },
-    purple: { 500: "#9c27b0" },
+    purple: { 500: "#9c27b0", 400: "#a78bfa" },
   },
   Divider: () => <hr />,
   Button: ({ children }: any) => <button>{children}</button>,
@@ -105,6 +105,11 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   MessageSquareDiff: () => <svg data-testid="icon-message-diff" />,
   MessageSquareMore: () => <svg data-testid="icon-message-more" />,
   TrendingUp: () => <svg data-testid="icon-trending-up" />,
+  Info: () => <svg data-testid="icon-info" />,
+  Server: () => <svg data-testid="icon-server" />,
+  User: () => <svg data-testid="icon-user" />,
+  Shield: () => <svg data-testid="icon-shield" />,
+  Rocket: () => <svg data-testid="icon-rocket" />,
 }));
 
 // Mock useGetProjectSupportStats

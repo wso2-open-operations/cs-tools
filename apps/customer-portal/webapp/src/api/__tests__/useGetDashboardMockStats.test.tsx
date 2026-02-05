@@ -37,6 +37,21 @@ vi.mock("@/constants/apiConstants", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isSignedIn: true,
+    isLoading: false,
+  }),
+}));
+
+// Mock MockConfigProvider
+vi.mock("@/providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({
+    isMockEnabled: true,
+  }),
+}));
+
 describe("useGetDashboardMockStats", () => {
   let queryClient: QueryClient;
 
@@ -80,6 +95,19 @@ describe("useGetDashboardMockStats", () => {
         "Fetching dashboard mock stats for project ID: project-1",
       ),
     );
+  });
+
+  it("should have correct query options", () => {
+    renderHook(() => useGetDashboardMockStats("project-1"), {
+      wrapper,
+    });
+
+    const query = queryClient.getQueryCache().findAll({
+      queryKey: ["dashboard-stats", "project-1", true],
+    })[0];
+
+    expect((query?.options as any).staleTime).toBe(5 * 60 * 1000);
+    expect((query?.options as any).refetchOnWindowFocus).toBeUndefined();
   });
 
   it("should not fetch if projectId is missing", () => {

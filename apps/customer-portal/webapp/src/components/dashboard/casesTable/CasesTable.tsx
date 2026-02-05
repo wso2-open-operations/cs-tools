@@ -15,12 +15,16 @@
 // under the License.
 
 import { ListingTable } from "@wso2/oxygen-ui";
-import { type JSX, useState } from "react";
+import { type JSX, useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@/api/useGetProjectCases";
-import FilterPopover from "@/components/common/filterPanel/FilterPopover";
+import useGetCasesFilters from "@/api/useGetCasesFilters";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
+import FilterPopover, {
+  type FilterField,
+} from "@/components/common/filterPanel/FilterPopover";
 import type { CaseSearchRequest } from "@/models/requests";
-import { FILTER_FIELDS } from "@/constants/dashboardConstants";
 import CasesTableHeader from "./CasesTableHeader";
 import CasesList from "./CasesList";
 
@@ -30,10 +34,58 @@ interface CasesTableProps {
 
 const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
   const navigate = useNavigate();
+  const { isLoading: isAuthLoading } = useAsgardeo();
+  const { showLoader, hideLoader } = useLoader();
   const [filters, setFilters] = useState<Record<string, any>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+
+  const {
+    data: filtersMetadata,
+    isFetching: isFetchingFilters,
+    isError: isErrorFilters,
+  } = useGetCasesFilters(projectId);
+
+  const dynamicFilterFields: FilterField[] = [
+    {
+      id: "statusId",
+      label: "Status",
+      type: "select",
+      options:
+        filtersMetadata?.statuses.map((s) => ({
+          label: s.label,
+          value: s.id,
+        })) || [],
+    },
+    {
+      id: "severityId",
+      label: "Severity",
+      type: "select",
+      options:
+        filtersMetadata?.severities.map((s) => ({
+          label: s.label,
+          value: s.id,
+        })) || [],
+    },
+    {
+      id: "caseTypes",
+      label: "Case Type",
+      type: "select",
+      options: filtersMetadata?.caseTypes.map((t) => t.label) || [],
+    },
+    {
+      id: "deploymentId",
+      label: "Deployment",
+      type: "select",
+      options: [
+        { label: "Development", value: "Development" },
+        { label: "Production", value: "Production" },
+        { label: "QA", value: "QA" },
+        { label: "Staging", value: "Staging" },
+      ],
+    },
+  ];
 
   const hasFilters = Object.values(filters).some(
     (val) => val !== undefined && val !== "" && val !== null,
@@ -60,7 +112,22 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
     },
   };
 
-  const { data, isLoading } = useGetProjectCases(projectId, requestBody);
+  const {
+    data,
+    isFetching: isFetchingCases,
+    isError,
+  } = useGetProjectCases(projectId, requestBody);
+
+  const tableLoading = isAuthLoading || isFetchingCases || isFetchingFilters;
+
+  useEffect(() => {
+    if (tableLoading) {
+      showLoader();
+    } else {
+      hideLoader();
+    }
+    return () => hideLoader();
+  }, [tableLoading, showLoader, hideLoader]);
 
   const handleFilterSearch = (newFilters: Record<string, any>) => {
     setFilters(newFilters);
@@ -98,7 +165,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
     setPage(0);
   };
 
-  const activeFilterFields = FILTER_FIELDS.map((field) => ({
+  const activeFilterFields = dynamicFilterFields.map((field) => ({
     id: field.id,
     label: field.label,
     options: field.options,
@@ -106,7 +173,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
 
   const getDisplayValue = (fieldId: string, value: any): string => {
     if (!value) return "";
-    const field = FILTER_FIELDS.find((f) => f.id === fieldId);
+    const field = dynamicFilterFields.find((f) => f.id === fieldId);
     if (field?.options) {
       const option = field.options.find((opt) =>
         typeof opt === "string" ? opt === value : opt.value === value,
@@ -142,7 +209,8 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
 
       {/* Cases list */}
       <CasesList
-        isLoading={isLoading}
+        isLoading={isFetchingCases || isAuthLoading}
+        isError={isError}
         data={data}
         page={page}
         rowsPerPage={rowsPerPage}
@@ -156,8 +224,10 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
         onClose={() => setIsFilterOpen(false)}
         onSearch={handleFilterSearch}
         initialFilters={filters}
-        fields={FILTER_FIELDS}
+        fields={dynamicFilterFields}
         title="Filter Cases"
+        isLoading={isFetchingFilters || isAuthLoading}
+        isError={isErrorFilters}
       />
     </ListingTable.Container>
   );

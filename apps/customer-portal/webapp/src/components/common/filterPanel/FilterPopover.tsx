@@ -28,8 +28,10 @@ import {
   FormControl,
   TextField,
   InputLabel,
+  Skeleton,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { useState, useEffect, type JSX, type ChangeEvent } from "react";
 
@@ -48,6 +50,8 @@ interface FilterPopoverProps<T> {
   initialFilters: T;
   fields: FilterField[];
   title?: string;
+  isLoading?: boolean;
+  isError?: boolean;
 }
 
 const FilterPopover = <T extends Record<string, any>>({
@@ -57,6 +61,8 @@ const FilterPopover = <T extends Record<string, any>>({
   initialFilters,
   fields,
   title = "Advanced Search",
+  isLoading = false,
+  isError = false,
 }: FilterPopoverProps<T>): JSX.Element => {
   const [tempFilters, setTempFilters] = useState<T>(initialFilters);
 
@@ -118,52 +124,94 @@ const FilterPopover = <T extends Record<string, any>>({
         </IconButton>
       </DialogTitle>
       {/* filter popover content */}
-      <DialogContent sx={{ minHeight: 300 }}>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 3, pt: 2 }}>
-          {/* filter popover fields */}
-          {/* filter popover fields */}
-          {fields.map((field) =>
-            field.type === "select" ? (
-              <FormControl fullWidth size="small" key={field.id}>
-                <InputLabel id={`${field.id}-label`}>{field.label}</InputLabel>
-                <Select<string>
-                  labelId={`${field.id}-label`}
-                  id={field.id}
+      <DialogContent
+        sx={{ minHeight: 400, display: "flex", flexDirection: "column" }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+            pt: 2,
+            flexGrow: 1,
+            justifyContent: isError ? "center" : "flex-start",
+          }}
+        >
+          {isLoading ? (
+            Array.from({ length: fields.length || 3 }).map((_, index) => (
+              <Box key={index} sx={{ width: "100%" }}>
+                <Skeleton
+                  variant="text"
+                  width="30%"
+                  height={20}
+                  sx={{ mb: 1 }}
+                />
+                <Skeleton variant="rectangular" width="100%" height={40} />
+              </Box>
+            ))
+          ) : isError ? (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                py: 4,
+                gap: 1,
+              }}
+            >
+              <ErrorIndicator entityName="filters" />
+              <Typography variant="body2" color="error">
+                Failed to load filter options
+              </Typography>
+            </Box>
+          ) : (
+            fields.map((field) =>
+              field.type === "select" ? (
+                <FormControl fullWidth size="small" key={field.id}>
+                  <InputLabel id={`${field.id}-label`}>
+                    {field.label}
+                  </InputLabel>
+                  <Select<string>
+                    labelId={`${field.id}-label`}
+                    id={field.id}
+                    value={tempFilters[field.id] || ""}
+                    label={field.label}
+                    onChange={handleSelectChange(field.id)}
+                  >
+                    {/* filter popover select menu item */}
+                    <MenuItem value="">
+                      <Typography variant="caption" color="text.disabled">
+                        {field.placeholder || `Select ${field.label}`}
+                      </Typography>
+                    </MenuItem>
+                    {/* filter popover select menu items */}
+                    {field.options?.map((option) => {
+                      const value =
+                        typeof option === "string" ? option : option.value;
+                      const label =
+                        typeof option === "string" ? option : option.label;
+                      return (
+                        <MenuItem key={value} value={value}>
+                          <Typography variant="body2">{label}</Typography>
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                </FormControl>
+              ) : (
+                <TextField
+                  key={field.id}
                   value={tempFilters[field.id] || ""}
+                  onChange={handleTextChange(field.id)}
+                  placeholder={field.placeholder || `Enter ${field.label}`}
+                  size="small"
+                  fullWidth
                   label={field.label}
-                  onChange={handleSelectChange(field.id)}
-                >
-                  {/* filter popover select menu item */}
-                  <MenuItem value="">
-                    <Typography variant="caption" color="text.disabled">
-                      {field.placeholder || `Select ${field.label}`}
-                    </Typography>
-                  </MenuItem>
-                  {/* filter popover select menu items */}
-                  {field.options?.map((option) => {
-                    const value =
-                      typeof option === "string" ? option : option.value;
-                    const label =
-                      typeof option === "string" ? option : option.label;
-                    return (
-                      <MenuItem key={value} value={value}>
-                        <Typography variant="body2">{label}</Typography>
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-            ) : (
-              <TextField
-                key={field.id}
-                value={tempFilters[field.id] || ""}
-                onChange={handleTextChange(field.id)}
-                placeholder={field.placeholder || `Enter ${field.label}`}
-                size="small"
-                fullWidth
-                label={field.label}
-              />
-            ),
+                />
+              ),
+            )
           )}
         </Box>
       </DialogContent>
