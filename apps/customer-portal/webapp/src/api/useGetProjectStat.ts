@@ -15,6 +15,8 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useAsgardeo } from "@asgardeo/react";
+import { useMockConfig } from "@/providers/MockConfigProvider";
 import { getMockProjectStats } from "@/models/mockFunctions";
 import { mockProjects } from "@/models/mockData";
 import { useLogger } from "@/hooks/useLogger";
@@ -31,31 +33,76 @@ export function useGetProjectStat(
   projectId: string,
 ): UseQueryResult<ProjectStatsResponse, Error> {
   const logger = useLogger();
+  const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
 
   return useQuery<ProjectStatsResponse, Error>({
-    queryKey: [ApiQueryKeys.PROJECT_STATS, projectId],
+    queryKey: [ApiQueryKeys.PROJECT_STATS, projectId, isMockEnabled],
     queryFn: async (): Promise<ProjectStatsResponse> => {
-      logger.debug(`Fetching project stats for project ID: ${projectId}`);
-
-      // Mock behavior: simulate network latency.
-      await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
-
-      // Validate project ID
-      const projectExists = mockProjects.some((p) => p.id === projectId);
-      if (!projectExists) {
-        throw new Error(`Project stats not found for ID: ${projectId}`);
-      }
-
-      const stats: ProjectStatsResponse = getMockProjectStats();
-
       logger.debug(
-        `Project stats fetched successfully for project ID: ${projectId}`,
-        stats,
+        `Fetching project stats for project ID: ${projectId}, mock: ${isMockEnabled}`,
       );
 
-      return stats;
+      if (isMockEnabled) {
+        // Mock behavior: simulate network latency.
+        await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
+
+        // Validate project ID (using mock data for validation)
+        const projectExists = mockProjects.some((p) => p.id === projectId);
+        if (!projectExists) {
+          logger.error(`Project stats not found for ID: ${projectId}`);
+          throw new Error(`Project stats not found for ID: ${projectId}`);
+        }
+
+        const stats: ProjectStatsResponse = getMockProjectStats();
+
+        logger.debug(
+          `Project stats fetched successfully for project ID: ${projectId} (mock)`,
+          stats,
+        );
+
+        return stats;
+      }
+
+      try {
+        const idToken = await getIdToken();
+        const baseUrl = import.meta.env.CUSTOMER_PORTAL_BACKEND_BASE_URL;
+
+        if (!baseUrl) {
+          throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
+        }
+
+        const requestUrl = `${baseUrl}/projects/${projectId}/stats`;
+
+        const response = await fetch(requestUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${idToken}`,
+            "x-user-id-token": idToken,
+          },
+        });
+
+        logger.debug(
+          `[useGetProjectStat] Response status for ${projectId}: ${response.status}`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Error fetching project stats: ${response.statusText}`,
+          );
+        }
+
+        const data: ProjectStatsResponse = await response.json();
+        logger.debug("[useGetProjectStat] Data received:", data);
+        return data;
+      } catch (error) {
+        logger.error("[useGetProjectStat] Error:", error);
+        throw error;
+      }
     },
-    enabled: !!projectId,
+    enabled: !!projectId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
     staleTime: 5 * 60 * 1000,
   });
 }
