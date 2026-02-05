@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import Header from "@/components/common/header/Header";
 import { mockProjects } from "@/models/mockData";
@@ -62,6 +62,10 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
   ColorSchemeToggle: () => <button>ThemeToggle</button>,
   Divider: () => <hr />,
+  colors: {
+    blue: { 700: "#1d4ed8" },
+    purple: { 400: "#a78bfa" },
+  },
 }));
 
 // Mock icons
@@ -78,6 +82,12 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => {
     Shield: mockIcon("Shield"),
     Users: mockIcon("Users"),
     Settings: mockIcon("Settings"),
+    Info: mockIcon("Info"),
+    Server: mockIcon("Server"),
+    Clock: mockIcon("Clock"),
+    User: mockIcon("User"),
+    Rocket: mockIcon("Rocket"),
+    CircleAlert: mockIcon("CircleAlert"),
     WSO2: () => <svg data-testid="wso2-logo" />,
   };
 });
@@ -105,14 +115,11 @@ vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
 
-const mockFetchNextPage = vi.fn();
 const mockUseSearchProjects = vi.fn(() => ({
   data: {
-    pages: [{ projects: mockProjects }],
+    projects: mockProjects,
   },
-  fetchNextPage: mockFetchNextPage,
-  hasNextPage: false,
-  isFetchingNextPage: false,
+  isLoading: false,
   isError: false,
 })) as any;
 
@@ -186,11 +193,9 @@ describe("Header", () => {
     mockParams.projectId = "";
     mockUseSearchProjects.mockReturnValue({
       data: {
-        pages: [{ projects: mockProjects }],
+        projects: mockProjects,
       },
-      fetchNextPage: mockFetchNextPage,
-      hasNextPage: false,
-      isFetchingNextPage: false,
+      isLoading: false,
       isError: false,
     });
   });
@@ -286,33 +291,7 @@ describe("Header", () => {
     expect(screen.queryByTestId("project-switcher")).toBeNull();
   });
 
-  it("should call fetchNextPage if hasNextPage is true", () => {
-    mockUseSearchProjects.mockReturnValue({
-      data: { pages: [{ projects: mockProjects }] },
-      fetchNextPage: mockFetchNextPage,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      isError: false,
-    });
-
-    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
-
-    expect(mockFetchNextPage).toHaveBeenCalled();
-  });
-
-  it("should NOT call fetchNextPage if isError is true", () => {
-    mockUseSearchProjects.mockReturnValue({
-      data: { pages: [{ projects: mockProjects }] },
-      fetchNextPage: mockFetchNextPage,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      isError: true,
-    });
-
-    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
-
-    expect(mockFetchNextPage).not.toHaveBeenCalled();
-  });
+  // Removed legacy pagination tests as useGetProjects is no longer an infinite query
 
   it("should render Actions", () => {
     render(<Header onToggleSidebar={mockOnToggleSidebar} />);
@@ -323,9 +302,7 @@ describe("Header", () => {
     mockLocation.pathname = "/project-1/dashboard";
     mockParams.projectId = "project-1";
     mockUseSearchProjects.mockReturnValue({
-      data: { pages: [{ projects: mockProjects }] },
-      fetchNextPage: mockFetchNextPage,
-      hasNextPage: false,
+      data: { projects: mockProjects },
       isLoading: true,
       isError: false,
     });
