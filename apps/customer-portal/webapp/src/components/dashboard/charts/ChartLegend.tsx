@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
+import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
