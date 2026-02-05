@@ -17,11 +17,13 @@
 import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import { TrendingUp, TrendingDown } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 import { type TrendData } from "@/models/responses";
 
 interface TrendIndicatorProps {
   trend?: TrendData;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 /**
@@ -33,8 +35,9 @@ interface TrendIndicatorProps {
 export const TrendIndicator = ({
   trend,
   isLoading,
+  isError,
 }: TrendIndicatorProps): JSX.Element | null => {
-  if (!isLoading && !trend) {
+  if (!isLoading && !trend && !isError) {
     return null;
   }
 
@@ -51,6 +54,13 @@ export const TrendIndicator = ({
       {isLoading ? (
         <>
           <Skeleton variant="rounded" width={45} height={16} />
+          <Typography variant="caption" color="text.secondary">
+            vs last month
+          </Typography>
+        </>
+      ) : isError ? (
+        <>
+          <ErrorIndicator entityName="trend" />
           <Typography variant="caption" color="text.secondary">
             vs last month
           </Typography>
