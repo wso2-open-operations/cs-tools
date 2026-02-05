@@ -28,17 +28,20 @@ import {
   calculateProgress,
 } from "@/utils/projectStats";
 import { SUBSCRIPTION_STATUS } from "@/constants/projectDetailsConstants";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 interface SubscriptionDetailsProps {
   startDate: string;
   endDate: string;
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const SubscriptionDetails = ({
   startDate,
   endDate,
   isLoading,
+  isError,
 }: SubscriptionDetailsProps): JSX.Element => {
   const subscriptionStatus = getSubscriptionStatus(endDate);
   const subscriptionColor = getSubscriptionColor(subscriptionStatus);
@@ -59,6 +62,8 @@ const SubscriptionDetails = ({
         </Typography>
         {isLoading ? (
           <Skeleton variant="rounded" width={70} height={24} />
+        ) : isError || startDate === "--" || endDate === "--" ? (
+          <ErrorIndicator entityName="subscription status" />
         ) : (
           <Chip
             label={subscriptionStatus}
@@ -77,7 +82,11 @@ const SubscriptionDetails = ({
             variant="determinate"
             value={progress}
             color={
-              subscriptionColor === "default" ? "primary" : subscriptionColor
+              isError || startDate === "--" || endDate === "--"
+                ? "error"
+                : subscriptionColor === "default"
+                  ? "primary"
+                  : subscriptionColor
             }
           />
         )}
@@ -95,7 +104,9 @@ const SubscriptionDetails = ({
             Start
           </Typography>
           {isLoading ? (
-            <Skeleton variant="text" width={80} />
+            <Skeleton variant="text" width="60%" />
+          ) : isError ? (
+            <ErrorIndicator entityName="subscription details" />
           ) : (
             <Typography variant="caption">{startDate}</Typography>
           )}
@@ -106,6 +117,8 @@ const SubscriptionDetails = ({
           </Typography>
           {isLoading ? (
             <Skeleton variant="text" width={100} />
+          ) : isError || startDate === "--" || endDate === "--" ? (
+            <ErrorIndicator entityName="subscription status" />
           ) : (
             <Typography variant="caption">
               {subscriptionStatus === SUBSCRIPTION_STATUS.EXPIRED
