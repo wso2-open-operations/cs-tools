@@ -21,7 +21,6 @@
     "@mui/material": "^7.3.6",
     "@mui/x-charts": "^8.22.1",
     "@tanstack/react-query": "^5.90.12",
-    "@types/react-router-dom": "^5.3.3",
     "@wso2/oxygen-ui": "^0.2.1",
     "@wso2/oxygen-ui-charts-react": "^0.4.0",
     "@wso2/oxygen-ui-icons-react": "^0.2.1",
