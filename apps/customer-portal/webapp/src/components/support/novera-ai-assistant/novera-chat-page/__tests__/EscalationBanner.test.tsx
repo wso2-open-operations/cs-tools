@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import EscalationBanner from "@/components/support/novera-ai-assistant/novera-chat-page/EscalationBanner";
+import EscalationBanner from "@components/support/novera-ai-assistant/novera-chat-page/EscalationBanner";
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,

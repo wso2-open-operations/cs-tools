@@ -17,7 +17,7 @@
 import { Box, IconButton, TextField } from "@wso2/oxygen-ui";
 import { Send } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import EscalationBanner from "@/components/support/novera-ai-assistant/novera-chat-page/EscalationBanner";
+import EscalationBanner from "@components/support/novera-ai-assistant/novera-chat-page/EscalationBanner";
 
 interface ChatInputProps {
   inputValue: string;

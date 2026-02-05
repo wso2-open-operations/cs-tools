@@ -16,8 +16,8 @@
 
 import { Box } from "@wso2/oxygen-ui";
 import { type JSX, type RefObject } from "react";
-import ChatMessageBubble from "@/components/support/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
-import type { Message } from "@/pages/NoveraChatPage";
+import ChatMessageBubble from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
+import type { Message } from "@pages/NoveraChatPage";
 
 interface ChatMessageListProps {
   messages: Message[];
