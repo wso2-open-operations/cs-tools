@@ -17,13 +17,13 @@
 import { Box, Card, CardContent } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
-import type { ProjectDetails } from "@/models/responses";
-import { formatProjectDate } from "@/utils/projectStats";
-import ProjectHeader from "./ProjectHeader";
-import ProjectName from "./ProjectName";
-import ProjectDescription from "./ProjectDescription";
-import ProjectMetadata from "./ProjectMetadata";
-import SubscriptionDetails from "./SubscriptionDetails";
+import type { ProjectDetails } from "@models/responses";
+import { formatProjectDate } from "@utils/projectStats";
+import ProjectHeader from "@components/project-details/project-overview/project-information/ProjectHeader";
+import ProjectName from "@components/project-details/project-overview/project-information/ProjectName";
+import ProjectDescription from "@components/project-details/project-overview/project-information/ProjectDescription";
+import ProjectMetadata from "@components/project-details/project-overview/project-information/ProjectMetadata";
+import SubscriptionDetails from "@components/project-details/project-overview/project-information/SubscriptionDetails";
 
 interface ProjectInformationCardProps {
   project?: ProjectDetails;

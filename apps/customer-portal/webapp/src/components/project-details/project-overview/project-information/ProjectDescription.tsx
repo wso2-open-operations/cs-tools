@@ -16,8 +16,8 @@
 
 import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
-import { stripHtmlTags } from "@/utils/projectCard";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
+import { stripHtmlTags } from "@utils/projectCard";
 
 interface ProjectDescriptionProps {
   description: string;

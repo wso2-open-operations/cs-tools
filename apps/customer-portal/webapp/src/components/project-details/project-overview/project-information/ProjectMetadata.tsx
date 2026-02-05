@@ -20,8 +20,8 @@ import {
   getProjectTypeColor,
   getSupportTierColor,
   getSLAStatusColor,
-} from "@/utils/projectStats";
-import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
+} from "@utils/projectStats";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 interface ProjectMetadataProps {
   createdDate: string;
