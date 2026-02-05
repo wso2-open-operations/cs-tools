@@ -16,9 +16,9 @@
 
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import CasesTable from "../CasesTable";
-import useGetProjectCases from "@/api/useGetProjectCases";
-import useGetCasesFilters from "@/api/useGetCasesFilters";
+import CasesTable from "@components/dashboard/cases-table/CasesTable";
+import useGetProjectCases from "@api/useGetProjectCases";
+import useGetCasesFilters from "@api/useGetCasesFilters";
 
 // Mock dependencies
 vi.mock("react-router", () => ({

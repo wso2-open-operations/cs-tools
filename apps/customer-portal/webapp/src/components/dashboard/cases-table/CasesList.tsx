@@ -31,10 +31,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, MoreVertical } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
-import type { CaseSearchResponse } from "@/models/responses";
-import { getPriorityColor, getStatusColor } from "@/utils/casesTable";
-import ErrorIndicator from "@/components/common/error-indicator/ErrorIndicator";
-import CasesTableSkeleton from "./CasesTableSkeleton";
+import type { CaseSearchResponse } from "@models/responses";
+import { getPriorityColor, getStatusColor } from "@utils/casesTable";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
+import CasesTableSkeleton from "@components/dashboard/cases-table/CasesTableSkeleton";
 
 interface CasesListProps {
   isLoading: boolean;

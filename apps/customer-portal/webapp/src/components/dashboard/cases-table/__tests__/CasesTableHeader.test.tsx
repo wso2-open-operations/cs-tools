@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import CasesTableHeader from "../CasesTableHeader";
+import CasesTableHeader from "@components/dashboard/cases-table/CasesTableHeader";
 
 // Mock Oxygen UI components
 vi.mock("@wso2/oxygen-ui", () => ({

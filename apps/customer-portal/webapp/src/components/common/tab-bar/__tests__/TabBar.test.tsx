@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import TabBar, { type TabBarProps, type TabOption } from "../TabBar";
+import TabBar, { type TabBarProps, type TabOption } from "@components/common/tab-bar/TabBar";
 
 // Mock Icon Component
 const MockIcon = ({ size }: { size?: number }) => (
