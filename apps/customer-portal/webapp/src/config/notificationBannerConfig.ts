@@ -25,12 +25,15 @@ export interface NotificationBannerConfig {
 }
 
 export const notificationBannerConfig: NotificationBannerConfig = {
-  actionLabel: import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL,
-  actionUrl: import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL,
-  message: import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE || "",
+  actionLabel: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL,
+  actionUrl: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL,
+  message: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE || "",
   severity:
-    import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY || "info",
-  title: import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE || "",
-  visible:
-    import.meta.env.CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE === "true",
+    (window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY as
+      | "info"
+      | "warning"
+      | "error"
+      | "success") || "info",
+  title: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE || "",
+  visible: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE,
 };
