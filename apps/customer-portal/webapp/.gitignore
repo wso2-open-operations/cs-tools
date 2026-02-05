@@ -30,3 +30,4 @@ dist-ssr
 
 # OS files
 .DS_Store
+config.js
