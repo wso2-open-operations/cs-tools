@@ -35,5 +35,5 @@ export const notificationBannerConfig: NotificationBannerConfig = {
       | "error"
       | "success") || "info",
   title: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE || "",
-  visible: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE,
+  visible: window.config?.CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE || false,
 };
