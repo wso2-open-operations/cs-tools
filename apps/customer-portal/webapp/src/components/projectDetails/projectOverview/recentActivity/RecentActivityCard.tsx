@@ -25,6 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Zap } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import ErrorIndicator from "@/components/common/errorIndicator/ErrorIndicator";
 
 import {
   getRecentActivityItems,
@@ -35,11 +36,13 @@ import type { ProjectStatsResponse } from "@/models/responses";
 interface RecentActivityCardProps {
   activity?: ProjectStatsResponse["recentActivity"];
   isLoading?: boolean;
+  isError?: boolean;
 }
 
 const RecentActivityCard = ({
   activity,
   isLoading,
+  isError,
 }: RecentActivityCardProps): JSX.Element => {
   const activities: ActivityItem[] = getRecentActivityItems(activity);
   return (
@@ -86,6 +89,8 @@ const RecentActivityCard = ({
                 ) : (
                   <Skeleton variant="text" width={100} height={24} />
                 )
+              ) : isError ? (
+                <ErrorIndicator entityName={activityItem.label} />
               ) : activityItem.type === "chip" ? (
                 <Chip
                   label={activityItem.value}
