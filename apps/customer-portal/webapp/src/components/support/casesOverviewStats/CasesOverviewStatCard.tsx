@@ -77,7 +77,7 @@ export default function CasesOverviewStatCard({
                   isLoading
                     ? ((
                         <Skeleton variant="text" width="40%" height={24} />
-                      ) as unknown as number)
+                      ) as any)
                     : (stats?.[stat.key] ?? 0)
                 }
                 icon={<stat.icon />}
