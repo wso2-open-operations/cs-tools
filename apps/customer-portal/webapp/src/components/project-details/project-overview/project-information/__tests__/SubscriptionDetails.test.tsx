@@ -33,8 +33,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
   Skeleton: () => <div data-testid="skeleton" />,
   colors: {
-    blue: { 700: "#1976d2" },
-    purple: { 400: "#ab47bc" },
+    blue: { 700: "#1976D2" },
+    purple: { 400: "#AB47BC" },
   },
 }));
 

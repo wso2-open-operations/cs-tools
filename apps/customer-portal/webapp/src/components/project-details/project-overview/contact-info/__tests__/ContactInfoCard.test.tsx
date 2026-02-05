@@ -45,7 +45,7 @@ vi.mock("@/constants/projectDetailsConstants", () => ({
       role: "Role 2",
       email: "email2@example.com",
       icon: "icon-2",
-      bgColor: "#fff",
+      bgColor: "#FFF",
     },
   ],
 }));

@@ -35,8 +35,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 describe("ChartLegend", () => {
   const mockData = [
-    { name: "Item 1", value: 10, color: "#ff0000" },
-    { name: "Item 2", value: 20, color: "#00ff00" },
+    { name: "Item 1", value: 10, color: "#FF0000" },
+    { name: "Item 2", value: 20, color: "#00FF00" },
   ];
 
   it("should render legend items correctly", () => {
@@ -56,7 +56,7 @@ describe("ChartLegend", () => {
     );
 
     expect(item1ColorBox).toBeInTheDocument();
-    expect(item1ColorBox).toHaveStyle({ backgroundColor: "#ff0000" });
+    expect(item1ColorBox).toHaveStyle({ backgroundColor: "#FF0000" });
 
     const item2Text = screen.getByText("Item 2");
     expect(item2Text).toBeInTheDocument();
