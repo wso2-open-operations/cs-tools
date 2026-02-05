@@ -168,17 +168,18 @@ export const SYSTEM_HEALTH = {
 export type SystemHealth = (typeof SYSTEM_HEALTH)[keyof typeof SYSTEM_HEALTH];
 
 export const SLA_STATUS = {
-  GOOD: "Good",
+  GOOD: "All Good",
   BAD: "Bad",
 } as const;
 
 export type SLAStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
 
 export const CASE_PRIORITY = {
-  CRITICAL: "Critical",
-  HIGH: "High",
-  MEDIUM: "Medium",
-  LOW: "Low",
+  CATASTROPHIC: "Catastrophic (P0)",
+  CRITICAL: "Critical (P1)",
+  HIGH: "High (P2)",
+  MEDIUM: "Medium (P3)",
+  LOW: "Low (P4)",
 } as const;
 
 export type CasePriority = (typeof CASE_PRIORITY)[keyof typeof CASE_PRIORITY];
@@ -186,7 +187,16 @@ export type CasePriority = (typeof CASE_PRIORITY)[keyof typeof CASE_PRIORITY];
 export const CASE_STATUS = {
   OPEN: "Open",
   IN_PROGRESS: "In Progress",
-  RESOLVED: "Resolved",
+  WAITING_ON_CLIENT: "Waiting On Client",
+  WORK_IN_PROGRESS: "Work In Progress",
+  AWAITING_INFO: "Awaiting Info",
+  WAITING_ON_WSO2: "Waiting On WSO2",
+  SOLUTION_PROPOSED: "Solution Proposed",
+  CLOSED: "Closed",
+  REOPENED: "Reopened",
+  CANCELLED: "Cancelled",
+  DEFERRED: "Deferred",
+  CHANGE_SCHEDULED: "Change Scheduled",
 } as const;
 
 export type CaseStatus = (typeof CASE_STATUS)[keyof typeof CASE_STATUS];
