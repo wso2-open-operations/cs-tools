@@ -20,7 +20,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import AuthGuard from "@/AuthGuard"; // Corrected path
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { useLoader } from "@/context/linearLoader/LoaderContext";
+import { useLoader } from "@/context/linear-loader/LoaderContext";
 
 // Mock dependencies
 vi.mock("@asgardeo/react", () => ({

@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useEffect, type JSX } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
 
-import { useLoader } from "@/context/linearLoader/LoaderContext";
+import { useLoader } from "@/context/linear-loader/LoaderContext";
 
 /**
  * AuthGuard component to protect routes.

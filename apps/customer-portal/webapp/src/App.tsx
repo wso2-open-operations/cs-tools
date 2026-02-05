@@ -24,7 +24,7 @@ import SupportPage from "@/pages/SupportPage";
 import NoveraChatPage from "@/pages/NoveraChatPage";
 import CreateCasePage from "@/pages/CreateCasePage";
 import AppLayout from "@/layouts/AppLayout";
-import { LoaderProvider } from "@/context/linearLoader/LoaderContext";
+import { LoaderProvider } from "@/context/linear-loader/LoaderContext";
 import LoginPage from "@/pages/LoginPage";
 import AuthGuard from "@/AuthGuard";
 
