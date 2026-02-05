@@ -15,11 +15,12 @@
 // under the License.
 
 import { ListingTable } from "@wso2/oxygen-ui";
-import { type JSX, useState } from "react";
+import { type JSX, useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@/api/useGetProjectCases";
 import useGetCasesFilters from "@/api/useGetCasesFilters";
+import { useLoader } from "@/context/linearLoader/LoaderContext";
 import FilterPopover, {
   type FilterField,
 } from "@/components/common/filterPanel/FilterPopover";
@@ -34,14 +35,15 @@ interface CasesTableProps {
 const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
   const navigate = useNavigate();
   const { isLoading: isAuthLoading } = useAsgardeo();
+  const { showLoader, hideLoader } = useLoader();
   const [filters, setFilters] = useState<Record<string, any>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
 
   const {
     data: filtersMetadata,
-    isLoading: isLoadingFilters,
+    isFetching: isFetchingFilters,
     isError: isErrorFilters,
   } = useGetCasesFilters(projectId);
 
@@ -110,10 +112,20 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
     },
   };
 
-  const { data, isLoading, isError } = useGetProjectCases(
-    projectId,
-    requestBody,
-  );
+  const {
+    data,
+    isFetching: isFetchingCases,
+    isError,
+  } = useGetProjectCases(projectId, requestBody);
+
+  const tableLoading = isAuthLoading || isFetchingCases || isFetchingFilters;
+
+  useEffect(() => {
+    if (tableLoading) {
+      showLoader();
+      return () => hideLoader();
+    }
+  }, [tableLoading, showLoader, hideLoader]);
 
   const handleFilterSearch = (newFilters: Record<string, any>) => {
     setFilters(newFilters);
@@ -195,7 +207,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
 
       {/* Cases list */}
       <CasesList
-        isLoading={isLoading || isAuthLoading}
+        isLoading={isFetchingCases || isAuthLoading}
         isError={isError}
         data={data}
         page={page}
@@ -212,7 +224,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
         initialFilters={filters}
         fields={dynamicFilterFields}
         title="Filter Cases"
-        isLoading={isLoadingFilters || isAuthLoading}
+        isLoading={isFetchingFilters || isAuthLoading}
         isError={isErrorFilters}
       />
     </ListingTable.Container>
