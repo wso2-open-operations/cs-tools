@@ -101,10 +101,6 @@ export const decodeTokenAndStoreUser = (): User | null => {
     }
 
     const decoded = jwtDecode<TokenPayload>(token);
-    Logger.info("Token decoded successfully", {
-      email: decoded.email,
-      name: decoded.name,
-    });
 
     // Extract user information from token
     const user: User = {
