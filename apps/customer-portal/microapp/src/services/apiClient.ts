@@ -57,7 +57,7 @@ apiClient.interceptors.request.use(
     }
 
     try {
-      const token = ""; // TODO: Replace with `const token = await refreshTokenPromise;`
+      const token = await refreshTokenPromise;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
         config.headers["Content-Type"] = "application/json";
