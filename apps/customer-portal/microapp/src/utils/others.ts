@@ -15,7 +15,11 @@
 // under the License.
 
 export const stringAvatar = (name: string) => {
-  return `${name.split(" ")[0][0]}${name.split(" ")[1][0]}`;
+  if (!name) return "";
+  const parts = name.trim().split(/\s+/);
+
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return `${parts[0].charAt(0) + parts[parts.length - 1].charAt(0)}`.toUpperCase();
 };
 
 export function capitalize(text: string): string {
