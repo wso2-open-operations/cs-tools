@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Grid, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Chip, Grid, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
 import { PROJECT_METRIC_META, PROJECT_STATUS_META, PROJECT_TYPE_META } from "@root/src/config/constants";

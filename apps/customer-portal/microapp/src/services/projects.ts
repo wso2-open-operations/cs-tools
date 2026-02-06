@@ -15,26 +15,26 @@
 // under the License.
 
 import apiClient from "@src/services/apiClient";
-import type { ProjectCardProps } from "@root/src/components/features/projects";
+import type { ProjectCardProps } from "@components/features/projects";
+
 import { PROJECTS_ENDPOINT } from "@config/endpoints";
 
 export interface ProjectsResponseType {
-  projects: [
-    {
-      sysId: string;
-      name: string;
-      description: string;
-      projectKey: string;
-      createdOn: string;
-      activeChatsCount: number;
-      openCasesCount: number;
-    },
-  ];
+  projects: {
+    sysId: string;
+    name: string;
+    description: string;
+    projectKey: string;
+    createdOn: string;
+    activeChatsCount: number;
+    openCasesCount: number;
+  }[];
   pagination: { offset: number; limit: number; totalRecords: number };
 }
 
 export const getProjects = async (): Promise<ProjectCardProps[]> => {
   const response = await apiClient.get<ProjectsResponseType>(PROJECTS_ENDPOINT);
+
   return response.data.projects.map((project) => ({
     id: project.projectKey,
     name: project.name,
@@ -45,6 +45,7 @@ export const getProjects = async (): Promise<ProjectCardProps[]> => {
     // TODO: determine project status from backend
     // Fallback to "All Good" until backend provides explicit field
     status: "All Good",
+    numberOfOpenCases: project.openCasesCount,
     metrics: {
       cases: project.openCasesCount,
       chats: project.activeChatsCount,
