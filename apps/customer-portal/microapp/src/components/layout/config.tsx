@@ -10,7 +10,7 @@ type AppBarConfig = {
   showChips: boolean;
 };
 
-interface MainLayoutConfigType {
+export interface MainLayoutConfigType {
   path: string;
   title: string;
   tabIndex: number;

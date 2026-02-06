@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { matchPath, useLocation } from "react-router-dom";
 import { LayoutContext, type LayoutContextType } from "@src/context/layout";
-import { MAIN_LAYOUT_CONFIG } from "@src/components/layout/config";
+import { MAIN_LAYOUT_CONFIG, type MainLayoutConfigType } from "@src/components/layout/config";
+import { Logger } from "@root/src/utils/logger";
 
 export default function LayoutProvider({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -12,9 +13,14 @@ export default function LayoutProvider({ children }: { children: React.ReactNode
   const [endSlotOverride, setEndSlotOverride] = useState<ReactNode | undefined>(undefined);
   const [appBarSlotsOverride, setAppBarSlotsOverride] = useState<ReactNode | undefined>(undefined);
 
-  const meta = useMemo(() => {
+  const meta: MainLayoutConfigType = useMemo(() => {
     const config = MAIN_LAYOUT_CONFIG.find((route) => matchPath({ path: route.path, end: true }, location.pathname));
-    if (config === undefined) throw Error("Route Configuration Not Found");
+
+    if (!config) {
+      Logger.error("Route Configuration Not Found");
+      return { path: location.pathname, title: "", tabIndex: -1 };
+    }
+
     return config;
   }, [location.pathname]);
 
