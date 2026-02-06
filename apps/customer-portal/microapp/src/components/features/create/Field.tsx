@@ -1,20 +1,39 @@
-import { FormControl, TextField as MuiTextField, MenuItem, Select, Stack, InputLabel } from "@wso2/oxygen-ui";
+import {
+  FormControl,
+  TextField as MuiTextField,
+  MenuItem,
+  Select,
+  Stack,
+  InputLabel,
+  type SelectChangeEvent,
+} from "@wso2/oxygen-ui";
 
 export function SelectField({
+  name,
   label,
   options,
   value = 0,
   startAdornment,
+  onChange,
 }: {
+  name: string;
   label: string;
   options: { value: number; label: string }[];
   value?: number;
   startAdornment?: React.ReactNode;
+  onChange?: (event: SelectChangeEvent<number>) => void;
 }) {
   return (
     <FormControl component={Stack} gap={1} fullWidth>
       <InputLabel>{label}</InputLabel>
-      <Select label={label} value={value} sx={{ bgcolor: "background.paper" }} startAdornment={startAdornment}>
+      <Select
+        name={name}
+        label={label}
+        value={value}
+        sx={{ bgcolor: "background.paper" }}
+        startAdornment={startAdornment}
+        onChange={onChange}
+      >
         {options.map((option) => (
           <MenuItem key={option.value} value={option.value}>
             {option.label}
@@ -26,6 +45,7 @@ export function SelectField({
 }
 
 export function TextField({
+  name,
   label,
   value,
   multiline = false,
@@ -34,6 +54,7 @@ export function TextField({
   startAdornment,
   onChange,
 }: {
+  name: string;
   label: string;
   value: string;
   placeholder?: string;
@@ -46,6 +67,7 @@ export function TextField({
   return (
     <FormControl component={Stack} gap={1} fullWidth>
       <MuiTextField
+        name={name}
         label={label}
         value={value}
         placeholder={placeholder}
