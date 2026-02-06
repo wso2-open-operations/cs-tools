@@ -15,8 +15,8 @@ export function StickyCommentBar({ value, placeholder, topSlot, onChange, onSend
   const hasContent = value.trim().length > 0;
 
   const send = () => {
-    onChange("");
     onSend();
+    onChange("");
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
