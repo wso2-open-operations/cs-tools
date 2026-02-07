@@ -160,7 +160,7 @@ public isolated function mapCommentsResponse(entity:CommentsResponse response) r
 # + limit - Limit value
 # + offset - Offset value
 # + return - True if invalid, else false
-public function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =>
+public isolated function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =>
     ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0);
 
 # Map attachments response to map to desired structure.
