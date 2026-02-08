@@ -92,6 +92,25 @@ describe("richTextEditor utils", () => {
       expect(html).not.toContain("/var/local<em>storage</em>data");
       expect(html).toContain("<em>this</em>");
     });
+
+    it("should neutralize malicious HTML in markdown to prevent XSS", () => {
+      const md =
+        "This is a list:\n- <img src=x onerror=alert(1)>\n- Normal item";
+      const html = markdownToHtml(md);
+      expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+      expect(html).not.toContain("<img src=x");
+      expect(html).not.toContain("onerror");
+    });
+
+    it("should protect markdown markup inside inline code spans", () => {
+      const md = "This is some `**not bold**` and `_not italic_` code.";
+      const html = markdownToHtml(md);
+
+      expect(html).toContain("<code>**not bold**</code>");
+      expect(html).not.toContain("<strong>not bold</strong>");
+      expect(html).toContain("<code>_not italic_</code>");
+      expect(html).not.toContain("<em>not italic</em>");
+    });
   });
 
   describe("htmlToMarkdown", () => {

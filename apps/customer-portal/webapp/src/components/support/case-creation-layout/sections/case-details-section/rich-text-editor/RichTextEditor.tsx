@@ -495,8 +495,9 @@ export function RichTextEditor({
           : target.closest(".rich-text-image-delete");
         const id = (btn as HTMLElement)?.getAttribute("data-delete-id");
         if (id && editorRef.current) {
+          const safeId = CSS.escape(id);
           const wrap = editorRef.current.querySelector(
-            `[data-image-id="${id}"]`,
+            `[data-image-id="${safeId}"]`,
           );
           wrap?.remove();
           emitChange(editorRef.current.innerHTML);

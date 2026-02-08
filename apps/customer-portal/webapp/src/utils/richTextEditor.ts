@@ -125,13 +125,20 @@ export function htmlToMarkdown(html: string): string {
  * @returns HTML string.
  */
 export function markdownToHtml(md: string): string {
-  let html = md;
+  let html = escapeHtml(md);
+
+  // Protect inline code spans from formatting rules
+  const inlinePlaceholders: string[] = [];
+  html = html.replace(/`([^`]+)`/g, (_m, code) => {
+    const id = `__BT_INLINE_CODE_PLACEHOLDER_${inlinePlaceholders.length}__`;
+    inlinePlaceholders.push(code);
+    return id;
+  });
 
   html = html.replace(/^(-{3,}|\*{3,}|_{3,})\s*$/gm, "<hr/>");
   html = html.replace(
     /```(\w*)\n?([\s\S]*?)```/g,
-    (_m, _lang, code) =>
-      `<pre><code>${code.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code></pre>`,
+    (_m, _lang, code) => `<pre><code>${code}</code></pre>`,
   );
   html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
   html = html.replace(/^#####\s+(.+)$/gm, "<h5>$1</h5>");
@@ -146,7 +153,14 @@ export function markdownToHtml(md: string): string {
     /\[([^\]]+)\]\(([^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener">$1</a>',
   );
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Restore inline code spans
+  inlinePlaceholders.forEach((content, i) => {
+    html = html.replace(
+      `__BT_INLINE_CODE_PLACEHOLDER_${i}__`,
+      `<code>${content}</code>`,
+    );
+  });
 
   // Protect code blocks before splitting by blank lines
   const placeholders: string[] = [];
