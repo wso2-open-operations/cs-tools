@@ -48,12 +48,11 @@ export function LinkInsertPopover({
     if (open) {
       setUrl(defaultUrl);
       setText(defaultText);
-      // Focus text input if there's text, otherwise focus URL input
       const timer = setTimeout(() => {
         if (defaultText) {
-          textInputRef.current?.focus();
-        } else {
           urlInputRef.current?.focus();
+        } else {
+          textInputRef.current?.focus();
         }
       }, 0);
       return () => clearTimeout(timer);

@@ -48,6 +48,10 @@ export function EditorContentArea({
       ref={editorRef}
       contentEditable={!disabled}
       suppressContentEditableWarning
+      role="textbox"
+      aria-multiline
+      aria-disabled={disabled}
+      aria-label={placeholder}
       onInput={onInput}
       onKeyDown={onKeyDown}
       onPaste={onPaste}

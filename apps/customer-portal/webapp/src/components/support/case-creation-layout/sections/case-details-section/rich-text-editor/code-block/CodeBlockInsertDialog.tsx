@@ -33,7 +33,7 @@ export interface CodeBlockInsertDialogProps {
 }
 
 /**
- * Dialog for inserting code blocks with language selection and preview.
+ * Dialog for inserting code blocks into the rich text editor.
  *
  * @param {CodeBlockInsertDialogProps} props - Component props.
  * @returns {JSX.Element} The rendered code block insert dialog.

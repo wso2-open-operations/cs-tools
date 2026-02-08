@@ -205,4 +205,60 @@ describe("RichTextEditor", () => {
     const editable = wrapper.querySelector("[contenteditable]");
     expect(editable).toHaveAttribute("contenteditable", "false");
   });
+
+  it("should block unsafe URL schemes in handleInsertLink", async () => {
+    render(
+      <RichTextEditor
+        value=""
+        onChange={vi.fn()}
+        data-testid="rich-text-editor"
+      />,
+    );
+
+    const linkButton = screen.getByRole("button", {
+      name: /insert or edit link/i,
+    });
+    fireEvent.click(linkButton);
+
+    const urlInput = screen.getByPlaceholderText("https://...");
+    const applyButton = screen.getByRole("button", { name: /apply/i });
+
+    // Try javascript: scheme
+    fireEvent.change(urlInput, {
+      target: { value: "javascript:alert('XSS')" },
+    });
+    fireEvent.click(applyButton);
+
+    const editable = screen
+      .getByTestId("rich-text-editor")
+      .querySelector("[contenteditable=true]");
+    expect(editable?.innerHTML).not.toContain("javascript:alert");
+  });
+
+  it("should allow safe URL schemes in handleInsertLink", async () => {
+    render(
+      <RichTextEditor
+        value=""
+        onChange={vi.fn()}
+        data-testid="rich-text-editor"
+      />,
+    );
+
+    const linkButton = screen.getByRole("button", {
+      name: /insert or edit link/i,
+    });
+    fireEvent.click(linkButton);
+
+    const urlInput = screen.getByPlaceholderText("https://...");
+    const applyButton = screen.getByRole("button", { name: /apply/i });
+
+    // Try https: scheme
+    fireEvent.change(urlInput, { target: { value: "https://wso2.com" } });
+    fireEvent.click(applyButton);
+
+    const editable = screen
+      .getByTestId("rich-text-editor")
+      .querySelector("[contenteditable=true]");
+    expect(editable?.innerHTML).toContain('href="https://wso2.com"');
+  });
 });
