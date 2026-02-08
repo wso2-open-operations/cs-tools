@@ -74,7 +74,6 @@ describe("richTextEditor utils", () => {
     it("should handle code blocks with blank lines", () => {
       const md = "```javascript\nfunction test() {\n\n  return true;\n}\n```";
       const html = markdownToHtml(md);
-      // It should NOT split the code block into multiple pieces or wrap parts in <p>
       expect(html).toContain(
         "<pre><code>function test() {\n\n  return true;\n}\n</code></pre>",
       );
@@ -111,6 +110,36 @@ describe("richTextEditor utils", () => {
       expect(html).toContain("<code>_not italic_</code>");
       expect(html).not.toContain("<em>not italic</em>");
     });
+
+    it("should preserve HTML characters in code blocks without double-encoding", () => {
+      const md = "```\nif (a < b && c > d) {}\n```";
+      const html = markdownToHtml(md);
+
+      expect(html).toContain("<code>if (a &lt; b &amp;&amp; c &gt; d) {}");
+      expect(html).not.toContain("&amp;lt;");
+    });
+
+    it("should handle inline code with HTML characters correctly", () => {
+      const md = "This is `<tag>` and `a & b`.";
+      const html = markdownToHtml(md);
+
+      expect(html).toContain("<code>&lt;tag&gt;</code>");
+      expect(html).toContain("<code>a &amp; b</code>");
+      expect(html).not.toContain("&amp;lt;");
+    });
+
+    it("should handle complex nested markdown structures", () => {
+      const md =
+        "# Header\n\n- Item with **bold** and `code`.\n- Another item with [Link](http://foo.com).\n\n```\nformatted\n  code\n```";
+      const html = markdownToHtml(md);
+
+      expect(html).toContain("<h1>Header</h1>");
+      expect(html).toContain(
+        "<li>Item with <strong>bold</strong> and <code>code</code>.</li>",
+      );
+      expect(html).toContain('<li>Another item with <a href="http://foo.com"');
+      expect(html).toContain("<pre><code>formatted\n  code\n</code></pre>");
+    });
   });
 
   describe("htmlToMarkdown", () => {
@@ -128,6 +157,13 @@ describe("richTextEditor utils", () => {
       expect(md).toContain("- Item 2");
     });
 
+    it("should handle nested formatting in htmlToMarkdown", () => {
+      const html =
+        "<ul><li>Item with <strong>bold</strong> and <code>code</code></li></ul>";
+      const md = htmlToMarkdown(html);
+      expect(md).toContain("- Item with **bold** and `code`");
+    });
+
     it("should sanitize malicious HTML to prevent XSS", () => {
       const maliciousHtml =
         '<p>Normal text</p><img src=x onerror="alert(1)"><script>console.log("XSS")</script>';
@@ -137,6 +173,12 @@ describe("richTextEditor utils", () => {
       expect(md).not.toContain("alert");
       expect(md).not.toContain("console.log");
       expect(md).toContain("Normal text");
+    });
+
+    it("should convert backticks in text correctly", () => {
+      const html = "<p>This is a `backtick` in text.</p>";
+      const md = htmlToMarkdown(html);
+      expect(md).toContain("This is a `backtick` in text.");
     });
   });
 

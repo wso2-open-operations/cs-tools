@@ -99,10 +99,7 @@ export function htmlToMarkdown(html: string): string {
       case "img":
         return `![image](${el.getAttribute("src") ?? ""})`;
       case "div":
-        return (
-          Array.from(node.childNodes).map(walk).join("") +
-          (children.trim() ? "\n\n" : "")
-        );
+        return children.trim() ? `${children}\n\n` : children;
       case "script":
       case "style":
       case "iframe":
@@ -125,21 +122,27 @@ export function htmlToMarkdown(html: string): string {
  * @returns HTML string.
  */
 export function markdownToHtml(md: string): string {
-  let html = escapeHtml(md);
+  // 1. Extract and protect fenced code blocks before general escaping
+  const fencedCodeBlocks: string[] = [];
+  let html = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, _lang, code) => {
+    const id = `__BT_FENCED_CODE_PLACEHOLDER_${fencedCodeBlocks.length}__`;
+    fencedCodeBlocks.push(`<pre><code>${escapeHtml(code)}</code></pre>`);
+    return id;
+  });
 
-  // Protect inline code spans from formatting rules
+  // 2. Escape everything else for XSS protection
+  html = escapeHtml(html);
+
+  // 3. Protect inline code spans from formatting rules (now safely escaped)
   const inlinePlaceholders: string[] = [];
   html = html.replace(/`([^`]+)`/g, (_m, code) => {
     const id = `__BT_INLINE_CODE_PLACEHOLDER_${inlinePlaceholders.length}__`;
-    inlinePlaceholders.push(code);
+    inlinePlaceholders.push(`<code>${code}</code>`);
     return id;
   });
 
   html = html.replace(/^(-{3,}|\*{3,}|_{3,})\s*$/gm, "<hr/>");
-  html = html.replace(
-    /```(\w*)\n?([\s\S]*?)```/g,
-    (_m, _lang, code) => `<pre><code>${code}</code></pre>`,
-  );
+
   html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
   html = html.replace(/^#####\s+(.+)$/gm, "<h5>$1</h5>");
   html = html.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
@@ -154,12 +157,13 @@ export function markdownToHtml(md: string): string {
     '<a href="$2" target="_blank" rel="noopener">$1</a>',
   );
 
-  // Restore inline code spans
+  // 4. Restore code spans
   inlinePlaceholders.forEach((content, i) => {
-    html = html.replace(
-      `__BT_INLINE_CODE_PLACEHOLDER_${i}__`,
-      `<code>${content}</code>`,
-    );
+    html = html.replace(`__BT_INLINE_CODE_PLACEHOLDER_${i}__`, content);
+  });
+
+  fencedCodeBlocks.forEach((content, i) => {
+    html = html.replace(`__BT_FENCED_CODE_PLACEHOLDER_${i}__`, content);
   });
 
   // Protect code blocks before splitting by blank lines
