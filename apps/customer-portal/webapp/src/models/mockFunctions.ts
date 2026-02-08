@@ -27,6 +27,7 @@ import type {
   ProjectSupportStats,
   DashboardMockStats,
   ProjectStatsResponse,
+  ChatHistoryResponse,
 } from "@models/responses";
 
 /**
@@ -228,6 +229,58 @@ export const getMockDashboardStats = (): DashboardMockStats => {
         TypeB: 430,
         TypeC: 210,
         TypeD: 210,
+      },
+    ],
+  };
+};
+
+/**
+ * Returns mock chat history for a project.
+ *
+ * @returns {ChatHistoryResponse} Mock chat history list.
+ */
+export const getMockChatHistory = (): ChatHistoryResponse => {
+  return {
+    chatHistory: [
+      {
+        chatId: "1628192673",
+        title: "How do I configure custom claims in JWT tokens?",
+        startedTime: "2 hours ago",
+        messages: 8,
+        kbArticles: 3,
+        status: "Resolved",
+      },
+      {
+        chatId: "1628192674",
+        title: "Getting error 401 when calling the API endpoint...",
+        startedTime: "1 day ago",
+        messages: 5,
+        kbArticles: 2,
+        status: "Still Open",
+      },
+      {
+        chatId: "1628192675",
+        title: "Need help understanding rate limiting configuration",
+        startedTime: "2 days ago",
+        messages: 12,
+        kbArticles: 5,
+        status: "Resolved",
+      },
+      {
+        chatId: "1628192676",
+        title: "Can I integrate with Azure AD for authentication?",
+        startedTime: "3 days ago",
+        messages: 6,
+        kbArticles: 4,
+        status: "Resolved",
+      },
+      {
+        chatId: "1628192677",
+        title: "Deployment best practices for high availability setup",
+        startedTime: "5 days ago",
+        messages: 15,
+        kbArticles: 7,
+        status: "Abandoned",
       },
     ],
   };
