@@ -1084,7 +1084,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # Get product update levels.
     #
     # + updateLevelState - Update level state
-    # + return - Lost of product update levels or an error
+    # + return - List of product update levels or an error
     resource function get updates/product\-update\-levels(http:RequestContext ctx, string? updateLevelState)
         returns updates:ProductUpdateLevel[]|http:InternalServerError {
 

@@ -63,7 +63,7 @@ public isolated function getProductUpdateLevels(string idToken, string? updateLe
 
     string? updateLevelStateToUse = updateLevelState;
     if updateLevelStateToUse is string {
-        return updatesClient->/product\-update\-levels.get(generateHeaders(idToken),
+        return updatesClient->/updates/product\-update\-levels.get(generateHeaders(idToken),
             updateLevelState = updateLevelStateToUse
         );
     }
