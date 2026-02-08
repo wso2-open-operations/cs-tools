@@ -26,7 +26,7 @@ import CreateCasePage from "@pages/CreateCasePage";
 import AppLayout from "@layouts/AppLayout";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import LoginPage from "@pages/LoginPage";
-import AuthGuard from "@AuthGuard";
+import AuthGuard from "@/AuthGuard";
 
 export default function App(): JSX.Element {
   return (
