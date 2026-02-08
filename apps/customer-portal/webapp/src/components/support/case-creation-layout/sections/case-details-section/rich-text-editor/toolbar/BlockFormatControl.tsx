@@ -78,30 +78,32 @@ export function BlockFormatControl({
   return (
     <>
       <Tooltip title="Block format">
-        <IconButton
-          size="small"
-          onClick={handleClick}
-          disabled={disabled}
-          aria-label="Block format"
-          sx={{ display: "flex", alignItems: "center", gap: 0.25 }}
-        >
-          <Typography
-            component="span"
-            variant={getBlockDisplay(currentTag).variant}
-            sx={{
-              fontSize: "0.8125rem",
-              lineHeight: 1.2,
-              maxWidth: 100,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              display: "block",
-            }}
+        <span>
+          <IconButton
+            size="small"
+            onClick={handleClick}
+            disabled={disabled}
+            aria-label="Block format"
+            sx={{ display: "flex", alignItems: "center", gap: 0.25 }}
           >
-            {getBlockDisplay(currentTag).label}
-          </Typography>
-          <ChevronDown size={16} />
-        </IconButton>
+            <Typography
+              component="span"
+              variant={getBlockDisplay(currentTag).variant}
+              sx={{
+                fontSize: "0.8125rem",
+                lineHeight: 1.2,
+                maxWidth: 100,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                display: "block",
+              }}
+            >
+              {getBlockDisplay(currentTag).label}
+            </Typography>
+            <ChevronDown size={16} />
+          </IconButton>
+        </span>
       </Tooltip>
       <Menu
         open={Boolean(anchorEl)}
@@ -111,12 +113,7 @@ export function BlockFormatControl({
       >
         {tags.map(({ value: v, label, variant }) => (
           <MenuItem key={v} onClick={() => handleSelect(v)}>
-            <Typography
-              variant={variant}
-              sx={v === "pre" ? { fontFamily: "monospace" } : undefined}
-            >
-              {label}
-            </Typography>
+            <Typography variant={variant}>{label}</Typography>
           </MenuItem>
         ))}
       </Menu>

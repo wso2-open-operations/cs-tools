@@ -354,8 +354,27 @@ export function RichTextEditor({
         setLinkPopup(null);
         return;
       }
+
+      // Validate URL scheme to prevent XSS
+      const trimmedUrl = url.trim();
+      const lowerUrl = trimmedUrl.toLowerCase();
+      const isSafeScheme =
+        lowerUrl.startsWith("http://") ||
+        lowerUrl.startsWith("https://") ||
+        lowerUrl.startsWith("mailto:") ||
+        lowerUrl.startsWith("tel:") ||
+        trimmedUrl.startsWith("/") ||
+        trimmedUrl.startsWith("#") ||
+        trimmedUrl.startsWith("?");
+
+      if (!isSafeScheme) {
+        logger.warn(`Blocked potentially unsafe URL: ${url}`);
+        setLinkPopup(null);
+        return;
+      }
+
       const displayText = text || url;
-      const safeUrl = url.replace(/"/g, "&quot;");
+      const safeUrl = trimmedUrl.replace(/"/g, "&quot;");
       const safeText = displayText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const linkHtml = `<a href="${safeUrl}" target="_blank" rel="noopener">${safeText}</a>`;
       const savedRange = savedRangeRef.current;
@@ -399,6 +418,8 @@ export function RichTextEditor({
       if (!file || !file.type.startsWith("image/")) return;
       const reader = new FileReader();
       reader.onload = () => {
+        if (!editorRef.current) return;
+
         const dataUrl = reader.result as string;
         const id = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const safeSrc = dataUrl.replace(/"/g, "&quot;");
@@ -553,11 +574,20 @@ export function RichTextEditor({
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    el.addEventListener("selectionchange", updateActiveFormat);
+
+    const onSelectionChange = () => {
+      // Only update if the selection is within our editor
+      if (editorRef.current?.contains(document.activeElement)) {
+        updateActiveFormat();
+      }
+    };
+
+    document.addEventListener("selectionchange", onSelectionChange);
     el.addEventListener("mouseup", updateActiveFormat);
     el.addEventListener("keyup", updateActiveFormat);
+
     return () => {
-      el.removeEventListener("selectionchange", updateActiveFormat);
+      document.removeEventListener("selectionchange", onSelectionChange);
       el.removeEventListener("mouseup", updateActiveFormat);
       el.removeEventListener("keyup", updateActiveFormat);
     };

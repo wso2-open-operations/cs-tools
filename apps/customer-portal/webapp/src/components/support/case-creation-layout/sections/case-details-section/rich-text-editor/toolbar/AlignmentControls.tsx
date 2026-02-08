@@ -40,44 +40,52 @@ export function AlignmentControls({
   return (
     <>
       <Tooltip title="Align left">
-        <IconButton
-          size="small"
-          onClick={() => onAlign("justifyLeft")}
-          disabled={disabled}
-          aria-label="Align left"
-        >
-          <AlignLeft size={18} />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onAlign("justifyLeft")}
+            disabled={disabled}
+            aria-label="Align left"
+          >
+            <AlignLeft size={18} />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title="Align center">
-        <IconButton
-          size="small"
-          onClick={() => onAlign("justifyCenter")}
-          disabled={disabled}
-          aria-label="Align center"
-        >
-          <AlignCenter size={18} />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onAlign("justifyCenter")}
+            disabled={disabled}
+            aria-label="Align center"
+          >
+            <AlignCenter size={18} />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title="Align right">
-        <IconButton
-          size="small"
-          onClick={() => onAlign("justifyRight")}
-          disabled={disabled}
-          aria-label="Align right"
-        >
-          <AlignRight size={18} />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onAlign("justifyRight")}
+            disabled={disabled}
+            aria-label="Align right"
+          >
+            <AlignRight size={18} />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title="Justify">
-        <IconButton
-          size="small"
-          onClick={() => onAlign("justifyFull")}
-          disabled={disabled}
-          aria-label="Justify"
-        >
-          <AlignJustify size={18} />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={() => onAlign("justifyFull")}
+            disabled={disabled}
+            aria-label="Justify"
+          >
+            <AlignJustify size={18} />
+          </IconButton>
+        </span>
       </Tooltip>
     </>
   );

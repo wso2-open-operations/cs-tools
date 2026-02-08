@@ -77,9 +77,7 @@ describe("MarkdownEditorDialog", () => {
 
   it("should call onClose when Cancel button or close icon is clicked", () => {
     const onClose = vi.fn();
-    const { rerender } = render(
-      <MarkdownEditorDialog {...defaultProps} onClose={onClose} />,
-    );
+    render(<MarkdownEditorDialog {...defaultProps} onClose={onClose} />);
 
     // Cancel button
     fireEvent.click(screen.getByText("Cancel"));
