@@ -34,5 +34,5 @@ public isolated function searchUpdates(string idToken, UpdateSearchPayload paylo
         endingUpdateLevel: payload.endingUpdateLevel,
         hotfixes: payload.hotfixes
     };
-    return listUpdates(idToken, listUpdatePayload, payload.readOnly, payload.updateLevelState);
+    return listUpdates(idToken, listUpdatePayload, payload.updateLevelState);
 }

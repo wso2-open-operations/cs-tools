@@ -40,40 +40,6 @@ public type BasicProductInfo record {|
     string channel;
 |};
 
-# Updates payload.
-public type UpdatesPayload record {|
-    *BasicProductInfo;
-    # Update level
-    @constraint:Int {minValue: 1}
-    int updateLevel;
-    # Added files
-    @constraint:String {minLength: 1}
-    string filesAdded;
-    # Modified files
-    @constraint:String {minLength: 1}
-    string filesModified;
-    # Removed files
-    @constraint:String {minLength: 1}
-    string filesRemoved;
-    # Changes in bundles info
-    @constraint:String {minLength: 1}
-    string bundlesInfoChanges;
-    # Dependant releases
-    DependantRelease[] dependantReleases;
-    # Update descriptions
-    @constraint:Array {minLength: 1}
-    UpdateDescription[] updateDescriptions;
-    # Life cycle state
-    @constraint:String {minLength: 1}
-    string lifeCycleState;
-    # Updates count
-    @constraint:Int {minValue: 1}
-    int updatesCount;
-    # Security updates count
-    @constraint:Int {minValue: 0}
-    int securityUpdatesCount;
-|};
-
 # Dependant release.
 public type DependantRelease record {|
     # Repository
@@ -268,8 +234,6 @@ public type ListUpdatePayload record {|
 # Update search payload.
 public type UpdateSearchPayload record {|
     *ListUpdatePayload;
-    # Whether the update is read only
-    boolean? readOnly;
     # Update level state
     string? updateLevelState;
 |};

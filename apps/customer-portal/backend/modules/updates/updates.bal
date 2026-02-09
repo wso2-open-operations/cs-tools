@@ -13,16 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import ballerina/http;
-
-# Add update entry.
-#
-# + idToken - ID token for authentication
-# + payload - UpdatesPayload to be added
-# + return - Error if the operation fails
-public isolated function addUpdate(string idToken, UpdatesPayload payload) returns error? {
-    return updatesClient->/updates.post(payload, generateHeaders(idToken));
-}
 
 # Get recommended update levels for a user.
 #
@@ -36,21 +26,19 @@ public isolated function getRecommendedUpdateLevels(string email) returns Recomm
 #
 # + idToken - ID token for authentication
 # + payload - Payload for listing updates
-# + readOnly - Optional boolean parameter to indicate if the updates should be read-only
 # + updateLevelState - Optional string parameter to filter updates based on their level state
 # + return - List of updates, or an error if the operation fails
-public isolated function listUpdates(string idToken, ListUpdatePayload payload, boolean? readOnly,
-        string? updateLevelState) returns UpdateResponse|error {
+public isolated function listUpdates(string idToken, ListUpdatePayload payload, string? updateLevelState)
+    returns UpdateResponse|error {
 
-    http:QueryParams queryParams = {};
-    if readOnly is boolean {
-        queryParams["readOnly"] = readOnly.toString();
-    }
-    if updateLevelState is string {
-        queryParams["updateLevelState"] = updateLevelState;
+    string? updateLevelStateToUse = updateLevelState;
+    if updateLevelStateToUse is string {
+        return updatesClient->/updates/list\-updates.post(payload, generateHeaders(idToken), readOnly = true,
+            updateLevelState = updateLevelStateToUse
+        );
     }
 
-    return updatesClient->/updates/list\-updates.post(payload, generateHeaders(idToken), params = queryParams);
+    return updatesClient->/updates/list\-updates.post(payload, generateHeaders(idToken), readOnly = true);
 }
 
 # Get product update levels based on the provided parameters.
