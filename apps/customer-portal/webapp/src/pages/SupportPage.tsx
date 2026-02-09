@@ -14,14 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import { useEffect, type JSX } from "react";
-import { Typography, Box } from "@wso2/oxygen-ui";
+import { Typography, Box, Grid } from "@wso2/oxygen-ui";
+import { FileText, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import CasesOverviewStatCard from "@components/support/cases-overview-stats/CasesOverviewStatCard";
 import NoveraChatBanner from "@components/support/novera-ai-assistant/novera-chat-banner/NoveraChatBanner";
+import SupportOverviewCard from "@components/support/support-overview-cards/SupportOverviewCard";
 import { useGetProjectSupportStats } from "@api/useGetProjectSupportStats";
+import useGetProjectCases from "@api/useGetProjectCases";
 import { useLogger } from "@hooks/useLogger";
+import {
+  SUPPORT_OVERVIEW_CASES_LIMIT,
+} from "@constants/supportConstants";
 
 /**
  * SupportPage component to display case details for a project.
@@ -30,7 +36,7 @@ import { useLogger } from "@hooks/useLogger";
  */
 export default function SupportPage(): JSX.Element {
   const logger = useLogger();
-
+  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
   const {
@@ -39,8 +45,16 @@ export default function SupportPage(): JSX.Element {
     isError,
   } = useGetProjectSupportStats(projectId || "");
 
+  const { data: casesData, isFetching: isCasesLoading } = useGetProjectCases(
+    projectId || "",
+    {
+      pagination: { offset: 0, limit: SUPPORT_OVERVIEW_CASES_LIMIT },
+      sortBy: { field: "createdOn", order: "desc" },
+    },
+  );
   const { isLoading: isAuthLoading } = useAsgardeo();
 
+  const cases = casesData?.cases ?? [];
   const isActuallyLoading = isAuthLoading || isFetching || (!stats && !isError);
 
   useEffect(() => {
@@ -69,6 +83,20 @@ export default function SupportPage(): JSX.Element {
     <Box>
       <CasesOverviewStatCard isLoading={isActuallyLoading} stats={stats} />
       <NoveraChatBanner />
+      <Grid container spacing={2} sx={{ mt: 3 }}>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <SupportOverviewCard
+            title="Outstanding Cases"
+            subtitle="Latest 5 support tickets"
+            icon={FileText}
+            iconVariant="orange"
+            footerButtonLabel="View all cases"
+            onFooterClick={() => navigate("../dashboard")}
+          >
+            <OutstandingCasesList cases={cases} isLoading={isCasesLoading} />
+          </SupportOverviewCard>
+        </Grid>
+      </Grid>
     </Box>
   );
 }
