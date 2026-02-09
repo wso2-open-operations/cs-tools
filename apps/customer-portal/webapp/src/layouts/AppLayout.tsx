@@ -16,7 +16,7 @@
 
 import { notificationBannerConfig } from "@config/notificationBannerConfig";
 import { AppShell, Box, useAppShell, LinearProgress } from "@wso2/oxygen-ui";
-import { type JSX, type ReactNode } from "react";
+import { type JSX, type ReactNode, useRef, useEffect } from "react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useLocation, Outlet } from "react-router";
 import GlobalNotificationBanner from "@components/common/notification-banner/GlobalNotificationBanner";
@@ -35,6 +35,13 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
+  const mainContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [location.pathname]);
 
   const { state: shellState, actions: shellActions } = useAppShell({
     initialCollapsed: false,
@@ -95,6 +102,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
               />
             )}
             <Box
+              ref={mainContentRef}
               sx={{
                 flex: 1,
                 overflow: "auto",
