@@ -16,14 +16,17 @@
 
 import {
   Bot,
+  CircleAlert,
   CircleCheck,
+  CircleQuestionMark,
   Clock,
   FileText,
+  MessageCircle,
   MessageSquare,
   TrendingUp,
 } from "@wso2/oxygen-ui-icons-react";
 import { type ComponentType } from "react";
-import type { ProjectSupportStats } from "@models/responses";
+import type { ProjectSupportStats, ProjectCasesStats } from "@models/responses";
 
 // Chat actions for the history list.
 export const ChatAction = {
@@ -43,13 +46,67 @@ export const ChatStatus = {
 export type ChatStatus = (typeof ChatStatus)[keyof typeof ChatStatus];
 
 // Interface for support statistics card configuration.
-export interface SupportStatConfig {
+export interface SupportStatConfig<Key = keyof ProjectSupportStats> {
   iconColor: "primary" | "secondary" | "success" | "error" | "info" | "warning";
   icon: ComponentType;
-  key: keyof ProjectSupportStats;
+  key: Key;
   label: string;
   secondaryIcon?: ComponentType;
 }
+
+/**
+ * Valid keys for all cases statistics.
+ */
+export type AllCasesStatKey =
+  | "openCases"
+  | "workInProgress"
+  | "waitingOnClient"
+  | "waitingOnWso2";
+
+/**
+ * Configuration for the all cases statistics cards.
+ */
+export const ALL_CASES_STAT_CONFIGS: SupportStatConfig<AllCasesStatKey>[] = [
+  {
+    icon: CircleAlert,
+    iconColor: "info",
+    key: "openCases",
+    label: "Open",
+  },
+  {
+    icon: Clock,
+    iconColor: "warning",
+    key: "workInProgress",
+    label: "Working in Progress",
+  },
+  {
+    icon: MessageCircle,
+    iconColor: "primary",
+    key: "waitingOnClient",
+    label: "Awaiting Info",
+  },
+  {
+    icon: CircleQuestionMark,
+    iconColor: "secondary",
+    key: "waitingOnWso2",
+    label: "Waiting on WSO2",
+  },
+];
+
+/**
+ * Flattens the project cases statistics for the stat cards.
+ *
+ * @param {ProjectCasesStats | undefined} stats - The original stats.
+ * @returns {Record<AllCasesStatKey, number | undefined>} The flattened stats.
+ */
+export const getAllCasesFlattenedStats = (
+  stats: ProjectCasesStats | undefined,
+): Record<AllCasesStatKey, number | undefined> => ({
+  openCases: stats?.openCases,
+  waitingOnClient: stats?.activeCases?.waitingOnClient,
+  waitingOnWso2: stats?.activeCases?.waitingOnWso2,
+  workInProgress: stats?.activeCases?.workInProgress,
+});
 
 // Configuration for the support statistics cards.
 export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
