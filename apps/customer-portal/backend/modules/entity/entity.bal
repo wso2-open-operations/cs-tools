@@ -124,3 +124,21 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
 
     return csEntityClient->/attachments/search.post(payload, generateHeaders(idToken));
 }
+
+# Get products of a deployment.
+#
+# + idToken - ID token for authorization
+# + deploymentId - ID of the deployment
+# + return - Products response or error
+public isolated function getProducts(string idToken, string deploymentId) returns ProductsResponse|error {
+    return csEntityClient->/products/search.get(generateHeaders(idToken), deploymentId = deploymentId);
+}
+
+# Get deployments of a project.
+#
+# + idToken - ID token for authorization
+# + projectId - ID of the project
+# + return - Deployments response or error
+public isolated function getDeployments(string idToken, string projectId) returns DeploymentsResponse|error {
+    return csEntityClient->/deployments/search.post(generateHeaders(idToken), projectId = projectId);
+}

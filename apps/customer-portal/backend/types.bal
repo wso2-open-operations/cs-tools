@@ -185,7 +185,7 @@ public type RecentActivity record {|
     # Last deployment date
     string? lastDeploymentOn;
     # System health status
-    string systemHealth; 
+    string systemHealth;
 |};
 
 # Project statistics response.
@@ -246,4 +246,30 @@ public type AttachmentsResponse record {|
     # Total records count
     int totalRecords;
     *entity:Pagination;
+|};
+
+# Deployment data.
+public type Deployment record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # URL
+    string? url;
+    # Associated project
+    ReferenceItem? project;
+    # Type
+    ReferenceItem? 'type;
+|};
+
+# Deployments response.
+public type DeploymentsResponse record {|
+    # List of deployments
+    Deployment[] deployments;
 |};

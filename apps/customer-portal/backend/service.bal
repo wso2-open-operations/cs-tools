@@ -302,6 +302,99 @@ service http:InterceptableService / on new http:Listener(9090) {
         return projectResponse;
     }
 
+    # Get deployments of a project by ID.
+    # 
+    # + id - ID of the project
+    # + return - Deployments response or error response
+    resource function get projects/[string id]/deployments(http:RequestContext ctx)
+        returns DeploymentsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isEmptyId(id) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_PROJECT_ID_EMPTY
+                }
+            };
+        }
+
+        entity:DeploymentsResponse|error deploymentsResponse = entity:getDeployments(userInfo.idToken, id);
+        if deploymentsResponse is error {
+            if getStatusCode(deploymentsResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve deployments for the project.";
+            log:printError(customError, deploymentsResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return getDeployments(deploymentsResponse);
+    }
+
+    # Get products of a deployment by project ID and deployment ID.
+    # 
+    # + projectId - ID of the project
+    # + deploymentId - ID of the deployment
+    # + return - Products response or error response
+    resource function get projects/[string projectId]/deployments/[string deploymentId](http:RequestContext ctx)
+        returns entity:ProductsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
+    
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isEmptyId(projectId) || isEmptyId(deploymentId) {
+            return <http:BadRequest>{
+                body: {
+                    message: "Project ID and Deployment ID cannot be empty!"
+                }
+            };
+        }
+
+        entity:ProductsResponse|error productsResponse = entity:getProducts(userInfo.idToken, deploymentId);
+        if productsResponse is error {
+            if getStatusCode(productsResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(projectId, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve products for the deployment.";
+            log:printError(customError, productsResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return productsResponse;
+    }
+
     # Get overall project statistics by ID.
     #
     # + id - ID of the project

@@ -394,3 +394,62 @@ public type AttachmentsResponse record {|
     int totalRecords;
     *Pagination;
 |};
+
+# Product data.
+public type Product record {|
+    # ID
+    string id;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # Number of cores
+    string? cores;
+    # Transactions per second
+    string? tps;
+    # Update level
+    string? updateLevel;
+    # Associated deployment
+    ReferenceTableItem? deployment;
+    # Product model information
+    ReferenceTableItem? productModel;
+    json...;
+|};
+
+# Products response.
+public type ProductsResponse record {|
+    # List of products
+    Product[] products;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+|};
+
+# Deployment data.
+public type Deployment record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # URL
+    string? url;
+    # Associated project
+    ReferenceTableItem? project;
+    # Type
+    ChoiceListItem? 'type;
+    json...;
+|};
+
+# Deployments response.
+public type DeploymentsResponse record {|
+    # List of deployments
+    Deployment[] deployments;
+|};

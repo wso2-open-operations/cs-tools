@@ -161,7 +161,7 @@ public function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =
     ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0);
 
 # Map attachments response to map to desired structure.
-# 
+#
 # + response - Attachments response from the entity service
 # + return - Mapped attachments response
 public isolated function mapAttachmentsResponse(entity:AttachmentsResponse response) returns AttachmentsResponse {
@@ -182,4 +182,21 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
         'limit: response.'limit,
         offset: response.offset
     };
+}
+
+public isolated function getDeployments(entity:DeploymentsResponse response) returns DeploymentsResponse {
+    Deployment[] deployments = from entity:Deployment deployment in response.deployments
+        let entity:ReferenceTableItem? project = deployment.project
+        let entity:ChoiceListItem? 'type = deployment.'type
+        select {
+            id: deployment.id,
+            name: deployment.name,
+            createdOn: deployment.createdOn,
+            updatedOn: deployment.updatedOn,
+            description: deployment.description,
+            url: deployment.url,
+            project: project != () ? {id: project.id, label: project.name} : (),
+            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
+        };
+    return {deployments};
 }
