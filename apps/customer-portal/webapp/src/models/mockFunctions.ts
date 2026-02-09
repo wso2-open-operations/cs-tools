@@ -17,6 +17,7 @@
 import {
   mockActiveChatsOptions,
   mockCaseCreationMetadata,
+  mockChatHistory,
   mockOpenCasesOptions,
   mockStatusOptions,
 } from "@models/mockData";
@@ -27,6 +28,7 @@ import type {
   ProjectSupportStats,
   DashboardMockStats,
   ProjectStatsResponse,
+  ChatHistoryResponse,
 } from "@models/responses";
 
 /**
@@ -231,6 +233,15 @@ export const getMockDashboardStats = (): DashboardMockStats => {
       },
     ],
   };
+};
+
+/**
+ * Returns mock chat history for a project.
+ *
+ * @returns {ChatHistoryResponse} Mock chat history list.
+ */
+export const getMockChatHistory = (): ChatHistoryResponse => {
+  return mockChatHistory;
 };
 
 /**
