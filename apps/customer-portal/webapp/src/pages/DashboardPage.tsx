@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Grid } from "@wso2/oxygen-ui";
+import { Box, Button, Grid, NotificationBanner } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { useEffect, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
@@ -91,6 +91,14 @@ export default function DashboardPage(): JSX.Element {
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
+      {(isErrorMock || isErrorCases) && (
+        <NotificationBanner
+          visible
+          severity="error"
+          title="Error"
+          message="Error loading dashboard statistics. Please try again later."
+        />
+      )}
       {/* Get support button */}
       <Box
         sx={{

@@ -34,8 +34,16 @@ vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isLoading: false,
+    state: { isAuthenticated: true },
+  }),
+}));
+
 // Mock useLogger
-vi.mock("@/hooks/useLogger", () => ({
+vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -43,6 +51,18 @@ vi.mock("@/hooks/useLogger", () => ({
     error: vi.fn(),
   }),
 }));
+
+// Mock useLoader
+vi.mock("@context/linear-loader/LoaderContext", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    useLoader: () => ({
+      showLoader: vi.fn(),
+      hideLoader: vi.fn(),
+    }),
+  };
+});
 
 const mockMockStats = {
   data: {
@@ -76,31 +96,32 @@ const mockCasesStats = {
   isError: false,
 };
 
-vi.mock("@/api/useGetDashboardMockStats", () => ({
+vi.mock("@api/useGetDashboardMockStats", () => ({
   useGetDashboardMockStats: vi.fn(() => mockMockStats),
 }));
 
-vi.mock("@/api/useGetProjectCasesStats", () => ({
+vi.mock("@api/useGetProjectCasesStats", () => ({
   useGetProjectCasesStats: vi.fn(() => mockCasesStats),
 }));
 
 // Mock ChartLayout
-vi.mock("@/components/dashboard/charts/ChartLayout", () => ({
+vi.mock("@components/dashboard/charts/ChartLayout", () => ({
   default: () => <div data-testid="chart-layout" />,
 }));
 
 // Mock StatCard
-vi.mock("@/components/dashboard/stats/StatCard", () => ({
-  StatCard: ({ label, value }: any) => (
+vi.mock("@components/dashboard/stats/StatCard", () => ({
+  StatCard: ({ label, value, isError }: any) => (
     <div data-testid="stat-card">
       <span>{label}</span>
       <span>{value}</span>
+      {isError && <span>Error</span>}
     </div>
   ),
 }));
 
 // Mock CasesTable
-vi.mock("@/components/dashboard/casesTable/CasesTable", () => ({
+vi.mock("@components/dashboard/cases-table/CasesTable", () => ({
   default: () => <div data-testid="cases-table" />,
 }));
 
@@ -134,6 +155,13 @@ vi.mock("@wso2/oxygen-ui", () => ({
     yellow: { 600: "#EAB308" },
     purple: { 400: "#A78BFA" },
   },
+  NotificationBanner: ({ visible, title, message }: any) =>
+    visible ? (
+      <div data-testid="notification-banner">
+        {title && <span>{title}</span>}
+        {message && <span>{message}</span>}
+      </div>
+    ) : null,
 }));
 
 // Mock icons

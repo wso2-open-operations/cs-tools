@@ -28,6 +28,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+import { RichTextEditor } from "@components/support/case-creation-layout/sections/case-details-section/rich-text-editor/RichTextEditor";
 import { PencilLine, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 
@@ -42,13 +43,11 @@ interface CaseDetailsSectionProps {
   setSeverity: (value: string) => void;
   metadata: any;
   isLoading: boolean;
+  storageKey?: string;
 }
 
 /**
  * Renders the Case Details section for case creation.
- *
- * This section captures the case title, description, issue type,
- * severity, and related metadata.
  *
  * @returns The Case Details section JSX element.
  */
@@ -63,6 +62,7 @@ export const CaseDetailsSection = ({
   setSeverity,
   metadata,
   isLoading,
+  storageKey,
 }: CaseDetailsSectionProps): JSX.Element => {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -140,21 +140,26 @@ export const CaseDetailsSection = ({
             />
           </Box>
           <Form.ElementWrapper label="" name="description">
-            <TextField
-              id="description"
-              fullWidth
-              multiline
-              minRows={6}
+            <RichTextEditor
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={setDescription}
               placeholder="Describe the issue in detail"
               disabled={isLoading || !isEditing}
+              minHeight={200}
+              storageKey={storageKey}
+              data-testid="case-description-editor"
             />
           </Form.ElementWrapper>
           <Typography
             variant="caption"
-            color="text.secondary"
-            sx={{ mt: 1, display: "block" }}
+            color="text.disabled"
+            align="right"
+            sx={{
+              mt: 1,
+              display: "block",
+              fontStyle: "italic",
+              fontSize: "0.7rem",
+            }}
           >
             This includes all the information you shared with Novera
           </Typography>

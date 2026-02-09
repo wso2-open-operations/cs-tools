@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CaseCreationHeader } from "@components/support/case-creation-layout/CaseCreationHeader";
+import { CaseCreationHeader } from "@components/support/case-creation-layout/header/CaseCreationHeader";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({

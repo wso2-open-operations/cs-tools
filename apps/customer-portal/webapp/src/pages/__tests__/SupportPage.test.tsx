@@ -42,8 +42,16 @@ const mockLogger = {
   info: vi.fn(),
   warn: vi.fn(),
 };
-vi.mock("@/hooks/useLogger", () => ({
+vi.mock("@hooks/useLogger", () => ({
   useLogger: () => mockLogger,
+}));
+
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isLoading: false,
+    state: { isAuthenticated: true },
+  }),
 }));
 
 // Mock @wso2/oxygen-ui components
@@ -132,7 +140,7 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 
 // Mock useGetProjectSupportStats
 const mockUseGetProjectSupportStats = vi.fn();
-vi.mock("@/api/useGetProjectSupportStats", () => ({
+vi.mock("@api/useGetProjectSupportStats", () => ({
   useGetProjectSupportStats: (id: string) => mockUseGetProjectSupportStats(id),
 }));
 
