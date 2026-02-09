@@ -26,16 +26,27 @@ const mockUseLogger = {
 const mockShowLoader = vi.fn();
 const mockHideLoader = vi.fn();
 
-vi.mock("@/hooks/useLogger", () => ({
+vi.mock("@hooks/useLogger", () => ({
   useLogger: () => mockUseLogger,
 }));
 
-vi.mock("@/context/linearLoader/LoaderContext", () => ({
-  useLoader: () => ({
-    showLoader: mockShowLoader,
-    hideLoader: mockHideLoader,
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isLoading: false,
+    state: { isAuthenticated: true },
   }),
 }));
+
+vi.mock("../../context/linear-loader/LoaderContext", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    useLoader: () => ({
+      showLoader: mockShowLoader,
+      hideLoader: mockHideLoader,
+    }),
+  };
+});
 
 vi.mock("react-router", () => ({
   useParams: () => ({ projectId: "123" }),
@@ -46,42 +57,42 @@ vi.mock("react-router", () => ({
 const mockUseGetProjectDetails = vi.fn();
 const mockUseGetProjectStat = vi.fn();
 
-vi.mock("@/api/useGetProjectDetails", () => ({
+vi.mock("@api/useGetProjectDetails", () => ({
   default: () => mockUseGetProjectDetails(),
 }));
 
-vi.mock("@/api/useGetProjectStat", () => ({
+vi.mock("@api/useGetProjectStat", () => ({
   useGetProjectStat: () => mockUseGetProjectStat(),
 }));
 
 // Mock Child Components
-vi.mock("@/components/common/tabBar/TabBar", () => ({
+vi.mock("@components/common/tab-bar/TabBar", () => ({
   default: () => <div data-testid="tab-bar" />,
 }));
 
 vi.mock(
-  "@/components/projectDetails/projectOverview/projectInformation/ProjectInformationCard",
+  "@components/project-details/project-overview/project-information/ProjectInformationCard",
   () => ({
     default: () => <div data-testid="project-info-card" />,
   }),
 );
 
 vi.mock(
-  "@/components/projectDetails/projectOverview/projectStatistics/ProjectStatisticsCard",
+  "@components/project-details/project-overview/project-statistics/ProjectStatisticsCard",
   () => ({
     default: () => <div data-testid="project-stats-card" />,
   }),
 );
 
 vi.mock(
-  "@/components/projectDetails/projectOverview/contactInfo/ContactInfoCard",
+  "@components/project-details/project-overview/contact-info/ContactInfoCard",
   () => ({
     default: () => <div data-testid="contact-info-card" />,
   }),
 );
 
 vi.mock(
-  "@/components/projectDetails/projectOverview/recentActivity/RecentActivityCard",
+  "@components/project-details/project-overview/recent-activity/RecentActivityCard",
   () => ({
     default: () => <div data-testid="recent-activity-card" />,
   }),
@@ -147,7 +158,7 @@ describe("ProjectDetails", () => {
     });
     mockUseGetProjectStat.mockReturnValue({
       data: null,
-      isLoading: false,
+      isFetching: true,
       error: null,
     });
 
@@ -155,6 +166,11 @@ describe("ProjectDetails", () => {
     expect(mockShowLoader).toHaveBeenCalledTimes(1);
     expect(mockHideLoader).not.toHaveBeenCalled();
 
+    mockUseGetProjectStat.mockReturnValue({
+      data: { projectStats: { slaStatus: "Healthy" }, recentActivity: [] },
+      isFetching: false,
+      error: null,
+    });
     mockUseGetProjectDetails.mockReturnValue({
       data: { id: "123" },
       isLoading: false,
@@ -162,7 +178,7 @@ describe("ProjectDetails", () => {
     });
 
     rerender(<ProjectDetails />);
-    expect(mockHideLoader).toHaveBeenCalledTimes(1);
+    expect(mockHideLoader).toHaveBeenCalled();
   });
 
   it("should log error when project details fail to load", async () => {

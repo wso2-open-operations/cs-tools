@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ConversationSummary } from "@components/support/case-creation-layout/ConversationSummary";
+import { ConversationSummary } from "@components/support/case-creation-layout/sections/conversation-summary-section/ConversationSummary";
 import type { CaseCreationMetadata } from "@models/mockData";
 
 // Mock @wso2/oxygen-ui components

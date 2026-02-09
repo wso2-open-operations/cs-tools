@@ -63,3 +63,38 @@ export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
     label: "Active Chats",
   },
 ];
+
+// Rich text editor constants
+export const RICH_TEXT_HISTORY_LIMIT = 50;
+export const RICH_TEXT_UNDO_DEBOUNCE_MS = 600;
+
+export type RichTextBlockVariant =
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "subtitle1"
+  | "subtitle2"
+  | "body1"
+  | "body2"
+  | "caption";
+
+export const RICH_TEXT_BLOCK_TAGS: Array<{
+  value: string;
+  label: string;
+  variant: RichTextBlockVariant;
+}> = [
+  { value: "h1", label: "Heading 1", variant: "h1" },
+  { value: "h2", label: "Heading 2", variant: "h2" },
+  { value: "h3", label: "Heading 3", variant: "h3" },
+  { value: "h4", label: "Heading 4", variant: "h4" },
+  { value: "h5", label: "Heading 5", variant: "h5" },
+  { value: "h6", label: "Heading 6", variant: "h6" },
+  { value: "subtitle1", label: "Subtitle 1", variant: "subtitle1" },
+  { value: "subtitle2", label: "Subtitle 2", variant: "subtitle2" },
+  { value: "body1", label: "Body 1", variant: "body1" },
+  { value: "body2", label: "Body 2", variant: "body2" },
+  { value: "caption", label: "Caption", variant: "caption" },
+];

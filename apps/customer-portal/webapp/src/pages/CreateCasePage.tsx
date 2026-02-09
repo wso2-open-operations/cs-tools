@@ -22,11 +22,11 @@ import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import { AIInfoCard } from "@components/support/case-creation-layout/AIInfoCard";
-import { BasicInformationSection } from "@components/support/case-creation-layout/BasicInformationSection";
-import { CaseCreationHeader } from "@components/support/case-creation-layout/CaseCreationHeader";
-import { CaseDetailsSection } from "@components/support/case-creation-layout/CaseDetailsSection";
-import { ConversationSummary } from "@components/support/case-creation-layout/ConversationSummary";
+import { AIInfoCard } from "@components/support/case-creation-layout/header/AIInfoCard";
+import { BasicInformationSection } from "@components/support/case-creation-layout/sections/basic-information-section/BasicInformationSection";
+import { CaseCreationHeader } from "@components/support/case-creation-layout/header/CaseCreationHeader";
+import { CaseDetailsSection } from "@components/support/case-creation-layout/sections/case-details-section/CaseDetailsSection";
+import { ConversationSummary } from "@components/support/case-creation-layout/sections/conversation-summary-section/ConversationSummary";
 import {
   getGeneratedIssueTitle,
   getGeneratedIssueDescription,
@@ -148,6 +148,9 @@ export default function CreateCasePage(): JSX.Element {
               setSeverity={setSeverity}
               metadata={metadata}
               isLoading={isLoading}
+              storageKey={
+                projectId ? `create-case-draft-${projectId}` : undefined
+              }
             />
 
             {/* form actions container */}

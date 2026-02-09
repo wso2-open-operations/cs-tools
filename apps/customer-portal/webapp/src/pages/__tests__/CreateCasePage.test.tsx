@@ -15,121 +15,88 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { BrowserRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { BrowserRouter } from "react-router";
 import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import CreateCasePage from "@pages/CreateCasePage";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
 // Mock @wso2/oxygen-ui components
-vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children, component, onSubmit }: any) => (
-    <div data-testid="box" data-component={component} onSubmit={onSubmit}>
-      {children}
-    </div>
-  ),
-  Button: ({ children, onClick, startIcon }: any) => (
-    <button onClick={onClick}>
-      {startIcon}
-      {children}
-    </button>
-  ),
-  Card: ({ children }: any) => <div data-testid="card">{children}</div>,
-  CardContent: ({ children }: any) => (
-    <div data-testid="card-content">{children}</div>
-  ),
-  Chip: ({ label, icon }: any) => (
-    <div data-testid="chip">
-      {icon}
-      {label}
-    </div>
-  ),
-  colors: {
-    orange: { 700: "#C2410C" },
-    blue: { 700: "#1D4ED8" },
-    purple: { 400: "#A78BFA" },
-  },
-  ComplexSelect: Object.assign(
-    ({ children, value }: any) => <select value={value}>{children}</select>,
-    {
-      MenuItem: Object.assign(
-        ({ value }: any) => <option value={value}>{value}</option>,
-        {
-          Icon: () => null,
-          Text: ({ primary }: any) => primary,
-        },
-      ),
-    },
-  ),
-  Divider: () => <hr />,
-  Form: {
-    ElementWrapper: ({ children, label }: any) => (
-      <div data-testid="form-element-wrapper">
-        <label>{label}</label>
+vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    Box: ({ children, component, onSubmit }: any) => (
+      <div data-testid="box" data-component={component} onSubmit={onSubmit}>
         {children}
       </div>
     ),
-  },
-  FormControl: ({ children }: any) => (
-    <div data-testid="form-control">{children}</div>
-  ),
-  Grid: ({ children, container }: any) => (
-    <div data-testid="grid" data-container={container}>
-      {children}
-    </div>
-  ),
-  IconButton: ({ children, onClick }: any) => (
-    <button onClick={onClick} data-testid="icon-button">
-      {children}
-    </button>
-  ),
-  InputLabel: ({ children }: any) => <label>{children}</label>,
-  MenuItem: ({ children, value }: any) => (
-    <option value={value}>{children}</option>
-  ),
-  Paper: ({ children }: any) => <div data-testid="paper">{children}</div>,
-  Select: ({ children, value }: any) => (
-    <select value={value} disabled>
-      {children}
-    </select>
-  ),
-  TextField: ({ value, placeholder, multiline }: any) => (
-    <input
-      data-testid="text-field"
-      value={value}
-      placeholder={placeholder}
-      data-multiline={multiline}
-      readOnly
-    />
-  ),
-  Typography: ({ children, variant }: any) => (
-    <span data-testid="typography" data-variant={variant}>
-      {children}
-    </span>
-  ),
-}));
+    Button: ({ children, onClick, startIcon }: any) => (
+      <button onClick={onClick}>
+        {startIcon}
+        {children}
+      </button>
+    ),
+    IconButton: ({ children, onClick }: any) => (
+      <button onClick={onClick} data-testid="icon-button">
+        {children}
+      </button>
+    ),
+    Grid: ({ children, container }: any) => (
+      <div data-testid="grid" data-container={container}>
+        {children}
+      </div>
+    ),
+    Typography: ({ children, variant }: any) => (
+      <span data-testid="typography" data-variant={variant}>
+        {children}
+      </span>
+    ),
+    TextField: ({ value, placeholder, multiline }: any) => (
+      <input
+        data-testid="text-field"
+        value={value}
+        placeholder={placeholder}
+        data-multiline={multiline}
+        readOnly
+      />
+    ),
+  };
+});
 
 // Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  ArrowLeft: () => <svg data-testid="icon-arrow-left" />,
-  Bot: () => <svg data-testid="icon-bot" />,
-  CircleCheck: () => <svg data-testid="icon-check" />,
-  MessageSquare: () => <svg data-testid="icon-message" />,
-  Pencil: () => <svg data-testid="icon-pencil" />,
-  PencilLine: () => <svg data-testid="icon-pencil-line" />,
-  Sparkles: () => <svg data-testid="icon-sparkles" />,
-  Info: () => <svg data-testid="icon-info" />,
-  Server: () => <svg data-testid="icon-server" />,
-  Clock: () => <svg data-testid="icon-clock" />,
-  User: () => <svg data-testid="icon-user" />,
-  Shield: () => <svg data-testid="icon-shield" />,
-  Rocket: () => <svg data-testid="icon-rocket" />,
-  CircleAlert: () => <svg data-testid="icon-alert" />,
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    ArrowLeft: () => <svg data-testid="icon-arrow-left" />,
+    Bot: () => <svg data-testid="icon-bot" />,
+    CircleCheck: () => <svg data-testid="icon-check" />,
+    MessageSquare: () => <svg data-testid="icon-message" />,
+    Pencil: () => <svg data-testid="icon-pencil" />,
+    PencilLine: () => <svg data-testid="icon-pencil-line" />,
+    Sparkles: () => <svg data-testid="icon-sparkles" />,
+    Info: () => <svg data-testid="icon-info" />,
+    Server: () => <svg data-testid="icon-server" />,
+    Clock: () => <svg data-testid="icon-clock" />,
+    User: () => <svg data-testid="icon-user" />,
+    Shield: () => <svg data-testid="icon-shield" />,
+    Rocket: () => <svg data-testid="icon-rocket" />,
+    CircleAlert: () => <svg data-testid="icon-alert" />,
+  };
+});
+
+// Mock @asgardeo/react
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    isLoading: false,
+    state: { isAuthenticated: true },
+  }),
 }));
 
 // Mock useLogger hook
-vi.mock("@/hooks/useLogger", () => ({
+vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -138,8 +105,20 @@ vi.mock("@/hooks/useLogger", () => ({
   }),
 }));
 
+// Mock useLoader
+vi.mock("../../context/linear-loader/LoaderContext", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  return {
+    ...actual,
+    useLoader: () => ({
+      showLoader: vi.fn(),
+      hideLoader: vi.fn(),
+    }),
+  };
+});
+
 // Mock the API hook
-vi.mock("@/api/useGetCaseCreationDetails", () => ({
+vi.mock("@api/useGetCaseCreationDetails", () => ({
   useGetCaseCreationDetails: vi.fn(() => ({
     data: {
       projects: ["Production Environment-Main"],
@@ -161,7 +140,7 @@ vi.mock("@/api/useGetCaseCreationDetails", () => ({
 }));
 
 // Mock useGetProjectDetails hook
-vi.mock("@/api/useGetProjectDetails", () => ({
+vi.mock("@api/useGetProjectDetails", () => ({
   default: vi.fn(() => ({
     data: { id: "123", name: "WSO2 Super App", key: "WSA" },
     isLoading: false,

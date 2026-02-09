@@ -17,7 +17,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { CaseDetailsSection } from "@components/support/case-creation-layout/CaseDetailsSection";
+import { CaseDetailsSection } from "@components/support/case-creation-layout/sections/case-details-section/CaseDetailsSection";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -101,6 +101,26 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
 }));
 
+// Mock RichTextEditor as a simple textarea for tests
+vi.mock(
+  "@components/support/case-creation-layout/sections/case-details-section/rich-text-editor/RichTextEditor",
+  () => ({
+    RichTextEditor: ({
+      value,
+      onChange,
+      disabled,
+      "data-testid": dataTestId,
+    }: any) => (
+      <textarea
+        data-testid={dataTestId ?? "rich-text-editor"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+      />
+    ),
+  }),
+);
+
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   PencilLine: ({ onClick }: any) => (
@@ -136,13 +156,15 @@ describe("CaseDetailsSection", () => {
 
     expect(screen.getByText("Case Details")).toBeInTheDocument();
     expect(screen.getByTestId("input-title")).toHaveValue("Old Title");
-    expect(screen.getByTestId("input-description")).toHaveValue("Old Desc");
+    expect(screen.getByTestId("case-description-editor")).toHaveValue(
+      "Old Desc",
+    );
     expect(screen.getByTestId("select")).toHaveValue("Performance");
     expect(screen.getByTestId("complex-select")).toHaveValue("S2");
 
     // All fields disabled by default
     expect(screen.getByTestId("input-title")).toBeDisabled();
-    expect(screen.getByTestId("input-description")).toBeDisabled();
+    expect(screen.getByTestId("case-description-editor")).toBeDisabled();
     expect(screen.getByTestId("select")).toBeDisabled();
     expect(screen.getByTestId("complex-select")).toBeDisabled();
   });
@@ -154,7 +176,7 @@ describe("CaseDetailsSection", () => {
     fireEvent.click(pencilIcon);
 
     expect(screen.getByTestId("input-title")).not.toBeDisabled();
-    expect(screen.getByTestId("input-description")).not.toBeDisabled();
+    expect(screen.getByTestId("case-description-editor")).not.toBeDisabled();
     expect(screen.getByTestId("select")).not.toBeDisabled();
     expect(screen.getByTestId("complex-select")).not.toBeDisabled();
   });
@@ -170,7 +192,7 @@ describe("CaseDetailsSection", () => {
     });
     expect(defaultProps.setTitle).toHaveBeenCalledWith("New Title");
 
-    fireEvent.change(screen.getByTestId("input-description"), {
+    fireEvent.change(screen.getByTestId("case-description-editor"), {
       target: { value: "New Desc" },
     });
     expect(defaultProps.setDescription).toHaveBeenCalledWith("New Desc");

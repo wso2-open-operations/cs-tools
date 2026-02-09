@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AIInfoCard } from "@components/support/case-creation-layout/AIInfoCard";
+import { AIInfoCard } from "@components/support/case-creation-layout/header/AIInfoCard";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
