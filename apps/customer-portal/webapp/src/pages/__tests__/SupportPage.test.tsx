@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import React, { type ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +29,11 @@ vi.mock("react-router", async () => {
     useNavigate: () => vi.fn(),
   };
 });
+
+// Mock @asgardeo/react to avoid ESM buffer import errors in vitest
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({ isLoading: false, isSignedIn: true }),
+}));
 
 // Mock useLogger
 const mockLogger = {
@@ -92,6 +98,18 @@ vi.mock("@wso2/oxygen-ui", () => ({
     </div>
   ),
   Paper: ({ children }: any) => <div data-testid="paper">{children}</div>,
+  alpha: (color: string, opacity: number) => `alpha(${color}, ${opacity})`,
+  useTheme: () => ({
+    palette: {
+      primary: { main: "#0070F3" },
+      secondary: { main: "#71717A" },
+      error: { main: "#EF4444" },
+      warning: { main: "#F59E0B" },
+      info: { main: "#3B82F6" },
+      success: { main: "#10B981" },
+      text: { primary: "#000000", secondary: "#6B7280" },
+    },
+  }),
 }));
 
 // Mock icons
@@ -116,6 +134,48 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 const mockUseGetProjectSupportStats = vi.fn();
 vi.mock("@/api/useGetProjectSupportStats", () => ({
   useGetProjectSupportStats: (id: string) => mockUseGetProjectSupportStats(id),
+}));
+
+// Mock useGetProjectCases (avoids pulling in useAsgardeo)
+vi.mock("@/api/useGetProjectCases", () => ({
+  __esModule: true,
+  default: () => ({ data: { cases: [] }, isLoading: false }),
+}));
+
+// Mock useGetChatHistory
+vi.mock("@/api/useGetChatHistory", () => ({
+  useGetChatHistory: () => ({ data: { chatHistory: [] } }),
+}));
+
+// Mock support overview card components so SupportPage renders without full Oxygen UI tree
+vi.mock(
+  "@components/support/support-overview-cards/SupportOverviewCard",
+  () => ({
+    __esModule: true,
+    default: ({
+      title,
+      children,
+    }: {
+      title: string;
+      children: ReactElement;
+    }) => (
+      <div data-testid="support-overview-card">
+        <span>{title}</span>
+        {children}
+      </div>
+    ),
+  }),
+);
+vi.mock(
+  "@components/support/support-overview-cards/OutstandingCasesList",
+  () => ({
+    __esModule: true,
+    default: () => <div data-testid="outstanding-cases-list">Cases list</div>,
+  }),
+);
+vi.mock("@components/support/support-overview-cards/ChatHistoryList", () => ({
+  __esModule: true,
+  default: () => <div data-testid="chat-history-list">Chat list</div>,
 }));
 
 beforeEach(() => {
@@ -217,5 +277,26 @@ describe("SupportPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Start New Chat")).toBeInTheDocument();
     expect(screen.getAllByTestId("icon-bot")).toHaveLength(2);
+  });
+
+  it("should render Outstanding Cases and Chat History overview cards when data is loaded", () => {
+    mockUseGetProjectSupportStats.mockReturnValue({
+      isLoading: false,
+      data: {
+        totalCases: 10,
+        activeChats: 5,
+        sessionChats: 15,
+        resolvedChats: 20,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SupportPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Outstanding Cases")).toBeInTheDocument();
+    expect(screen.getByText("Chat History")).toBeInTheDocument();
   });
 });
