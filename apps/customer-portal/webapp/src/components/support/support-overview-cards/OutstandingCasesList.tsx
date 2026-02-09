@@ -61,7 +61,9 @@ export default function OutstandingCasesList({
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+    <Box
+      sx={{ display: "flex", flexDirection: "column", gap: 1.5, width: "100%" }}
+    >
       {cases.map((c) => {
         const colorPath = getStatusColor(c.status?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
@@ -105,15 +107,21 @@ export default function OutstandingCasesList({
             />
 
             <Form.CardContent sx={{ p: 0 }}>
-              <Typography
-                variant="body2"
-                color="text.primary"
-                sx={{
-                  overflow: "hidden",
-                }}
-              >
-                {c.title}
-              </Typography>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography
+                  variant="body2"
+                  color="text.primary"
+                  sx={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    display: "-webkit-box",
+                    WebkitLineClamp: 1,
+                    WebkitBoxOrient: "vertical",
+                  }}
+                >
+                  {c.title}
+                </Typography>
+              </Box>
             </Form.CardContent>
 
             <Form.CardActions sx={{ p: 0, justifyContent: "space-between" }}>
