@@ -43,7 +43,6 @@ import {
   resolveColorFromTheme,
 } from "@utils/support";
 import ChatHistorySkeleton from "@/components/support/support-overview-cards/ChatHistorySkeleton";
-import { CardButton } from "@wso2/oxygen-ui/components/Form/CardButton";
 
 export interface ChatHistoryListProps {
   items: ChatHistoryItem[];
