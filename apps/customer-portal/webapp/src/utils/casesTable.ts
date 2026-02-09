@@ -39,8 +39,8 @@ export const getPriorityColor = (
  */
 export const getStatusColor = (label?: string): string => {
   const normalized = label?.toLowerCase() || "";
-  if (normalized.includes("open")) return "primary.main";
-  if (normalized.includes("awaiting")) return "info.main";
+  if (normalized.includes("open")) return "info.main";
+  if (normalized.includes("awaiting")) return "primary.main";
   if (normalized.includes("progress")) return "warning.main";
   if (normalized.includes("resolved") || normalized.includes("closed"))
     return "success.main";
