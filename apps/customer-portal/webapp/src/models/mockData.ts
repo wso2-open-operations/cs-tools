@@ -485,4 +485,409 @@ export const mockCases: CaseListItem[] = [
       label: CASE_STATUS.CLOSED,
     },
   },
+  {
+    id: "case-007",
+    internalId: "CUPRSUB-107",
+    number: "CS0001007",
+    createdOn: "2026-01-18 15:45:00",
+    title: "Database connection timeout",
+    description: "Occasional timeouts when connecting to the primary DB.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+      label: "Incident",
+    },
+    deployment: {
+      id: "deployment-prod",
+      label: "Production",
+    },
+    severity: {
+      id: "11",
+      label: "High (P2)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-008",
+    internalId: "CUPRSUB-108",
+    number: "CS0001008",
+    createdOn: "2026-01-15 10:30:00",
+    title: "Incorrect data in analytics report",
+    description: "Users reporting mismatched totals in the monthly report.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "25db43311b58f010cb6898aebd4bcb09",
+      label: "Bug",
+    },
+    deployment: null,
+    severity: {
+      id: "12",
+      label: "Medium (P3)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-009",
+    internalId: "CUPRSUB-109",
+    number: "CS0001009",
+    createdOn: "2026-01-12 14:20:00",
+    title: "UI glitch in mobile view",
+    description: "Header overlaps content on smaller screens.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "25db43311b58f010cb6898aebd4bcb09",
+      label: "Bug",
+    },
+    deployment: null,
+    severity: {
+      id: "13",
+      label: "Low (P4)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-010",
+    internalId: "CUPRSUB-110",
+    number: "CS0001010",
+    createdOn: "2026-01-10 09:15:00",
+    title: "Request for API quota increase",
+    description: "Need higher rate limits for the staging environment.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    type: {
+      id: "5aeff1201b74c210264c997a234bcb54",
+      label: "Service Request",
+    },
+    deployment: {
+      id: "deployment-staging",
+      label: "Staging",
+    },
+    severity: {
+      id: "12",
+      label: "Medium (P3)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-011",
+    internalId: "CUPRSUB-111",
+    number: "CS0001011",
+    createdOn: "2026-01-08 11:00:00",
+    title: "Broken link in footer",
+    description: "The 'Privacy Policy' link leads to a 404 page.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "25db43311b58f010cb6898aebd4bcb09",
+      label: "Bug",
+    },
+    deployment: null,
+    severity: {
+      id: "13",
+      label: "Low (P4)",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-012",
+    internalId: "CUPRSUB-112",
+    number: "CS0001012",
+    createdOn: "2026-01-05 16:30:00",
+    title: "Performance issue in search indexing",
+    description: "Indexing process takes much longer than expected.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+      label: "Incident",
+    },
+    deployment: null,
+    severity: {
+      id: "11",
+      label: "High (P2)",
+    },
+    status: {
+      id: "10",
+      label: CASE_STATUS.IN_PROGRESS,
+    },
+  },
+  {
+    id: "case-013",
+    internalId: "CUPRSUB-113",
+    number: "CS0001013",
+    createdOn: "2026-01-02 13:00:00",
+    title: "New feature: Export to Excel",
+    description: "Requested ability to export analytics data to CSV/Excel.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "42fb4b311b58f010cb6898aebd4bcb94",
+      label: "New Feature",
+    },
+    deployment: null,
+    severity: {
+      id: "12",
+      label: "Medium (P3)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-014",
+    internalId: "CUPRSUB-114",
+    number: "CS0001014",
+    createdOn: "2025-12-30 10:00:00",
+    title: "Security vulnerability report",
+    description: "Potential XSS found in comments section.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "ab36479047ccf510a0a29cd3846d43ee",
+      label: "Security Report Analysis",
+    },
+    deployment: {
+      id: "deployment-prod",
+      label: "Production",
+    },
+    severity: {
+      id: "14",
+      label: "Catastrophic (P0)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-015",
+    internalId: "CUPRSUB-115",
+    number: "CS0001015",
+    createdOn: "2025-12-28 09:00:00",
+    title: "Email notification failure",
+    description: "Welcome emails not being sent to new signups.",
+    assignedEngineer: null,
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+      label: "Incident",
+    },
+    deployment: null,
+    severity: {
+      id: "11",
+      label: "High (P2)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-016",
+    internalId: "CUPRSUB-116",
+    number: "CS0001016",
+    createdOn: "2025-12-25 14:00:00",
+    title: "Server maintenance notification",
+    description: "Planned maintenance for high-availability cluster.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    type: {
+      id: "3b8b43311b58f010cb6898aebd4bcb8f",
+      label: "Announcement",
+    },
+    deployment: null,
+    severity: {
+      id: "13",
+      label: "Low (P4)",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-017",
+    internalId: "CUPRSUB-117",
+    number: "CS0001017",
+    createdOn: "2025-12-22 11:00:00",
+    title: "Slow load times on dashboard",
+    description: "Dashboards taking more than 5 seconds to fully load.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "e0eb43fd1b18f010cb6898aebd4bcb3c",
+      label: "Improvement",
+    },
+    deployment: null,
+    severity: {
+      id: "12",
+      label: "Medium (P3)",
+    },
+    status: {
+      id: "6",
+      label: CASE_STATUS.SOLUTION_PROPOSED,
+    },
+  },
+  {
+    id: "case-018",
+    internalId: "CUPRSUB-118",
+    number: "CS0001018",
+    createdOn: "2025-12-20 09:30:00",
+    title: "SSL certificate expiry warning",
+    description: "Certificate for staging cluster expires in 15 days.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    type: {
+      id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
+      label: "Task",
+    },
+    deployment: {
+      id: "deployment-staging",
+      label: "Staging",
+    },
+    severity: {
+      id: "11",
+      label: "High (P2)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-019",
+    internalId: "CUPRSUB-119",
+    number: "CS0001019",
+    createdOn: "2025-12-18 15:00:00",
+    title: "Localization issue: Japanese translation",
+    description: "Several buttons have incorrect Japanese text.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "25db43311b58f010cb6898aebd4bcb09",
+      label: "Bug",
+    },
+    deployment: null,
+    severity: {
+      id: "13",
+      label: "Low (P4)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-020",
+    internalId: "CUPRSUB-120",
+    number: "CS0001020",
+    createdOn: "2025-12-15 10:00:00",
+    title: "Unauthorized access attempt alert",
+    description: "Suspicious activity detected on user accounts.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    type: {
+      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+      label: "Incident",
+    },
+    deployment: {
+      id: "deployment-prod",
+      label: "Production",
+    },
+    severity: {
+      id: "10",
+      label: "Critical (P1)",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-021",
+    internalId: "CUPRSUB-121",
+    number: "CS0001021",
+    createdOn: "2025-12-12 14:00:00",
+    title: "System downtime summary",
+    description: "Post-mortem analysis of last week's outage.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    type: {
+      id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
+      label: "Task",
+    },
+    deployment: null,
+    severity: {
+      id: "12",
+      label: "Medium (P3)",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
 ];
