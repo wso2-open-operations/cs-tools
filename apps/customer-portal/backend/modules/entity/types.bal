@@ -167,12 +167,10 @@ public type ReferenceTableItem record {|
 public type CaseSearchFilters record {|
     # List of project IDs to filter
     string[] projectIds?;
-    # List of case types to filter
-    string[] caseTypes?;
-    # State ID
-    int stateId?;
-    # Severity ID
-    int severityId?;
+    # State key
+    int stateKey?;
+    # Severity key
+    int severityKey?;
     # Deployment ID
     string deploymentId?;
 |};

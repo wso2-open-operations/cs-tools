@@ -31,8 +31,6 @@ public type CacheConfig record {|
 
 # Case search filters.
 public type CaseSearchFilters record {|
-    # List of case types to filter
-    string[] caseTypes?;
     # Status ID
     int statusId?;
     # Severity ID
