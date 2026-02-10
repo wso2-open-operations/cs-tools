@@ -88,12 +88,12 @@ public isolated function getCase(string idToken, string caseId) returns CaseResp
     return csEntityClient->/cases/[caseId].get(generateHeaders(idToken));
 }
 
-# Add a new case.
+# Create a new case.
 # 
 # + idToken - ID token for authorization
 # + payload - Case creation payload
 # + return - Case creation response or error
-public isolated function addCase(string idToken, CaseCreatePayload payload) returns CaseCreateResponse|error {
+public isolated function createCase(string idToken, CaseCreatePayload payload) returns CaseCreateResponse|error {
     return csEntityClient->/cases.post(payload, generateHeaders(idToken));
 }
 

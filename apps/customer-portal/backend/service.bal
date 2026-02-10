@@ -634,7 +634,7 @@ service http:InterceptableService / on new http:Listener(9090) {
         return caseResponse;
     }
 
-    # Add a new case.
+    # Create a new case.
     # 
     # + payload - Case creation payload
     # + return - Success message or error response
@@ -650,7 +650,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:CaseCreateResponse|error createdCaseResponse = entity:addCase(userInfo.idToken, payload);
+        entity:CaseCreateResponse|error createdCaseResponse = entity:createCase(userInfo.idToken, payload);
         if createdCaseResponse is error {
             if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
                 log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
