@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import ballerina/constraint;
 
 # [Configurable] OAuth2 entity application configuration.
 type Oauth2Config record {|
@@ -25,24 +26,28 @@ type Oauth2Config record {|
 |};
 
 public type ContactFilter record {|
-    string email?;
+    @constraint:String {
+        minLength: 1,
+        pattern: re `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+    }
+    string? email = ();
 |};
 
 # [Entity] Account
 public type AccountDetail record {|
     # Account ID (Salesforce)
-    string id?;
+    string? id;
     json...;
 |};
 
 # Represent a customer contact.
 public type ContactDetail record {|
     # CRM id
-    string id?;
+    string? id;
     # Email of the customer
-    string email?;
+    string? email;
     # Account (Salesforce) related to the contact
-    AccountDetail account?;
+    AccountDetail? account;
     json...;
 |};
 
