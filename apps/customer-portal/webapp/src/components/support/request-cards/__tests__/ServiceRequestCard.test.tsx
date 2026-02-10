@@ -17,11 +17,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
-import ServiceRequestCard from "../ServiceRequestCard";
+import ServiceRequestCard from "@components/support/request-cards/ServiceRequestCard";
 import { SERVICE_REQUEST_BULLET_ITEMS } from "@constants/supportConstants";
 
 // Mock the child component to isolate the test
-vi.mock("../RequestCard", () => ({
+vi.mock("@components/support/request-cards/RequestCard", () => ({
   default: ({
     title,
     subtitle,
