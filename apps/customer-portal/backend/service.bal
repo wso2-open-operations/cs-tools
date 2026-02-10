@@ -634,6 +634,57 @@ service http:InterceptableService / on new http:Listener(9090) {
         return caseResponse;
     }
 
+    # Add a new case.
+    # 
+    # + payload - Case creation payload
+    # + return - Success message or error response
+    resource function post cases(http:RequestContext ctx, entity:CaseCreatePayload payload)
+        returns http:Created|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CaseCreateResponse|error createdCaseResponse = entity:addCase(userInfo.idToken, payload);
+        if createdCaseResponse is error {
+            if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(createdCaseResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to create a case for project: ${
+                    payload.projectId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to create a case for the selected project. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+
+            string customError = "Failed to create a new case.";
+            log:printError(customError, createdCaseResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Created>{
+            body: createdCaseResponse.case
+        };
+    }
+
     # Search cases for a specific project with filters and pagination.
     #
     # + id - ID of the project

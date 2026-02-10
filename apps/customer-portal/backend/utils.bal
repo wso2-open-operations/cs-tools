@@ -40,7 +40,8 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
     entity:CaseSearchResponse casesResponse = check entity:searchCases(idToken, searchPayload);
     Case[] cases = from entity:Case case in casesResponse.cases
         let entity:ReferenceTableItem? project = case.project
-        let entity:ReferenceTableItem? 'type = case.'type
+        let entity:ReferenceTableItem? deployedProduct = case.deployedProduct
+        let entity:ChoiceListItem? issueType = case.issueType
         let entity:ReferenceTableItem? deployment = case.deployment
         let entity:ReferenceTableItem? assignedEngineer = case.assignedEngineer
         let entity:ChoiceListItem? severity = case.severity
@@ -53,7 +54,8 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
             createdOn: case.createdOn,
             description: case.description,
             project: project != () ? {id: project.id, label: project.name} : (),
-            'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
+            deployedProduct: deployedProduct != () ? {id: deployedProduct.id, label: deployedProduct.name} : (),
+            issueType: issueType != () ? {id: issueType.id.toString(), label: issueType.label} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name} : (),
             assignedEngineer: assignedEngineer != () ? {id: assignedEngineer.id, label: assignedEngineer.name} : (),
             severity: severity != () ? {id: severity.id.toString(), label: severity.label} : (),

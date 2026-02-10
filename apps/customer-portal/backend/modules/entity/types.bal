@@ -116,6 +116,51 @@ public type Subscription record {|
     json...;
 |};
 
+# Payload for creating a case.
+public type CaseCreatePayload record {|
+    # Project ID
+    @constraint:String {minLength: 1}
+    string projectId;
+    # Deployment ID
+    @constraint:String {minLength: 1}
+    string deploymentId;
+    # Product ID
+    @constraint:String {minLength: 1}
+    string productId;
+    # Case title
+    string title;
+    # Case description
+    string description;
+    # Issue type ID
+    int issueTypeKey;
+    # Severity key
+    int severityKey;
+|};
+
+# Response from creating a case.
+public type CaseCreateResponse record {|
+    # Success message
+    string message;
+    # Created case details
+    CreatedCase case;
+|};
+
+# Created case details.
+public type CreatedCase record {|
+    # System ID of the created case
+    string id;
+    # WSO2 internal ID of the case
+    string internalId;
+    # Case number
+    string number;
+    # User who created the case
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Status
+    ChoiceListItem state;
+|};
+
 # Base case.
 public type Case record {|
     # Case ID
@@ -134,10 +179,12 @@ public type Case record {|
     ReferenceTableItem? assignedEngineer;
     # Associated project
     ReferenceTableItem? project;
-    # Type of the case
-    ReferenceTableItem? 'type;
     # Deployment information
     ReferenceTableItem? deployment;
+    # Deployed product information
+    ReferenceTableItem? deployedProduct;
+    # issueType of the case
+    ChoiceListItem? issueType;
     # Status information
     ChoiceListItem? state;
     # Severity information
