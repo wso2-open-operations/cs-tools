@@ -188,8 +188,8 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
 #
 # + response - Deployments response from the entity service
 # + return - Mapped deployments response
-public isolated function mapDeployments(entity:DeploymentsResponse response) returns DeploymentsResponse {
-    Deployment[] deployments = from entity:Deployment deployment in response.deployments
+public isolated function mapDeployments(entity:DeploymentsResponse response) returns Deployment[] {
+    return from entity:Deployment deployment in response.deployments
         let entity:ReferenceTableItem? project = deployment.project
         let entity:ChoiceListItem? 'type = deployment.'type
         select {
@@ -202,7 +202,6 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
             project: project != () ? {id: project.id, label: project.name} : (),
             'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
         };
-    return {deployments};
 }
 
 # Map deployed products response to the desired structure.
@@ -212,16 +211,15 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
 public isolated function mapDeployedProducts(entity:DeployedProductsResponse response)
     returns DeployedProduct[] {
 
-    DeployedProduct[] deployedProducts = from entity:DeployedProduct product in response.products
-        let entity:ReferenceTableItem? productModel = product.productModel
+    return from entity:DeployedProduct product in response.deployedProducts
+        let entity:ReferenceTableItem? associatedProduct = product.product
         let entity:ReferenceTableItem? deployment = product.deployment
         select {
             id: product.id,
             createdOn: product.createdOn,
             updatedOn: product.updatedOn,
             description: product.description,
-            productModel: productModel != () ? {id: productModel.id, label: productModel.name} : (),
+            product: associatedProduct != () ? {id: associatedProduct.id, label: associatedProduct.name} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name} : ()
         };
-    return deployedProducts;
 }

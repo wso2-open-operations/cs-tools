@@ -407,15 +407,15 @@ public type DeployedProduct record {|
     string? description;
     # Associated deployment
     ReferenceTableItem? deployment;
-    # Product model information
-    ReferenceTableItem? productModel;
+    # Product information
+    ReferenceTableItem? product;
     json...;
 |};
 
 # Deployed products response.
 public type DeployedProductsResponse record {|
     # List of deployed products
-    DeployedProduct[] products;
+    DeployedProduct[] deployedProducts;
 |};
 
 # Deployment data.

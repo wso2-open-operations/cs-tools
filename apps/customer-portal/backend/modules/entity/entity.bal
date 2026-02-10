@@ -133,7 +133,7 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
 public isolated function getDeployedProducts(string idToken, string deploymentId)
     returns DeployedProductsResponse|error {
 
-    return csEntityClient->/deployed_products/search.post({deploymentId}, generateHeaders(idToken));
+    return csEntityClient->/deployed\-products/search.post({deploymentId}, generateHeaders(idToken));
 }
 
 # Get deployments of a project.

@@ -248,7 +248,7 @@ public type AttachmentsResponse record {|
     *entity:Pagination;
 |};
 
-# Deployment data.
+# Deployment information.
 public type Deployment record {|
     # ID
     string id;
@@ -268,12 +268,6 @@ public type Deployment record {|
     ReferenceItem? 'type;
 |};
 
-# Deployments response.
-public type DeploymentsResponse record {|
-    # List of deployments
-    Deployment[] deployments;
-|};
-
 # Deployed product data.
 public type DeployedProduct record {|
     # ID
@@ -284,14 +278,8 @@ public type DeployedProduct record {|
     string updatedOn;
     # Description
     string? description;
-    # Associated product model
-    ReferenceItem? productModel;
+    # Associated product
+    ReferenceItem? product;
     # Deployment
     ReferenceItem? deployment;
-|};
-
-# Deployed product response.
-public type DeployedProductsResponse record {|
-    # List of deployed products
-    DeployedProduct[] products;
 |};
