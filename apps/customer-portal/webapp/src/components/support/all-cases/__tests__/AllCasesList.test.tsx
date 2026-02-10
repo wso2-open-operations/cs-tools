@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import AllCasesList from "@/components/support/all-cases/AllCasesList";
+import AllCasesList from "@components/support/all-cases/AllCasesList";
 import { mockCases } from "@models/mockData";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 

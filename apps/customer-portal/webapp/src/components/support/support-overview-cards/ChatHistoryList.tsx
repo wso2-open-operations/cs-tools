@@ -42,7 +42,7 @@ import {
   getChatStatusColor,
   resolveColorFromTheme,
 } from "@utils/support";
-import ChatHistorySkeleton from "@/components/support/support-overview-cards/ChatHistorySkeleton";
+import ChatHistorySkeleton from "@components/support/support-overview-cards/ChatHistorySkeleton";
 
 export interface ChatHistoryListProps {
   items: ChatHistoryItem[];

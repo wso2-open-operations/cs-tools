@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import AllCasesFilters from "@/components/support/all-cases/AllCasesFilters";
+import AllCasesFilters from "@components/support/all-cases/AllCasesFilters";
 import { mockCaseMetadata } from "@models/mockData";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 

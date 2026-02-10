@@ -31,7 +31,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 import type { CaseMetadataResponse } from "@models/responses";
-import AllCasesFilters from "@/components/support/all-cases/AllCasesFilters";
+import AllCasesFilters from "@components/support/all-cases/AllCasesFilters";
 
 export interface AllCasesSearchBarProps {
   searchTerm: string;

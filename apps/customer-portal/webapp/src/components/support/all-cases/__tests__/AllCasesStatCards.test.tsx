@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import AllCasesStatCards from "@/components/support/all-cases/AllCasesStatCards";
+import AllCasesStatCards from "@components/support/all-cases/AllCasesStatCards";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 // Mock the hook

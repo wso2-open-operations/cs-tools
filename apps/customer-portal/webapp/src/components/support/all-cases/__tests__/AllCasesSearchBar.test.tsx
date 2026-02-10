@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import AllCasesSearchBar from "@/components/support/all-cases/AllCasesSearchBar";
+import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 // Mock AllCasesFilters to simplify

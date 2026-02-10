@@ -32,7 +32,7 @@ import {
   resolveColorFromTheme,
   getStatusIcon,
 } from "@utils/support";
-import AllCasesListSkeleton from "@/components/support/all-cases/AllCasesListSkeleton";
+import AllCasesListSkeleton from "@components/support/all-cases/AllCasesListSkeleton";
 
 export interface AllCasesListProps {
   cases: CaseListItem[];
