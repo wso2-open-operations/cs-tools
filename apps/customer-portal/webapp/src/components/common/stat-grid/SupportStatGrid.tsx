@@ -76,7 +76,12 @@ export default function SupportStatGrid({
               value={
                 isLoading ? (
                   ((
-                    <Skeleton variant="rounded" width={60} height={24} />
+                    <Skeleton
+                      data-testid="Skeleton"
+                      variant="rounded"
+                      width={60}
+                      height={24}
+                    />
                   ) as any)
                 ) : isError ? (
                   <ErrorIndicator entityName={entityName} />
