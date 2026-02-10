@@ -395,22 +395,18 @@ public type AttachmentsResponse record {|
     *Pagination;
 |};
 
-# Product data.
-public type Product record {|
+# Deployed product data.
+public type DeployedProduct record {|
     # ID
     string id;
+    # Name
+    string name;
     # Created date and time
     string createdOn;
     # Updated date and time
     string updatedOn;
     # Description
     string? description;
-    # Number of cores
-    string? cores;
-    # Transactions per second
-    string? tps;
-    # Update level
-    string? updateLevel;
     # Associated deployment
     ReferenceTableItem? deployment;
     # Product model information
@@ -418,13 +414,10 @@ public type Product record {|
     json...;
 |};
 
-# Products response.
-public type ProductsResponse record {|
-    # List of products
-    Product[] products;
-    # Total records count
-    int totalRecords;
-    *Pagination;
+# Deployed products response.
+public type DeployedProductsResponse record {|
+    # List of deployed products
+    DeployedProduct[] products;
 |};
 
 # Deployment data.

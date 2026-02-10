@@ -303,7 +303,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Get deployments of a project by ID.
-    # 
+    #
     # + id - ID of the project
     # + return - Deployments response or error response
     resource function get projects/[string id]/deployments(http:RequestContext ctx)
@@ -345,17 +345,17 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
-        return getDeployments(deploymentsResponse);
+        return mapDeployments(deploymentsResponse);
     }
 
     # Get products of a deployment by project ID and deployment ID.
-    # 
+    #
     # + projectId - ID of the project
     # + deploymentId - ID of the deployment
     # + return - Products response or error response
-    resource function get projects/[string projectId]/deployments/[string deploymentId](http:RequestContext ctx)
-        returns entity:ProductsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
-    
+    resource function get projects/[string projectId]/deployments/[string deploymentId]/products(http:RequestContext
+            ctx) returns DeployedProductsResponse|http:BadRequest|http:Forbidden|http:InternalServerError {
+
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -373,7 +373,8 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:ProductsResponse|error productsResponse = entity:getProducts(userInfo.idToken, deploymentId);
+        entity:DeployedProductsResponse|error productsResponse =
+            entity:getDeployedProducts(userInfo.idToken, deploymentId);
         if productsResponse is error {
             if getStatusCode(productsResponse) == http:STATUS_FORBIDDEN {
                 logForbiddenProjectAccess(projectId, userInfo.userId);
@@ -392,7 +393,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
-        return productsResponse;
+        return mapDeployedProducts(productsResponse);
     }
 
     # Get overall project statistics by ID.
@@ -869,7 +870,7 @@ service http:InterceptableService / on new http:Listener(9090) {
                     }
                 };
             }
-            
+
             if getStatusCode(caseDetails) == http:STATUS_FORBIDDEN {
                 logForbiddenCaseAccess(id, userInfo.userId);
                 return <http:Forbidden>{

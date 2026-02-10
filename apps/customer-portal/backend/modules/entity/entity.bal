@@ -130,8 +130,10 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
 # + idToken - ID token for authorization
 # + deploymentId - ID of the deployment
 # + return - Products response or error
-public isolated function getProducts(string idToken, string deploymentId) returns ProductsResponse|error {
-    return csEntityClient->/products/search.get(generateHeaders(idToken), deploymentId = deploymentId);
+public isolated function getDeployedProducts(string idToken, string deploymentId)
+    returns DeployedProductsResponse|error {
+
+    return csEntityClient->/deployed\-products/search.post({deploymentId}, generateHeaders(idToken));
 }
 
 # Get deployments of a project.
@@ -140,5 +142,5 @@ public isolated function getProducts(string idToken, string deploymentId) return
 # + projectId - ID of the project
 # + return - Deployments response or error
 public isolated function getDeployments(string idToken, string projectId) returns DeploymentsResponse|error {
-    return csEntityClient->/deployments/search.post(generateHeaders(idToken), projectId = projectId);
+    return csEntityClient->/deployments/search.post({filters: {projectIds: [projectId]}}, generateHeaders(idToken));
 }

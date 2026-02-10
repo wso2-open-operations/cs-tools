@@ -184,7 +184,11 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
     };
 }
 
-public isolated function getDeployments(entity:DeploymentsResponse response) returns DeploymentsResponse {
+# Map deployments response to the desired structure.
+#
+# + response - Deployments response from the entity service
+# + return - Mapped deployments response
+public isolated function mapDeployments(entity:DeploymentsResponse response) returns DeploymentsResponse {
     Deployment[] deployments = from entity:Deployment deployment in response.deployments
         let entity:ReferenceTableItem? project = deployment.project
         let entity:ChoiceListItem? 'type = deployment.'type
@@ -199,4 +203,26 @@ public isolated function getDeployments(entity:DeploymentsResponse response) ret
             'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
         };
     return {deployments};
+}
+
+# Map deployed products response to the desired structure.
+# 
+# + response - Deployed products response from the entity service
+# + return - Mapped deployed products response
+public isolated function mapDeployedProducts(entity:DeployedProductsResponse response)
+    returns DeployedProductsResponse {
+
+    DeployedProduct[] deployedProducts = from entity:DeployedProduct product in response.products
+        let entity:ReferenceTableItem? productModel = product.productModel
+        let entity:ReferenceTableItem? deployment = product.deployment
+        select {
+            id: product.id,
+            name: product.name,
+            createdOn: product.createdOn,
+            updatedOn: product.updatedOn,
+            description: product.description,
+            productModel: productModel != () ? {id: productModel.id, label: productModel.name} : (),
+            deployment: deployment != () ? {id: deployment.id.toString(), label: deployment.name} : ()
+        };
+    return {products: deployedProducts};
 }

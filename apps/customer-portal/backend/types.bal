@@ -273,3 +273,27 @@ public type DeploymentsResponse record {|
     # List of deployments
     Deployment[] deployments;
 |};
+
+# Deployed product data.
+public type DeployedProduct record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # Associated product model
+    ReferenceItem? productModel;
+    # Deployment
+    ReferenceItem? deployment;
+|};
+
+# Deployed product response.
+public type DeployedProductsResponse record {|
+    # List of deployed products
+    DeployedProduct[] products;
+|};
