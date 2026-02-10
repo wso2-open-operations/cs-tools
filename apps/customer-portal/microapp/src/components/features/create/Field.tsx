@@ -18,8 +18,14 @@ interface SelectFieldProps {
 }
 
 export function SelectField({ name, label, options, value = 0, startAdornment, onChange }: SelectFieldProps) {
-  const values = options.map((option) => option.value);
-  if (new Set(values).size !== values.length) throw new Error("Select option values must be unique");
+  const seen = new Set();
+  options = options.filter((option) => {
+    if (seen.has(option.value)) return false;
+    else {
+      seen.add(option.value);
+      return true;
+    }
+  });
 
   return (
     <FormControl component={Stack} gap={1} fullWidth>
