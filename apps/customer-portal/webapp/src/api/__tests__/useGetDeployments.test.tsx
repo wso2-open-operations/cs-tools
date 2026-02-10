@@ -15,7 +15,7 @@
 // under the License.
 
 import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useGetDeployments } from "@api/useGetDeployments";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -64,10 +64,12 @@ describe("useGetDeployments", () => {
         },
       },
     });
-    mockLogger.debug.mockClear();
-    mockLogger.error.mockClear();
     mockIsMockEnabled = true;
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -129,5 +131,57 @@ describe("useGetDeployments", () => {
     expect(result.current.data).toEqual(mockResponse);
 
     window.config = originalConfig;
+  });
+
+  it("should throw error when CUSTOMER_PORTAL_BACKEND_BASE_URL is missing", async () => {
+    mockIsMockEnabled = false;
+    const originalConfig = window.config;
+    window.config = {} as typeof window.config;
+
+    const { result } = renderHook(() => useGetDeployments("project-123"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe(
+      "CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured",
+    );
+
+    window.config = originalConfig;
+  });
+
+  it("should throw error when API response is not ok", async () => {
+    mockIsMockEnabled = false;
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: "Internal Server Error",
+      status: 500,
+    } as Response);
+
+    const originalConfig = window.config;
+    window.config = {
+      CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
+    } as typeof window.config;
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { result } = renderHook(() => useGetDeployments("project-123"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe(
+      "Error fetching deployments: Internal Server Error",
+    );
+
+    window.config = originalConfig;
+  });
+
+  it("should not be enabled when projectId is empty", () => {
+    const { result } = renderHook(() => useGetDeployments(""), {
+      wrapper,
+    });
+
+    expect(result.current.isPending).toBe(true);
+    expect(result.current.fetchStatus).toBe("idle");
   });
 });
