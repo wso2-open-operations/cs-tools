@@ -21,32 +21,30 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
 
   return (
     <WidgetBox title={title}>
-      <Box>
-        <Box position="relative" width={200} height={200}>
-          <PieChart
-            height={200}
-            data={data}
-            colors={data.map((item) => item.color)}
-            pies={[{ nameKey: "label", dataKey: "value", innerRadius: "50%", paddingAngle: 5 }]}
-            margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-            legend={{ show: false }}
-            tooltip={{ show: false }}
-          />
-          <Typography
-            variant="h5"
-            sx={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              height: "100%",
-              width: "100%",
-              display: "grid",
-              placeItems: "center",
-            }}
-          >
-            {total}
-          </Typography>
-        </Box>
+      <Box position="relative" display="flex" alignItems="center" width="100%">
+        <PieChart
+          height={150}
+          data={data}
+          colors={data.map((item) => item.color)}
+          pies={[{ nameKey: "label", dataKey: "value", innerRadius: "50%", paddingAngle: 5 }]}
+          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+          legend={{ show: false }}
+          tooltip={{ show: false }}
+        />
+        <Typography
+          variant="h5"
+          sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            height: "100%",
+            width: "100%",
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          {total}
+        </Typography>
       </Box>
       <Stack gap={0.5} mt={1}>
         {data.map((item, index) => (
