@@ -38,20 +38,20 @@ public type ContactFilter record {|
 |};
 
 # [Entity] Account
-public type AccountDetail record {|
+public type Account record {|
     # Account ID (Salesforce)
     string? id;
     json...;
 |};
 
 # Represent a customer contact.
-public type ContactDetail record {|
+public type Contact record {|
     # CRM id
     string? id;
     # Email of the customer
     string? email;
     # Account (Salesforce) related to the contact
-    AccountDetail? account;
+    Account? account;
     json...;
 |};
 

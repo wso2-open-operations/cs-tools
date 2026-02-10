@@ -18,6 +18,6 @@
 # #
 # + filter - Contact filters
 # + return - Contact details or error 
-public isolated function getContactDetails(ContactFilter? filter) returns ContactDetail[]|error{
+public isolated function getContactDetails(ContactFilter? filter) returns Contact[]|error{
     return httpClient->/contacts/search.post(filter);
 }

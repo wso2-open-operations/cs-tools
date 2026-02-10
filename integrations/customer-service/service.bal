@@ -46,7 +46,7 @@ service / on new http:Listener(9090) {
     # + filter - Contact filters
     # + return - List of contacts or http:InternalServerError
     resource function post contacts/search(entity:ContactFilter filter) returns http:InternalServerError|ContactDetail[] {
-        entity:ContactDetail[]|error customerProfiles = entity:getContactDetails(filter);
+        entity:Contact[]|error customerProfiles = entity:getContactDetails(filter);
         if customerProfiles is error {
             log:printError(ERR_MSG_GET_CONTACTS, customerProfiles);
             return <http:InternalServerError>{
