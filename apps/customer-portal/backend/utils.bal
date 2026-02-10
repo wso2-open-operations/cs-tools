@@ -217,7 +217,6 @@ public isolated function mapDeployedProducts(entity:DeployedProductsResponse res
         let entity:ReferenceTableItem? deployment = product.deployment
         select {
             id: product.id,
-            name: product.name,
             createdOn: product.createdOn,
             updatedOn: product.updatedOn,
             description: product.description,

@@ -399,8 +399,6 @@ public type AttachmentsResponse record {|
 public type DeployedProduct record {|
     # ID
     string id;
-    # Name
-    string name;
     # Created date and time
     string createdOn;
     # Updated date and time
