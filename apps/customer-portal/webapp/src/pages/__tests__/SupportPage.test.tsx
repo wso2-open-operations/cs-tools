@@ -76,7 +76,9 @@ vi.mock("@wso2/oxygen-ui", () => ({
     blue: { 500: "#2196F3", 700: "#1D4ED8" },
     green: { 500: "#4CAF50" },
     purple: { 500: "#9C27B0", 400: "#A78BFA" },
+    orange: { 600: "#FB8C00" },
   },
+  alpha: (color: string, opacity: number) => `${color}-${opacity}`,
   Divider: () => <hr />,
   Button: ({ children }: any) => <button>{children}</button>,
   Card: ({ children, sx }: any) => <div style={sx}>{children}</div>,
@@ -124,6 +126,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
 // Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Bot: () => <svg data-testid="icon-bot" />,
+  ArrowRight: () => <svg data-testid="icon-arrow-right" />,
   CircleAlert: () => <svg data-testid="icon-alert" />,
   CircleQuestionMark: () => <svg data-testid="icon-question-mark" />,
   CircleCheck: () => <svg data-testid="icon-check" />,
@@ -208,7 +211,7 @@ describe("SupportPage", () => {
 
     const skeletons = screen.getAllByTestId("skeleton");
     expect(skeletons).toHaveLength(4);
-    expect(screen.getByTestId("icon-file-text")).toBeInTheDocument();
+    expect(screen.getAllByTestId("icon-file-text")).toHaveLength(2);
     expect(screen.getAllByTestId("icon-bot")).toHaveLength(2);
     expect(mockLogger.debug).not.toHaveBeenCalled();
   });

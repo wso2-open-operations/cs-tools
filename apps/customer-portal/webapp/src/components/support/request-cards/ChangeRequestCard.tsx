@@ -17,36 +17,31 @@
 import { useNavigate } from "react-router";
 import type { JSX } from "react";
 import { colors } from "@wso2/oxygen-ui";
-import { Server } from "@wso2/oxygen-ui-icons-react";
+import { CalendarDays } from "@wso2/oxygen-ui-icons-react";
 import RequestCard from "@components/support/request-cards/RequestCard";
-import { SERVICE_REQUEST_BULLET_ITEMS } from "@constants/supportConstants";
+import { CHANGE_REQUEST_BULLET_ITEMS } from "@constants/supportConstants";
 
 /**
- * Service Requests card for the Support page.
- * Renders overview and CTAs for service request management.
+ * Change Requests card for the Support page.
+ * Renders overview and CTA for change request management.
  *
- * @returns {JSX.Element} The Service Request card.
+ * @returns {JSX.Element} The Change Request card.
  */
-export default function ServiceRequestCard(): JSX.Element {
+export default function ChangeRequestCard(): JSX.Element {
   const navigate = useNavigate();
 
   return (
     <RequestCard
-      title="Service Requests"
-      subtitle="Manage deployment operations"
-      icon={Server}
-      paletteKey="info"
-      accentColor={colors.blue[600]}
-      infoBoxTitle="What are Service Requests?"
-      infoBoxDescription="Request operational changes to your managed cloud deployment:"
-      bulletItems={SERVICE_REQUEST_BULLET_ITEMS}
-      secondaryButtonLabel="View All Service Requests"
+      title="Change Requests"
+      subtitle="Track infrastructure changes"
+      icon={CalendarDays}
+      paletteKey="secondary"
+      accentColor={colors.purple[600]}
+      infoBoxTitle="What are Change Requests?"
+      infoBoxDescription="Structured workflow for planned infrastructure changes:"
+      bulletItems={CHANGE_REQUEST_BULLET_ITEMS}
+      secondaryButtonLabel="View All Change Requests"
       onSecondaryClick={() => navigate("../dashboard")}
-      primaryButton={{
-        label: "New Service Request",
-        onClick: () => navigate("../create-case"),
-        icon: Server,
-      }}
     />
   );
 }
