@@ -21,6 +21,7 @@ import type {
   UserDetails,
   Deployment,
   ChatHistoryResponse,
+  CaseMetadataResponse,
 } from "@models/responses";
 import {
   PROJECT_TYPE,
@@ -273,58 +274,35 @@ export const mockCaseCreationMetadata: CaseCreationMetadata = {
 };
 
 // Full mock metadata based on real response structure
-export const mockCaseMetadata = {
+export const mockCaseMetadata: CaseMetadataResponse = {
   statuses: [
     { id: "1", label: "Open" },
-    { id: "1001", label: "In Progress" },
-    { id: "1002", label: "Waiting On Client" },
     { id: "10", label: "Work In Progress" },
     { id: "18", label: "Awaiting Info" },
     { id: "1003", label: "Waiting On WSO2" },
     { id: "6", label: "Solution Proposed" },
     { id: "3", label: "Closed" },
     { id: "1006", label: "Reopened" },
-    { id: "7", label: "Cancelled" },
-    { id: "1007", label: "Deferred" },
-    { id: "1009", label: "Change Scheduled" },
   ],
   severities: [
-    { id: "13", label: "Low (P4)" },
-    { id: "12", label: "Medium (P3)" },
-    { id: "11", label: "High (P2)" },
-    { id: "10", label: "Critical (P1)" },
-    { id: "14", label: "Catastrophic (P0)" },
+    { id: "60", label: "S0" },
+    { id: "61", label: "S1" },
+    { id: "62", label: "S2" },
+    { id: "63", label: "S3" },
+    { id: "64", label: "S4" },
   ],
-  caseTypes: [
-    { id: "0d5b8fbd1b18f010cb6898aebd4bcba5", label: "Query" },
-    { id: "25db43311b58f010cb6898aebd4bcb09", label: "Bug" },
-    { id: "262c4e2d1bd9b010d64e64a2604bcb56", label: "Sub-Task" },
-    { id: "3b8b43311b58f010cb6898aebd4bcb8f", label: "Announcement" },
-    { id: "3f5b47bd1b18f010cb6898aebd4bcbc2", label: "Admin Task" },
-    { id: "42e93b6a1bfdf0106a67caa1604bcb3a", label: "Story" },
-    { id: "42fb4b311b58f010cb6898aebd4bcb94", label: "New Feature" },
-    { id: "4b41cbf81bbcb410cb6898aebd4bcb84", label: "Change Requests" },
-    { id: "5aeff1201b74c210264c997a234bcb54", label: "Service Request" },
-    { id: "80810ff81bbcb410cb6898aebd4bcb3c", label: "Hosting Query" },
-    { id: "83ed57221b7df0106a67caa1604bcb18", label: "Cloud Incident" },
-    { id: "8d4b87bd1b18f010cb6898aebd4bcb59", label: "Incident" },
-    { id: "8f8fc2c41b0bd550d64e64a2604bcb38", label: "Engagement" },
-    { id: "a0f93b2a1bfdf0106a67caa1604bcbc9", label: "NFR" },
-    {
-      id: "ab36479047ccf510a0a29cd3846d43ee",
-      label: "Security Report Analysis",
-    },
-    { id: "b9bc97ee1b3df0106a67caa1604bcb7f", label: "Cloud Query" },
-    { id: "bfa1473c1bbcb410cb6898aebd4bcb52", label: "Hosting" },
-    { id: "e0eb43fd1b18f010cb6898aebd4bcb3c", label: "Improvement" },
-    { id: "e30dbe1b1b319950d64e64a2604bcb75", label: "Test" },
-    { id: "f46103f81bbcb410cb6898aebd4bcb27", label: "Hosting Task" },
+  issueTypes: [
+    { id: "6", label: "Error" },
+    { id: "2", label: "Partial Outage" },
+    { id: "3", label: "Performance Degradation" },
+    { id: "4", label: "Question" },
+    { id: "5", label: "Security or Compliance" },
+    { id: "1", label: "Total Outage" },
   ],
   deployments: [
-    { id: "deployment-dev", label: "Development" },
-    { id: "deployment-prod", label: "Production" },
-    { id: "deployment-qa", label: "QA" },
-    { id: "deployment-staging", label: "Staging" },
+    { id: "1", label: "Development" },
+    { id: "2", label: "Production" },
+    { id: "3", label: "Non-Production" },
   ],
 };
 
@@ -343,17 +321,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "type-incident",
-      label: "Incident",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
-      id: "10",
-      label: "Critical (P1)",
+      id: "60",
+      label: "S0",
     },
     status: {
       id: "1",
@@ -372,10 +351,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "11",
@@ -398,10 +378,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
+    issueType: {
       id: "0d5b8fbd1b18f010cb6898aebd4bcba5",
       label: "Query",
     },
+    deployedProduct: null,
     deployment: null,
     severity: null,
     status: {
@@ -421,10 +402,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "42fb4b311b58f010cb6898aebd4bcb94",
       label: "New Feature",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "12",
@@ -448,12 +430,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
+      id: "4",
       label: "Staging",
     },
     severity: {
@@ -477,10 +460,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
+    issueType: {
       id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
       label: "Task",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "13",
@@ -503,12 +487,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
@@ -532,10 +517,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
+    issueType: {
       id: "25db43311b58f010cb6898aebd4bcb09",
       label: "Bug",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "12",
@@ -558,10 +544,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "25db43311b58f010cb6898aebd4bcb09",
       label: "Bug",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "13",
@@ -584,12 +571,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
+    issueType: {
       id: "5aeff1201b74c210264c997a234bcb54",
       label: "Service Request",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
+      id: "4",
       label: "Staging",
     },
     severity: {
@@ -613,10 +601,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "25db43311b58f010cb6898aebd4bcb09",
       label: "Bug",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "13",
@@ -639,10 +628,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "11",
@@ -665,10 +655,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
+    issueType: {
       id: "42fb4b311b58f010cb6898aebd4bcb94",
       label: "New Feature",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "12",
@@ -691,12 +682,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "ab36479047ccf510a0a29cd3846d43ee",
       label: "Security Report Analysis",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
@@ -720,10 +712,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "11",
@@ -746,10 +739,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
+    issueType: {
       id: "3b8b43311b58f010cb6898aebd4bcb8f",
       label: "Announcement",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "13",
@@ -772,10 +766,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "e0eb43fd1b18f010cb6898aebd4bcb3c",
       label: "Improvement",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "12",
@@ -798,12 +793,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
+    issueType: {
       id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
       label: "Task",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
+      id: "4",
       label: "Staging",
     },
     severity: {
@@ -827,10 +823,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
+    issueType: {
       id: "25db43311b58f010cb6898aebd4bcb09",
       label: "Bug",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "13",
@@ -853,12 +850,13 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
+    issueType: {
+      id: "3",
       label: "Incident",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
@@ -882,10 +880,11 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
+    issueType: {
       id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
       label: "Task",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
       id: "12",
