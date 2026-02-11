@@ -15,20 +15,17 @@
 // under the License.
 
 /**
- * Get priority color based on label.
- * @param label - Priority label
- * @returns Color string
+ * Returns the Oxygen ui color path for a given severity label.
+ * @param label - The severity label (e.g., S0, S1, S2, S3, S4).
+ * @returns The Oxygen ui color path (e.g., "error.main").
  */
-export const getPriorityColor = (
-  label?: string,
-): "error" | "warning" | "info" | "success" | "default" => {
-  const normalized = label?.toLowerCase() || "";
-  if (normalized.includes("critical") || normalized.includes("s1"))
-    return "error";
-  if (normalized.includes("high") || normalized.includes("s2"))
-    return "warning";
-  if (normalized.includes("medium") || normalized.includes("s3")) return "info";
-  if (normalized.includes("low") || normalized.includes("s4")) return "success";
+export const getSeverityColor = (label?: string): string => {
+  const normalized = label?.toUpperCase() || "";
+  if (normalized === "S0") return "error.main";
+  if (normalized === "S1") return "warning.main";
+  if (normalized === "S2") return "text.disabled";
+  if (normalized === "S3") return "info.main";
+  if (normalized === "S4") return "success.main";
   return "default";
 };
 
