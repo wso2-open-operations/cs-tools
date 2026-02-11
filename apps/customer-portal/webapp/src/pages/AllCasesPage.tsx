@@ -52,20 +52,19 @@ export default function AllCasesPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  // Fetch stats
+  // Fetch stats (runs in parallel with cases when projectId and auth are ready)
   const {
     data: stats,
-    isFetching: isStatsLoading,
+    isLoading: isStatsQueryLoading,
     isError: isStatsError,
   } = useGetProjectCasesStats(projectId || "");
 
   // Fetch filter metadata
   const { data: filterMetadata } = useGetCasesFilters(projectId || "");
 
-  // Fetch all cases using infinite query
+  // Fetch all cases using infinite query (runs in parallel with stats when projectId and auth are ready)
   const {
     data,
-    isFetching: isCasesFetching,
     isLoading: isCasesQueryLoading,
     hasNextPage,
     fetchNextPage,
@@ -75,6 +74,14 @@ export default function AllCasesPage(): JSX.Element {
       order: "desc",
     },
   });
+
+  // Show skeletons until each section has a response (covers query disabled by auth + initial fetch).
+  const hasStatsResponse = stats !== undefined;
+  const hasCasesResponse = data !== undefined;
+  const isStatsAreaLoading =
+    isStatsQueryLoading || (!!projectId && !hasStatsResponse);
+  const isCasesAreaLoading =
+    isCasesQueryLoading || (!!projectId && !hasCasesResponse);
 
   // Background-load all remaining pages so search/filters work on full dataset.
   useEffect(() => {
@@ -211,7 +218,7 @@ export default function AllCasesPage(): JSX.Element {
 
       {/* Stat cards */}
       <AllCasesStatCards
-        isLoading={isStatsLoading}
+        isLoading={isStatsAreaLoading}
         isError={isStatsError}
         stats={stats}
       />
@@ -262,7 +269,7 @@ export default function AllCasesPage(): JSX.Element {
       </Box>
 
       {/* Cases list */}
-      <AllCasesList cases={paginatedCases} isLoading={isCasesQueryLoading} />
+      <AllCasesList cases={paginatedCases} isLoading={isCasesAreaLoading} />
 
       {/* Pagination */}
       {totalPages > 1 && (
