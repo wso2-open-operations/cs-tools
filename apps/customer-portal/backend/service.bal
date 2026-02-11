@@ -832,7 +832,7 @@ service http:InterceptableService / on new http:Listener(9090) {
 
     # Classify the case using AI chat agent.
     #
-    # + payload - case classification payload
+    # + payload - Case classification payload
     # + return - Case classification response or an error
     resource function post cases/classify(http:RequestContext ctx, CaseClassificationPayload payload)
         returns ai_chat_agent:CaseClassificationResponse|http:InternalServerError {
