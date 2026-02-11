@@ -26,10 +26,7 @@ import {
   type JSX,
 } from "react";
 
-import {
-  ERROR_BANNER_PROGRESS_INTERVAL_MS,
-  ERROR_BANNER_TIMEOUT_MS,
-} from "@constants/errorBannerConstants";
+import { ERROR_BANNER_TIMEOUT_MS } from "@constants/errorBannerConstants";
 
 interface ErrorBannerContextType {
   /** Show the error banner with "Error loading {apiName}". */
@@ -55,12 +52,10 @@ export function ErrorBannerProvider({
   children,
 }: ErrorBannerProviderProps): JSX.Element {
   const [apiName, setApiName] = useState<string | null>(null);
-  const [progress, setProgress] = useState(100);
   const [key, setKey] = useState(0);
 
   const showError = useCallback((name: string) => {
     setApiName(name);
-    setProgress(100);
     setKey((prev) => prev + 1);
   }, []);
 
@@ -71,22 +66,12 @@ export function ErrorBannerProvider({
   useEffect(() => {
     if (!apiName) return;
 
-    const step =
-      (ERROR_BANNER_PROGRESS_INTERVAL_MS / ERROR_BANNER_TIMEOUT_MS) * 100;
-
-    const intervalId = setInterval(() => {
-      setProgress((prev) => {
-        const next = Math.max(0, prev - step);
-        if (next <= 0) {
-          dismiss();
-          return 0;
-        }
-        return next;
-      });
-    }, ERROR_BANNER_PROGRESS_INTERVAL_MS);
+    const timeoutId = setTimeout(() => {
+      dismiss();
+    }, ERROR_BANNER_TIMEOUT_MS);
 
     return () => {
-      clearInterval(intervalId);
+      clearTimeout(timeoutId);
     };
   }, [apiName, key, dismiss]);
 
@@ -97,7 +82,7 @@ export function ErrorBannerProvider({
     <ErrorBannerContext.Provider value={contextValue}>
       {children}
       {visible && apiName && (
-        <ErrorBanner apiName={apiName} progress={progress} onClose={dismiss} />
+        <ErrorBanner apiName={apiName} onClose={dismiss} />
       )}
     </ErrorBannerContext.Provider>
   );

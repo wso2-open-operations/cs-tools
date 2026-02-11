@@ -22,22 +22,15 @@ import {
 } from "@context/error-banner/ErrorBannerContext";
 
 vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: any) => <div data-testid="box">{children}</div>,
-  IconButton: ({ children, onClick, "aria-label": ariaLabel }: any) => (
-    <button data-testid="close-button" onClick={onClick} aria-label={ariaLabel}>
+  Alert: ({ children, onClose, severity }: any) => (
+    <div data-testid="error-banner" role="alert" data-severity={severity}>
       {children}
-    </button>
-  ),
-  LinearProgress: ({ value }: any) => (
-    <div data-testid="linear-progress" data-value={value} />
-  ),
-  Paper: ({ children }: any) => (
-    <div data-testid="error-banner" role="alert">
-      {children}
+      <button data-testid="close-button" onClick={onClose}>
+        Close
+      </button>
     </div>
   ),
-  Stack: ({ children }: any) => <div data-testid="stack">{children}</div>,
-  Typography: ({ children }: any) => <span>{children}</span>,
+  Box: ({ children }: any) => <div data-testid="box">{children}</div>,
 }));
 
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
