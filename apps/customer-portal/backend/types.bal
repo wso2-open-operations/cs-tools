@@ -67,8 +67,10 @@ public type Case record {|
     ReferenceItem? assignedEngineer;
     # Associated project
     ReferenceItem? project;
-    # Type of the case
-    ReferenceItem? 'type;
+    # Deployed product information
+    ReferenceItem? deployedProduct;
+    # issueType of the case
+    ReferenceItem? issueType;
     # Deployment
     ReferenceItem? deployment;
     # Severity of the case
@@ -183,7 +185,7 @@ public type RecentActivity record {|
     # Last deployment date
     string? lastDeploymentOn;
     # System health status
-    string systemHealth; 
+    string systemHealth;
 |};
 
 # Project statistics response.
@@ -244,4 +246,40 @@ public type AttachmentsResponse record {|
     # Total records count
     int totalRecords;
     *entity:Pagination;
+|};
+
+# Deployment information.
+public type Deployment record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # URL
+    string? url;
+    # Associated project
+    ReferenceItem? project;
+    # Type
+    ReferenceItem? 'type;
+|};
+
+# Deployed product data.
+public type DeployedProduct record {|
+    # ID
+    string id;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # Associated product
+    ReferenceItem? product;
+    # Deployment
+    ReferenceItem? deployment;
 |};

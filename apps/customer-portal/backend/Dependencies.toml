@@ -348,7 +348,6 @@ modules = [
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.authorization"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.entity"},
-	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.scim"},
-	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.types"}
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.scim"}
 ]
 

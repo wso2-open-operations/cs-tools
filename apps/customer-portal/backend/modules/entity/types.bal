@@ -116,6 +116,53 @@ public type Subscription record {|
     json...;
 |};
 
+# Payload for creating a case.
+public type CaseCreatePayload record {|
+    # Project ID
+    @constraint:String {minLength: 1}
+    string projectId;
+    # Deployment ID
+    @constraint:String {minLength: 1}
+    string deploymentId;
+    # Product ID
+    @constraint:String {minLength: 1}
+    string productId;
+    # Case title
+    @constraint:String {minLength: 1, maxLength: 500}
+    string title;
+    # Case description
+    @constraint:String {minLength: 1, maxLength: 65000}
+    string description;
+    # Issue type ID
+    int issueTypeKey;
+    # Severity key
+    int severityKey;
+|};
+
+# Response from creating a case.
+public type CaseCreateResponse record {|
+    # Success message
+    string message;
+    # Created case details
+    CreatedCase case;
+|};
+
+# Created case details.
+public type CreatedCase record {|
+    # System ID of the created case
+    string id;
+    # WSO2 internal ID of the case
+    string internalId;
+    # Case number
+    string number;
+    # User who created the case
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Status
+    ChoiceListItem state;
+|};
+
 # Base case.
 public type Case record {|
     # Case ID
@@ -134,10 +181,12 @@ public type Case record {|
     ReferenceTableItem? assignedEngineer;
     # Associated project
     ReferenceTableItem? project;
-    # Type of the case
-    ReferenceTableItem? 'type;
     # Deployment information
     ReferenceTableItem? deployment;
+    # Deployed product information
+    ReferenceTableItem? deployedProduct;
+    # issue type of the case
+    ChoiceListItem? issueType;
     # Status information
     ChoiceListItem? state;
     # Severity information
@@ -391,4 +440,54 @@ public type AttachmentsResponse record {|
     # Total records count
     int totalRecords;
     *Pagination;
+|};
+
+# Deployed product data.
+public type DeployedProduct record {|
+    # ID
+    string id;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # Associated deployment
+    ReferenceTableItem? deployment;
+    # Product information
+    ReferenceTableItem? product;
+    json...;
+|};
+
+# Deployed products response.
+public type DeployedProductsResponse record {|
+    # List of deployed products
+    DeployedProduct[] deployedProducts;
+|};
+
+# Deployment data.
+public type Deployment record {|
+    # ID
+    string id;
+    # Name
+    string name;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Description
+    string? description;
+    # URL
+    string? url;
+    # Associated project
+    ReferenceTableItem? project;
+    # Type
+    ChoiceListItem? 'type;
+    json...;
+|};
+
+# Deployments response.
+public type DeploymentsResponse record {|
+    # List of deployments
+    Deployment[] deployments;
 |};

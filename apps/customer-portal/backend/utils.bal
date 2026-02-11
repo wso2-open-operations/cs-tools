@@ -40,7 +40,8 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
     entity:CaseSearchResponse casesResponse = check entity:searchCases(idToken, searchPayload);
     Case[] cases = from entity:Case case in casesResponse.cases
         let entity:ReferenceTableItem? project = case.project
-        let entity:ReferenceTableItem? 'type = case.'type
+        let entity:ReferenceTableItem? deployedProduct = case.deployedProduct
+        let entity:ChoiceListItem? issueType = case.issueType
         let entity:ReferenceTableItem? deployment = case.deployment
         let entity:ReferenceTableItem? assignedEngineer = case.assignedEngineer
         let entity:ChoiceListItem? severity = case.severity
@@ -53,7 +54,8 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
             createdOn: case.createdOn,
             description: case.description,
             project: project != () ? {id: project.id, label: project.name} : (),
-            'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
+            deployedProduct: deployedProduct != () ? {id: deployedProduct.id, label: deployedProduct.name} : (),
+            issueType: issueType != () ? {id: issueType.id.toString(), label: issueType.label} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name} : (),
             assignedEngineer: assignedEngineer != () ? {id: assignedEngineer.id, label: assignedEngineer.name} : (),
             severity: severity != () ? {id: severity.id.toString(), label: severity.label} : (),
@@ -160,7 +162,7 @@ public function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =
     ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0);
 
 # Map attachments response to map to desired structure.
-# 
+#
 # + response - Attachments response from the entity service
 # + return - Mapped attachments response
 public isolated function mapAttachmentsResponse(entity:AttachmentsResponse response) returns AttachmentsResponse {
@@ -181,4 +183,44 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
         'limit: response.'limit,
         offset: response.offset
     };
+}
+
+# Map deployments response to the desired structure.
+#
+# + response - Deployments response from the entity service
+# + return - Mapped deployments response
+public isolated function mapDeployments(entity:DeploymentsResponse response) returns Deployment[] {
+    return from entity:Deployment deployment in response.deployments
+        let entity:ReferenceTableItem? project = deployment.project
+        let entity:ChoiceListItem? 'type = deployment.'type
+        select {
+            id: deployment.id,
+            name: deployment.name,
+            createdOn: deployment.createdOn,
+            updatedOn: deployment.updatedOn,
+            description: deployment.description,
+            url: deployment.url,
+            project: project != () ? {id: project.id, label: project.name} : (),
+            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
+        };
+}
+
+# Map deployed products response to the desired structure.
+# 
+# + response - Deployed products response from the entity service
+# + return - Mapped deployed products response
+public isolated function mapDeployedProducts(entity:DeployedProductsResponse response)
+    returns DeployedProduct[] {
+
+    return from entity:DeployedProduct product in response.deployedProducts
+        let entity:ReferenceTableItem? associatedProduct = product.product
+        let entity:ReferenceTableItem? deployment = product.deployment
+        select {
+            id: product.id,
+            createdOn: product.createdOn,
+            updatedOn: product.updatedOn,
+            description: product.description,
+            product: associatedProduct != () ? {id: associatedProduct.id, label: associatedProduct.name} : (),
+            deployment: deployment != () ? {id: deployment.id, label: deployment.name} : ()
+        };
 }

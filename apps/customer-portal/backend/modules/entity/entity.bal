@@ -88,6 +88,15 @@ public isolated function getCase(string idToken, string caseId) returns CaseResp
     return csEntityClient->/cases/[caseId].get(generateHeaders(idToken));
 }
 
+# Create a new case.
+# 
+# + idToken - ID token for authorization
+# + payload - Case creation payload
+# + return - Case creation response or error
+public isolated function createCase(string idToken, CaseCreatePayload payload) returns CaseCreateResponse|error {
+    return csEntityClient->/cases.post(payload, generateHeaders(idToken));
+}
+
 # Search cases of a project.
 #
 # + idToken - ID token for authorization
@@ -123,4 +132,24 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
     returns AttachmentsResponse|error {
 
     return csEntityClient->/attachments/search.post(payload, generateHeaders(idToken));
+}
+
+# Get products of a deployment.
+#
+# + idToken - ID token for authorization
+# + deploymentId - ID of the deployment
+# + return - Products response or error
+public isolated function getDeployedProducts(string idToken, string deploymentId)
+    returns DeployedProductsResponse|error {
+
+    return csEntityClient->/deployed\-products/search.post({deploymentId}, generateHeaders(idToken));
+}
+
+# Get deployments of a project.
+#
+# + idToken - ID token for authorization
+# + projectId - ID of the project
+# + return - Deployments response or error
+public isolated function getDeployments(string idToken, string projectId) returns DeploymentsResponse|error {
+    return csEntityClient->/deployments/search.post({filters: {projectIds: [projectId]}}, generateHeaders(idToken));
 }
