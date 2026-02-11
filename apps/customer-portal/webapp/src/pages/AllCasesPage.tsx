@@ -15,7 +15,7 @@
 // under the License.
 
 import { useParams, useNavigate } from "react-router";
-import { useState, useMemo, type JSX, type ChangeEvent } from "react";
+import { useState, useMemo, useEffect, type JSX, type ChangeEvent } from "react";
 import {
   Box,
   Button,
@@ -63,17 +63,29 @@ export default function AllCasesPage(): JSX.Element {
   const { data: filterMetadata } = useGetCasesFilters(projectId || "");
 
   // Fetch all cases using infinite query
-  const { data, isFetching: isCasesLoading } = useGetProjectCases(
-    projectId || "",
-    {
-      sortBy: {
-        field: "createdOn",
-        order: "desc",
-      },
+  const {
+    data,
+    isFetching: isCasesLoading,
+    hasNextPage,
+    fetchNextPage,
+  } = useGetProjectCases(projectId || "", {
+    sortBy: {
+      field: "createdOn",
+      order: "desc",
     },
-  );
+  });
+
+  // Background-load all remaining pages so search/filters work on full dataset.
+  useEffect(() => {
+    if (!data || !hasNextPage) {
+      return;
+    }
+
+    void fetchNextPage();
+  }, [data, hasNextPage, fetchNextPage]);
 
   const allCases = data?.pages.flatMap((page) => page.cases) ?? [];
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
   // Frontend filtering and search
   const filteredAndSearchedCases = useMemo(() => {
@@ -128,13 +140,24 @@ export default function AllCasesPage(): JSX.Element {
     return filtered;
   }, [allCases, searchTerm, filters, sortOrder]);
 
+  const hasActiveFiltersOrSearch =
+    Boolean(searchTerm.trim()) ||
+    Boolean(filters.statusId) ||
+    Boolean(filters.severityId) ||
+    Boolean(filters.issueTypes) ||
+    Boolean(filters.deploymentId);
+
+  const totalItems = hasActiveFiltersOrSearch
+    ? filteredAndSearchedCases.length
+    : apiTotalRecords || filteredAndSearchedCases.length;
+
   // Pagination logic
   const paginatedCases = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
     return filteredAndSearchedCases.slice(startIndex, startIndex + pageSize);
   }, [filteredAndSearchedCases, page]);
 
-  const totalPages = Math.ceil(filteredAndSearchedCases.length / pageSize);
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -212,8 +235,7 @@ export default function AllCasesPage(): JSX.Element {
         }}
       >
         <Typography variant="body2" color="text.secondary">
-          Showing {paginatedCases.length} of {filteredAndSearchedCases.length}{" "}
-          cases
+          Showing {paginatedCases.length} of {totalItems} cases
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <FormControl size="small" sx={{ minWidth: 180 }}>
