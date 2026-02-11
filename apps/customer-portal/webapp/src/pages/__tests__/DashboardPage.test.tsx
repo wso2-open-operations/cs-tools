@@ -15,11 +15,13 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "@pages/DashboardPage";
 import { DASHBOARD_STATS } from "@constants/dashboardConstants";
 import { useGetDashboardMockStats } from "@api/useGetDashboardMockStats";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
 const mockNavigate = vi.fn();
@@ -133,6 +135,20 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {children}
     </div>
   ),
+  IconButton: ({ children, onClick, "aria-label": ariaLabel }: any) => (
+    <button data-testid="icon-button" onClick={onClick} aria-label={ariaLabel}>
+      {children}
+    </button>
+  ),
+  LinearProgress: ({ value }: any) => (
+    <div data-testid="linear-progress" data-value={value}></div>
+  ),
+  Paper: ({ children }: any) => (
+    <div data-testid="error-banner" role="alert">
+      {children}
+    </div>
+  ),
+  Stack: ({ children }: any) => <div data-testid="stack">{children}</div>,
   Typography: ({ children, variant }: any) => (
     <div data-testid={`typography-${variant}`}>{children}</div>
   ),
@@ -143,9 +159,6 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {endIcon}
     </button>
   ),
-  LinearProgress: ({ color }: any) => (
-    <div data-testid="linear-progress" data-color={color}></div>
-  ),
   colors: {
     common: { white: "#FFFFFF" },
     blue: { 500: "#3B82F6", 700: "#1D4ED8" },
@@ -155,13 +168,6 @@ vi.mock("@wso2/oxygen-ui", () => ({
     yellow: { 600: "#EAB308" },
     purple: { 400: "#A78BFA" },
   },
-  NotificationBanner: ({ visible, title, message }: any) =>
-    visible ? (
-      <div data-testid="notification-banner">
-        {title && <span>{title}</span>}
-        {message && <span>{message}</span>}
-      </div>
-    ) : null,
 }));
 
 // Mock icons
@@ -180,15 +186,19 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Shield: () => <svg data-testid="icon-shield" />,
   User: () => <svg data-testid="icon-user" />,
   Rocket: () => <svg data-testid="icon-rocket" />,
+  X: () => <span data-testid="icon-x" />,
 }));
+
+const renderWithProviders = (ui: ReactElement) =>
+  render(
+    <LoaderProvider>
+      <ErrorBannerProvider>{ui}</ErrorBannerProvider>
+    </LoaderProvider>,
+  );
 
 describe("DashboardPage", () => {
   it("should render correctly", () => {
-    render(
-      <LoaderProvider>
-        <DashboardPage />
-      </LoaderProvider>,
-    );
+    renderWithProviders(<DashboardPage />);
 
     expect(screen.getAllByTestId("stat-card")).toHaveLength(
       DASHBOARD_STATS.length,
@@ -198,54 +208,40 @@ describe("DashboardPage", () => {
   });
 
   it("should navigate to support chat on button click", () => {
-    render(
-      <LoaderProvider>
-        <DashboardPage />
-      </LoaderProvider>,
-    );
+    renderWithProviders(<DashboardPage />);
     const button = screen.getByText("Get Support");
     fireEvent.click(button);
 
     expect(mockNavigate).toHaveBeenCalledWith("/project-1/support/chat");
   });
 
-  it("should render error message when statistics fail to load", () => {
+  it("should render error banner when statistics fail to load", () => {
     vi.mocked(useGetDashboardMockStats).mockReturnValueOnce({
       ...mockMockStats,
       isError: true,
       data: undefined,
     } as any);
 
-    render(
-      <LoaderProvider>
-        <DashboardPage />
-      </LoaderProvider>,
-    );
+    renderWithProviders(<DashboardPage />);
 
+    expect(screen.getByTestId("error-banner")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Error loading dashboard statistics. Please try again later.",
-      ),
+      screen.getByText("Error loading dashboard statistics"),
     ).toBeInTheDocument();
   });
 
-  it("should render error message when cases statistics fail to load", () => {
+  it("should render error banner when cases statistics fail to load", () => {
     vi.mocked(useGetProjectCasesStats).mockReturnValueOnce({
       ...mockCasesStats,
       isError: true,
       data: undefined,
     } as any);
 
-    render(
-      <LoaderProvider>
-        <DashboardPage />
-      </LoaderProvider>,
-    );
+    renderWithProviders(<DashboardPage />);
 
+    expect(screen.getByTestId("error-banner")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Error loading dashboard statistics. Please try again later.",
-      ),
+      screen.getByText("Error loading dashboard statistics"),
     ).toBeInTheDocument();
   });
 });
