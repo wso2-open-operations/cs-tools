@@ -21,7 +21,7 @@ import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
 import { ItemListView, ItemCard, type ItemCardProps } from "@components/features/support";
 
-import { MOCK_METRICS, MOCK_ITEMS } from "@src/mocks/data/support";
+import { MOCK_METRICS, MOCK_ITEMS, TAB_TITLES } from "@src/mocks/data/support";
 
 export default function SupportPage() {
   const theme = useTheme();
@@ -75,7 +75,7 @@ export default function SupportPage() {
         <Tab label="Changes" value="change" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5} elevation={0}>
-        <ItemListView title="Open Cases" viewAllPath={`/${tab}s/all`}>
+        <ItemListView title={TAB_TITLES[tab]} viewAllPath={`/${tab}s/all`}>
           {MOCK_ITEMS[tab].map((item, index) => (
             <ItemCard key={index} {...item} />
           ))}

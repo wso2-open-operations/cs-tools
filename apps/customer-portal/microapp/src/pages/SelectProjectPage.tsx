@@ -15,7 +15,7 @@
 // under the License.
 
 import { Suspense } from "react";
-import { Box, CircularProgress, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Box, CircularProgress, SearchBar, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Folder } from "@wso2/oxygen-ui-icons-react";
 import { ProjectCard } from "@components/features/projects";
 import { useNavigate } from "react-router-dom";
@@ -66,6 +66,7 @@ function SelectProjectContent() {
         Choose a project to access your support cases, chat history, and dashboard
       </Typography>
       <Stack mt={5} gap={3}>
+        <SearchBar size="small" placeholder="Search Users" value="" sx={{ mt: 1 }} fullWidth />
         {MOCK_PROJECTS.map((props) => (
           <ProjectCard
             key={props.id}

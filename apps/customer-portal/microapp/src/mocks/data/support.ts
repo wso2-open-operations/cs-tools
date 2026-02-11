@@ -1,5 +1,12 @@
 import type { ItemCardProps, ItemType, ItemCardExtendedProps } from "@components/features/support";
 
+export const TAB_TITLES = {
+  case: "Open Cases",
+  chat: "Chat History",
+  service: "Service Requests",
+  change: "Change Requests",
+};
+
 export const MOCK_METRICS = [
   { label: "Open Cases", value: 10 },
   { label: "Active Chats", value: 8 },
