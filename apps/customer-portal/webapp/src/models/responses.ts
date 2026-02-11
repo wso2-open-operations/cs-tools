@@ -175,6 +175,44 @@ export interface CaseSearchResponse {
   }[];
 }
 
+// Case details
+export interface CaseDetailsAccount {
+  type: string | null;
+  id: string;
+  name: string | null;
+}
+
+export interface CaseDetailsProject {
+  id: string;
+  name: string | null;
+}
+
+export interface CaseStatus {
+  id: number;
+  label: string | null;
+}
+
+export interface CaseDetails {
+  id: string;
+  internalId: string;
+  number: string | null;
+  createdOn: string | null;
+  updatedOn: string | null;
+  title: string | null;
+  description: string | null;
+  slaResponseTime: string | null;
+  product: string | null;
+  account: CaseDetailsAccount | null;
+  csManager: string | null;
+  assignedEngineer: string | null;
+  project: CaseDetailsProject | null;
+  deployment: { id: string; label: string } | null;
+  deployedProduct: string | null;
+  issueType: string | null;
+  state: CaseStatus | null;
+  severity: CaseStatus | null;
+}
+
 // Project Stats Response
 export interface ProjectStatsResponse {
   projectStats: {

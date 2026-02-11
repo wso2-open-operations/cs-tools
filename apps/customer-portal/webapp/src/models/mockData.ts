@@ -16,6 +16,7 @@
 
 import type {
   CaseListItem,
+  CaseDetails,
   ProjectListItem,
   ProjectDetails,
   UserDetails,
@@ -897,6 +898,39 @@ export const mockCases: CaseListItem[] = [
     },
   },
 ];
+
+// Mock case details.
+export const mockCaseDetails: CaseDetails = {
+  id: "case-001",
+  internalId: "CUPRSUB-101",
+  number: "CS0001001",
+  createdOn: "2026-01-31 10:45:12",
+  updatedOn: "2026-02-10 23:47:57",
+  title: "Application crashes on startup",
+  description:
+    "App crashes immediately after launch with a null pointer error.",
+  slaResponseTime: "129671000",
+  product: null,
+  account: {
+    type: null,
+    id: "9460f8a91bfaa694a002c9d3604bcbbb",
+    name: "Customer 3i",
+  },
+  csManager: null,
+  assignedEngineer: null,
+  project: {
+    id: "project-001",
+    name: "Customer Portal – Subscription",
+  },
+  deployment: {
+    id: "deployment-prod",
+    label: "Production",
+  },
+  deployedProduct: null,
+  issueType: null,
+  state: { id: 1, label: "Open" },
+  severity: { id: 10, label: "Critical (P1)" },
+};
 
 // Mock deployments for project detail Deployments tab.
 export const mockDeployments: Deployment[] = [
