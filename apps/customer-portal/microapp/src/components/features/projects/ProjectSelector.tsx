@@ -1,4 +1,4 @@
-import { Box, Popover, pxToRem, Stack, Typography, type PopoverProps } from "@wso2/oxygen-ui";
+import { alpha, Box, Popover, pxToRem, Stack, Typography, type PopoverProps } from "@wso2/oxygen-ui";
 import { ProjectPopoverItem } from "@components/features/projects";
 import { useProject } from "@context/project";
 import { MOCK_PROJECTS } from "@src/mocks/data/projects";
@@ -20,7 +20,6 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
         vertical: "bottom",
         horizontal: "center",
       }}
-      elevation={0}
       slotProps={{
         paper: {
           sx: (theme) => ({
@@ -28,6 +27,7 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
             width: "100%",
             border: `1px solid ${theme.palette.divider}`,
             borderRadius: 3,
+            boxShadow: `${alpha(theme.palette.text.primary, 0.3)} 0px 48px 100px 0px`,
           }),
         },
       }}
