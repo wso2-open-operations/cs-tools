@@ -26,8 +26,7 @@ describe("AllCasesFilters", () => {
   const defaultFilters = {
     statusId: "",
     severityId: "",
-    caseTypes: "",
-    deploymentId: "",
+    issueTypes: "",
   };
 
   beforeEach(() => {
@@ -45,12 +44,11 @@ describe("AllCasesFilters", () => {
       </ThemeProvider>,
     );
 
-    // Check for labels (Status, Severity, Category, Deployment)
+    // Check for labels (Status, Severity, Category)
     // MUI renders labels in multiple places (InputLabel, Legend), so we check getAllByText
     expect(screen.getAllByText("Status")[0]).toBeInTheDocument();
     expect(screen.getAllByText("Severity")[0]).toBeInTheDocument();
     expect(screen.getAllByText("Category")[0]).toBeInTheDocument();
-    expect(screen.getAllByText("Deployment")[0]).toBeInTheDocument();
   });
 
   it("should call onFilterChange when a filter is changed", async () => {
