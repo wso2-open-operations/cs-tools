@@ -212,25 +212,34 @@ export default function AllCasesList({
                     Created {formatRelativeTime(caseItem.createdOn) || "--"}
                   </Typography>
                 </Box>
-                {caseItem.assignedEngineer && (
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 0.5,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <User size={14} />
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ lineHeight: 1 }}
+                {(() => {
+                  const raw = caseItem.assignedEngineer;
+                  const assignedLabel =
+                    raw == null
+                      ? ""
+                      : typeof raw === "object" && "label" in raw
+                        ? (raw as { id: string; label: string }).label
+                        : String(raw);
+                  return assignedLabel ? (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        flexShrink: 0,
+                      }}
                     >
-                      Assigned to {caseItem.assignedEngineer}
-                    </Typography>
-                  </Box>
-                )}
+                      <User size={14} />
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ lineHeight: 1 }}
+                      >
+                        Assigned to {assignedLabel}
+                      </Typography>
+                    </Box>
+                  ) : null;
+                })()}
                 {caseItem.deployment?.label && (
                   <Box
                     sx={{

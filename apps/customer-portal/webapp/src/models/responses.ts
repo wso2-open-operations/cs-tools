@@ -140,7 +140,8 @@ export interface CaseListItem {
   createdOn: string;
   title: string;
   description: string;
-  assignedEngineer: string | null;
+  /** API may return string or { id, label } object. */
+  assignedEngineer: string | { id: string; label: string } | null;
   project: {
     id: string;
     label: string;

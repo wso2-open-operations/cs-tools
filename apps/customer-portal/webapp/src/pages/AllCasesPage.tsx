@@ -48,7 +48,7 @@ export default function AllCasesPage(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("asc");
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -65,7 +65,8 @@ export default function AllCasesPage(): JSX.Element {
   // Fetch all cases using infinite query
   const {
     data,
-    isFetching: isCasesLoading,
+    isFetching: isCasesFetching,
+    isLoading: isCasesQueryLoading,
     hasNextPage,
     fetchNextPage,
   } = useGetProjectCases(projectId || "", {
@@ -261,7 +262,7 @@ export default function AllCasesPage(): JSX.Element {
       </Box>
 
       {/* Cases list */}
-      <AllCasesList cases={paginatedCases} isLoading={isCasesLoading} />
+      <AllCasesList cases={paginatedCases} isLoading={isCasesQueryLoading} />
 
       {/* Pagination */}
       {totalPages > 1 && (
