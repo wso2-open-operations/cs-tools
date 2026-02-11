@@ -28,7 +28,7 @@ export interface SearchProjectsRequest {
 // Request body for searching cases.
 export interface CaseSearchRequest {
   filters?: {
-    caseTypes?: string[];
+    issueId?: number;
     deploymentId?: string;
     severityId?: number;
     statusId?: number;

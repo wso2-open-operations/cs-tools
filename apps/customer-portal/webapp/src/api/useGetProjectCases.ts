@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  type UseInfiniteQueryResult,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useMockConfig } from "@providers/MockConfigProvider";
 import { useLogger } from "@hooks/useLogger";
@@ -25,29 +29,37 @@ import type { CaseSearchRequest } from "@models/requests";
 import type { CaseSearchResponse } from "@models/responses";
 
 /**
- * Custom hook to search cases for a specific project.
+ * Custom hook to search cases for a specific project using infinite query.
  *
  * @param {string} projectId - The ID of the project to search cases for.
- * @param {CaseSearchRequest} requestBody - The search parameters including filters, pagination, and sorting.
- * @returns {UseQueryResult<CaseSearchResponse, Error>} The query result object.
+ * @param {Omit<CaseSearchRequest, 'pagination'>} baseRequest - The search parameters excluding pagination.
+ * @returns {UseInfiniteQueryResult<CaseSearchResponse, Error>} The infinite query result object.
  */
 export default function useGetProjectCases(
   projectId: string,
-  requestBody: CaseSearchRequest,
-): UseQueryResult<CaseSearchResponse, Error> {
+  baseRequest: Omit<CaseSearchRequest, "pagination">,
+): UseInfiniteQueryResult<InfiniteData<CaseSearchResponse>, Error> {
   const logger = useLogger();
 
   const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { isMockEnabled } = useMockConfig();
 
-  return useQuery<CaseSearchResponse, Error>({
+  return useInfiniteQuery<CaseSearchResponse, Error>({
     queryKey: [
       ApiQueryKeys.PROJECT_CASES,
       projectId,
-      requestBody,
+      baseRequest,
       isMockEnabled,
     ],
-    queryFn: async (): Promise<CaseSearchResponse> => {
+    queryFn: async ({ pageParam = 0 }): Promise<CaseSearchResponse> => {
+      const requestBody: CaseSearchRequest = {
+        ...baseRequest,
+        pagination: {
+          offset: pageParam as number,
+          limit: 10,
+        },
+      };
+
       logger.debug(
         `Fetching cases for project: ${projectId} with params:`,
         requestBody,
@@ -57,9 +69,7 @@ export default function useGetProjectCases(
       if (isMockEnabled) {
         await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
 
-        // TODO: Filter logic need be implemented here
-
-        const { offset = 0, limit = 5 } = requestBody.pagination;
+        const { offset = 0, limit = 10 } = requestBody.pagination;
         const filteredCases = mockCases.filter(
           (cases) => cases.project.id === projectId || projectId === "all",
         );
@@ -113,6 +123,13 @@ export default function useGetProjectCases(
         throw error;
       }
     },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.offset + lastPage.limit;
+      return nextOffset < lastPage.totalRecords ? nextOffset : undefined;
+    },
     enabled: !!projectId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }

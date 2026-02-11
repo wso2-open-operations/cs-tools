@@ -15,7 +15,13 @@
 // under the License.
 
 import { useParams, useNavigate } from "react-router";
-import { useState, useMemo, type JSX, type ChangeEvent } from "react";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  type JSX,
+  type ChangeEvent,
+} from "react";
 import {
   Box,
   Button,
@@ -52,28 +58,64 @@ export default function AllCasesPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  // Fetch stats
+  // Fetch stats (runs in parallel with cases when projectId and auth are ready)
   const {
     data: stats,
-    isFetching: isStatsLoading,
+    isLoading: isStatsQueryLoading,
     isError: isStatsError,
   } = useGetProjectCasesStats(projectId || "");
 
   // Fetch filter metadata
   const { data: filterMetadata } = useGetCasesFilters(projectId || "");
 
-  // Fetch all cases
-  const { data: casesData, isFetching: isCasesLoading } = useGetProjectCases(
-    projectId || "",
-    {
-      pagination: { offset: 0, limit: 1000 },
-      sortBy: { field: "createdOn", order: "desc" },
-    },
+  const caseSearchRequest = useMemo(
+    () => ({
+      filters: {
+        statusId: filters.statusId ? Number(filters.statusId) : undefined,
+        severityId: filters.severityId ? Number(filters.severityId) : undefined,
+        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+        deploymentId: filters.deploymentId || undefined,
+      },
+      sortBy: {
+        field: "createdOn",
+        order: "desc" as const,
+      },
+    }),
+    [filters],
   );
 
-  const allCases = casesData?.cases ?? [];
+  // Fetch all cases using infinite query (runs in parallel with stats when projectId and auth are ready)
+  const {
+    data,
+    isLoading: isCasesQueryLoading,
+    hasNextPage,
+    fetchNextPage,
+  } = useGetProjectCases(projectId || "", caseSearchRequest);
 
-  // Frontend filtering and search
+  // Show skeletons until each section has a response (covers query disabled by auth + initial fetch).
+  const hasStatsResponse = stats !== undefined;
+  const hasCasesResponse = data !== undefined;
+  const isStatsLoading =
+    isStatsQueryLoading || (!!projectId && !hasStatsResponse);
+  const isCasesAreaLoading =
+    isCasesQueryLoading || (!!projectId && !hasCasesResponse);
+
+  // Background-load all remaining pages so search/filters work on full dataset.
+  useEffect(() => {
+    if (!data || !hasNextPage) {
+      return;
+    }
+
+    void fetchNextPage();
+  }, [data, hasNextPage, fetchNextPage]);
+
+  const allCases = useMemo(
+    () => data?.pages.flatMap((page) => page.cases) ?? [],
+    [data],
+  );
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
+
+  // Frontend search and sort
   const filteredAndSearchedCases = useMemo(() => {
     let filtered = [...allCases];
 
@@ -88,34 +130,6 @@ export default function AllCasesPage(): JSX.Element {
       );
     }
 
-    // Apply status filter
-    if (filters.statusId) {
-      filtered = filtered.filter(
-        (caseItem) => caseItem.status?.id === filters.statusId,
-      );
-    }
-
-    // Apply severity filter
-    if (filters.severityId) {
-      filtered = filtered.filter(
-        (caseItem) => caseItem.severity?.id === filters.severityId,
-      );
-    }
-
-    // Apply category/case type filter
-    if (filters.caseTypes) {
-      filtered = filtered.filter(
-        (caseItem) => caseItem.type?.id === filters.caseTypes,
-      );
-    }
-
-    // Apply deployment filter
-    if (filters.deploymentId) {
-      filtered = filtered.filter(
-        (caseItem) => caseItem.deployment?.id === filters.deploymentId,
-      );
-    }
-
     // Apply sorting
     filtered.sort((a, b) => {
       const dateA = new Date(a.createdOn).getTime() || 0;
@@ -124,7 +138,9 @@ export default function AllCasesPage(): JSX.Element {
     });
 
     return filtered;
-  }, [allCases, searchTerm, filters, sortOrder]);
+  }, [allCases, searchTerm, sortOrder]);
+
+  const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
 
   // Pagination logic
   const paginatedCases = useMemo(() => {
@@ -132,7 +148,7 @@ export default function AllCasesPage(): JSX.Element {
     return filteredAndSearchedCases.slice(startIndex, startIndex + pageSize);
   }, [filteredAndSearchedCases, page]);
 
-  const totalPages = Math.ceil(filteredAndSearchedCases.length / pageSize);
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -210,8 +226,7 @@ export default function AllCasesPage(): JSX.Element {
         }}
       >
         <Typography variant="body2" color="text.secondary">
-          Showing {paginatedCases.length} of {filteredAndSearchedCases.length}{" "}
-          cases
+          Showing {paginatedCases.length} of {totalItems} cases
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <FormControl size="small" sx={{ minWidth: 180 }}>
@@ -237,7 +252,7 @@ export default function AllCasesPage(): JSX.Element {
       </Box>
 
       {/* Cases list */}
-      <AllCasesList cases={paginatedCases} isLoading={isCasesLoading} />
+      <AllCasesList cases={paginatedCases} isLoading={isCasesAreaLoading} />
 
       {/* Pagination */}
       {totalPages > 1 && (

@@ -41,7 +41,7 @@ export interface AllCasesSearchBarProps {
   filters: {
     statusId?: string;
     severityId?: string;
-    caseTypes?: string;
+    issueTypes?: string;
     deploymentId?: string;
   };
   filterMetadata: CaseMetadataResponse | undefined;

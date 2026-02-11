@@ -51,10 +51,9 @@ export default function SupportPage(): JSX.Element {
     isError,
   } = useGetProjectSupportStats(projectId || "");
 
-  const { data: casesData, isFetching: isCasesLoading } = useGetProjectCases(
+  const { data, isFetching: isCasesLoading } = useGetProjectCases(
     projectId || "",
     {
-      pagination: { offset: 0, limit: SUPPORT_OVERVIEW_CASES_LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     },
   );
@@ -64,7 +63,8 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const cases = casesData?.cases ?? [];
+  const cases =
+    data?.pages?.[0]?.cases?.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
   const chatItems =
     chatHistoryData?.chatHistory?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ?? [];
 

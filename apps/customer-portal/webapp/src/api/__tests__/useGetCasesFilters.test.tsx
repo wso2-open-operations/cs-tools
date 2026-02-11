@@ -16,7 +16,7 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import { mockCaseMetadata } from "@models/mockData";
 
@@ -60,6 +60,9 @@ describe("useGetCasesFilters", () => {
   beforeEach(() => {
     queryClient.clear();
     vi.clearAllMocks();
+    vi.stubGlobal("config", {
+      CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
+    });
   });
 
   it("should return mock data when isMockEnabled is true", async () => {
@@ -75,7 +78,7 @@ describe("useGetCasesFilters", () => {
     const mockResponse = {
       statuses: [{ id: "1", label: "Open" }],
       severities: [{ id: "2", label: "High" }],
-      caseTypes: [{ id: "3", label: "Incident" }],
+      issueTypes: [{ id: "3", label: "Incident" }],
     };
 
     const mockFetch = vi.fn().mockResolvedValue({
@@ -94,7 +97,7 @@ describe("useGetCasesFilters", () => {
     );
   });
 
-  it("should handle API errors", async () => {
+  it("should fetch and return project case filters", async () => {
     mockUseMockConfig.mockReturnValue({ isMockEnabled: false });
 
     const mockFetch = vi.fn().mockResolvedValue({
@@ -107,5 +110,9 @@ describe("useGetCasesFilters", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toContain("Internal Server Error");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 });
