@@ -75,6 +75,10 @@ vi.mock("@components/common/empty-state/EmptyIcon", () => ({
   default: () => <div data-testid="empty-icon" />,
 }));
 
+vi.mock("@components/common/error-state/ErrorStateIcon", () => ({
+  default: () => <div data-testid="error-state-icon" />,
+}));
+
 // Mock useAsgardeo
 const mockUseAsgardeo = vi.fn();
 vi.mock("@asgardeo/react", () => ({
@@ -190,7 +194,7 @@ describe("ProjectHub", () => {
     ).toBeInTheDocument();
   });
 
-  it("should render error message when isError is true", async () => {
+  it("should render error state when isError is true", async () => {
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: null,
@@ -203,9 +207,13 @@ describe("ProjectHub", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId("tooltip")).toBeInTheDocument();
-    expect(screen.queryByText("No Projects Yet")).not.toBeInTheDocument();
-    expect(screen.getByText(/Select Your Project/i)).toBeInTheDocument();
+    expect(screen.getByTestId("error-state-icon")).toBeInTheDocument();
+    expect(screen.getByText("Something Went Wrong")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "We couldn't load the data right now. Please try again or refresh the page.",
+      ),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining("Failed to load projects"),
