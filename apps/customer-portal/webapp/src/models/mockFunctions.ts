@@ -22,6 +22,7 @@ import {
   mockDeployments,
   mockStatusOptions,
   mockUpdatesStats,
+  mockProductUpdateLevels,
 } from "@models/mockData";
 import type { CaseCreationMetadata } from "@models/mockData";
 
@@ -34,6 +35,7 @@ import type {
   ChatHistoryResponse,
   DeploymentsResponse,
   UpdatesStats,
+  ProductUpdateLevelsResponse,
 } from "@models/responses";
 
 /**
@@ -296,8 +298,16 @@ export const getMockDeployments = (
 };
 
 /**
- * Returns mock updates statistics (used when isMockEnabled for useGetUpdatesStats).
+ * Returns mock updates statistics (used when isMockEnabled for useGetProductUpdatesStats).
  *
  * @returns {UpdatesStats} Mock updates statistics.
  */
 export const getMockUpdatesStats = (): UpdatesStats => mockUpdatesStats;
+
+/**
+ * Returns mock product update levels (used when isMockEnabled for useGetProductUpdateLevels).
+ *
+ * @returns {ProductUpdateLevelsResponse} Mock product update levels.
+ */
+export const getMockProductUpdateLevels =
+  (): ProductUpdateLevelsResponse => mockProductUpdateLevels;
