@@ -22,10 +22,10 @@ import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import ProjectCard from "@components/project-hub/project-card/ProjectCard";
 import ProjectCardSkeleton from "@components/project-hub/project-card/ProjectCardSkeleton";
-import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
+import { FolderOpen, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
-import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
+import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 
 /**
  * ProjectHub component.
@@ -115,8 +115,17 @@ export default function ProjectHub(): JSX.Element {
 
     if (isError) {
       return (
-        <Box sx={{ py: 5 }}>
-          <ErrorIndicator entityName="projects" />
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            py: 10,
+          }}
+        >
+          <ErrorStateIcon />
         </Box>
       );
     }
@@ -218,19 +227,29 @@ export default function ProjectHub(): JSX.Element {
               gap: 1.5,
             }}
           >
-            <FolderOpen size={28} />
+            {isError ? (
+              <Box component="span" sx={{ color: "error.main" }}>
+                <TriangleAlert size={28} />
+              </Box>
+            ) : (
+              <FolderOpen size={28} />
+            )}
             <Typography variant="h4">
-              {!isLoading && !isAuthLoading && !isError && projects.length === 0
-                ? "No Projects Yet"
-                : "Select Your Project"}
+              {isError
+                ? "Something Went Wrong"
+                : !isLoading && !isAuthLoading && projects.length === 0
+                  ? "No Projects Yet"
+                  : "Select Your Project"}
             </Typography>
           </Box>
 
           {/* project hub subtitle */}
           <Typography variant="subtitle2" color="text.secondary">
-            {!isLoading && !isAuthLoading && !isError && projects.length === 0
-              ? "Projects will appear here once they are created or assigned to you"
-              : "Choose a project to access your support cases, chat history, and dashboard"}
+            {isError
+              ? "We couldn't load the data right now. Please try again or refresh the page."
+              : !isLoading && !isAuthLoading && projects.length === 0
+                ? "Projects will appear here once they are created or assigned to you"
+                : "Choose a project to access your support cases, chat history, and dashboard"}
           </Typography>
         </Box>
         <Box sx={{ width: "100%" }}>{renderContent()}</Box>
