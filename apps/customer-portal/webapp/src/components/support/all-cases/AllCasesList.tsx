@@ -140,10 +140,10 @@ export default function AllCasesList({
                       },
                     }}
                   />
-                  {caseItem.type?.label && (
+                  {caseItem.issueType?.label && (
                     <Chip
                       size="small"
-                      label={caseItem.type.label || "--"}
+                      label={caseItem.issueType.label || "--"}
                       variant="outlined"
                       sx={{
                         height: 20,
