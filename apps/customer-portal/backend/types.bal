@@ -309,3 +309,17 @@ public type AttachmentPayload record {|
     # Base 64 encoded content
     string content;
 |};
+
+# Case classification payload.
+public type CaseClassificationPayload record {|
+    # Chat history
+    string chatHistory;
+    # Product details
+    string[] productDetails;
+    # Environments
+    string[] environments;
+    # Region
+    string region;
+    # Tier
+    string tier;
+|};

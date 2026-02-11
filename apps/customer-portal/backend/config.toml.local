@@ -24,3 +24,11 @@ updatesServiceUrl = "<base_url>"
     clientId = "<client_id>"
     clientSecret = "<client_secret>"
     scopes = ["<scopes>"]
+
+[customer_portal.ai_chat_agent]
+aiChatAgentBaseUrl = "<base_url>"
+[customer_portal.ai_chat_agent.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]

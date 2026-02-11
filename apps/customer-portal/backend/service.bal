@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import customer_portal.ai_chat_agent;
 import customer_portal.authorization;
 import customer_portal.entity;
 import customer_portal.scim;
@@ -827,6 +828,44 @@ service http:InterceptableService / on new http:Listener(9090) {
         }
 
         return getCaseFilters(caseMetadata);
+    }
+
+    # Classify the case using AI chat agent.
+    #
+    # + payload - Case classification payload
+    # + return - Case classification response or an error
+    resource function post cases/classify(http:RequestContext ctx, CaseClassificationPayload payload)
+        returns ai_chat_agent:CaseClassificationResponse|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        // TODO: Need to persist the chat history
+        ai_chat_agent:CaseClassificationResponse|error classificationResponse =
+            ai_chat_agent:createCaseClassification(
+                {
+                    chat_history: payload.chatHistory,
+                    productDetails: payload.productDetails,
+                    environments: payload.environments,
+                    region: payload.region,
+                    tier: payload.tier
+                });
+        if classificationResponse is error {
+            string customError = "Failed to classify chat message.";
+            log:printError(customError, classificationResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return classificationResponse;
     }
 
     # Get comments for a specific case.
