@@ -60,6 +60,9 @@ describe("useGetCasesFilters", () => {
   beforeEach(() => {
     queryClient.clear();
     vi.clearAllMocks();
+    vi.stubGlobal("config", {
+      CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
+    });
   });
 
   it("should return mock data when isMockEnabled is true", async () => {
@@ -75,7 +78,7 @@ describe("useGetCasesFilters", () => {
     const mockResponse = {
       statuses: [{ id: "1", label: "Open" }],
       severities: [{ id: "2", label: "High" }],
-      caseTypes: [{ id: "3", label: "Incident" }],
+      issueTypes: [{ id: "3", label: "Incident" }],
     };
 
     const mockFetch = vi.fn().mockResolvedValue({
