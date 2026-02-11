@@ -15,7 +15,7 @@
 // under the License.
 
 import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useGetProductUpdatesStats } from "@api/useGetProductUpdatesStats";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -67,6 +67,10 @@ describe("useGetProductUpdatesStats", () => {
     mockLogger.error.mockClear();
     mockIsMockEnabled = true;
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   const wrapper = ({ children }: { children: ReactNode }) => (
