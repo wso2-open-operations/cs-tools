@@ -31,6 +31,8 @@ public type CacheConfig record {|
 
 # Case search filters.
 public type CaseSearchFilters record {|
+    # Search query for case number, title and description
+    string searchQuery?;
     # Issue ID
     int issueId?;
     # Status ID
@@ -283,4 +285,27 @@ public type DeployedProduct record {|
     ReferenceItem? product;
     # Deployment
     ReferenceItem? deployment;
+|};
+
+# Payload for creating a comment.
+public type CommentCreatePayload record {|
+    # Reference type
+    entity:ReferenceType referenceType;
+    # Comment content
+    @constraint:String {minLength: 1, maxLength: 65000}
+    string content;
+    # Comment type
+    entity:CommentType 'type;
+|};
+
+# Payload for creating an attachment.
+public type AttachmentPayload record {|
+    # Reference type
+    entity:ReferenceType referenceType;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # Base 64 encoded content
+    string content;
 |};

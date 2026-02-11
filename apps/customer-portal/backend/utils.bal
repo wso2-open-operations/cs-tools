@@ -31,6 +31,7 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
     entity:CaseSearchPayload searchPayload = {
         filters: {
             projectIds: [projectId],
+            searchQuery: payload.filters?.searchQuery,
             issueTypeKeys: issueId != () ? [issueId] : (),
             severityKey: payload.filters?.severityId,
             stateKey: payload.filters?.statusId,
@@ -208,7 +209,7 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
 }
 
 # Map deployed products response to the desired structure.
-# 
+#
 # + response - Deployed products response from the entity service
 # + return - Mapped deployed products response
 public isolated function mapDeployedProducts(entity:DeployedProductsResponse response)

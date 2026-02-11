@@ -975,13 +975,141 @@ service http:InterceptableService / on new http:Listener(9090) {
         return mapAttachmentsResponse(attachmentResponse);
     }
 
+    # Create a new comment for a specific case.
+    #
+    # + id - ID of the case
+    # + payload - Comment creation payload
+    # + return - Created comment or error response
+    resource function post cases/[string id]/comments(http:RequestContext ctx, CommentCreatePayload payload)
+        returns entity:CreatedComment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isEmptyId(id) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_ID_EMPTY
+                }
+            };
+        }
+
+        entity:CommentCreateResponse|error createdCaseResponse = entity:createComment(userInfo.idToken,
+                {
+                    referenceId: id,
+                    referenceType: payload.referenceType,
+                    content: payload.content,
+                    'type: payload.'type
+                });
+        if createdCaseResponse is error {
+            if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(createdCaseResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to comment on case with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to comment on the requested case. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+
+            string customError = "Failed to create a new comment.";
+            log:printError(customError, createdCaseResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return createdCaseResponse.comment;
+    }
+
+    # Create a new attachment for a specific case.
+    #
+    # + id - ID of the case
+    # + return - Created attachment or error response
+    resource function post cases/[string id]/attachments(http:RequestContext ctx, AttachmentPayload payload)
+        returns entity:CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isEmptyId(id) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_ID_EMPTY
+                }
+            };
+        }
+
+        entity:AttachmentCreateResponse|error createdAttachmentResponse = entity:createAttachment(userInfo.idToken,
+                {
+                    referenceId: id,
+                    referenceType: payload.referenceType,
+                    name: payload.name,
+                    'type: payload.'type,
+                    file: payload.content
+                });
+        if createdAttachmentResponse is error {
+            if getStatusCode(createdAttachmentResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(createdAttachmentResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to add attachment to case with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to add attachments to the requested case. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+
+            string customError = "Failed to create a new attachment.";
+            log:printError(customError, createdAttachmentResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return createdAttachmentResponse.attachment;
+    }
+
     # Get products of a deployment by deployment ID.
     #
     # + id - ID of the deployment
     # + return - Deployed products response or error response
     resource function get deployments/[string id]/products(http:RequestContext ctx)
         returns DeployedProduct[]|http:BadRequest|http:Forbidden|http:InternalServerError {
-    
+
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -1082,7 +1210,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Get product update levels.
-    # 
+    #
     # + return - List of product update levels or an error
     resource function get updates/product\-update\-levels(http:RequestContext ctx)
         returns updates:ProductUpdateLevel[]|http:InternalServerError {

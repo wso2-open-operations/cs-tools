@@ -89,7 +89,7 @@ public isolated function getCase(string idToken, string caseId) returns CaseResp
 }
 
 # Create a new case.
-# 
+#
 # + idToken - ID token for authorization
 # + payload - Case creation payload
 # + return - Case creation response or error
@@ -134,6 +134,17 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
     return csEntityClient->/attachments/search.post(payload, generateHeaders(idToken));
 }
 
+# Create an attachment.
+#
+# + idToken - ID token for authorization
+# + payload - Attachment creation payload
+# + return - Attachment creation response or error
+public isolated function createAttachment(string idToken, AttachmentPayload payload)
+    returns AttachmentCreateResponse|error {
+
+    return csEntityClient->/attachments.post(payload, generateHeaders(idToken));
+}
+
 # Get products of a deployment.
 #
 # + idToken - ID token for authorization
@@ -152,4 +163,15 @@ public isolated function getDeployedProducts(string idToken, string deploymentId
 # + return - Deployments response or error
 public isolated function getDeployments(string idToken, string projectId) returns DeploymentsResponse|error {
     return csEntityClient->/deployments/search.post({filters: {projectIds: [projectId]}}, generateHeaders(idToken));
+}
+
+# Create a comment for a case.
+#
+# + idToken - ID token for authorization
+# + payload - Comment creation payload
+# + return - Comment creation response or error
+public isolated function createComment(string idToken, CommentCreatePayload payload)
+    returns CommentCreateResponse|error {
+
+    return csEntityClient->/comments.post(payload, generateHeaders(idToken));
 }

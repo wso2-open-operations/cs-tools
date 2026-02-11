@@ -216,6 +216,8 @@ public type ReferenceTableItem record {|
 public type CaseSearchFilters record {|
     # List of project IDs to filter
     string[] projectIds?;
+    # Search query for case number, title and description
+    string searchQuery?;
     # List of issue types to filter
     int[] issueTypeKeys?;
     # State key
@@ -492,4 +494,87 @@ public type Deployment record {|
 public type DeploymentsResponse record {|
     # List of deployments
     Deployment[] deployments;
+|};
+
+# Valid reference type values.
+public enum ReferenceType {
+    CASE = "case",
+    CHANGE_REQUEST = "change_request"
+}
+
+# Valid comment type values.
+public enum CommentType {
+    COMMENT = "comments",
+    WORK_NOTE = "work_note"
+}
+
+# Payload for creating a comment.
+public type CommentCreatePayload record {|
+    # Reference ID (case or change request ID)
+    string referenceId;
+    # Reference type
+    ReferenceType referenceType;
+    # Comment content
+    @constraint:String {minLength: 1, maxLength: 65000}
+    string content;
+    # Comment type
+    CommentType 'type;
+|};
+
+# Created comment details.
+public type CreatedComment record {|
+    # System ID of the created comment
+    string id;
+    # Created date and time
+    string createdOn;
+    # User who created the comment
+    string createdBy;
+    json...;
+|};
+
+# Response from creating a comment.
+public type CommentCreateResponse record {|
+    # Success message
+    string message;
+    # Created comment details
+    CreatedComment comment;
+    json...;
+|};
+
+# Response from creating an attachment.
+public type AttachmentCreateResponse record {|
+    # Success message
+    string message;
+    # Created attachment details
+    CreatedAttachment attachment;
+    json...;
+|};
+
+# Created attachment details.
+public type CreatedAttachment record {|
+    # System ID of the created attachment
+    string id;
+    # File size in bytes
+    int sizeBytes;
+    # Created date and time
+    string createdOn;
+    # User who created the attachment
+    string createdBy;
+    # Download URL
+    string downloadUrl;
+    json...;
+|};
+
+# Payload for creating an attachment.
+public type AttachmentPayload record {|
+    # Reference ID to which the attachment is associated (e.g., query ID, incident ID, etc)
+    string referenceId;
+    # Reference type
+    ReferenceType referenceType;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # Content of the file as a byte array
+    string file;
 |};
