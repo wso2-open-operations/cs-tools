@@ -25,6 +25,7 @@ import AllCasesPage from "@pages/AllCasesPage";
 import NoveraChatPage from "@pages/NoveraChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
 import AppLayout from "@layouts/AppLayout";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import LoginPage from "@pages/LoginPage";
 import AuthGuard from "./AuthGuard";
@@ -33,7 +34,8 @@ export default function App(): JSX.Element {
   return (
     <BrowserRouter>
       <LoaderProvider>
-        <Routes>
+        <ErrorBannerProvider>
+          <Routes>
           {/* Public Route */}
           <Route path="/login" element={<LoginPage />} />
 
@@ -101,7 +103,8 @@ export default function App(): JSX.Element {
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </ErrorBannerProvider>
       </LoaderProvider>
     </BrowserRouter>
   );
