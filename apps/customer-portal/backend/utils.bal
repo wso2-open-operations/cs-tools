@@ -27,9 +27,11 @@ import ballerina/log;
 public isolated function searchCases(string idToken, string projectId, CaseSearchPayload payload)
     returns CaseSearchResponse|error {
 
+    int? issueId = payload.filters?.issueId;
     entity:CaseSearchPayload searchPayload = {
         filters: {
             projectIds: [projectId],
+            issueTypeKeys: issueId != () ? [issueId] : (),
             severityKey: payload.filters?.severityId,
             stateKey: payload.filters?.statusId,
             deploymentId: payload.filters?.deploymentId
@@ -81,12 +83,15 @@ public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata
         select {id: item.id.toString(), label: item.label};
     ReferenceItem[] caseTypes = from entity:ReferenceTableItem item in caseMetadata.caseTypes
         select {id: item.id, label: item.name};
+    ReferenceItem[] issueTypes = from entity:ChoiceListItem item in caseMetadata.issueTypes
+        select {id: item.id.toString(), label: item.label};
 
     // TODO: Other project specific filters will be added later
     return {
         statuses,
         severities,
-        caseTypes
+        caseTypes,
+        issueTypes
     };
 }
 
