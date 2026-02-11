@@ -284,3 +284,13 @@ public type DeployedProduct record {|
     # Deployment
     ReferenceItem? deployment;
 |};
+
+# Payload for creating a comment.
+public type CommentCreatePayload record {|
+    # Reference type
+    entity:ReferenceType referenceType;
+    # Comment content
+    string content;
+    # Comment type
+    entity:CommentType 'type;
+|};

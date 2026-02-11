@@ -493,3 +493,49 @@ public type DeploymentsResponse record {|
     # List of deployments
     Deployment[] deployments;
 |};
+
+# Valid reference type values.
+public enum ReferenceType {
+    CASE = "case",
+    CHANGE_REQUEST = "change_request"
+}
+
+# Valid comment type values.
+public enum CommentType {
+    COMMENT = "comments",
+    WORK_NOTE = "work_note"
+}
+
+# Payload for creating a comment.
+public type CommentCreatePayload record {|
+    # Reference ID (case or change request ID)
+    string referenceId;
+    # Reference type
+    ReferenceType referenceType;
+    # Comment content
+    string content;
+    # Comment type
+    CommentType 'type;
+|};
+
+# Created comment details.
+public type CreatedComment record {|
+    # System ID of the created comment
+    string id;
+    # Created date and time
+    string createdOn;
+    # User who created the comment
+    string createdBy;
+    json...;
+|};
+
+# Response from creating a comment.
+public type CommentCreateResponse record {|
+    # Success status
+    boolean success;
+    # Success message
+    string message;
+    # Created comment details
+    CreatedComment comment;
+    json...;
+|};
