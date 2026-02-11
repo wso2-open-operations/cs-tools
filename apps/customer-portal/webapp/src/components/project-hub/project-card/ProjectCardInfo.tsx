@@ -15,7 +15,7 @@
 // under the License.
 
 import { Form, Typography } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import { type JSX, useMemo } from "react";
 import { stripHtmlTags } from "@utils/projectCard";
 
 interface ProjectCardInfoProps {
@@ -33,12 +33,26 @@ export default function ProjectCardInfo({
   title,
   subtitle,
 }: ProjectCardInfoProps): JSX.Element {
+  const strippedSubtitle = useMemo(() => stripHtmlTags(subtitle), [subtitle]);
+  const displayTitle = title || "--";
+  const displaySubtitle = strippedSubtitle || "--";
+
   return (
     <Form.CardHeader
       sx={{ pt: 1.5 }}
       title={
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          {title}
+        <Typography
+          variant="h6"
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            mb: 1,
+          }}
+        >
+          {displayTitle}
         </Typography>
       }
       subheader={
@@ -55,7 +69,7 @@ export default function ProjectCardInfo({
             minHeight: "5rem",
           }}
         >
-          {stripHtmlTags(subtitle)}
+          {displaySubtitle}
         </Typography>
       }
     />

@@ -15,9 +15,10 @@
 // under the License.
 
 import { Form } from "@wso2/oxygen-ui";
-import { useMemo, type JSX } from "react";
+import { useMemo, type JSX, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useGetProjectStat } from "@api/useGetProjectStat";
+import { useLoader } from "@context/linear-loader/LoaderContext";
 import ProjectCardActions from "@components/project-hub/project-card/ProjectCardActions";
 import ProjectCardBadges from "@components/project-hub/project-card/ProjectCardBadges";
 import ProjectCardInfo from "@components/project-hub/project-card/ProjectCardInfo";
@@ -54,6 +55,7 @@ export default function ProjectCard({
 }: ProjectCardProps): JSX.Element {
   // Hook to navigate between routes.
   const navigate = useNavigate();
+  const { showLoader, hideLoader } = useLoader();
 
   const handleViewDashboard = () => {
     if (onViewDashboard) {
@@ -69,6 +71,13 @@ export default function ProjectCard({
     isLoading: isStatsLoading,
     isError: isStatsQueryError,
   } = useGetProjectStat(id);
+
+  useEffect(() => {
+    if (isStatsLoading) {
+      showLoader();
+      return () => hideLoader();
+    }
+  }, [isStatsLoading, showLoader, hideLoader]);
 
   const mockStatus = useMemo(() => getMockStatus(), []);
   const mockOpenCases = useMemo(() => getMockOpenCases(), []);
@@ -88,6 +97,7 @@ export default function ProjectCard({
         alignItems: "stretch",
         display: "flex",
         flexDirection: "column",
+        width: "100%",
       }}
     >
       {/* project card badges */}

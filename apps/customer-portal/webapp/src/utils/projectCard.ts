@@ -51,12 +51,17 @@ export const formatProjectDate = (dateString: string): string => {
 export const getStatusColor = (
   status: string,
 ): "success" | "warning" | "error" | "default" => {
-  switch (status) {
-    case "All Good":
+  const lowerStatus = status?.toLowerCase();
+  switch (lowerStatus) {
+    case "all good":
+    case "good":
+    case "healthy":
       return "success";
-    case "Need Attention":
+    case "need attention":
       return "warning";
-    case "Critical Issues":
+    case "critical issues":
+    case "bad":
+    case "critical":
       return "error";
     default:
       return "default";

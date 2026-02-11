@@ -19,7 +19,7 @@
 # + email - Email of the user
 # + return - An array of RecommendedUpdateLevel records, or an error if the operation fails
 public isolated function getRecommendedUpdateLevels(string email) returns RecommendedUpdateLevel[]|error {
-    return updatesClient->/updates/recommended\-update\-levels.get(userEmail = email);
+    return updatesClient->/updates/recommended\-update\-levels.get(user = email);
 }
 
 # List updates based on the provided parameters.

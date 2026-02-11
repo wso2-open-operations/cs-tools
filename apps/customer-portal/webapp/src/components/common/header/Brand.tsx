@@ -17,15 +17,27 @@
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { WSO2 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import { useNavigate } from "react-router";
 
 /**
  * Brand component for the header.
  *
+ * @param {object} props - Component props.
+ * @param {boolean} props.isNavigationDisabled - Whether navigation to the project hub is disabled.
  * @returns {JSX.Element} The Brand component.
  */
-export default function Brand(): JSX.Element {
+export default function Brand({
+  isNavigationDisabled = false,
+}: {
+  isNavigationDisabled?: boolean;
+}): JSX.Element {
+  const navigate = useNavigate();
+
   return (
-    <HeaderUI.Brand>
+    <HeaderUI.Brand
+      onClick={() => !isNavigationDisabled && navigate("/")}
+      sx={{ cursor: isNavigationDisabled ? "default" : "pointer" }}
+    >
       {/* brand logo */}
       <HeaderUI.BrandLogo>
         <WSO2 />

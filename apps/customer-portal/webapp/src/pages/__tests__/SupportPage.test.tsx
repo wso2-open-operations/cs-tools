@@ -78,7 +78,6 @@ vi.mock("@wso2/oxygen-ui", () => ({
     purple: { 500: "#9C27B0", 400: "#A78BFA" },
     orange: { 600: "#FB8C00" },
   },
-  alpha: (color: string, opacity: number) => `${color}-${opacity}`,
   Divider: () => <hr />,
   Button: ({ children }: any) => <button>{children}</button>,
   Card: ({ children, sx }: any) => <div style={sx}>{children}</div>,

@@ -93,6 +93,34 @@ export default function ProjectSwitcher({
     );
   }
 
+  if (projects.length <= 1) {
+    const project = selectedProject || projects[0];
+
+    return (
+      <HeaderUI.Switchers showDivider={false}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            height: 40,
+            minWidth: 200,
+            px: 1.5,
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: "4px",
+            backgroundColor: "background.paper",
+          }}
+        >
+          <FolderOpen size={16} />
+          <ComplexSelect.MenuItem.Text
+            primary={project ? project.name : "Select Project"}
+          />
+        </Box>
+      </HeaderUI.Switchers>
+    );
+  }
+
   return (
     <HeaderUI.Switchers showDivider={false}>
       {/* project switcher select */}

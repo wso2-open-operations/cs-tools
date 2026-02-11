@@ -20,6 +20,7 @@ import {
   useState,
   useCallback,
   useRef,
+  useEffect,
   type ReactNode,
   type JSX,
 } from "react";
@@ -39,8 +40,13 @@ export function LoaderProvider({
 }): JSX.Element {
   const [isVisible, setIsVisible] = useState(false);
   const loaderCount = useRef(0);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showLoader = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     loaderCount.current += 1;
     setIsVisible(true);
   }, []);
@@ -48,8 +54,23 @@ export function LoaderProvider({
   const hideLoader = useCallback(() => {
     loaderCount.current = Math.max(0, loaderCount.current - 1);
     if (loaderCount.current === 0) {
-      setIsVisible(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+
+      timeoutRef.current = setTimeout(() => {
+        setIsVisible(false);
+        timeoutRef.current = null;
+      }, 500);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   return (

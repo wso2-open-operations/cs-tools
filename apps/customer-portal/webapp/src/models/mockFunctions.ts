@@ -270,7 +270,7 @@ export const getMockProjectStats = (): ProjectStatsResponse => {
       activeChats: Math.floor(Math.random() * 10),
       deployments: Math.floor(Math.random() * 20),
       openCases: Math.floor(Math.random() * 15),
-      slaStatus: Math.random() > 0.5 ? "Good" : "Bad",
+      slaStatus: Math.random() > 0.5 ? "All Good" : "Critical Issues",
     },
     recentActivity: {
       billableHours: Math.floor(Math.random() * 100),
