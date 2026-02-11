@@ -30,8 +30,11 @@ export function NotificationsListItem({
       minHeight={120}
       gap={2}
       p={1}
-      elevation={0}
-      sx={{ borderLeft: "5px solid", borderColor: unread ? "primary.main" : "transparent" }}
+      sx={{
+        borderLeft: "5px solid",
+        borderColor: unread ? "primary.main" : "transparent",
+        bgcolor: "background.paper",
+      }}
     >
       <Icon size={pxToRem(24)} color={color} />
       <Stack sx={{ width: "100%" }} justifyContent="space-between" gap={1}>

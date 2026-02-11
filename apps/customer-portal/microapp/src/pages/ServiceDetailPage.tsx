@@ -42,7 +42,7 @@ export default function ServiceDetailPage() {
   return (
     <>
       <Stack gap={2} mb={10}>
-        <Card component={Stack} p={1.5} gap={1.5}>
+        <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
           <Typography variant="h5" fontWeight="medium">
             Request Information
           </Typography>
@@ -76,7 +76,7 @@ export default function ServiceDetailPage() {
             </Grid>
           </Grid>
         </Card>
-        <Card component={Stack} p={1.5} gap={1.5}>
+        <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
           <Typography variant="h5" fontWeight="medium">
             Requirements
           </Typography>
@@ -88,7 +88,7 @@ export default function ServiceDetailPage() {
             ))}
           </Stack>
         </Card>
-        <Card component={Stack} p={1.5} gap={1.5}>
+        <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
           <Typography variant="h5" fontWeight="medium">
             Progress Timeline
           </Typography>
@@ -115,7 +115,7 @@ export default function ServiceDetailPage() {
             ))}
           </Timeline>
         </Card>
-        <Card component={Stack} p={1.5} gap={1.5}>
+        <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
           <Typography variant="h5" fontWeight="medium">
             Updates
           </Typography>

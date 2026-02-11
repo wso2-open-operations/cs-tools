@@ -1,4 +1,4 @@
-import { Chip, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { alpha, Chip, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { ProjectCardProps } from "@components/features/projects";
 import { Check } from "@wso2/oxygen-ui-icons-react";
 import { Circle } from "@mui/icons-material";
@@ -36,7 +36,14 @@ export function ProjectPopoverItem({
         {active && <Check color={theme.palette.primary.main} />}
       </Stack>
       <Stack direction="row" alignItems="center" gap={1.5}>
-        <Chip label={status} size="small" color={statusChipColorVariant} />
+        <Chip
+          label={status}
+          size="small"
+          sx={(theme) => ({
+            bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+            color: theme.palette[statusChipColorVariant].light,
+          })}
+        />
         <Typography color="text.secondary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}>
           {type}
         </Typography>

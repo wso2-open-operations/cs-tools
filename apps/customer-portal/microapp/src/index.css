@@ -23,6 +23,10 @@ under the License.
   font-optical-sizing: auto;
 }
 
+html {
+  font-size: 15px; /* base font size */
+}
+
 body {
   margin: 0;
 }

@@ -21,7 +21,7 @@ export function UserListItem({ name, email, role, lastActive }: UserListItemProp
       elevation={0}
       to="/users/edit"
       state={{ name, email, role: capitalize(role) }}
-      sx={{ textDecoration: "none" }}
+      sx={{ textDecoration: "none", p: 1 }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>

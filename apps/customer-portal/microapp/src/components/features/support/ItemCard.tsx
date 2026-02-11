@@ -69,7 +69,7 @@ export function ItemCard(props: ItemCardProps) {
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
   return (
-    <Card component={Link} to={to} sx={{ textDecoration: "none" }}>
+    <Card component={Link} to={to} sx={{ textDecoration: "none", p: 1 }}>
       <Stack gap={0.8}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" alignItems="center" gap={1}>

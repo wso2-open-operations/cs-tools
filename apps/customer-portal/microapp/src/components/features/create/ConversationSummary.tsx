@@ -59,15 +59,7 @@ export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
           </Stack>
         </Stack>
         {messages.length > 0 && (
-          <Accordion
-            elevation={0}
-            sx={{
-              "&:before": {
-                display: "none",
-              },
-            }}
-            disableGutters
-          >
+          <Accordion elevation={0} sx={{ bgcolor: "transparent", border: "none" }} disableGutters>
             <AccordionSummary expandIcon={<ChevronDown size={pxToRem(20)} />} sx={{ p: 0 }}>
               <Typography variant="subtitle1" color="text.secondary" component="span">
                 View Full Conversation

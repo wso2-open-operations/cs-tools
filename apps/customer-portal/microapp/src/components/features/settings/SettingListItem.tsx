@@ -23,7 +23,14 @@ export function SettingListItem({
   const Icon = icon;
 
   return (
-    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ cursor: "pointer" }} p={1.5}>
+    <Stack
+      direction="row"
+      justifyContent="space-between"
+      alignItems="center"
+      bgcolor="background.paper"
+      sx={{ cursor: "pointer" }}
+      p={1.5}
+    >
       <Stack direction="row" alignItems="center" gap={1.5}>
         <Stack
           width={40}

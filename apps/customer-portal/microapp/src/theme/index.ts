@@ -14,12 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ClassicTheme, extendTheme } from "@wso2/oxygen-ui";
+import { AcrylicOrangeTheme, extendTheme } from "@wso2/oxygen-ui";
 import { typography } from "@theme/typography";
 
 import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
 
-const theme = extendTheme(ClassicTheme, {
+const theme = extendTheme(AcrylicOrangeTheme, {
   typography,
 }) as OxygenTheme;
 

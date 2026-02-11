@@ -22,5 +22,5 @@ interface StatusChipProps extends Omit<ChipProps, "label"> {
 export function StatusChip({ status, ...props }: StatusChipProps) {
   const color = STATUS_CHIP_COLOR_CONFIG[status];
 
-  return <Chip variant="outlined" color={color} label={capitalize(status)} {...props} />;
+  return <Chip color={color} label={capitalize(status)} {...props} />;
 }

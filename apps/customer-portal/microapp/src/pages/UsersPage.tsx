@@ -70,7 +70,7 @@ export default function UsersPage() {
           <AddButton />
         </Stack>
         <Divider />
-        <Stack gap={2} pt={1} divider={<Divider />}>
+        <Stack gap={2} pt={1}>
           {users.map((props, index) => (
             <UserListItem key={index} {...props} />
           ))}

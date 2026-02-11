@@ -130,7 +130,7 @@ export default function ChatDetailPage() {
   return (
     <>
       <Stack gap={2} mb={10}>
-        <Card component={Stack} p={1.5} gap={1.5} elevation={0}>
+        <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
           <Typography variant="h5" fontWeight="medium">
             Chat Information
           </Typography>

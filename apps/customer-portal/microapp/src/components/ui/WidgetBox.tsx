@@ -8,7 +8,7 @@ interface WidgetBoxProps extends Omit<CardProps, "variant"> {
 
 export function WidgetBox({ title, children, ...props }: WidgetBoxProps) {
   return (
-    <Card component={Stack} p={1.2} gap={0.5} sx={{ height: "100%" }} {...props}>
+    <Card component={Stack} p={1.2} gap={0.5} sx={{ height: "100%", bgcolor: "background.paper" }} {...props}>
       {title && (
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6" fontWeight="medium" color="text.secondary">

@@ -48,13 +48,13 @@ export const APP_BAR_CONFIG: Record<AppBarVariant, AppBarConfig> = {
 };
 
 export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
-  { path: "/", title: "Dashboard", appBarVariant: "extended", tabIndex: 0 },
+  { path: "/", appBarVariant: "extended", tabIndex: 0 },
   { path: "/select", title: "Select Project", tabIndex: -1 },
-  { path: "/support", title: "Support Center", tabIndex: 1 },
-  { path: "/users", title: "Project Users", tabIndex: 2 },
+  { path: "/support", tabIndex: 1 },
+  { path: "/users", tabIndex: 2 },
   { path: "/users/invite", title: "Invite User", appBarVariant: "notifications", hasBackAction: true, tabIndex: -1 },
   { path: "/users/edit", title: "Edit User", appBarVariant: "notifications", hasBackAction: true, tabIndex: -1 },
-  { path: "/profile", title: "My Profile", appBarVariant: "minimal", tabIndex: 3 },
+  { path: "/profile", appBarVariant: "minimal", tabIndex: 3 },
   {
     path: "/notifications",
     title: "Notifications",

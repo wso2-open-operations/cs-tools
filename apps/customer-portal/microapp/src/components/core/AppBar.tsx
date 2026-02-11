@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AppBar as MuiAppBar, Button, Chip, IconButton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
+import {
+  AppBar as MuiAppBar,
+  Button,
+  Chip,
+  IconButton,
+  Stack,
+  Typography,
+  pxToRem,
+  useTheme,
+  Box,
+  alpha,
+} from "@wso2/oxygen-ui";
 
 import { NotificationBadge } from "@components/ui";
 import { ProjectSelector } from "@components/features/projects";
@@ -9,7 +20,7 @@ import { useProject } from "@context/project";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
 import { MOCK_PROJECTS } from "@src/mocks/data/projects";
-import { PROJECT_STATUS_META, PROJECT_TYPE_META } from "@config/constants";
+import { PROJECT_STATUS_META } from "@config/constants";
 import { ArrowLeft, Bell, ChevronDown, Folder } from "@wso2/oxygen-ui-icons-react";
 
 export function AppBar() {
@@ -37,7 +48,6 @@ export function AppBar() {
 
   if (!project) return null;
 
-  const TypeChipIcon = PROJECT_TYPE_META[project.type].icon;
   const statusChipColorVariant = PROJECT_STATUS_META[project.status].color;
 
   return (
@@ -48,7 +58,11 @@ export function AppBar() {
         elevation={0}
         sx={{ backgroundColor: "background.paper", display: "flex", flexDirection: "col", gap: 1, p: 1.5, pt: 3 }}
       >
-        {config.showNotifications && <NotificationButton to="/notifications" />}
+        {config.showNotifications && (
+          <Box mb={1}>
+            <NotificationButton to="/notifications" />
+          </Box>
+        )}
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
           <Stack direction="row" alignItems="center" gap={1.5}>
@@ -58,9 +72,11 @@ export function AppBar() {
               <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
                 {overlineSlot}
               </Typography>
-              <Typography variant="h6" fontWeight="medium">
-                {title}
-              </Typography>
+              {title && (
+                <Typography variant="h6" fontWeight="medium">
+                  {title}
+                </Typography>
+              )}
               <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
                 {subtitleSlot}
               </Typography>
@@ -83,13 +99,15 @@ export function AppBar() {
         )}
         {config.showChips && (
           <Stack direction="row" gap={2} mt={1.5}>
-            <Chip label={project.status} size="small" color={statusChipColorVariant} />
             <Chip
-              label={project.type}
-              icon={<TypeChipIcon />}
+              label={project.status}
               size="small"
-              sx={{ alignSelf: "start", borderRadius: 1 }}
+              sx={(theme) => ({
+                bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+                color: theme.palette[statusChipColorVariant].light,
+              })}
             />
+            <Chip label={project.type} size="small" sx={{ alignSelf: "start" }} />
           </Stack>
         )}
 

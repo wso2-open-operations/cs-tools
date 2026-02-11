@@ -26,7 +26,7 @@ export function ItemListView({ title, viewAllPath, children }: ItemListViewProps
         </Button>
       </Stack>
       <Divider />
-      <Stack gap={2} pt={2} divider={<Divider />}>
+      <Stack gap={2} pt={2}>
         {children}
       </Stack>
     </>

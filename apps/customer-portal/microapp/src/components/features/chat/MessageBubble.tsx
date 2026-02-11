@@ -19,7 +19,13 @@ export function MessageBubble({ author, blocks, timestamp = "Just Now", sx }: Ch
 
   return (
     <Stack direction="row" justifyContent={you ? "end" : "start"}>
-      <Card component={Stack} p={1.5} ml={you ? 10 : undefined} width={you ? "fit-content" : undefined} sx={sx}>
+      <Card
+        component={Stack}
+        p={1.5}
+        ml={you ? 10 : undefined}
+        width={you ? "fit-content" : undefined}
+        sx={{ ...sx, bgcolor: "background.paper" }}
+      >
         {!you && (
           <Stack direction="row" justifyContent="start" gap={1} mb={1}>
             <Box color="primary.main">
