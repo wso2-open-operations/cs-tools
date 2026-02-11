@@ -38,11 +38,25 @@ export function usePostCaseClassifications(): UseMutationResult<
   const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { isMockEnabled } = useMockConfig();
 
-  return useMutation<CaseClassificationResponse, Error, CaseClassificationRequest>({
+  return useMutation<
+    CaseClassificationResponse,
+    Error,
+    CaseClassificationRequest
+  >({
     mutationFn: async (
       requestBody: CaseClassificationRequest,
     ): Promise<CaseClassificationResponse> => {
-      logger.debug("[usePostCaseClassifications] Request payload:", requestBody);
+      const { chatHistory, ...restOfRequest } = requestBody;
+      logger.debug(
+        "[usePostCaseClassifications] Request payload (chatHistory redacted):",
+        {
+          ...restOfRequest,
+          chatHistorySummary: {
+            length: chatHistory.length,
+            hasContent: chatHistory.trim().length > 0,
+          },
+        },
+      );
 
       if (isMockEnabled) {
         await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));
@@ -51,37 +65,44 @@ export function usePostCaseClassifications(): UseMutationResult<
         return data;
       }
 
-      if (!isSignedIn || isAuthLoading) {
-        throw new Error("User must be signed in to classify case details");
-      }
+      try {
+        if (!isSignedIn || isAuthLoading) {
+          throw new Error("User must be signed in to classify case details");
+        }
 
-      const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
-      if (!baseUrl) {
-        throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
-      }
+        const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
+        if (!baseUrl) {
+          throw new Error(
+            "CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured",
+          );
+        }
 
-      const idToken = await getIdToken();
-      const requestUrl = `${baseUrl}/cases/classify`;
+        const idToken = await getIdToken();
+        const requestUrl = `${baseUrl}/cases/classify`;
 
-      const response = await fetch(requestUrl, {
-        method: "POST",
-        headers: addApiHeaders(idToken),
-        body: JSON.stringify(requestBody),
-      });
+        const response = await fetch(requestUrl, {
+          method: "POST",
+          headers: addApiHeaders(idToken),
+          body: JSON.stringify(requestBody),
+        });
 
-      logger.debug(
-        `[usePostCaseClassifications] Response status: ${response.status}`,
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Error classifying case details: ${response.status} ${response.statusText}`,
+        logger.debug(
+          `[usePostCaseClassifications] Response status: ${response.status}`,
         );
-      }
 
-      const data: CaseClassificationResponse = await response.json();
-      logger.debug("[usePostCaseClassifications] Data received:", data);
-      return data;
+        if (!response.ok) {
+          throw new Error(
+            `Error classifying case details: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const data: CaseClassificationResponse = await response.json();
+        logger.debug("[usePostCaseClassifications] Data received:", data);
+        return data;
+      } catch (error) {
+        logger.error("[usePostCaseClassifications] Error:", error);
+        throw error;
+      }
     },
   });
 }
