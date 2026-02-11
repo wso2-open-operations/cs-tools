@@ -17,6 +17,7 @@
 import type {
   CaseListItem,
   CaseDetails,
+  CaseComment,
   ProjectListItem,
   ProjectDetails,
   UserDetails,
@@ -932,6 +933,33 @@ export const mockCaseDetails: CaseDetails = {
   severity: { id: 10, label: "Critical (P1)" },
 };
 
+// Mock case comments.
+export const mockCaseComments: CaseComment[] = [
+  {
+    id: "1398232c1bceb290a002c9d3604bcb27",
+    content:
+      "[code]<p>Test comment</p><p><img src=\"/db98232c1bceb290a002c9d3604bcb27.iix\"></p><p><br></p><p>test</p>[/code]",
+    type: "comments",
+    createdOn: "2025-12-23 14:49:58",
+    createdBy: "para-admin@wso2.com",
+    isEscalated: false,
+  },
+  {
+    id: "712727a81bceb290a002c9d3604bcbcc",
+    content: "[code]<p>www</p><p><img src=\"/3d2727a81bceb290a002c9d3604bcbcc.iix\"></p>[/code]",
+    type: "comments",
+    createdOn: "2025-12-23 14:43:36",
+    createdBy: "para-admin@wso2.com",
+    isEscalated: false,
+  },
+  {
+    id: "61f6a7a81bceb290a002c9d3604bcb53",
+    content:
+      "[code]<br><b> <u>Description</u> </b><br><p><p>Test Description</p></p>[/code]",
+    type: "comments",
+    createdOn: "2025-12-23 14:42:46",
+    createdBy: "para-admin@wso2.com",
+    isEscalated: false,
 // Mock deployments for project detail Deployments tab.
 export const mockDeployments: Deployment[] = [
   {

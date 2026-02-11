@@ -213,6 +213,24 @@ export interface CaseDetails {
   severity: CaseStatus | null;
 }
 
+// Case comment
+export interface CaseComment {
+  id: string;
+  content: string;
+  type: string;
+  createdOn: string;
+  createdBy: string;
+  isEscalated: boolean;
+}
+
+// Response for case comments list
+export interface CaseCommentsResponse {
+  comments: CaseComment[];
+  totalRecords: number;
+  offset: number;
+  limit: number;
+}
+
 // Project Stats Response
 export interface ProjectStatsResponse {
   projectStats: {
