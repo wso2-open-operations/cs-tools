@@ -22,8 +22,8 @@ import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 // Mock the table utils
 vi.mock("@utils/casesTable", () => ({
-  getPriorityColor: vi.fn(() => "error"),
   getStatusColor: vi.fn(() => "success.main"),
+  getSeverityColor: vi.fn(() => "error.main"),
 }));
 
 // Mock the support utils

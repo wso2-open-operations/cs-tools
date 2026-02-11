@@ -74,7 +74,7 @@ vi.mock("../CasesTableSkeleton", () => ({
 }));
 
 vi.mock("@/utils/casesTable", () => ({
-  getPriorityColor: () => "default",
+  getSeverityColor: () => "error.main",
   getStatusColor: () => "#000",
 }));
 
