@@ -16,12 +16,15 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import Brand from "@components/common/header/Brand";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Header: {
-    Brand: ({ children }: { children: any }) => <div>{children}</div>,
+    Brand: ({ children, onClick }: { children: any; onClick?: () => void }) => (
+      <div onClick={onClick}>{children}</div>
+    ),
     BrandLogo: ({ children }: { children: any }) => <div>{children}</div>,
     BrandTitle: ({ children }: { children: any }) => <h1>{children}</h1>,
   },
@@ -34,7 +37,11 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 
 describe("Brand", () => {
   it("should render the wso2 logo and product title", () => {
-    render(<Brand />);
+    render(
+      <MemoryRouter>
+        <Brand />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByTestId("wso2-logo")).toBeInTheDocument();
     expect(screen.getByText("Customer Portal")).toBeInTheDocument();

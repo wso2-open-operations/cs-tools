@@ -58,4 +58,15 @@ describe("ProjectCardInfo", () => {
     expect(screen.getByTestId("typography-h6")).toBeInTheDocument();
     expect(screen.getByTestId("typography-body2")).toBeInTheDocument();
   });
+
+  it("should display '--' fallback for empty title and subtitle", () => {
+    const props = {
+      title: "",
+      subtitle: "",
+    };
+
+    render(<ProjectCardInfo {...props} />);
+
+    expect(screen.getAllByText("--")).toHaveLength(2);
+  });
 });

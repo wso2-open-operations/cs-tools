@@ -80,7 +80,7 @@ export default function ProjectCardStats({
             <ErrorIndicator entityName="Open Cases" />
           ) : (
             <Typography variant="body2" color="primary">
-              {openCases}
+              {openCases ?? "--"}
             </Typography>
           )}
         </Box>
@@ -104,7 +104,7 @@ export default function ProjectCardStats({
             <ErrorIndicator entityName="Active Chats" />
           ) : (
             <Typography variant="body2" color={colors.blue[500]}>
-              {activeChats}
+              {activeChats ?? "--"}
             </Typography>
           )}
         </Box>
@@ -113,7 +113,7 @@ export default function ProjectCardStats({
         <Box display="flex" alignItems="center" gap={1} color="text.secondary">
           <Calendar size={16} />
           <Typography variant="body2" color="inherit">
-            {formatProjectDate(date)}
+            {formatProjectDate(date) || "--"}
           </Typography>
         </Box>
         <Divider sx={{ width: "100%" }} />

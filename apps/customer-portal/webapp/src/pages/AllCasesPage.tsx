@@ -60,8 +60,7 @@ export default function AllCasesPage(): JSX.Element {
   } = useGetProjectCasesStats(projectId || "");
 
   // Fetch filter metadata
-  const { data: filterMetadata, isFetching: isFiltersMetadataLoading } =
-    useGetCasesFilters(projectId || "");
+  const { data: filterMetadata } = useGetCasesFilters(projectId || "");
 
   // Fetch all cases
   const { data: casesData, isFetching: isCasesLoading } = useGetProjectCases(

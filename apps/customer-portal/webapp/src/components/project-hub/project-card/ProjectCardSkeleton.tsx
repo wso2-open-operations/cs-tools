@@ -38,6 +38,7 @@ const ProjectCardSkeleton = (): JSX.Element => {
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        width: "100%",
       }}
     >
       {/* project card badges skeleton */}

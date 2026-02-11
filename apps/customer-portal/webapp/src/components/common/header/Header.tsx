@@ -122,7 +122,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
         <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
       )}
       {/* header brand logo and title */}
-      <Brand />
+      <Brand isNavigationDisabled={projects.length <= 1} />
       {!isProjectHub && (
         <>
           {/* header project switcher */}

@@ -16,8 +16,10 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { useEffect, useMemo, type JSX } from "react";
+import { useNavigate } from "react-router";
 import useGetProjects from "@api/useGetProjects";
 import { useLogger } from "@hooks/useLogger";
+import { useLoader } from "@context/linear-loader/LoaderContext";
 import ProjectCard from "@components/project-hub/project-card/ProjectCard";
 import ProjectCardSkeleton from "@components/project-hub/project-card/ProjectCardSkeleton";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
@@ -31,6 +33,8 @@ import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
  */
 export default function ProjectHub(): JSX.Element {
   const logger = useLogger();
+  const navigate = useNavigate();
+  const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
   const {
     data: projectsResponse,
@@ -43,12 +47,19 @@ export default function ProjectHub(): JSX.Element {
     [projectsResponse?.projects],
   );
 
-  // TODO : Uncommnet this on production
-  // useEffect(() => {
-  //   if (!isLoading && !isError && projects.length === 1) {
-  //     navigate(`/${projects[0].id}/dashboard`);
-  //   }
-  // }, [projects, isLoading, isError, navigate]);
+  useEffect(() => {
+    if (isLoading || isAuthLoading) {
+      showLoader();
+      return () => hideLoader();
+    }
+  }, [isLoading, isAuthLoading, showLoader, hideLoader]);
+
+  // Navigate to dashboard if there is only one project
+  useEffect(() => {
+    if (!isLoading && !isAuthLoading && !isError && projects.length === 1) {
+      navigate(`/${projects[0].id}/dashboard`, { replace: true });
+    }
+  }, [projects, isLoading, isAuthLoading, isError, navigate]);
 
   useEffect(() => {
     if (isError) {
