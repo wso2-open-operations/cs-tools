@@ -976,7 +976,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Create a new comment for a specific case.
-    # 
+    #
     # + id - ID of the case
     # + payload - Comment creation payload
     # + return - Created comment or error response
@@ -1040,10 +1040,10 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Create a new attachment for a specific case.
-    # 
+    #
     # + id - ID of the case
     # + return - Created attachment or error response
-    resource function post cases/[string id]/attachments(http:RequestContext ctx, entity:AttachmentPayload payload)
+    resource function post cases/[string id]/attachments(http:RequestContext ctx, AttachmentPayload payload)
         returns entity:CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -1063,8 +1063,14 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:AttachmentCreateResponse|error createdAttachmentResponse =
-            entity:createAttachment(userInfo.idToken, payload);
+        entity:AttachmentCreateResponse|error createdAttachmentResponse = entity:createAttachment(userInfo.idToken,
+                {
+                    referenceId: id,
+                    referenceType: payload.referenceType,
+                    name: payload.name,
+                    'type: payload.'type,
+                    file: payload.content.toBase64()
+                });
         if createdAttachmentResponse is error {
             if getStatusCode(createdAttachmentResponse) == http:STATUS_UNAUTHORIZED {
                 log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
@@ -1103,7 +1109,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + return - Deployed products response or error response
     resource function get deployments/[string id]/products(http:RequestContext ctx)
         returns DeployedProduct[]|http:BadRequest|http:Forbidden|http:InternalServerError {
-    
+
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -1204,7 +1210,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Get product update levels.
-    # 
+    #
     # + return - List of product update levels or an error
     resource function get updates/product\-update\-levels(http:RequestContext ctx)
         returns updates:ProductUpdateLevel[]|http:InternalServerError {

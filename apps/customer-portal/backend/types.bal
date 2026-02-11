@@ -292,7 +292,22 @@ public type CommentCreatePayload record {|
     # Reference type
     entity:ReferenceType referenceType;
     # Comment content
+    @constraint:String {minLength: 1, maxLength: 65000}
     string content;
     # Comment type
     entity:CommentType 'type;
+|};
+
+# Payload for creating an attachment.
+public type AttachmentPayload record {|
+    # Reference ID to which the attachment is associated (e.g., query ID, incident ID, etc)
+    string referenceId;
+    # Reference type
+    entity:ReferenceType referenceType;
+    # File name
+    string name;
+    # MIME type of the file
+    string 'type;
+    # Content of the file as a byte array
+    byte[] content;
 |};
