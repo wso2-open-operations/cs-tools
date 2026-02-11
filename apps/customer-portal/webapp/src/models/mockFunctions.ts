@@ -87,13 +87,13 @@ export const getMockProjectSupportStats = (): ProjectSupportStats => {
  * @returns {ProjectCasesStats} Mock project case statistics.
  */
 export const getMockProjectCasesStats = (): ProjectCasesStats => {
-  const workInProgress = Math.floor(Math.random() * 10);
-  const waitingOnClient = Math.floor(Math.random() * 5);
-  const waitingOnWso2 = Math.floor(Math.random() * 5);
+  const workInProgress = 1;
+  const waitingOnClient = 0;
+  const waitingOnWso2 = 1;
 
-  const medium = Math.floor(Math.random() * 8) + 1;
-  const high = Math.floor(Math.random() * 4) + 1;
-  const critical = Math.floor(Math.random() * 2) + 1;
+  const medium = 15;
+  const high = 0;
+  const critical = 0;
 
   return {
     activeCases: {
@@ -102,8 +102,8 @@ export const getMockProjectCasesStats = (): ProjectCasesStats => {
       waitingOnWso2,
       workInProgress,
     },
-    averageResponseTime: Number((Math.random() * 24).toFixed(1)),
-    openCases: workInProgress + waitingOnClient + waitingOnWso2,
+    averageResponseTime: 0.0,
+    openCases: 58,
     outstandingCases: {
       critical,
       high,
@@ -111,10 +111,10 @@ export const getMockProjectCasesStats = (): ProjectCasesStats => {
       total: medium + high + critical,
     },
     resolvedCases: {
-      currentMonth: Math.floor(Math.random() * 10) + 5,
-      total: Math.floor(Math.random() * 50) + 20,
+      currentMonth: 0,
+      total: 1,
     },
-    totalCases: Math.floor(Math.random() * 100) + 50,
+    totalCases: 61,
   };
 };
 

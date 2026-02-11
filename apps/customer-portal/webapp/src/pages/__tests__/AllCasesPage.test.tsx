@@ -106,8 +106,20 @@ describe("AllCasesPage", () => {
       isFetching: false,
     });
     (useGetProjectCases as any).mockReturnValue({
-      data: { cases: mockCases, totalRecords: mockCases.length },
+      data: {
+        pages: [
+          {
+            cases: mockCases,
+            totalRecords: mockCases.length,
+            offset: 0,
+            limit: mockCases.length,
+          },
+        ],
+        pageParams: [0],
+      },
       isFetching: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
     });
   });
 

@@ -263,9 +263,9 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     metadataKey: "severities",
   },
   {
-    filterKey: "caseTypes",
+    filterKey: "issueTypes",
     id: "category",
-    metadataKey: "caseTypes",
+    metadataKey: "issueTypes",
   },
   {
     filterKey: "deploymentId",

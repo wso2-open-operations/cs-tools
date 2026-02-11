@@ -23,6 +23,7 @@ import type {
   UserDetails,
   Deployment,
   ChatHistoryResponse,
+  CaseMetadataResponse,
 } from "@models/responses";
 import {
   PROJECT_TYPE,
@@ -275,58 +276,35 @@ export const mockCaseCreationMetadata: CaseCreationMetadata = {
 };
 
 // Full mock metadata based on real response structure
-export const mockCaseMetadata = {
+export const mockCaseMetadata: CaseMetadataResponse = {
   statuses: [
     { id: "1", label: "Open" },
-    { id: "1001", label: "In Progress" },
-    { id: "1002", label: "Waiting On Client" },
     { id: "10", label: "Work In Progress" },
     { id: "18", label: "Awaiting Info" },
     { id: "1003", label: "Waiting On WSO2" },
     { id: "6", label: "Solution Proposed" },
     { id: "3", label: "Closed" },
     { id: "1006", label: "Reopened" },
-    { id: "7", label: "Cancelled" },
-    { id: "1007", label: "Deferred" },
-    { id: "1009", label: "Change Scheduled" },
   ],
   severities: [
-    { id: "13", label: "Low (P4)" },
-    { id: "12", label: "Medium (P3)" },
-    { id: "11", label: "High (P2)" },
-    { id: "10", label: "Critical (P1)" },
-    { id: "14", label: "Catastrophic (P0)" },
+    { id: "60", label: "S0" },
+    { id: "61", label: "S1" },
+    { id: "62", label: "S2" },
+    { id: "63", label: "S3" },
+    { id: "64", label: "S4" },
   ],
-  caseTypes: [
-    { id: "0d5b8fbd1b18f010cb6898aebd4bcba5", label: "Query" },
-    { id: "25db43311b58f010cb6898aebd4bcb09", label: "Bug" },
-    { id: "262c4e2d1bd9b010d64e64a2604bcb56", label: "Sub-Task" },
-    { id: "3b8b43311b58f010cb6898aebd4bcb8f", label: "Announcement" },
-    { id: "3f5b47bd1b18f010cb6898aebd4bcbc2", label: "Admin Task" },
-    { id: "42e93b6a1bfdf0106a67caa1604bcb3a", label: "Story" },
-    { id: "42fb4b311b58f010cb6898aebd4bcb94", label: "New Feature" },
-    { id: "4b41cbf81bbcb410cb6898aebd4bcb84", label: "Change Requests" },
-    { id: "5aeff1201b74c210264c997a234bcb54", label: "Service Request" },
-    { id: "80810ff81bbcb410cb6898aebd4bcb3c", label: "Hosting Query" },
-    { id: "83ed57221b7df0106a67caa1604bcb18", label: "Cloud Incident" },
-    { id: "8d4b87bd1b18f010cb6898aebd4bcb59", label: "Incident" },
-    { id: "8f8fc2c41b0bd550d64e64a2604bcb38", label: "Engagement" },
-    { id: "a0f93b2a1bfdf0106a67caa1604bcbc9", label: "NFR" },
-    {
-      id: "ab36479047ccf510a0a29cd3846d43ee",
-      label: "Security Report Analysis",
-    },
-    { id: "b9bc97ee1b3df0106a67caa1604bcb7f", label: "Cloud Query" },
-    { id: "bfa1473c1bbcb410cb6898aebd4bcb52", label: "Hosting" },
-    { id: "e0eb43fd1b18f010cb6898aebd4bcb3c", label: "Improvement" },
-    { id: "e30dbe1b1b319950d64e64a2604bcb75", label: "Test" },
-    { id: "f46103f81bbcb410cb6898aebd4bcb27", label: "Hosting Task" },
+  issueTypes: [
+    { id: "6", label: "Error" },
+    { id: "2", label: "Partial Outage" },
+    { id: "3", label: "Performance Degradation" },
+    { id: "4", label: "Question" },
+    { id: "5", label: "Security or Compliance" },
+    { id: "1", label: "Total Outage" },
   ],
   deployments: [
-    { id: "deployment-dev", label: "Development" },
-    { id: "deployment-prod", label: "Production" },
-    { id: "deployment-qa", label: "QA" },
-    { id: "deployment-staging", label: "Staging" },
+    { id: "1", label: "Development" },
+    { id: "2", label: "Production" },
+    { id: "3", label: "Non-Production" },
   ],
 };
 
@@ -345,17 +323,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "type-incident",
-      label: "Incident",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
-      id: "10",
-      label: "Critical (P1)",
+      id: "60",
+      label: "S0",
     },
     status: {
       id: "1",
@@ -374,18 +353,22 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
-    deployment: null,
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
-      id: "1001",
-      label: CASE_STATUS.IN_PROGRESS,
+      id: "10",
+      label: CASE_STATUS.WORK_IN_PROGRESS,
     },
   },
   {
@@ -400,12 +383,16 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "0d5b8fbd1b18f010cb6898aebd4bcba5",
-      label: "Query",
+    issueType: {
+      id: "4",
+      label: "Question",
     },
+    deployedProduct: null,
     deployment: null,
-    severity: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
     status: {
       id: "1",
       label: CASE_STATUS.OPEN,
@@ -423,14 +410,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "42fb4b311b58f010cb6898aebd4bcb94",
-      label: "New Feature",
+    issueType: {
+      id: "4",
+      label: "Question",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "1",
@@ -450,17 +438,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
-      label: "Staging",
+      id: "3",
+      label: "Non-Production",
     },
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
       id: "1",
@@ -479,14 +468,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
-      label: "Task",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "13",
-      label: "Low (P4)",
+      id: "63",
+      label: "S3",
     },
     status: {
       id: "3",
@@ -505,17 +495,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
       id: "1",
@@ -534,14 +525,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "25db43311b58f010cb6898aebd4bcb09",
-      label: "Bug",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "1",
@@ -560,14 +552,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "25db43311b58f010cb6898aebd4bcb09",
-      label: "Bug",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "13",
-      label: "Low (P4)",
+      id: "63",
+      label: "S3",
     },
     status: {
       id: "1",
@@ -586,17 +579,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
-      id: "5aeff1201b74c210264c997a234bcb54",
-      label: "Service Request",
+    issueType: {
+      id: "1",
+      label: "Total Outage",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
-      label: "Staging",
+      id: "3",
+      label: "Non-Production",
     },
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "1",
@@ -615,14 +609,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "25db43311b58f010cb6898aebd4bcb09",
-      label: "Bug",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "13",
-      label: "Low (P4)",
+      id: "63",
+      label: "S3",
     },
     status: {
       id: "3",
@@ -641,17 +636,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
-      id: "1001",
+      id: "10",
       label: CASE_STATUS.IN_PROGRESS,
     },
   },
@@ -667,14 +663,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "42fb4b311b58f010cb6898aebd4bcb94",
-      label: "New Feature",
+    issueType: {
+      id: "4",
+      label: "Question",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "1",
@@ -693,17 +690,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "ab36479047ccf510a0a29cd3846d43ee",
-      label: "Security Report Analysis",
+    issueType: {
+      id: "5",
+      label: "Security or Compliance",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
-      id: "14",
-      label: "Catastrophic (P0)",
+      id: "60",
+      label: "S0",
     },
     status: {
       id: "1",
@@ -722,14 +720,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
       id: "1",
@@ -748,14 +747,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
-      id: "3b8b43311b58f010cb6898aebd4bcb8f",
-      label: "Announcement",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "13",
-      label: "Low (P4)",
+      id: "63",
+      label: "S3",
     },
     status: {
       id: "3",
@@ -774,14 +774,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "e0eb43fd1b18f010cb6898aebd4bcb3c",
-      label: "Improvement",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "6",
@@ -800,17 +801,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-003",
       label: "Internal Tools",
     },
-    type: {
-      id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
-      label: "Task",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-staging",
-      label: "Staging",
+      id: "3",
+      label: "Non-Production",
     },
     severity: {
-      id: "11",
-      label: "High (P2)",
+      id: "61",
+      label: "S1",
     },
     status: {
       id: "1",
@@ -829,14 +831,15 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "25db43311b58f010cb6898aebd4bcb09",
-      label: "Bug",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "13",
-      label: "Low (P4)",
+      id: "63",
+      label: "S3",
     },
     status: {
       id: "1",
@@ -855,17 +858,18 @@ export const mockCases: CaseListItem[] = [
       id: "project-001",
       label: "Customer Portal – Subscription",
     },
-    type: {
-      id: "8d4b87bd1b18f010cb6898aebd4bcb59",
-      label: "Incident",
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
     },
+    deployedProduct: null,
     deployment: {
-      id: "deployment-prod",
+      id: "2",
       label: "Production",
     },
     severity: {
-      id: "10",
-      label: "Critical (P1)",
+      id: "61",
+      label: "S1",
     },
     status: {
       id: "1",
@@ -884,18 +888,577 @@ export const mockCases: CaseListItem[] = [
       id: "project-002",
       label: "Customer Analytics Platform",
     },
-    type: {
-      id: "c10c0ffd1b18f010cb6898aebd4bcb0f",
-      label: "Task",
+    issueType: {
+      id: "6",
+      label: "Error",
     },
+    deployedProduct: null,
     deployment: null,
     severity: {
-      id: "12",
-      label: "Medium (P3)",
+      id: "62",
+      label: "S2",
     },
     status: {
       id: "3",
       label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-022",
+    internalId: "CUPRSUB-122",
+    number: "CS0001022",
+    createdOn: "2025-12-10 11:30:00",
+    title: "Deployment failure in QA",
+    description: "Automated deployment pipeline failed for QA environment.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-023",
+    internalId: "CUPRSUB-123",
+    number: "CS0001023",
+    createdOn: "2025-12-08 09:45:00",
+    title: "Feature request: Dark mode",
+    description: "Users are requesting dark mode support for the dashboard.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "4",
+      label: "Question",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "63",
+      label: "S3",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-024",
+    internalId: "CUPRSUB-124",
+    number: "CS0001024",
+    createdOn: "2025-12-05 16:20:00",
+    title: "Slow query performance",
+    description: "Analytics queries taking longer than expected.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "10",
+      label: CASE_STATUS.WORK_IN_PROGRESS,
+    },
+  },
+  {
+    id: "case-025",
+    internalId: "CUPRSUB-125",
+    number: "CS0001025",
+    createdOn: "2025-12-03 14:10:00",
+    title: "Login issue with SSO",
+    description: "Users unable to login using Google SSO.",
+    assignedEngineer: null,
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "60",
+      label: "S0",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-026",
+    internalId: "CUPRSUB-126",
+    number: "CS0001026",
+    createdOn: "2025-11-30 10:00:00",
+    title: "API documentation error",
+    description: "Found incorrect parameter description in v1 docs.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "63",
+      label: "S3",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-027",
+    internalId: "CUPRSUB-127",
+    number: "CS0001027",
+    createdOn: "2025-11-28 13:45:00",
+    title: "Request for backup restore",
+    description: "Need to restore database backup from previous week.",
+    assignedEngineer: null,
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "1",
+      label: "Total Outage",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-028",
+    internalId: "CUPRSUB-128",
+    number: "CS0001028",
+    createdOn: "2025-11-25 09:30:00",
+    title: "User permission issue",
+    description: "Client cannot access project settings.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "10",
+      label: CASE_STATUS.WORK_IN_PROGRESS,
+    },
+  },
+  {
+    id: "case-029",
+    internalId: "CUPRSUB-129",
+    number: "CS0001029",
+    createdOn: "2025-11-22 15:15:00",
+    title: "Integration with Slack",
+    description: "Requesting help to set up Slack notifications.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    issueType: {
+      id: "4",
+      label: "Question",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "63",
+      label: "S3",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-030",
+    internalId: "CUPRSUB-130",
+    number: "CS0001030",
+    createdOn: "2025-11-20 11:00:00",
+    title: "Server 500 error on checkout",
+    description: "Checkout process failing intermittently.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "60",
+      label: "S0",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-031",
+    internalId: "CUPRSUB-131",
+    number: "CS0001031",
+    createdOn: "2025-11-18 14:30:00",
+    title: "Incorrect billing amount",
+    description: "Customer charged twice for subscription.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-032",
+    internalId: "CUPRSUB-132",
+    number: "CS0001032",
+    createdOn: "2025-11-15 10:45:00",
+    title: "SSL certificate expiry warning",
+    description: "Certificate expiring in 3 days.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "10",
+      label: CASE_STATUS.WORK_IN_PROGRESS,
+    },
+  },
+  {
+    id: "case-033",
+    internalId: "CUPRSUB-133",
+    number: "CS0001033",
+    createdOn: "2025-11-12 16:00:00",
+    title: "Dashboard loading slow",
+    description: "Takes over 10 seconds to load main dashboard.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    issueType: {
+      id: "3",
+      label: "Performance Degradation",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-034",
+    internalId: "CUPRSUB-134",
+    number: "CS0001034",
+    createdOn: "2025-11-10 13:20:00",
+    title: "Typo in footer",
+    description: "Copyright year is incorrect.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "63",
+      label: "S3",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-035",
+    internalId: "CUPRSUB-135",
+    number: "CS0001035",
+    createdOn: "2025-11-08 11:50:00",
+    title: "Request for log access",
+    description: "Need access to server logs for debugging.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "4",
+      label: "Question",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-036",
+    internalId: "CUPRSUB-136",
+    number: "CS0001036",
+    createdOn: "2025-11-05 09:10:00",
+    title: "Search functionality broken",
+    description: "Search returns no results for valid queries.",
+    assignedEngineer: "engineer-456",
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-037",
+    internalId: "CUPRSUB-137",
+    number: "CS0001037",
+    createdOn: "2025-11-03 14:40:00",
+    title: "Export to PDF failure",
+    description: "PDF export crashes for large reports.",
+    assignedEngineer: null,
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-038",
+    internalId: "CUPRSUB-138",
+    number: "CS0001038",
+    createdOn: "2025-11-01 10:25:00",
+    title: "New user onboarding issue",
+    description: "Welcome email not being sent.",
+    assignedEngineer: "engineer-789",
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "61",
+      label: "S1",
+    },
+    status: {
+      id: "10",
+      label: CASE_STATUS.WORK_IN_PROGRESS,
+    },
+  },
+  {
+    id: "case-039",
+    internalId: "CUPRSUB-139",
+    number: "CS0001039",
+    createdOn: "2025-10-30 16:50:00",
+    title: "Mobile app crash on iOS 18",
+    description: "Crash observed only on latest iOS version.",
+    assignedEngineer: null,
+    project: {
+      id: "project-001",
+      label: "Customer Portal – Subscription",
+    },
+    issueType: {
+      id: "6",
+      label: "Error",
+    },
+    deployedProduct: null,
+    deployment: {
+      id: "2",
+      label: "Production",
+    },
+    severity: {
+      id: "60",
+      label: "S0",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
+    },
+  },
+  {
+    id: "case-040",
+    internalId: "CUPRSUB-140",
+    number: "CS0001040",
+    createdOn: "2025-10-28 12:15:00",
+    title: "Request for custom domain",
+    description: "Client wants to use their own domain for portal.",
+    assignedEngineer: "engineer-123",
+    project: {
+      id: "project-003",
+      label: "Internal Tools",
+    },
+    issueType: {
+      id: "4",
+      label: "Question",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "63",
+      label: "S3",
+    },
+    status: {
+      id: "3",
+      label: CASE_STATUS.CLOSED,
+    },
+  },
+  {
+    id: "case-041",
+    internalId: "CUPRSUB-141",
+    number: "CS0001041",
+    createdOn: "2025-10-25 09:00:00",
+    title: "Database migration plan",
+    description: "Planning for next month's DB upgrade.",
+    assignedEngineer: null,
+    project: {
+      id: "project-002",
+      label: "Customer Analytics Platform",
+    },
+    issueType: {
+      id: "4",
+      label: "Question",
+    },
+    deployedProduct: null,
+    deployment: null,
+    severity: {
+      id: "62",
+      label: "S2",
+    },
+    status: {
+      id: "1",
+      label: CASE_STATUS.OPEN,
     },
   },
 ];
@@ -960,6 +1523,9 @@ export const mockCaseComments: CaseComment[] = [
     createdOn: "2025-12-23 14:42:46",
     createdBy: "para-admin@wso2.com",
     isEscalated: false,
+  },
+];
+
 // Mock deployments for project detail Deployments tab.
 export const mockDeployments: Deployment[] = [
   {

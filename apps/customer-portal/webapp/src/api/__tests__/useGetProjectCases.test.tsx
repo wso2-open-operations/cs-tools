@@ -71,8 +71,8 @@ describe("useGetProjectCases", () => {
   });
 
   it("should have correct query options", () => {
-    const requestBody = { pagination: { limit: 10, offset: 0 } };
-    renderHook(() => useGetProjectCases("project-1", requestBody), {
+    const requestBody = { sortBy: { field: "createdOn", order: "desc" } };
+    renderHook(() => useGetProjectCases("project-1", requestBody as any), {
       wrapper,
     });
 
@@ -80,13 +80,16 @@ describe("useGetProjectCases", () => {
       queryKey: ["project-cases", "project-1", requestBody, true],
     })[0];
 
-    expect((query?.options as any).staleTime).toBeUndefined();
-    expect((query?.options as any).refetchOnWindowFocus).toBeUndefined();
+    expect((query?.options as any).staleTime).toBe(5 * 60 * 1000);
+    expect((query?.options as any).refetchOnWindowFocus).toBe(false);
   });
 
   it("should not fetch if projectId is missing", () => {
     const { result } = renderHook(
-      () => useGetProjectCases("", { pagination: { limit: 10, offset: 0 } }),
+      () =>
+        useGetProjectCases("", {
+          sortBy: { field: "createdOn", order: "desc" },
+        }),
       {
         wrapper,
       },

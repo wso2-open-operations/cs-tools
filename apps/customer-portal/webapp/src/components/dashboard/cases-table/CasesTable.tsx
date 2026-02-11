@@ -15,7 +15,7 @@
 // under the License.
 
 import { ListingTable } from "@wso2/oxygen-ui";
-import { type JSX, useState, useEffect } from "react";
+import { type JSX, useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@api/useGetProjectCases";
@@ -24,7 +24,6 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import FilterPopover, {
   type FilterField,
 } from "@components/common/filter-panel/FilterPopover";
-import type { CaseSearchRequest } from "@models/requests";
 import CasesTableHeader from "@components/dashboard/cases-table/CasesTableHeader";
 import CasesList from "@components/dashboard/cases-table/CasesList";
 
@@ -53,7 +52,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       label: "Status",
       type: "select",
       options:
-        filtersMetadata?.statuses.map((s) => ({
+        filtersMetadata?.statuses?.map((s) => ({
           label: s.label,
           value: s.id,
         })) || [],
@@ -63,60 +62,72 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       label: "Severity",
       type: "select",
       options:
-        filtersMetadata?.severities.map((s) => ({
+        filtersMetadata?.severities?.map((s) => ({
           label: s.label,
           value: s.id,
         })) || [],
     },
     {
-      id: "caseTypes",
+      id: "issueTypes",
       label: "Case Type",
       type: "select",
-      options: filtersMetadata?.caseTypes.map((t) => t.label) || [],
+      options:
+        filtersMetadata?.issueTypes?.map((t) => ({
+          label: t.label,
+          value: t.id,
+        })) || [],
     },
     {
       id: "deploymentId",
       label: "Deployment",
       type: "select",
-      options: [
-        { label: "Development", value: "Development" },
-        { label: "Production", value: "Production" },
-        { label: "QA", value: "QA" },
-        { label: "Staging", value: "Staging" },
-      ],
+      options:
+        filtersMetadata?.deployments?.map((d) => ({
+          label: d.label,
+          value: d.id,
+        })) || [],
     },
   ];
 
-  const hasFilters = Object.values(filters).some(
-    (val) => val !== undefined && val !== "" && val !== null,
-  );
-
-  const requestBody: CaseSearchRequest = {
-    ...(hasFilters && {
+  const caseSearchRequest = useMemo(
+    () => ({
       filters: {
+        statusId: filters.statusId ? Number(filters.statusId) : undefined,
+        severityId: filters.severityId ? Number(filters.severityId) : undefined,
+        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
-        severityId: filters.severityId
-          ? parseInt(filters.severityId, 10)
-          : undefined,
-        statusId: filters.statusId ? parseInt(filters.statusId, 10) : undefined,
-        caseTypes: filters.caseTypes ? [filters.caseTypes] : undefined,
+      },
+      sortBy: {
+        field: "createdOn",
+        order: "desc" as const,
       },
     }),
-    pagination: {
-      offset: page * rowsPerPage,
-      limit: rowsPerPage,
-    },
-    sortBy: {
-      field: "createdOn",
-      order: "desc",
-    },
-  };
+    [filters],
+  );
 
   const {
     data,
     isFetching: isFetchingCases,
     isError,
-  } = useGetProjectCases(projectId, requestBody);
+  } = useGetProjectCases(projectId, caseSearchRequest);
+
+  const allCases = data?.pages.flatMap((page) => page.cases) ?? [];
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
+
+  const filteredCases = useMemo(() => [...allCases], [allCases]);
+
+  const paginatedData = useMemo(() => {
+    const startIndex = page * rowsPerPage;
+    const totalRecords =
+      filteredCases.length === 0 ? 0 : apiTotalRecords || filteredCases.length;
+
+    return {
+      cases: filteredCases.slice(startIndex, startIndex + rowsPerPage),
+      totalRecords,
+      offset: startIndex,
+      limit: rowsPerPage,
+    };
+  }, [filteredCases, page, rowsPerPage, apiTotalRecords]);
 
   const tableLoading = isAuthLoading || isFetchingCases || isFetchingFilters;
 
@@ -211,7 +222,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       <CasesList
         isLoading={isFetchingCases || isAuthLoading}
         isError={isError}
-        data={data}
+        data={paginatedData}
         page={page}
         rowsPerPage={rowsPerPage}
         onPageChange={handleChangePage}

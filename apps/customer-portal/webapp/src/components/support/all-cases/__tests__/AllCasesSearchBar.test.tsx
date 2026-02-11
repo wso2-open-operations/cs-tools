@@ -32,7 +32,7 @@ describe("AllCasesSearchBar", () => {
   const defaultFilters = {
     statusId: "",
     severityId: "",
-    caseTypes: "",
+    issueTypes: "",
     deploymentId: "",
   };
 

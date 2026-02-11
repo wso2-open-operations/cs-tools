@@ -108,7 +108,6 @@ vi.mock("@wso2/oxygen-ui", () => ({
     </div>
   ),
   Paper: ({ children }: any) => <div data-testid="paper">{children}</div>,
-  alpha: (color: string, opacity: number) => `alpha(${color}, ${opacity})`,
   useTheme: () => ({
     palette: {
       primary: { main: "#0070F3" },
@@ -152,7 +151,13 @@ vi.mock("@api/useGetProjectSupportStats", () => ({
 // Mock useGetProjectCases (avoids pulling in useAsgardeo)
 vi.mock("@api/useGetProjectCases", () => ({
   __esModule: true,
-  default: () => ({ data: { cases: [] }, isLoading: false }),
+  default: () => ({
+    data: {
+      pages: [{ cases: [], totalRecords: 0, offset: 0, limit: 10 }],
+      pageParams: [0],
+    },
+    isFetching: false,
+  }),
 }));
 
 // Mock useGetChatHistory

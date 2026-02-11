@@ -148,13 +148,22 @@ export default function OutstandingCasesList({
                 }}
               />
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                {c.assignedEngineer && (
-                  <Tooltip title={`Assigned to ${c.assignedEngineer}`}>
-                    <Typography variant="caption" color="text.secondary">
-                      Assigned to {c.assignedEngineer}
-                    </Typography>
-                  </Tooltip>
-                )}
+                {(() => {
+                  const raw = c.assignedEngineer;
+                  const label =
+                    raw == null
+                      ? ""
+                      : typeof raw === "object" && "label" in raw
+                        ? raw.label
+                        : String(raw);
+                  return label ? (
+                    <Tooltip title={`Assigned to ${label}`}>
+                      <Typography variant="caption" color="text.secondary">
+                        Assigned to {label}
+                      </Typography>
+                    </Tooltip>
+                  ) : null;
+                })()}
                 <Typography variant="caption" color="text.secondary">
                   {formatRelativeTime(c.createdOn)}
                 </Typography>
