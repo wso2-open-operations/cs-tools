@@ -81,8 +81,6 @@ public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata
         select {id: item.id.toString(), label: item.label};
     ReferenceItem[] severities = from entity:ChoiceListItem item in caseMetadata.severities
         select {id: item.id.toString(), label: item.label};
-    ReferenceItem[] caseTypes = from entity:ReferenceTableItem item in caseMetadata.caseTypes
-        select {id: item.id, label: item.name};
     ReferenceItem[] issueTypes = from entity:ChoiceListItem item in caseMetadata.issueTypes
         select {id: item.id.toString(), label: item.label};
 
@@ -90,7 +88,6 @@ public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata
     return {
         statuses,
         severities,
-        caseTypes,
         issueTypes
     };
 }

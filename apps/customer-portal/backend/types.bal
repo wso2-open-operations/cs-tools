@@ -133,8 +133,6 @@ public type CaseFilterOptions record {|
     ReferenceItem[] statuses;
     # List of case severities
     ReferenceItem[] severities;
-    # List of case types
-    ReferenceItem[] caseTypes;
     # List of issue types
     ReferenceItem[] issueTypes;
 |};
