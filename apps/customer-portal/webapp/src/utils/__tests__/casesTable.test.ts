@@ -24,11 +24,11 @@ describe("casesTable utils", () => {
     it("should return correct MUI color paths for severity levels", () => {
       expect(getSeverityColor("S0")).toBe("error.main");
       expect(getSeverityColor("S1")).toBe("warning.main");
-      expect(getSeverityColor("S2")).toBe("text.primary");
+      expect(getSeverityColor("S2")).toBe("text.disabled");
       expect(getSeverityColor("S3")).toBe("info.main");
       expect(getSeverityColor("S4")).toBe("success.main");
-      expect(getSeverityColor("Unknown")).toBe("default");
-      expect(getSeverityColor(undefined)).toBe("default");
+      expect(getSeverityColor("Unknown")).toBe("text.secondary");
+      expect(getSeverityColor(undefined)).toBe("text.secondary");
     });
   });
 

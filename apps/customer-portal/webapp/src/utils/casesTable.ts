@@ -26,7 +26,7 @@ export const getSeverityColor = (label?: string): string => {
   if (normalized === "S2") return "text.disabled";
   if (normalized === "S3") return "info.main";
   if (normalized === "S4") return "success.main";
-  return "default";
+  return "text.secondary";
 };
 
 /**
