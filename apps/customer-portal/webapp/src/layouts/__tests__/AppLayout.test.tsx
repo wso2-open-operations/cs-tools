@@ -34,7 +34,6 @@ const mockShellState = {
 
 vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
   const actual = (await importOriginal()) as any;
-  const React = await import("react");
   return {
     ...actual,
     AppShell: Object.assign(
