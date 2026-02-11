@@ -31,6 +31,8 @@ public type CacheConfig record {|
 
 # Case search filters.
 public type CaseSearchFilters record {|
+    # Issue ID
+    int issueId?;
     # Status ID
     int statusId?;
     # Severity ID
@@ -131,9 +133,8 @@ public type CaseFilterOptions record {|
     ReferenceItem[] statuses;
     # List of case severities
     ReferenceItem[] severities;
-    # List of case types
-    ReferenceItem[] caseTypes;
-    // TODO: Add other filters once implemented
+    # List of issue types
+    ReferenceItem[] issueTypes;
 |};
 
 # Case statistics for a project.

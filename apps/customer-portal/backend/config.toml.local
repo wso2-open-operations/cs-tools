@@ -16,3 +16,11 @@ scimOperationsServiceUrl = "<base_url>"
     clientId = "<client_id>"
     clientSecret = "<client_secret>"
     scopes = ["<scopes>"]
+
+[customer_portal.updates]
+updatesServiceUrl = "<base_url>"
+[customer_portal.updates.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]

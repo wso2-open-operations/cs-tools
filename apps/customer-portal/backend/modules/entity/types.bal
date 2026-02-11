@@ -216,6 +216,8 @@ public type ReferenceTableItem record {|
 public type CaseSearchFilters record {|
     # List of project IDs to filter
     string[] projectIds?;
+    # List of issue types to filter
+    int[] issueTypeKeys?;
     # State key
     int stateKey?;
     # Severity key
@@ -286,8 +288,8 @@ public type CaseMetadataResponse record {|
     ChoiceListItem[] states;
     # List of available case severities (eg: S0, S1, etc.)
     ChoiceListItem[] severities;
-    # List of available case types (eg: Incident, Service Request, etc.)
-    ReferenceTableItem[] caseTypes;
+    # List of available issue types (eg: Error, Total Outage, etc.)
+    ChoiceListItem[] issueTypes;
     json...;
 |};
 

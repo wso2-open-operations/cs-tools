@@ -17,6 +17,7 @@
 import customer_portal.authorization;
 import customer_portal.entity;
 import customer_portal.scim;
+import customer_portal.updates;
 
 import ballerina/cache;
 import ballerina/http;
@@ -681,7 +682,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     }
 
     # Create a new case.
-    # 
+    #
     # + payload - Case creation payload
     # + return - Success message or error response
     resource function post cases(http:RequestContext ctx, entity:CaseCreatePayload payload)
@@ -709,7 +710,7 @@ service http:InterceptableService / on new http:Listener(9090) {
 
             if getStatusCode(createdCaseResponse) == http:STATUS_FORBIDDEN {
                 log:printWarn(string `User: ${userInfo.userId} is forbidden to create a case for project: ${
-                    payload.projectId}!`);
+                        payload.projectId}!`);
                 return <http:Forbidden>{
                     body: {
                         message: "You're not authorized to create a case for the selected project. " +
@@ -980,7 +981,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + return - Deployed products response or error response
     resource function get deployments/[string id]/products(http:RequestContext ctx)
         returns DeployedProduct[]|http:BadRequest|http:Forbidden|http:InternalServerError {
-
+    
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -998,8 +999,7 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        entity:DeployedProductsResponse|error productsResponse =
-            entity:getDeployedProducts(userInfo.idToken, id);
+        entity:DeployedProductsResponse|error productsResponse = entity:getDeployedProducts(userInfo.idToken, id);
         if productsResponse is error {
             if getStatusCode(productsResponse) == http:STATUS_FORBIDDEN {
                 log:printWarn(string `Access to deployment ID: ${id} is forbidden for user: ${userInfo.userId}`);
@@ -1018,6 +1018,95 @@ service http:InterceptableService / on new http:Listener(9090) {
                 }
             };
         }
+
         return mapDeployedProducts(productsResponse);
+    }
+
+    # Get recommended update levels.
+    #
+    # + return - List of recommended update levels or an error
+    resource function get updates/recommended\-update\-levels(http:RequestContext ctx)
+        returns updates:RecommendedUpdateLevel[]|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        updates:RecommendedUpdateLevel[]|error recommendedUpdateLevels =
+            updates:getRecommendedUpdateLevels(userInfo.email);
+        if recommendedUpdateLevels is error {
+            string customError = "Failed to retrieve recommended update levels.";
+            log:printError(customError, recommendedUpdateLevels);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return recommendedUpdateLevels;
+    }
+
+    # Search updates based on provided filters.
+    #
+    # + payload - Update search payload containing filters
+    # + return - List of updates matching or an error
+    resource function post updates/search(http:RequestContext ctx, updates:ListUpdatePayload payload)
+        returns updates:UpdateResponse|http:BadRequest|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        updates:UpdateResponse|error updateResponse = updates:listUpdates(userInfo.idToken, payload);
+        if updateResponse is error {
+            string customError = "Failed to search updates.";
+            log:printError(customError, updateResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return updateResponse;
+    }
+
+    # Get product update levels.
+    # 
+    # + return - List of product update levels or an error
+    resource function get updates/product\-update\-levels(http:RequestContext ctx)
+        returns updates:ProductUpdateLevel[]|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        updates:ProductUpdateLevel[]|error productUpdateLevels = updates:getProductUpdateLevels(userInfo.idToken);
+        if productUpdateLevels is error {
+            string customError = "Failed to get product update levels.";
+            log:printError(customError, productUpdateLevels);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return productUpdateLevels;
     }
 }
