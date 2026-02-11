@@ -28,8 +28,8 @@ export interface SearchProjectsRequest {
 // Request body for searching cases.
 export interface CaseSearchRequest {
   filters?: {
-    caseTypes?: string[];
-    deploymentId?: string;
+    issueId?: number;
+    deploymentId?: number;
     severityId?: number;
     statusId?: number;
   };
