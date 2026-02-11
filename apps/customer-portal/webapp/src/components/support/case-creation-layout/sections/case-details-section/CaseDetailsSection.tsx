@@ -17,7 +17,6 @@
 import {
   Box,
   Chip,
-  ComplexSelect,
   Form,
   FormControl,
   Grid,
@@ -31,6 +30,8 @@ import {
 import { RichTextEditor } from "@components/support/case-creation-layout/sections/case-details-section/rich-text-editor/RichTextEditor";
 import { PencilLine, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
+import type { CaseMetadataResponse } from "@models/responses";
+import { getSeverityColor } from "@utils/casesTable";
 
 interface CaseDetailsSectionProps {
   title: string;
@@ -42,6 +43,7 @@ interface CaseDetailsSectionProps {
   severity: string;
   setSeverity: (value: string) => void;
   metadata: any;
+  filters?: CaseMetadataResponse;
   isLoading: boolean;
   storageKey?: string;
 }
@@ -61,10 +63,15 @@ export const CaseDetailsSection = ({
   severity,
   setSeverity,
   metadata,
+  filters,
   isLoading,
   storageKey,
 }: CaseDetailsSectionProps): JSX.Element => {
   const [isEditing, setIsEditing] = useState(false);
+
+  // TODO : Remove this after the mock interface removed.
+  const issueTypes = filters?.issueTypes || metadata?.issueTypes || [];
+  const severityLevels = filters?.severities || metadata?.severityLevels || [];
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -191,6 +198,7 @@ export const CaseDetailsSection = ({
               disabled={isLoading || !isEditing}
             >
               <Select
+                id="issue-type-select"
                 value={issueType}
                 onChange={(e) => setIssueType(e.target.value)}
                 displayEmpty
@@ -201,11 +209,14 @@ export const CaseDetailsSection = ({
                 <MenuItem value="" disabled>
                   Select Issue Type...
                 </MenuItem>
-                {metadata?.issueTypes?.map((type: string) => (
-                  <MenuItem key={type} value={type}>
-                    {type}
-                  </MenuItem>
-                ))}
+                {issueTypes.map((type: any) => {
+                  const label = typeof type === "string" ? type : type.label;
+                  return (
+                    <MenuItem key={label} value={label}>
+                      {label}
+                    </MenuItem>
+                  );
+                })}
               </Select>
             </FormControl>
           </Grid>
@@ -227,96 +238,91 @@ export const CaseDetailsSection = ({
                 sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
               />
             </Box>
-            <ComplexSelect
+            <FormControl
               fullWidth
               size="small"
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as string)}
               disabled={isLoading || !isEditing}
-              displayEmpty
-              renderValue={(value) => {
-                if (value === "") {
-                  return "Select Severity Level...";
-                }
-                const selectedLevel = metadata?.severityLevels?.find(
-                  (level: any) => level.id === value,
-                );
-                if (!selectedLevel) {
-                  return value as string;
-                }
-                return (
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            >
+              <Select
+                id="severity-level-select"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as string)}
+                displayEmpty
+                renderValue={(value) => {
+                  if (value === "") {
+                    return "Select Severity Level...";
+                  }
+                  const selectedLevel = severityLevels.find(
+                    (level: any) => level.id === value,
+                  );
+                  if (!selectedLevel) {
+                    return value as string;
+                  }
+                  return (
                     <Box
-                      sx={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        bgcolor:
-                          selectedLevel.id === "S1"
-                            ? "error.main"
-                            : selectedLevel.id === "S2"
-                              ? "warning.main"
-                              : selectedLevel.id === "S3"
-                                ? "info.main"
-                                : "success.main",
-                        flexShrink: 0,
-                      }}
-                    />
-                    <Box
-                      sx={{
-                        display: "flex",
-                        flexDirection: "column",
-                        minWidth: 0,
-                      }}
+                      sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
                     >
+                      <Box
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          bgcolor: getSeverityColor(selectedLevel.label),
+                          flexShrink: 0,
+                        }}
+                      />
                       <Typography variant="body2">
                         {selectedLevel.label}
                       </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
+                    </Box>
+                  );
+                }}
+              >
+                <MenuItem value="" disabled>
+                  Select Severity Level...
+                </MenuItem>
+                {severityLevels.map((lvl: any) => (
+                  <MenuItem key={lvl.id} value={lvl.id}>
+                    <Box
+                      sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                    >
+                      <Box
                         sx={{
-                          display: "block",
-                          lineHeight: 1.2,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          width: 12,
+                          height: 12,
+                          borderRadius: "50%",
+                          bgcolor: getSeverityColor(lvl.label),
+                        }}
+                      />
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          minWidth: 0,
                         }}
                       >
-                        {selectedLevel.description}
-                      </Typography>
+                        <Typography variant="body2">{lvl.label}</Typography>
+                        {lvl.description && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{
+                              display: "block",
+                              lineHeight: 1.2,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {lvl.description}
+                          </Typography>
+                        )}
+                      </Box>
                     </Box>
-                  </Box>
-                );
-              }}
-            >
-              {metadata?.severityLevels?.map((lvl: any) => (
-                <ComplexSelect.MenuItem key={lvl.id} value={lvl.id}>
-                  <ComplexSelect.MenuItem.Icon>
-                    {/* severity status color dot */}
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: "50%",
-                        bgcolor:
-                          lvl.id === "S1"
-                            ? "error.main"
-                            : lvl.id === "S2"
-                              ? "warning.main"
-                              : lvl.id === "S3"
-                                ? "info.main"
-                                : "success.main",
-                      }}
-                    />
-                  </ComplexSelect.MenuItem.Icon>
-                  <ComplexSelect.MenuItem.Text
-                    primary={lvl.label}
-                    secondary={lvl.description}
-                  />
-                </ComplexSelect.MenuItem>
-              ))}
-            </ComplexSelect>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Grid>
         </Grid>
       </Box>
