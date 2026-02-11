@@ -834,7 +834,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     #
     # + payload - case classification payload
     # + return - Case classification response or an error
-    resource function post cases/classification(http:RequestContext ctx, CaseClassificationPayload payload)
+    resource function post cases/classify(http:RequestContext ctx, CaseClassificationPayload payload)
         returns ai_chat_agent:CaseClassificationResponse|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
