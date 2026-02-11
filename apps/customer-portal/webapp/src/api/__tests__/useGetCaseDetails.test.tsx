@@ -20,6 +20,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import useGetCaseDetails from "@api/useGetCaseDetails";
 import { mockCaseDetails } from "@models/mockData";
 
+vi.mock("@constants/apiConstants", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@constants/apiConstants")>();
+  return {
+    ...actual,
+    API_MOCK_DELAY: 0,
+  };
+});
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: vi.fn().mockResolvedValue("mock-token"),
@@ -68,10 +77,9 @@ describe("useGetCaseDetails", () => {
   });
 
   it("should not fetch when projectId or caseId is missing", () => {
-    const { result: r1 } = renderHook(
-      () => useGetCaseDetails("", "case-001"),
-      { wrapper },
-    );
+    const { result: r1 } = renderHook(() => useGetCaseDetails("", "case-001"), {
+      wrapper,
+    });
     expect(r1.current.isFetching).toBe(false);
 
     const { result: r2 } = renderHook(
