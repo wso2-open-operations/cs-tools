@@ -153,7 +153,13 @@ vi.mock("@api/useGetProjectSupportStats", () => ({
 // Mock useGetProjectCases (avoids pulling in useAsgardeo)
 vi.mock("@api/useGetProjectCases", () => ({
   __esModule: true,
-  default: () => ({ data: { cases: [] }, isLoading: false }),
+  default: () => ({
+    data: {
+      pages: [{ cases: [], totalRecords: 0, offset: 0, limit: 10 }],
+      pageParams: [0],
+    },
+    isFetching: false,
+  }),
 }));
 
 // Mock useGetChatHistory
