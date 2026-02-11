@@ -17,6 +17,7 @@
 import type {
   CaseListItem,
   CaseDetails,
+  CaseComment,
   ProjectListItem,
   ProjectDetails,
   UserDetails,
