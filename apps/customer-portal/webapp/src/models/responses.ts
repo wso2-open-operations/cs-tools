@@ -331,3 +331,13 @@ export interface Deployment {
 export interface DeploymentsResponse {
   deployments: Deployment[];
 }
+
+// Updates statistics response.
+export interface UpdatesStats {
+  productsTracked: number | null;
+  totalUpdatesInstalled: number | null;
+  totalUpdatesInstalledBreakdown?: { regular: number; security: number };
+  totalUpdatesPending: number | null;
+  totalUpdatesPendingBreakdown?: { regular: number; security: number };
+  securityUpdatesPending: number | null;
+}
