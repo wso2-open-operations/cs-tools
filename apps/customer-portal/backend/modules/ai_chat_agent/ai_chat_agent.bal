@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Get case classification for the given payload.
+# Create case classification for the given payload.
 #
 # + payload - Case classification payload
 # + return - Case classification response or error
