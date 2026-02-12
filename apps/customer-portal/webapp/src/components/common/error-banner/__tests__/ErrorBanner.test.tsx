@@ -39,19 +39,24 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
 }));
 
 describe("ErrorBanner", () => {
-  it("should render api name", () => {
+  it("should render message from caller", () => {
     const onClose = vi.fn();
-    render(<ErrorBanner apiName="dashboard statistics" onClose={onClose} />);
+    render(
+      <ErrorBanner
+        message="Could not load dashboard statistics."
+        onClose={onClose}
+      />,
+    );
 
     expect(screen.getByTestId("error-banner")).toBeInTheDocument();
     expect(
-      screen.getByText("Error loading dashboard statistics"),
+      screen.getByText("Could not load dashboard statistics."),
     ).toBeInTheDocument();
   });
 
   it("should call onClose when close button is clicked", () => {
     const onClose = vi.fn();
-    render(<ErrorBanner apiName="projects" onClose={onClose} />);
+    render(<ErrorBanner message="Something went wrong." onClose={onClose} />);
 
     fireEvent.click(screen.getByTestId("close-button"));
 

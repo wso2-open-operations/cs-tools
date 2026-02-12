@@ -23,19 +23,20 @@ import {
 import type { JSX } from "react";
 
 interface ErrorBannerProps {
-  apiName: string;
+  /** User-facing error message; supplied by the caller. */
+  message: string;
   onClose: () => void;
 }
 
 /**
  * ErrorBanner component displayed above the footer at the right corner.
- * Uses Oxygen UI Alert component.
+ * Uses Oxygen UI Alert component. Displays the message passed from the caller.
  *
  * @param {ErrorBannerProps} props - Component props.
  * @returns {JSX.Element} The ErrorBanner JSX.
  */
 export default function ErrorBanner({
-  apiName,
+  message,
   onClose,
 }: ErrorBannerProps): JSX.Element {
   return (
@@ -54,7 +55,7 @@ export default function ErrorBanner({
         elevation={6}
         sx={{ width: "100%" }}
       >
-        Error loading {apiName}
+        {message}
       </Alert>
     </Box>
   );

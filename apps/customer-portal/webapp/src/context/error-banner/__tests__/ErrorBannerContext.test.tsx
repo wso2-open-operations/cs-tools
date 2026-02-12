@@ -72,12 +72,10 @@ describe("ErrorBannerContext", () => {
     fireEvent.click(screen.getByText("Trigger Error"));
 
     expect(screen.getByTestId("error-banner")).toBeInTheDocument();
-    expect(
-      screen.getByText("Error loading dashboard statistics"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("dashboard statistics")).toBeInTheDocument();
   });
 
-  it("should show api name passed to showError", () => {
+  it("should show message passed to showError", () => {
     render(
       <ErrorBannerProvider>
         <TestConsumer />
@@ -86,7 +84,7 @@ describe("ErrorBannerContext", () => {
 
     fireEvent.click(screen.getByText("Trigger Projects Error"));
 
-    expect(screen.getByText("Error loading projects")).toBeInTheDocument();
+    expect(screen.getByText("projects")).toBeInTheDocument();
   });
 
   it("should dismiss banner when close button is clicked", () => {
