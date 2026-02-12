@@ -37,4 +37,4 @@ public const int MAX_RECORD_LIMIT = 1000;
 
 # Email constraint for email validation.
 public final string:RegExp EMAIL_CONSTRAINT = 
-    re `^[A-Za-z0-9]+([._%+-]?[A-Za-z0-9]+)*@[A-Za-z0-9]+([.-]?[A-Za-z0-9]+)*\.[A-Za-z]{2,}$`;
+    re `^[A-Za-z0-9]+([._%+-][A-Za-z0-9]+)*@[A-Za-z0-9]+([.-][A-Za-z0-9]+)*\.[A-Za-z]{2,}$`;

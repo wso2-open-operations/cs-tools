@@ -59,10 +59,9 @@ service / on new http:Listener(9090) {
 
     # Retrieve the contact by email.
     #
-    # + email - Contact email
-    # + return - Contact | InternalServerError | NotFound
-    resource function get contacts/[entity:EmailString email]() returns Contact|http:NotFound|http:InternalServerError {
-        entity:ContactSearchPayload filter = { email };
+    # + filter - Contact search payload
+    # + return - Contact | InternalServerError 
+    resource function post contacts/find(entity:ContactSearchPayload filter) returns http:Ok|http:InternalServerError {
         entity:Contact[]|error contacts = entity:searchContacts(filter);
         if contacts is error {
             log:printError(ERR_MSG_GET_CONTACTS, contacts);
@@ -74,18 +73,21 @@ service / on new http:Listener(9090) {
         }
         if contacts.length() == 0 {
             log:printError(ERR_MSG_CONTACTS_NOTFOUND);
-            return <http:NotFound>{
+            return <http:Ok>{
                 body: {
-                    message: ERR_MSG_CONTACTS_NOTFOUND
+                    isUserExist: false
                 }
             };
         }
         log:printDebug(`Account ID: ${contacts[0].account?.id}`);
         entity:Account? account = contacts[0].account;
-        return {
-            id: contacts[0].id,
-            email: contacts[0].email,
-            account: account is entity:Account ? {id: account.id} : ()
+
+        return <http:Ok>{
+            body: {
+                id: contacts[0].id,
+                accountId: account is entity:Account ? account.id : "",
+                isUserExist: true
+            }
         };
     }
 }

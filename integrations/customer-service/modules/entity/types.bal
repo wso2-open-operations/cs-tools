@@ -14,13 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 import ballerina/constraint;
-# Email Constraint.
-@constraint:String {
-    pattern: EMAIL_CONSTRAINT
-
-}
-public type EmailString string;
-
 # Contact search payload.
 public type ContactSearchPayload record {|
     # Email
