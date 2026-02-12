@@ -213,6 +213,10 @@ public type Comment record {|
     string createdBy;
     # Indicates if the comment is escalated
     boolean isEscalated;
+    # Indicates if the comment has inline attachments
+    boolean hasInlineAttachments;
+    # List of inline attachments
+    entity:InlineAttachment[] inlineAttachments;
 |};
 
 # Comments response with pagination.
@@ -232,8 +236,8 @@ public type Attachment record {|
     string name;
     # MIME type of the file
     string 'type;
-    # File size in bytes
-    string sizeBytes;
+    # File size
+    string size;
     # User who created the attachment
     string createdBy;
     # Created date and time
@@ -289,13 +293,9 @@ public type DeployedProduct record {|
 
 # Payload for creating a comment.
 public type CommentCreatePayload record {|
-    # Reference type
-    entity:ReferenceType referenceType;
     # Comment content
-    @constraint:String {minLength: 1, maxLength: 65000}
+    @constraint:String {minLength: 1} // TODO: Remove max length until the byte array support is added
     string content;
-    # Comment type
-    entity:CommentType 'type;
 |};
 
 # Payload for creating an attachment.

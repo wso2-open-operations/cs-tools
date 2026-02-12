@@ -395,6 +395,10 @@ public type Comment record {|
     string createdBy;
     # Indicates if the comment is escalated
     boolean isEscalated;
+    # Indicates if the comment has inline attachments
+    boolean hasInlineAttachments;
+    # List of inline attachments
+    InlineAttachment[] inlineAttachments;
     json...;
 |};
 
@@ -414,6 +418,11 @@ public type ReferenceSearchPayload record {|
     string referenceId;
     # Pagination details
     Pagination pagination?;
+    # Filter criteria
+    record {|
+        # Type filter criteria (e.g., "comments", "work_note")
+        string 'type?;
+    |} filters?;
 |};
 
 # Attachment data.
@@ -426,8 +435,8 @@ public type Attachment record {|
     string name;
     # MIME type of the file
     string 'type;
-    # File size in bytes
-    string sizeBytes;
+    # File size
+    string size;
     # User who created the attachment
     string createdBy;
     # Created date and time
@@ -515,7 +524,7 @@ public type CommentCreatePayload record {|
     # Reference type
     ReferenceType referenceType;
     # Comment content
-    @constraint:String {minLength: 1, maxLength: 65000}
+    @constraint:String {minLength: 1} // TODO: Remove max length until the byte array support is added
     string content;
     # Comment type
     CommentType 'type;
@@ -529,6 +538,14 @@ public type CreatedComment record {|
     string createdOn;
     # User who created the comment
     string createdBy;
+    # HTML content of the comment
+    string content;
+    # Indicates if the comment has inline attachments
+    boolean hasInlineAttachments;
+    # Count of inline attachments
+    int inlineImageCount;
+    # List of inline attachments
+    InlineAttachment[] inlineAttachments;
     json...;
 |};
 
@@ -554,8 +571,8 @@ public type AttachmentCreateResponse record {|
 public type CreatedAttachment record {|
     # System ID of the created attachment
     string id;
-    # File size in bytes
-    int sizeBytes;
+    # File size
+    int size;
     # Created date and time
     string createdOn;
     # User who created the attachment
@@ -577,4 +594,20 @@ public type AttachmentPayload record {|
     string 'type;
     # Content of the file as a byte array
     string file;
+|};
+
+# Inline attachment.
+public type InlineAttachment record {|
+    # ID of the inline attachment
+    string id;
+    # File name
+    string fileName;
+    # Content type
+    string contentType;
+    # Download URL
+    string downloadUrl;
+    # Created date and time
+    string createdOn;
+    # User who created
+    string createdBy;
 |};
