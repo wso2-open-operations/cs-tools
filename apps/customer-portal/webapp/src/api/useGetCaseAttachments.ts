@@ -26,6 +26,7 @@ import type { CaseAttachmentsResponse } from "@models/responses";
 export interface UseGetCaseAttachmentsOptions {
   limit?: number;
   offset?: number;
+  enabled?: boolean;
 }
 
 /**
@@ -42,7 +43,7 @@ export default function useGetCaseAttachments(
   const logger = useLogger();
   const { getIdToken, isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { isMockEnabled } = useMockConfig();
-  const { limit = 10, offset = 0 } = options ?? {};
+  const { limit = 50, offset = 0, enabled: optionsEnabled = true } = options ?? {};
 
   return useQuery<CaseAttachmentsResponse, Error>({
     queryKey: [
@@ -98,7 +99,10 @@ export default function useGetCaseAttachments(
         throw error;
       }
     },
-    enabled: !!caseId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
+    enabled:
+      optionsEnabled &&
+      !!caseId &&
+      (isMockEnabled || (isSignedIn && !isAuthLoading)),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
