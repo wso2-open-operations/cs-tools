@@ -20,6 +20,7 @@ import {
   SuccessBannerProvider,
   useSuccessBanner,
 } from "@context/success-banner/SuccessBannerContext";
+import { ERROR_BANNER_TIMEOUT_MS } from "@constants/errorBannerConstants";
 
 vi.mock("@wso2/oxygen-ui", () => ({
   Alert: ({ children, onClose, severity }: any) => (
@@ -110,7 +111,7 @@ describe("SuccessBannerContext", () => {
     expect(screen.getByTestId("success-banner")).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(2900);
+      vi.advanceTimersByTime(ERROR_BANNER_TIMEOUT_MS + 100);
     });
 
     expect(screen.queryByTestId("success-banner")).toBeNull();

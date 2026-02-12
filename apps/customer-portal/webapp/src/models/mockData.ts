@@ -1672,7 +1672,7 @@ export const mockProjectDeployments: ProjectDeploymentItem[] = [
   },
   {
     id: "70f481301ba7a650a002c9d3604bcbf7",
-    name: "Developement",
+    name: "Development",
     createdOn: "2025-08-21 09:26:43",
     updatedOn: "2026-02-06 04:00:02",
     description: null,
@@ -1690,7 +1690,7 @@ export const mockDeploymentProducts: DeploymentProductItem[] = [
     updatedOn: "2026-02-10 03:43:39",
     description: null,
     product: { id: "34c5b7b11b0c61d0d64e64a2604bcb5f", label: "WSO2 Identity Server 6.0.0" },
-    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Developement" },
+    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Development" },
   },
   {
     id: "a02f54101bcf3610182c0dc5604bcb9b",
@@ -1698,7 +1698,7 @@ export const mockDeploymentProducts: DeploymentProductItem[] = [
     updatedOn: "2026-02-09 17:05:06",
     description: null,
     product: { id: "db16915e1b83cd10d64e64a2604bcbdb", label: "WSO2 API Manager 3.2.0" },
-    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Developement" },
+    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Development" },
   },
 ];
 
