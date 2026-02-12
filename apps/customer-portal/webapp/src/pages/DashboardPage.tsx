@@ -79,7 +79,7 @@ export default function DashboardPage(): JSX.Element {
   useEffect(() => {
     if ((isErrorMock || isErrorCases) && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
-      showError("dashboard statistics");
+      showError("Could not load dashboard statistics.");
 
       if (isErrorMock) {
         logger.error(`Failed to load mock stats for project ID: ${projectId}`);

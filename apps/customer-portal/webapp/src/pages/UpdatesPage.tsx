@@ -64,7 +64,7 @@ export default function UpdatesPage(): JSX.Element {
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
-      showError("updates statistics");
+      showError("Could not load updates statistics.");
       logger.error(`Failed to load updates stats for project ID: ${projectId}`);
     }
     if (!isError) {

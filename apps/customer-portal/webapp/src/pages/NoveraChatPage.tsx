@@ -129,7 +129,7 @@ export default function NoveraChatPage(): JSX.Element {
       });
     } catch (error) {
       logger.error("Failed to classify case details", error);
-      showError("case classification");
+      showError("Case classification failed. Please try again.");
     }
   };
   const [messages, setMessages] = useState<Message[]>([
@@ -159,7 +159,7 @@ export default function NoveraChatPage(): JSX.Element {
 
   useEffect(() => {
     if (deploymentProductsError) {
-      showError("loading product options");
+      showError("Could not load product options. Please try again.");
     }
   }, [deploymentProductsError, showError]);
 
