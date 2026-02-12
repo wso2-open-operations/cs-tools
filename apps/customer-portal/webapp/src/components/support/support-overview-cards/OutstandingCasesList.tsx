@@ -34,6 +34,8 @@ import { formatRelativeTime, resolveColorFromTheme } from "@utils/support";
 export interface OutstandingCasesListProps {
   cases: CaseListItem[];
   isLoading?: boolean;
+  /** When provided, clicking a case card navigates to case details (caller should navigate). */
+  onCaseClick?: (caseItem: CaseListItem) => void;
 }
 
 /**
@@ -45,6 +47,7 @@ export interface OutstandingCasesListProps {
 export default function OutstandingCasesList({
   cases,
   isLoading,
+  onCaseClick,
 }: OutstandingCasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -71,6 +74,7 @@ export default function OutstandingCasesList({
         return (
           <Form.CardButton
             key={c.id}
+            onClick={onCaseClick ? () => onCaseClick(c) : undefined}
             sx={{
               p: 2,
               display: "flex",

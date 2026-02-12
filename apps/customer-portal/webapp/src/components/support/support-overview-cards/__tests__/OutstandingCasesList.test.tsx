@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import OutstandingCasesList from "@components/support/support-overview-cards/OutstandingCasesList";
 import type { CaseListItem } from "@models/responses";
 
@@ -51,5 +51,29 @@ describe("OutstandingCasesList", () => {
     expect(screen.getByText("Work In Progress")).toBeInTheDocument();
     expect(screen.getByText(/Assigned to Sarah Chen/)).toBeInTheDocument();
     expect(screen.getByText("2 hours ago")).toBeInTheDocument();
+  });
+
+  it("should call onCaseClick with case when card is clicked", () => {
+    const onCaseClick = vi.fn();
+    render(
+      <OutstandingCasesList cases={mockCases} onCaseClick={onCaseClick} />,
+    );
+
+    fireEvent.click(screen.getByText("API Gateway timeout issues"));
+    expect(onCaseClick).toHaveBeenCalledTimes(1);
+    expect(onCaseClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "1",
+        number: "CASE-2845",
+        title: "API Gateway timeout issues",
+      }),
+    );
+  });
+
+  it("should render without onCaseClick (cards not clickable for navigation)", () => {
+    render(<OutstandingCasesList cases={mockCases} />);
+    expect(screen.getByText("API Gateway timeout issues")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("API Gateway timeout issues"));
+    // No crash; behavior is just no navigation
   });
 });

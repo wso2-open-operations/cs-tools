@@ -227,6 +227,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
         rowsPerPage={rowsPerPage}
         onPageChange={handleChangePage}
         onRowsPerPageChange={handleChangeRowsPerPage}
+        onCaseClick={(c) => navigate(`/${projectId}/support/cases/${c.id}`)}
       />
 
       {/* Filter popover */}

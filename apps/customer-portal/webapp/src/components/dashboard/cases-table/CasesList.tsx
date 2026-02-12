@@ -31,7 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, MoreVertical } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
-import type { CaseSearchResponse } from "@models/responses";
+import type { CaseSearchResponse, CaseListItem } from "@models/responses";
 import { getSeverityColor, getStatusColor } from "@utils/casesTable";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import CasesTableSkeleton from "@components/dashboard/cases-table/CasesTableSkeleton";
@@ -44,6 +44,8 @@ interface CasesListProps {
   rowsPerPage: number;
   onPageChange: (event: unknown, newPage: number) => void;
   onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  /** When provided, case title is clickable and navigates to case details. */
+  onCaseClick?: (caseItem: CaseListItem) => void;
 }
 
 const CasesList = ({
@@ -54,6 +56,7 @@ const CasesList = ({
   rowsPerPage,
   onPageChange,
   onRowsPerPageChange,
+  onCaseClick,
 }: CasesListProps): JSX.Element => {
   return (
     <>
@@ -113,15 +116,38 @@ const CasesList = ({
                   <TableCell>
                     <Box>
                       <Typography
+                        component="span"
                         variant="body2"
                         color="text.primary"
+                        role={onCaseClick ? "button" : undefined}
+                        tabIndex={onCaseClick ? 0 : undefined}
+                        onKeyDown={
+                          onCaseClick
+                            ? (e) => {
+                                if (
+                                  e.key === "Enter" ||
+                                  e.key === " "
+                                ) {
+                                  e.preventDefault();
+                                  onCaseClick(row);
+                                }
+                              }
+                            : undefined
+                        }
+                        onClick={
+                          onCaseClick
+                            ? () => onCaseClick(row)
+                            : undefined
+                        }
                         sx={{
-                          display: "flex",
+                          display: "inline-flex",
                           alignItems: "center",
                           gap: 0.5,
-                          cursor: "pointer",
+                          cursor: onCaseClick ? "pointer" : "default",
                           fontWeight: 500,
-                          "&:hover": { color: "primary.main" },
+                          "&:hover": onCaseClick
+                            ? { color: "primary.main" }
+                            : undefined,
                         }}
                       >
                         {row.title || "--"}
