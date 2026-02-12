@@ -22,6 +22,7 @@ import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/
 import ChatMessageList from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageList";
 import { getNoveraResponse } from "@models/mockFunctions";
 import { useQueries } from "@tanstack/react-query";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
 import {
   fetchDeploymentProducts,
@@ -57,7 +58,7 @@ export default function NoveraChatPage(): JSX.Element {
   const deploymentIds = projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
   const deploymentProductQueries = useQueries({
     queries: deploymentIds.map((deploymentId) => ({
-      queryKey: ["deployment-products", deploymentId] as const,
+      queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId] as const,
       queryFn: () =>
         fetchDeploymentProducts(deploymentId, {
           getIdToken,
@@ -65,14 +66,18 @@ export default function NoveraChatPage(): JSX.Element {
         }),
     })),
   });
-  const productDetails = Array.from(
-    new Set(
-      deploymentProductQueries
-        .flatMap((q) => q.data ?? [])
-        .map((item) => item.product?.label)
-        .filter((label): label is string => Boolean(label?.trim())),
-    ),
-  );
+  const deploymentProductsReady =
+    !deploymentProductQueries.some((q) => q.isLoading || q.isError);
+  const productDetails = deploymentProductsReady
+    ? Array.from(
+        new Set(
+          deploymentProductQueries
+            .flatMap((q) => q.data ?? [])
+            .map((item) => item.product?.label)
+            .filter((label): label is string => Boolean(label?.trim())),
+        ),
+      )
+    : [];
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
   const { mutateAsync, isPending } = usePostCaseClassifications();
 

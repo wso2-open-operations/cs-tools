@@ -20,6 +20,7 @@ import { useState, useEffect, useRef, type FormEvent, type JSX } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useQueries } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -66,7 +67,7 @@ export default function CreateCasePage(): JSX.Element {
   const deploymentIds = projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
   const deploymentProductQueries = useQueries({
     queries: deploymentIds.map((deploymentId) => ({
-      queryKey: ["deployment-products", deploymentId] as const,
+      queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId] as const,
       queryFn: () =>
         fetchDeploymentProducts(deploymentId, {
           getIdToken,
@@ -74,9 +75,16 @@ export default function CreateCasePage(): JSX.Element {
         }),
     })),
   });
-  const allDeploymentProducts = deploymentProductQueries.flatMap(
-    (q) => q.data ?? [],
+  const deploymentProductsLoading = deploymentProductQueries.some(
+    (q) => q.isLoading,
   );
+  const deploymentProductsError = deploymentProductQueries.some(
+    (q) => q.isError,
+  );
+  const allDeploymentProducts =
+    !deploymentProductsLoading && !deploymentProductsError
+      ? deploymentProductQueries.flatMap((q) => q.data ?? [])
+      : [];
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
@@ -213,37 +221,43 @@ export default function CreateCasePage(): JSX.Element {
         d.type?.label === deployment ||
         d.name === deployment,
     );
-    const deploymentIdFromProject =
-      projectDeploymentMatch?.id ??
-      filters?.deployments?.find(
-        (d: { id: string; label: string }) =>
-          d.id === deployment || d.label === deployment,
-      )?.id ??
-      deployment;
+    const deploymentFromFilters = filters?.deployments?.find(
+      (d: { id: string; label: string }) =>
+        d.id === deployment || d.label === deployment,
+    );
+    const deploymentMatch = projectDeploymentMatch ?? deploymentFromFilters;
+    if (!deploymentMatch) {
+      showError("Create case");
+      return;
+    }
+
+    const productMatch = allDeploymentProducts.find(
+      (item) =>
+        item.product?.label?.trim() === product?.trim(),
+    );
+    if (!productMatch?.product?.id) {
+      showError("Create case");
+      return;
+    }
 
     const issueTypeItem = filters?.issueTypes?.find(
       (t: { id: string; label: string }) =>
         t.id === issueType || t.label === issueType,
     );
 
-    const deploymentId = deploymentIdFromProject;
-    const productMatch = allDeploymentProducts.find(
-      (item) =>
-        item.product?.label === product || item.product?.label?.trim() === product?.trim(),
-    );
-    const productId = productMatch?.product?.id ?? product;
-    const issueTypeKey = issueTypeItem
-      ? parseInt(issueTypeItem.id, 10)
-      : parseInt(issueType, 10) || 0;
+    const deploymentId = deploymentMatch.id;
+    const productId = productMatch.product.id;
+    const issueTypeKey =
+      parseInt(issueTypeItem?.id ?? issueType, 10) || 0;
     const severityKey = parseInt(severity, 10) || 0;
 
     const payload: CreateCaseRequest = {
       deploymentId: String(deploymentId),
       description,
-      issueTypeKey: Number.isNaN(issueTypeKey) ? 0 : issueTypeKey,
+      issueTypeKey,
       productId: String(productId),
       projectId,
-      severityKey: Number.isNaN(severityKey) ? 0 : severityKey,
+      severityKey,
       title,
     };
 
@@ -358,7 +372,12 @@ export default function CreateCasePage(): JSX.Element {
                 startIcon={<CircleCheck size={18} />}
                 color="primary"
                 disabled={
-                  isMockEnabled || isLoading || isCreatePending || !projectId
+                  isMockEnabled ||
+                  isLoading ||
+                  isCreatePending ||
+                  !projectId ||
+                  deploymentProductsLoading ||
+                  deploymentProductsError
                 }
               >
                 {isCreatePending ? "Creating..." : "Create Support Case"}
