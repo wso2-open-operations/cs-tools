@@ -29,7 +29,9 @@ vi.mock("@hooks/useLogger", () => ({
 }));
 
 vi.mock("@constants/apiConstants", async (importOriginal) => {
-  const actual = (await importOriginal()) as { ApiQueryKeys: Record<string, string> };
+  const actual = (await importOriginal()) as {
+    ApiQueryKeys: Record<string, string>;
+  };
   return {
     ...actual,
     API_MOCK_DELAY: 0,
@@ -78,18 +80,24 @@ describe("useGetProductUpdatesStats", () => {
   );
 
   it("should return loading state initially", async () => {
-    const { result } = renderHook(() => useGetProductUpdatesStats("project-1"), {
-      wrapper,
-    });
+    const { result } = renderHook(
+      () => useGetProductUpdatesStats("project-1"),
+      {
+        wrapper,
+      },
+    );
 
     expect(result.current.isLoading).toBe(true);
   });
 
   it("should return mock data when isMockEnabled is true", async () => {
     mockIsMockEnabled = true;
-    const { result } = renderHook(() => useGetProductUpdatesStats("project-1"), {
-      wrapper,
-    });
+    const { result } = renderHook(
+      () => useGetProductUpdatesStats("project-1"),
+      {
+        wrapper,
+      },
+    );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
@@ -130,8 +138,12 @@ describe("useGetProductUpdatesStats", () => {
       securityUpdatesPending: 25,
     };
 
-    const originalWindowConfig = (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config;
-    (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    const originalWindowConfig = (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config;
+    (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
     };
 
@@ -145,9 +157,12 @@ describe("useGetProductUpdatesStats", () => {
         } as Response),
       );
 
-      const { result } = renderHook(() => useGetProductUpdatesStats("project-1"), {
-        wrapper,
-      });
+      const { result } = renderHook(
+        () => useGetProductUpdatesStats("project-1"),
+        {
+          wrapper,
+        },
+      );
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
@@ -166,8 +181,12 @@ describe("useGetProductUpdatesStats", () => {
   it("should handle API error when isMockEnabled is false", async () => {
     mockIsMockEnabled = false;
 
-    const originalWindowConfig = (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config;
-    (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    const originalWindowConfig = (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config;
+    (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
     };
 
@@ -181,9 +200,12 @@ describe("useGetProductUpdatesStats", () => {
         } as Response),
       );
 
-      const { result } = renderHook(() => useGetProductUpdatesStats("project-1"), {
-        wrapper,
-      });
+      const { result } = renderHook(
+        () => useGetProductUpdatesStats("project-1"),
+        {
+          wrapper,
+        },
+      );
 
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.error?.message).toContain(
