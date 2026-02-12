@@ -76,7 +76,7 @@ describe("useGetCaseAttachments", () => {
     );
     expect(result.current.data?.totalRecords).toBe(mockCaseAttachments.length);
     expect(result.current.data?.offset).toBe(0);
-    expect(result.current.data?.limit).toBe(10);
+    expect(result.current.data?.limit).toBe(50);
   });
 
   it("should not fetch when caseId is missing", () => {
@@ -87,7 +87,7 @@ describe("useGetCaseAttachments", () => {
   it("should use correct query key", () => {
     renderHook(() => useGetCaseAttachments("case-001"), { wrapper });
     const query = queryClient.getQueryCache().findAll({
-      queryKey: ["case-attachments", "case-001", 10, 0, true],
+      queryKey: ["case-attachments", "case-001", 50, 0, true],
     })[0];
     expect(query).toBeDefined();
   });
