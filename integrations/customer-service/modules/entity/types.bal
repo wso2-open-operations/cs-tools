@@ -16,8 +16,7 @@
 import ballerina/constraint;
 # Email Constraint.
 @constraint:String {
-    minLength: 6,
-    pattern: re `^[A-Za-z0-9]+([._%+-]?[A-Za-z0-9]+)*@[A-Za-z0-9]+([.-]?[A-Za-z0-9]+)*\.[A-Za-z]{2,}$`
+    pattern: EMAIL_CONSTRAINT
 
 }
 public type EmailString string;
@@ -25,7 +24,10 @@ public type EmailString string;
 # Contact search payload.
 public type ContactSearchPayload record {|
     # Email
-    EmailString? email = ();
+    @constraint:String {
+        pattern: EMAIL_CONSTRAINT
+    }
+    string? email = ();
     # Limit
     int? 'limit = DEFAULT_RECORD_LIMIT;
     # Offset
