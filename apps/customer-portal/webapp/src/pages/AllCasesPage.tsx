@@ -22,6 +22,7 @@ import {
   type JSX,
   type ChangeEvent,
 } from "react";
+import { useLoader } from "@context/linear-loader/LoaderContext";
 import {
   Box,
   Button,
@@ -88,9 +89,12 @@ export default function AllCasesPage(): JSX.Element {
   const {
     data,
     isLoading: isCasesQueryLoading,
+    isFetching: isCasesFetching,
     hasNextPage,
     fetchNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest);
+
+  const { showLoader, hideLoader } = useLoader();
 
   // Show skeletons until each section has a response (covers query disabled by auth + initial fetch).
   const hasStatsResponse = stats !== undefined;
@@ -99,6 +103,16 @@ export default function AllCasesPage(): JSX.Element {
     isStatsQueryLoading || (!!projectId && !hasStatsResponse);
   const isCasesAreaLoading =
     isCasesQueryLoading || (!!projectId && !hasCasesResponse);
+
+  const isPageLoading = isStatsLoading || isCasesAreaLoading || isCasesFetching;
+
+  useEffect(() => {
+    if (isPageLoading) {
+      showLoader();
+      return () => hideLoader();
+    }
+    hideLoader();
+  }, [isPageLoading, showLoader, hideLoader]);
 
   // Background-load all remaining pages so search/filters work on full dataset.
   useEffect(() => {
@@ -252,7 +266,11 @@ export default function AllCasesPage(): JSX.Element {
       </Box>
 
       {/* Cases list */}
-      <AllCasesList cases={paginatedCases} isLoading={isCasesAreaLoading} />
+      <AllCasesList
+        cases={paginatedCases}
+        isLoading={isCasesAreaLoading}
+        onCaseClick={(c) => navigate(`/${projectId}/support/cases/${c.id}`)}
+      />
 
       {/* Pagination */}
       {totalPages > 1 && (
