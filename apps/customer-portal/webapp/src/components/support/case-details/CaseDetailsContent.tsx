@@ -30,6 +30,7 @@ export interface CaseDetailsContentProps {
   data: CaseDetails | undefined;
   isLoading: boolean;
   isError: boolean;
+  caseId: string;
   onBack: () => void;
 }
 
@@ -43,6 +44,7 @@ export default function CaseDetailsContent({
   data,
   isLoading,
   isError,
+  caseId,
   onBack,
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
@@ -143,7 +145,7 @@ export default function CaseDetailsContent({
           />
         </Paper>
 
-        <CaseDetailsTabPanels activeTab={activeTab} />
+        <CaseDetailsTabPanels activeTab={activeTab} caseId={caseId} />
       </Box>
     </Box>
   );
