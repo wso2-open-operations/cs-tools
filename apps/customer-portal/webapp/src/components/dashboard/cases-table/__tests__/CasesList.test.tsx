@@ -35,7 +35,11 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <thead data-testid="table-head">{children}</thead>
   ),
   TableRow: ({ children }: any) => <tr data-testid="table-row">{children}</tr>,
-  Typography: ({ children }: any) => <span>{children}</span>,
+  Typography: ({ children, onClick, ...rest }: any) => (
+    <span onClick={onClick} {...rest}>
+      {children}
+    </span>
+  ),
   Chip: ({ label }: any) => <span data-testid="chip">{label}</span>,
   IconButton: ({ children }: any) => <button>{children}</button>,
   Paper: ({ children }: any) => <div>{children}</div>,
@@ -191,6 +195,49 @@ describe("CasesList", () => {
       target: { value: "25" },
     });
     expect(mockOnRowsPerPageChange).toHaveBeenCalled();
+  });
+
+  it("should call onCaseClick with case when case title is clicked", () => {
+    const mockOnCaseClick = vi.fn();
+    render(
+      <CasesList
+        isLoading={false}
+        data={mockData}
+        page={0}
+        rowsPerPage={10}
+        onPageChange={mockOnPageChange}
+        onRowsPerPageChange={mockOnRowsPerPageChange}
+        onCaseClick={mockOnCaseClick}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Test Case 1"));
+    expect(mockOnCaseClick).toHaveBeenCalledTimes(1);
+    expect(mockOnCaseClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", title: "Test Case 1", number: "CS-001" }),
+    );
+
+    fireEvent.click(screen.getByText("Test Case 2"));
+    expect(mockOnCaseClick).toHaveBeenCalledTimes(2);
+    expect(mockOnCaseClick).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "2", title: "Test Case 2", number: "CS-002" }),
+    );
+  });
+
+  it("should not call onCaseClick when not provided (title still rendered)", () => {
+    render(
+      <CasesList
+        isLoading={false}
+        data={mockData}
+        page={0}
+        rowsPerPage={10}
+        onPageChange={mockOnPageChange}
+        onRowsPerPageChange={mockOnRowsPerPageChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Test Case 1"));
+    expect(screen.getByText("Test Case 1")).toBeInTheDocument();
   });
 
   it("should render '--' for null or undefined values", () => {

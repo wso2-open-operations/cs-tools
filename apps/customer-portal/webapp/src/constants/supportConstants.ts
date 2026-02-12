@@ -16,14 +16,21 @@
 
 import {
   Activity,
+  BookOpen,
   Bot,
   CircleAlert,
   CircleCheck,
+  CirclePause,
   CircleQuestionMark,
+  CircleX,
   Clock,
   FileText,
+  Info,
   MessageCircle,
   MessageSquare,
+  Paperclip,
+  Phone,
+  TriangleAlert,
   TrendingUp,
   Zap,
 } from "@wso2/oxygen-ui-icons-react";
@@ -176,6 +183,40 @@ export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
     key: "activeChats",
     label: "Active Chats",
   },
+];
+
+/**
+ * Case details tab configuration (label + icon for Activity, Details, Attachments, etc.).
+ */
+export interface CaseDetailsTabConfig {
+  label: string;
+  Icon: ComponentType<{ size?: number }>;
+}
+
+export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
+  { label: "Activity", Icon: MessageSquare },
+  { label: "Details", Icon: Info },
+  { label: "Attachments (0)", Icon: Paperclip },
+  { label: "Calls (0)", Icon: Phone },
+  { label: "Knowledge Base (0)", Icon: BookOpen },
+];
+
+//Palette intent for case status action buttons.
+export type CaseStatusPaletteIntent = "error" | "warning" | "success" | "info";
+
+// Case status action (e.g. Escalate, Mark as Resolved) for the action row.
+export interface CaseStatusAction {
+  label: string;
+  Icon: ComponentType<{ size?: number }>;
+  paletteIntent: CaseStatusPaletteIntent;
+}
+
+// Case status actions shown in the case details action row.
+export const CASE_STATUS_ACTIONS: CaseStatusAction[] = [
+  { label: "Escalate Case", Icon: TriangleAlert, paletteIntent: "error" },
+  { label: "Waiting on WSO2", Icon: CirclePause, paletteIntent: "warning" },
+  { label: "Mark as Resolved", Icon: CircleCheck, paletteIntent: "success" },
+  { label: "Close Case", Icon: CircleX, paletteIntent: "info" },
 ];
 
 // Number of outstanding cases to show on support overview cards.

@@ -37,6 +37,7 @@ import AllCasesListSkeleton from "@components/support/all-cases/AllCasesListSkel
 export interface AllCasesListProps {
   cases: CaseListItem[];
   isLoading: boolean;
+  onCaseClick?: (caseItem: CaseListItem) => void;
 }
 
 /**
@@ -48,6 +49,7 @@ export interface AllCasesListProps {
 export default function AllCasesList({
   cases,
   isLoading,
+  onCaseClick,
 }: AllCasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -75,6 +77,7 @@ export default function AllCasesList({
         return (
           <Form.CardButton
             key={caseItem.id}
+            onClick={onCaseClick ? () => onCaseClick(caseItem) : undefined}
             sx={{
               p: 3,
               display: "flex",

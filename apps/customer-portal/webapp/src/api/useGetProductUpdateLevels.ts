@@ -40,9 +40,7 @@ export function useGetProductUpdateLevels(): UseQueryResult<
   return useQuery<ProductUpdateLevelsResponse, Error>({
     queryKey: [ApiQueryKeys.PRODUCT_UPDATE_LEVELS, isMockEnabled],
     queryFn: async (): Promise<ProductUpdateLevelsResponse> => {
-      logger.debug(
-        `Fetching product update levels, mock: ${isMockEnabled}`,
-      );
+      logger.debug(`Fetching product update levels, mock: ${isMockEnabled}`);
 
       if (isMockEnabled) {
         await new Promise((resolve) => setTimeout(resolve, API_MOCK_DELAY));

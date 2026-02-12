@@ -110,7 +110,15 @@ export default function SupportPage(): JSX.Element {
             footerButtonLabel="View all cases"
             onFooterClick={() => navigate("cases")}
           >
-            <OutstandingCasesList cases={cases} isLoading={isCasesLoading} />
+            <OutstandingCasesList
+              cases={cases}
+              isLoading={isCasesLoading}
+              onCaseClick={
+                projectId
+                  ? (c) => navigate(`/${projectId}/support/cases/${c.id}`)
+                  : undefined
+              }
+            />
           </SupportOverviewCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>

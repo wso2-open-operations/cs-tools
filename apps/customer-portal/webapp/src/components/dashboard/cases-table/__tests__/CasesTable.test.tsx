@@ -21,9 +21,11 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
+const mockNavigate = vi.fn();
+
 // Mock dependencies
 vi.mock("react-router", () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => mockNavigate,
 }));
 
 vi.mock("@/api/useGetProjectCases");
@@ -87,7 +89,12 @@ vi.mock("../CasesTableHeader", () => ({
 }));
 
 vi.mock("../CasesList", () => ({
-  default: ({ data, onPageChange, onRowsPerPageChange }: any) => (
+  default: ({
+    data,
+    onPageChange,
+    onRowsPerPageChange,
+    onCaseClick,
+  }: any) => (
     <div data-testid="cases-list">
       <span data-testid="case-count">{data?.cases.length || 0}</span>
       <span data-testid="total-records">{data?.totalRecords || 0}</span>
@@ -95,6 +102,14 @@ vi.mock("../CasesList", () => ({
       <button onClick={() => onRowsPerPageChange({ target: { value: "25" } })}>
         Change Rows
       </button>
+      {onCaseClick && (
+        <button
+          onClick={() => onCaseClick({ id: "case-1", title: "Case 1" })}
+          data-testid="case-title-click"
+        >
+          Case 1
+        </button>
+      )}
     </div>
   ),
 }));
@@ -329,6 +344,21 @@ describe("CasesTable", () => {
     await waitFor(() => {
       expect(screen.getByTestId("case-count")).toHaveTextContent("1");
     });
+  });
+
+  it("should navigate to case details when onCaseClick is triggered from list", () => {
+    render(
+      <ThemeProvider theme={theme}>
+        <CasesTable projectId={mockProjectId} />
+      </ThemeProvider>,
+    );
+
+    const caseTitleButton = screen.getByTestId("case-title-click");
+    fireEvent.click(caseTitleButton);
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      `/${mockProjectId}/support/cases/case-1`,
+    );
   });
 
   it("should propagate loading and error states to FilterPopover", () => {

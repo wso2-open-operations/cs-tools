@@ -29,7 +29,9 @@ vi.mock("@hooks/useLogger", () => ({
 }));
 
 vi.mock("@constants/apiConstants", async (importOriginal) => {
-  const actual = (await importOriginal()) as { ApiQueryKeys: Record<string, string> };
+  const actual = (await importOriginal()) as {
+    ApiQueryKeys: Record<string, string>;
+  };
   return {
     ...actual,
     API_MOCK_DELAY: 0,
@@ -132,8 +134,12 @@ describe("useGetProductUpdateLevels", () => {
       },
     ];
 
-    const originalWindowConfig = (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config;
-    (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    const originalWindowConfig = (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config;
+    (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
     };
 
@@ -166,8 +172,12 @@ describe("useGetProductUpdateLevels", () => {
   it("should handle API error when isMockEnabled is false", async () => {
     mockIsMockEnabled = false;
 
-    const originalWindowConfig = (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config;
-    (window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    const originalWindowConfig = (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config;
+    (
+      window as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
     };
 

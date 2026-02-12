@@ -34,6 +34,9 @@ export default defineConfig({
       "@components": fileURLToPath(
         new URL("./src/components", import.meta.url),
       ),
+      "@case-details": fileURLToPath(
+        new URL("./src/components/support/case-details/header", import.meta.url),
+      ),
       "@config": fileURLToPath(new URL("./src/config", import.meta.url)),
       "@constants": fileURLToPath(new URL("./src/constants", import.meta.url)),
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),

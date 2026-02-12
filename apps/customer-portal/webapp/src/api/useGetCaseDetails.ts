@@ -57,7 +57,7 @@ export default function useGetCaseDetails(
         }
 
         const idToken = await getIdToken();
-        const requestUrl = `${baseUrl}/projects/${projectId}/cases/${caseId}`;
+        const requestUrl = `${baseUrl}/cases/${caseId}`;
         const response = await fetch(requestUrl, {
           method: "GET",
           headers: addApiHeaders(idToken),

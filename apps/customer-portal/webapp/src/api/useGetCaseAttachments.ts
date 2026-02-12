@@ -98,8 +98,7 @@ export default function useGetCaseAttachments(
         throw error;
       }
     },
-    enabled:
-      !!caseId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
+    enabled: !!caseId && (isMockEnabled || (isSignedIn && !isAuthLoading)),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

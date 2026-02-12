@@ -13,6 +13,8 @@
       "@api/*": ["src/api/*"],
       "@assets/*": ["src/assets/*"],
       "@components/*": ["src/components/*"],
+      "@case-details": ["src/components/support/case-details/header"],
+      "@case-details/*": ["src/components/support/case-details/header/*"],
       "@config/*": ["src/config/*"],
       "@constants/*": ["src/constants/*"],
       "@context/*": ["src/context/*"],

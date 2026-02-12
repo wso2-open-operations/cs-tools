@@ -63,10 +63,9 @@ describe("useGetCaseAttachments", () => {
   });
 
   it("should return mock attachments when isMockEnabled is true", async () => {
-    const { result } = renderHook(
-      () => useGetCaseAttachments("case-001"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useGetCaseAttachments("case-001"), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 

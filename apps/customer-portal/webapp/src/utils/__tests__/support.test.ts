@@ -28,6 +28,7 @@ import {
   getChatStatusColor,
   getChatActionColor,
   formatRelativeTime,
+  formatValue,
   deriveFilterLabels,
   getStatusIcon,
   resolveColorFromTheme,
@@ -93,6 +94,25 @@ describe("support utils", () => {
       expect(resolveColorFromTheme("non.existent.color", theme)).toBe(
         "non.existent.color",
       );
+    });
+  });
+
+  describe("formatValue", () => {
+    it("should return '--' for null and undefined", () => {
+      expect(formatValue(null)).toBe("--");
+      expect(formatValue(undefined)).toBe("--");
+    });
+
+    it("should return '--' for empty string", () => {
+      expect(formatValue("")).toBe("--");
+    });
+
+    it("should return string for non-empty string", () => {
+      expect(formatValue("Choreo")).toBe("Choreo");
+    });
+
+    it("should return string for number", () => {
+      expect(formatValue(42)).toBe("42");
     });
   });
 
