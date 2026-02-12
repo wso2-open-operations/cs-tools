@@ -14,13 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, colors, Paper, Typography } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Button,
+  CircularProgress,
+  colors,
+  Paper,
+  Typography,
+} from "@wso2/oxygen-ui";
 import { CircleAlert } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
 interface EscalationBannerProps {
   visible: boolean;
   onCreateCase: () => void;
+  isLoading?: boolean;
 }
 
 /**
@@ -34,6 +42,7 @@ interface EscalationBannerProps {
 export default function EscalationBanner({
   visible,
   onCreateCase,
+  isLoading = false,
 }: EscalationBannerProps): JSX.Element | null {
   if (!visible) return null;
 
@@ -66,8 +75,12 @@ export default function EscalationBanner({
         size="medium"
         color="primary"
         onClick={onCreateCase}
+        disabled={isLoading}
+        startIcon={
+          isLoading ? <CircularProgress size={16} color="inherit" /> : undefined
+        }
       >
-        Create Case
+        {isLoading ? "Creating..." : "Create Case"}
       </Button>
     </Paper>
   );

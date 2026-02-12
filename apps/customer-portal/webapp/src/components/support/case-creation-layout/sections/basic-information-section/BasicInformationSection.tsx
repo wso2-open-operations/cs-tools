@@ -37,6 +37,8 @@ interface BasicInformationSectionProps {
   setDeployment: (value: string) => void;
   metadata: any;
   isLoading: boolean;
+  extraDeploymentOptions?: string[];
+  extraProductOptions?: string[];
 }
 
 /**
@@ -55,8 +57,25 @@ export const BasicInformationSection = ({
   setDeployment,
   metadata,
   isLoading,
+  extraDeploymentOptions,
+  extraProductOptions,
 }: BasicInformationSectionProps): JSX.Element => {
   const [isEditing, setIsEditing] = useState(false);
+  const deploymentOptions = Array.from(
+    new Set(
+      [
+        ...(metadata?.deploymentTypes ?? []),
+        ...(extraDeploymentOptions ?? []),
+      ].filter((value) => value && value.trim() !== ""),
+    ),
+  );
+  const productOptions = Array.from(
+    new Set(
+      [...(metadata?.products ?? []), ...(extraProductOptions ?? [])].filter(
+        (value) => value && value.trim() !== "",
+      ),
+    ),
+  );
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -127,7 +146,7 @@ export const BasicInformationSection = ({
               <MenuItem value="" disabled>
                 Select Deployment Type...
               </MenuItem>
-              {metadata?.deploymentTypes?.map((d: string) => (
+              {deploymentOptions.map((d) => (
                 <MenuItem key={d} value={d}>
                   {d}
                 </MenuItem>
@@ -170,7 +189,7 @@ export const BasicInformationSection = ({
               <MenuItem value="" disabled>
                 Select Product & Version...
               </MenuItem>
-              {metadata?.products?.map((p: string) => (
+              {productOptions.map((p) => (
                 <MenuItem key={p} value={p}>
                   {p}
                 </MenuItem>

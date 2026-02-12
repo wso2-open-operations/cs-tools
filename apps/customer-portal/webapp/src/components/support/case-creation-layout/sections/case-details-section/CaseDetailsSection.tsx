@@ -46,6 +46,8 @@ interface CaseDetailsSectionProps {
   filters?: CaseMetadataResponse;
   isLoading: boolean;
   storageKey?: string;
+  extraIssueTypes?: string[];
+  extraSeverityLevels?: { id: string; label: string; description?: string }[];
 }
 
 /**
@@ -66,12 +68,36 @@ export const CaseDetailsSection = ({
   filters,
   isLoading,
   storageKey,
+  extraIssueTypes,
+  extraSeverityLevels,
 }: CaseDetailsSectionProps): JSX.Element => {
   const [isEditing, setIsEditing] = useState(false);
 
   // TODO : Remove this after the mock interface removed.
-  const issueTypes = filters?.issueTypes || metadata?.issueTypes || [];
-  const severityLevels = filters?.severities || metadata?.severityLevels || [];
+  const baseIssueTypes = filters?.issueTypes || metadata?.issueTypes || [];
+  const issueTypes = [
+    ...baseIssueTypes,
+    ...(extraIssueTypes ?? []).filter(
+      (extra) =>
+        !baseIssueTypes.some((base: any) => {
+          const baseLabel = typeof base === "string" ? base : base.label;
+          return baseLabel === extra;
+        }),
+    ),
+  ];
+  const baseSeverityLevels = (filters?.severities ||
+    metadata?.severityLevels ||
+    []) as {
+    id: string;
+    label: string;
+    description?: string;
+  }[];
+  const severityLevels = [
+    ...baseSeverityLevels,
+    ...(extraSeverityLevels ?? []).filter(
+      (extra) => !baseSeverityLevels.some((level) => level.id === extra.id),
+    ),
+  ];
 
   return (
     <Paper sx={{ p: 3 }}>

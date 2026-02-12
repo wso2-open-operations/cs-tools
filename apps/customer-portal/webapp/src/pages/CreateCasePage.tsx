@@ -16,8 +16,8 @@
 
 import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
-import { useState, useEffect, useRef, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useState, useEffect, useRef, type FormEvent, type JSX } from "react";
+import { useNavigate, useParams, useLocation } from "react-router";
 import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -32,6 +32,7 @@ import {
   getGeneratedIssueTitle,
   getGeneratedIssueDescription,
 } from "@models/mockFunctions";
+import type { CaseClassificationResponse } from "@models/responses";
 
 /**
  * CreateCasePage component to review and edit AI-generated case details.
@@ -40,6 +41,7 @@ import {
  */
 export default function CreateCasePage(): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const { projectId } = useParams<{ projectId: string }>();
   const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
@@ -59,6 +61,20 @@ export default function CreateCasePage(): JSX.Element {
   const [severity, setSeverity] = useState("");
 
   const hasInitializedRef = useRef(false);
+  const classificationState = location.state as
+    | { classification?: CaseClassificationResponse }
+    | undefined;
+  const classification = classificationState?.classification;
+  const classificationInfo = classification?.case_info;
+  const classificationIssueType = classification?.issueType?.trim() || "";
+  const classificationSeverity = classification?.severityLevel?.trim() || "";
+  const classificationDeployment =
+    classificationInfo?.environment?.trim() || "";
+  const classificationProduct = classificationInfo?.productName
+    ? classificationInfo.productVersion
+      ? `${classificationInfo.productName} - ${classificationInfo.productVersion}`
+      : classificationInfo.productName
+    : "";
 
   useEffect(() => {
     if (isLoading || isProjectLoading || isFiltersLoading) {
@@ -76,27 +92,68 @@ export default function CreateCasePage(): JSX.Element {
   }, [projectDetails]);
 
   useEffect(() => {
-    if (metadata && !hasInitializedRef.current) {
-      if (!project && !projectId && metadata.projects?.[0]) {
-        setProject(metadata.projects[0]);
-      }
-      setProduct(metadata.products?.[0] || "");
-      setDeployment(metadata.deploymentTypes?.[0] || "");
-
-      // TODO: Remove this fallback logic once the mock interface removed.
-      const initialIssueType =
-        filters?.issueTypes?.[0]?.label || metadata.issueTypes?.[0] || "";
-      const initialSeverity =
-        filters?.severities?.[1]?.id || metadata.severityLevels?.[1]?.id || "";
-
-      setIssueType(initialIssueType);
-      setSeverity(initialSeverity);
-
-      setTitle(getGeneratedIssueTitle());
-      setDescription(getGeneratedIssueDescription());
-      hasInitializedRef.current = true;
+    if (hasInitializedRef.current) {
+      return;
     }
-  }, [metadata, filters, project, projectId]);
+
+    if (isLoading || isFiltersLoading) {
+      return;
+    }
+
+    if (!metadata) {
+      return;
+    }
+
+    if (!project && !projectId && metadata?.projects?.[0]) {
+      setProject(metadata.projects[0]);
+    }
+
+    const initialProduct =
+      classificationProduct || metadata?.products?.[0] || "";
+    const initialDeployment =
+      classificationDeployment || metadata?.deploymentTypes?.[0] || "";
+
+    // TODO: Remove this fallback logic once the mock interface removed.
+    const fallbackIssueType =
+      filters?.issueTypes?.[0]?.label || metadata?.issueTypes?.[0] || "";
+    const initialIssueType = classificationIssueType || fallbackIssueType;
+
+    const severityLevels =
+      filters?.severities || metadata?.severityLevels || [];
+    const severityMatch = severityLevels.find(
+      (level: any) =>
+        level.id === classificationSeverity ||
+        level.label === classificationSeverity,
+    );
+    const fallbackSeverity = severityLevels?.[1]?.id || "";
+    const initialSeverity =
+      severityMatch?.id || classificationSeverity || fallbackSeverity;
+
+    setProduct(initialProduct);
+    setDeployment(initialDeployment);
+    setIssueType(initialIssueType);
+    setSeverity(initialSeverity);
+
+    setTitle(classificationInfo?.shortDescription || getGeneratedIssueTitle());
+    setDescription(
+      classificationInfo?.description || getGeneratedIssueDescription(),
+    );
+
+    hasInitializedRef.current = true;
+  }, [
+    classification,
+    classificationDeployment,
+    classificationInfo,
+    classificationIssueType,
+    classificationProduct,
+    classificationSeverity,
+    filters,
+    isFiltersLoading,
+    isLoading,
+    metadata,
+    project,
+    projectId,
+  ]);
 
   useEffect(() => {
     if (isError) {
@@ -112,9 +169,46 @@ export default function CreateCasePage(): JSX.Element {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
   };
+
+  const issueTypesList = filters?.issueTypes || metadata?.issueTypes || [];
+  const hasIssueType = issueTypesList.some((type: any) => {
+    const label = typeof type === "string" ? type : type.label;
+    return label === classificationIssueType;
+  });
+  const extraIssueTypes =
+    classificationIssueType && !hasIssueType ? [classificationIssueType] : [];
+
+  const severityLevelsList = (filters?.severities ||
+    metadata?.severityLevels ||
+    []) as {
+    id: string;
+    label: string;
+    description?: string;
+  }[];
+  const hasSeverity = severityLevelsList.some(
+    (level) =>
+      level.id === classificationSeverity ||
+      level.label === classificationSeverity,
+  );
+  const extraSeverityLevels =
+    classificationSeverity && !hasSeverity
+      ? [{ id: classificationSeverity, label: classificationSeverity }]
+      : [];
+
+  const baseDeploymentOptions = metadata?.deploymentTypes ?? [];
+  const baseProductOptions = metadata?.products ?? [];
+  const extraDeploymentOptions =
+    classificationDeployment &&
+    !baseDeploymentOptions.includes(classificationDeployment)
+      ? [classificationDeployment]
+      : [];
+  const extraProductOptions =
+    classificationProduct && !baseProductOptions.includes(classificationProduct)
+      ? [classificationProduct]
+      : [];
 
   const renderContent = () => {
     if (isError) {
@@ -147,6 +241,8 @@ export default function CreateCasePage(): JSX.Element {
               setDeployment={setDeployment}
               metadata={metadata}
               isLoading={isLoading || isProjectLoading}
+              extraDeploymentOptions={extraDeploymentOptions}
+              extraProductOptions={extraProductOptions}
             />
 
             <CaseDetailsSection
@@ -164,6 +260,8 @@ export default function CreateCasePage(): JSX.Element {
               storageKey={
                 projectId ? `create-case-draft-${projectId}` : undefined
               }
+              extraIssueTypes={extraIssueTypes}
+              extraSeverityLevels={extraSeverityLevels}
             />
 
             {/* form actions container */}

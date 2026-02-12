@@ -33,6 +33,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {children}
     </button>
   ),
+  CircularProgress: () => <div data-testid="circular-progress" />,
   Paper: ({ children }: any) => <div>{children}</div>,
   Typography: ({ children }: any) => <div>{children}</div>,
   TextField: ({ value, onChange, placeholder, onKeyPress }: any) => (
@@ -62,6 +63,42 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   ArrowLeft: () => <svg data-testid="back-icon" />,
   Send: () => <svg data-testid="send-icon" />,
   CircleAlert: () => <svg data-testid="alert-icon" />,
+}));
+
+vi.mock("@api/usePostCaseClassifications", () => ({
+  usePostCaseClassifications: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  }),
+}));
+
+vi.mock("@api/useGetDeployments", () => ({
+  useGetDeployments: () => ({
+    data: { deployments: [] },
+  }),
+}));
+
+vi.mock("@api/useGetProjectDetails", () => ({
+  default: () => ({
+    data: { subscription: { supportTier: "" } },
+    isLoading: false,
+    error: null,
+  }),
+}));
+
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({
+    showError: vi.fn(),
+  }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
 }));
 
 const renderWithRouter = () => {

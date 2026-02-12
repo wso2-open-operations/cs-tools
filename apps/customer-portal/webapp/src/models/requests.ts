@@ -39,3 +39,12 @@ export interface CaseSearchRequest {
     order: "asc" | "desc";
   };
 }
+
+// Request body for case classification.
+export interface CaseClassificationRequest {
+  chatHistory: string;
+  environments: string[];
+  productDetails: string[];
+  region: string;
+  tier: string;
+}
