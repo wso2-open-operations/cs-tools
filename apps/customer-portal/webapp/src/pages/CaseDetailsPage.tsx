@@ -80,6 +80,7 @@ export default function CaseDetailsPage(): JSX.Element {
       data={data}
       isLoading={showSkeletons}
       isError={isError}
+      caseId={caseId || ""}
       onBack={handleBack}
     />
   );
