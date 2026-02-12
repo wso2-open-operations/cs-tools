@@ -27,37 +27,20 @@ import {
   useTheme,
   type Theme,
 } from "@wso2/oxygen-ui";
-import {
-  CircleCheck,
-  CirclePause,
-  CircleX,
-  CirclePlay,
-  TriangleAlert,
-} from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ComponentType } from "react";
+import { CirclePlay } from "@wso2/oxygen-ui-icons-react";
+import { type JSX } from "react";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
+import {
+  CASE_STATUS_ACTIONS,
+  type CaseStatusPaletteIntent,
+} from "@constants/supportConstants";
 import { formatValue } from "@utils/support";
-
-type PaletteIntent = "error" | "warning" | "success" | "info";
-
-interface CaseStatusAction {
-  label: string;
-  Icon: ComponentType<{ size?: number }>;
-  paletteIntent: PaletteIntent;
-}
-
-const CASE_STATUS_ACTIONS: CaseStatusAction[] = [
-  { label: "Escalate Case", Icon: TriangleAlert, paletteIntent: "error" },
-  { label: "Waiting on WSO2", Icon: CirclePause, paletteIntent: "warning" },
-  { label: "Mark as Resolved", Icon: CircleCheck, paletteIntent: "success" },
-  { label: "Close Case", Icon: CircleX, paletteIntent: "info" },
-];
 
 const ACTION_BUTTON_ICON_SIZE = 12;
 
 function getActionButtonSx(
   theme: Theme,
-  intent: PaletteIntent,
+  intent: CaseStatusPaletteIntent,
 ): Record<string, unknown> {
   const light = theme.palette[intent].light;
   return {
