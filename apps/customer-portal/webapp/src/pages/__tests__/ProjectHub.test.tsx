@@ -17,13 +17,38 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import ProjectHub from "@pages/ProjectHub";
-import { mockProjects } from "@models/mockData";
+import { MemoryRouter } from "react-router";
+
+const testProjects = [
+  {
+    id: "project-1",
+    key: "PROJ1",
+    name: "Project 1",
+    description: "Description 1",
+    createdOn: "2026-01-01 10:00:00",
+  },
+  {
+    id: "project-2",
+    key: "PROJ2",
+    name: "Project 2",
+    description: "Description 2",
+    createdOn: "2026-01-02 11:00:00",
+  },
+];
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
   Typography: ({ children, variant }: any) => (
     <div data-testid="typography" data-variant={variant}>
+      {children}
+    </div>
+  ),
+  IconButton: ({ children }: any) => (
+    <button data-testid="icon-button">{children}</button>
+  ),
+  Tooltip: ({ children, title }: any) => (
+    <div data-testid="tooltip" title={title}>
       {children}
     </div>
   ),
@@ -43,6 +68,15 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Shield: () => <div data-testid="shield-icon" />,
   Rocket: () => <div data-testid="rocket-icon" />,
   CircleAlert: () => <div data-testid="alert-icon" />,
+  TriangleAlert: () => <div data-testid="triangle-alert-icon" />,
+}));
+
+vi.mock("@components/common/empty-state/EmptyIcon", () => ({
+  default: () => <div data-testid="empty-icon" />,
+}));
+
+vi.mock("@components/common/error-state/ErrorStateIcon", () => ({
+  default: () => <div data-testid="error-state-icon" />,
 }));
 
 // Mock useAsgardeo
@@ -57,25 +91,24 @@ vi.mock("@/providers/MockConfigProvider", () => ({
   useMockConfig: () => mockUseMockConfig(),
 }));
 
-// Mock sub-components
-vi.mock("@/components/projectHub/projectCard/ProjectCard", () => ({
-  default: ({ title, isStatsError }: any) => (
-    <div
-      data-testid="project-card"
-      data-stats-error={isStatsError ? "true" : "false"}
-    >
-      {title}
-    </div>
-  ),
+// Mock useLoader
+const mockUseLoader = vi.fn();
+vi.mock("@context/linear-loader/LoaderContext", () => ({
+  useLoader: () => mockUseLoader(),
 }));
 
-vi.mock("@/components/projectHub/projectCard/ProjectCardSkeleton", () => ({
+// Mock sub-components
+vi.mock("@components/project-hub/project-card/ProjectCard", () => ({
+  default: ({ title }: any) => <div data-testid="project-card">{title}</div>,
+}));
+
+vi.mock("@components/project-hub/project-card/ProjectCardSkeleton", () => ({
   default: () => <div data-testid="project-skeleton" />,
 }));
 
 // Mock hooks
 const mockUseGetProjects = vi.fn();
-vi.mock("@/api/useGetProjects", () => ({
+vi.mock("@api/useGetProjects", () => ({
   default: (...args: any[]) => mockUseGetProjects(...args),
 }));
 
@@ -85,7 +118,7 @@ const mockLogger = {
   warn: vi.fn(),
   error: vi.fn(),
 };
-vi.mock("@/hooks/useLogger", () => ({
+vi.mock("@hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
 
@@ -94,10 +127,14 @@ describe("ProjectHub", () => {
     vi.clearAllMocks();
     mockUseAsgardeo.mockReturnValue({ isLoading: false });
     mockUseMockConfig.mockReturnValue({ isMockEnabled: true });
+    mockUseLoader.mockReturnValue({
+      showLoader: vi.fn(),
+      hideLoader: vi.fn(),
+    });
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: {
-        projects: mockProjects,
+        projects: testProjects,
       },
       isError: false,
     });
@@ -110,61 +147,73 @@ describe("ProjectHub", () => {
       isError: false,
     });
 
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
 
     expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3);
+    expect(screen.queryByText("No Projects Yet")).not.toBeInTheDocument();
+    expect(screen.getByText(/Select Your Project/i)).toBeInTheDocument();
   });
 
   it("should render loading skeletons when isAuthLoading is true", () => {
     mockUseAsgardeo.mockReturnValue({ isLoading: true });
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
-      data: null, // Data might not be available yet
+      data: null,
       isError: false,
     });
 
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
 
     expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3);
+    expect(screen.queryByText("No Projects Yet")).not.toBeInTheDocument();
+    expect(screen.getByText(/Select Your Project/i)).toBeInTheDocument();
   });
 
   it("should render project cards when data is loaded", () => {
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
 
     expect(screen.getAllByTestId("project-card")).toHaveLength(
-      mockProjects.length,
+      testProjects.length,
     );
-    expect(screen.getByText(mockProjects[0].name)).toBeInTheDocument();
+    expect(screen.getByText(testProjects[0].name)).toBeInTheDocument();
+    expect(screen.getByText(/Select Your Project/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Choose a project to access your support cases/i),
+    ).toBeInTheDocument();
   });
 
-  it("should pass isStatsError=true to ProjectCard when mocks are disabled", () => {
-    mockUseMockConfig.mockReturnValue({ isMockEnabled: false });
-
-    render(<ProjectHub />);
-
-    const cards = screen.getAllByTestId("project-card");
-    expect(cards[0]).toHaveAttribute("data-stats-error", "true");
-  });
-
-  it("should pass isStatsError=false to ProjectCard when mocks are enabled", () => {
-    mockUseMockConfig.mockReturnValue({ isMockEnabled: true });
-
-    render(<ProjectHub />);
-
-    const cards = screen.getAllByTestId("project-card");
-    expect(cards[0]).toHaveAttribute("data-stats-error", "false");
-  });
-
-  it("should render error message when isError is true", async () => {
+  it("should render error state when isError is true", async () => {
     mockUseGetProjects.mockReturnValue({
       isLoading: false,
       data: null,
       isError: true,
     });
 
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/Error loading projects/i)).toBeInTheDocument();
+    expect(screen.getByTestId("error-state-icon")).toBeInTheDocument();
+    expect(screen.getByText("Something Went Wrong")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "We couldn't load the data right now. Please try again or refresh the page.",
+      ),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining("Failed to load projects"),
@@ -181,13 +230,28 @@ describe("ProjectHub", () => {
       isError: false,
     });
 
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
 
-    expect(screen.getByText(/No projects available/i)).toBeInTheDocument();
+    expect(screen.getByTestId("empty-icon")).toBeInTheDocument();
+    // Specific text matches to avoid duplicate regex matches
+    expect(screen.getByText("No Projects Yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Projects will appear here once they are created or assigned to you",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("should log debug message when projects are loaded", async () => {
-    render(<ProjectHub />);
+    render(
+      <MemoryRouter>
+        <ProjectHub />
+      </MemoryRouter>,
+    );
     await waitFor(() => {
       expect(mockLogger.debug).toHaveBeenCalledWith(
         expect.stringContaining("projects loaded"),

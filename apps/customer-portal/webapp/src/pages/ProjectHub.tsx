@@ -24,7 +24,8 @@ import ProjectCard from "@components/project-hub/project-card/ProjectCard";
 import ProjectCardSkeleton from "@components/project-hub/project-card/ProjectCardSkeleton";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
-import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
+import EmptyIcon from "@components/common/empty-state/EmptyIcon";
+import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 
 /**
  * ProjectHub component.
@@ -114,17 +115,44 @@ export default function ProjectHub(): JSX.Element {
 
     if (isError) {
       return (
-        <Box sx={{ py: 5 }}>
-          <ErrorIndicator entityName="projects" />
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            py: 10,
+          }}
+        >
+          <ErrorStateIcon />
+          <Typography variant="h4">Something Went Wrong</Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            We couldn&apos;t load the data right now. Please try again or refresh
+            the page.
+          </Typography>
         </Box>
       );
     }
 
-    if (!projects || projects.length === 0) {
+    if (projects.length === 0) {
       return (
-        <Typography variant="h6" color="text.secondary">
-          No projects available.
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            py: 10,
+          }}
+        >
+          <EmptyIcon />
+          <Typography variant="h4">No Projects Yet</Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Projects will appear here once they are created or assigned to you
+          </Typography>
+        </Box>
       );
     }
 
@@ -190,34 +218,36 @@ export default function ProjectHub(): JSX.Element {
           justifyContent: "center",
         }}
       >
-        <Box
-          sx={{
-            mb: 3,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            textAlign: "center",
-          }}
-        >
-          {/* project hub title */}
+        {!(isError || (!isLoading && !isAuthLoading && projects.length === 0)) && (
           <Box
             sx={{
-              mb: 1,
+              mb: 3,
               display: "flex",
+              flexDirection: "column",
               alignItems: "center",
-              gap: 1.5,
+              textAlign: "center",
             }}
           >
-            <FolderOpen size={28} />
-            <Typography variant="h4">Select Your Project</Typography>
-          </Box>
+            {/* project hub title */}
+            <Box
+              sx={{
+                mb: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 1.5,
+              }}
+            >
+              <FolderOpen size={28} />
+              <Typography variant="h4">Select Your Project</Typography>
+            </Box>
 
-          {/* project hub subtitle */}
-          <Typography variant="subtitle2" color="text.secondary">
-            Choose a project to access your support cases, chat history, and
-            dashboard
-          </Typography>
-        </Box>
+            {/* project hub subtitle */}
+            <Typography variant="subtitle2" color="text.secondary">
+              Choose a project to access your support cases, chat history, and
+              dashboard
+            </Typography>
+          </Box>
+        )}
         <Box sx={{ width: "100%" }}>{renderContent()}</Box>
       </Box>
     </Box>

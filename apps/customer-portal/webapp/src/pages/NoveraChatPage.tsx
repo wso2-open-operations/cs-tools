@@ -21,6 +21,11 @@ import ChatHeader from "@components/support/novera-ai-assistant/novera-chat-page
 import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageList";
 import { getNoveraResponse } from "@models/mockFunctions";
+import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
+import { useGetDeployments } from "@api/useGetDeployments";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useLogger } from "@hooks/useLogger";
 
 export interface Message {
   id: string;
@@ -36,8 +41,13 @@ export interface Message {
  */
 export default function NoveraChatPage(): JSX.Element {
   const navigate = useNavigate();
+  const logger = useLogger();
+  const { showError } = useErrorBanner();
 
   const { projectId } = useParams<{ projectId: string }>();
+  const { data: deploymentsData } = useGetDeployments(projectId || "");
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
+  const { mutateAsync, isPending } = usePostCaseClassifications();
 
   const handleBack = () => {
     if (projectId) {
@@ -47,11 +57,54 @@ export default function NoveraChatPage(): JSX.Element {
     }
   };
 
-  const handleCreateCase = () => {
-    if (projectId) {
-      navigate(`/${projectId}/support/chat/create-case`);
-    } else {
+  const handleCreateCase = async () => {
+    if (!projectId) {
       navigate("/");
+      return;
+    }
+
+    const environments = Array.from(
+      new Set(
+        (
+          deploymentsData?.deployments?.map((deployment) => deployment.name) ||
+          []
+        ).filter(Boolean),
+      ),
+    );
+    const productDetails = Array.from(
+      new Set(
+        (
+          deploymentsData?.deployments?.flatMap((deployment) =>
+            deployment.products.map(
+              (product) => `${product.name} - ${product.version}`,
+            ),
+          ) || []
+        ).filter(Boolean),
+      ),
+    );
+
+    const chatHistory = messages
+      .map(
+        (message) =>
+          `${message.sender === "user" ? "User" : "Assistant"}: ${message.text}`,
+      )
+      .join("\n");
+
+    try {
+      const classification = await mutateAsync({
+        chatHistory,
+        environments,
+        productDetails,
+        region: "",
+        tier: projectDetails?.subscription?.supportTier ?? "",
+      });
+
+      navigate(`/${projectId}/support/chat/create-case`, {
+        state: { classification },
+      });
+    } catch (error) {
+      logger.error("Failed to classify case details", error);
+      showError("case classification");
     }
   };
   const [messages, setMessages] = useState<Message[]>([
@@ -148,6 +201,7 @@ export default function NoveraChatPage(): JSX.Element {
             setInputValue={setInputValue}
             showEscalationBanner={messages.length > 4}
             onCreateCase={handleCreateCase}
+            isCreateCaseLoading={isPending}
           />
         </Paper>
       </Box>
