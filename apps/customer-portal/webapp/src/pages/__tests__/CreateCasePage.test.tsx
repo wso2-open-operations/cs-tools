@@ -14,11 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserRouter } from "react-router";
-import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
-import useGetProjectDetails from "@api/useGetProjectDetails";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CreateCasePage from "@pages/CreateCasePage";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
@@ -121,28 +119,6 @@ vi.mock("../../context/linear-loader/LoaderContext", async (importOriginal) => {
   };
 });
 
-// Mock the API hook
-vi.mock("@api/useGetCaseCreationDetails", () => ({
-  useGetCaseCreationDetails: vi.fn(() => ({
-    data: {
-      projects: ["Production Environment-Main"],
-      products: ["WSO2 API Manager - v4.2.0"],
-      deploymentTypes: ["Production"],
-      issueTypes: ["Partial Outage"],
-      severityLevels: [
-        { id: "S1", label: "S1", description: "Desc 1" },
-        { id: "S2", label: "S2", description: "Desc 2" },
-      ],
-      conversationSummary: {
-        messagesExchanged: 8,
-        troubleshootingAttempts: "2 steps completed",
-        kbArticlesReviewed: "3 articles suggested",
-      },
-    },
-    isLoading: false,
-  })),
-}));
-
 // Mock useGetProjectDetails hook
 vi.mock("@api/useGetProjectDetails", () => ({
   default: vi.fn(() => ({
@@ -206,7 +182,7 @@ const queryClient = new QueryClient({
 });
 
 describe("CreateCasePage", () => {
-  it("should render all sections correctly", () => {
+  it("should render all sections correctly", async () => {
     render(
       <QueryClientProvider client={queryClient}>
         <LoaderProvider>
@@ -229,17 +205,17 @@ describe("CreateCasePage", () => {
     expect(screen.getByText("Basic Information")).toBeInTheDocument();
     expect(screen.getByText("Case Details")).toBeInTheDocument();
 
-    // Specific AI populated fields
-    expect(
-      screen.getByDisplayValue(
-        "Unstable API Manager Performance in Production",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("WSO2 API Manager - v4.2.0")).toBeInTheDocument();
+    // Specific AI populated fields (title set in queueMicrotask)
+    await waitFor(() => {
+      expect(
+        screen.getByDisplayValue(
+          "Unstable API Manager Performance in Production",
+        ),
+      ).toBeInTheDocument();
+    });
 
-    // Sidebar
+    // Sidebar (conversation summary shows error indicator when no metadata)
     expect(screen.getByText("Conversation Summary")).toBeInTheDocument();
-    expect(screen.getByText("8")).toBeInTheDocument(); // Messages exchanged
   });
 
   it("should have a back button that navigates back", () => {
@@ -262,38 +238,4 @@ describe("CreateCasePage", () => {
     expect(screen.getByTestId("icon-arrow-left")).toBeInTheDocument();
   });
 
-  it("should render error message when statistics fail to load", () => {
-    vi.mocked(useGetCaseCreationDetails).mockReturnValue({
-      data: null,
-      isLoading: false,
-      isError: true,
-    } as any);
-
-    // Ensure project details don't fail properly (can mock return null/loading for this test scenario if needed, but not strictly required for this test case's focus)
-    vi.mocked(useGetProjectDetails).mockReturnValue({
-      data: null,
-      isLoading: false,
-      error: new Error("Failed"),
-    } as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <LoaderProvider>
-          <ErrorBannerProvider>
-            <SuccessBannerProvider>
-              <BrowserRouter>
-                <CreateCasePage />
-              </BrowserRouter>
-            </SuccessBannerProvider>
-          </ErrorBannerProvider>
-        </LoaderProvider>
-      </QueryClientProvider>,
-    );
-
-    expect(
-      screen.getByText(
-        "Error loading case creation details. Please try again later.",
-      ),
-    ).toBeInTheDocument();
-  });
 });

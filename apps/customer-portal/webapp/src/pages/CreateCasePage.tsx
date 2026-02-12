@@ -14,20 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Grid } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useState, useEffect, useRef, type FormEvent, type JSX } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useQueries } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
 import { fetchDeploymentProducts } from "@api/useGetDeploymentsProducts";
 import { usePostCase } from "@api/usePostCase";
-import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -43,6 +41,15 @@ import {
   getGeneratedIssueDescription,
 } from "@models/mockFunctions";
 import type { CaseClassificationResponse } from "@models/responses";
+import {
+  buildClassificationProductLabel,
+  getBaseDeploymentOptions,
+  getBaseProductOptions,
+  resolveDeploymentMatch,
+  resolveIssueTypeKey,
+  resolveProductId,
+  shouldAddClassificationProductToOptions,
+} from "@utils/caseCreation";
 
 /**
  * CreateCasePage component to review and edit AI-generated case details.
@@ -53,9 +60,7 @@ export default function CreateCasePage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const { projectId } = useParams<{ projectId: string }>();
-  const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
-  const { data: metadata, isLoading, isError } = useGetCaseCreationDetails();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
   const { data: filters, isLoading: isFiltersLoading } = useGetCasesFilters(
@@ -63,8 +68,11 @@ export default function CreateCasePage(): JSX.Element {
   );
   const { getIdToken } = useAsgardeo();
   const { isMockEnabled } = useMockConfig();
-  const { data: projectDeployments } = useGetProjectDeployments(projectId || "");
-  const deploymentIds = projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
+  const { data: projectDeployments } = useGetProjectDeployments(
+    projectId || "",
+  );
+  const deploymentIds =
+    projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
   const deploymentProductQueries = useQueries({
     queries: deploymentIds.map((deploymentId) => ({
       queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId] as const,
@@ -89,7 +97,6 @@ export default function CreateCasePage(): JSX.Element {
   const { showSuccess } = useSuccessBanner();
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
 
-  const [project, setProject] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [issueType, setIssueType] = useState("");
@@ -107,58 +114,41 @@ export default function CreateCasePage(): JSX.Element {
   const classificationSeverity = classification?.severityLevel?.trim() || "";
   const classificationDeployment =
     classificationInfo?.environment?.trim() || "";
-  const classificationProduct = classificationInfo?.productName
-    ? classificationInfo.productVersion
-      ? `${classificationInfo.productName} - ${classificationInfo.productVersion}`
-      : classificationInfo.productName
-    : "";
+  const classificationProduct =
+    buildClassificationProductLabel(classificationInfo);
 
   useEffect(() => {
-    if (isLoading || isProjectLoading || isFiltersLoading) {
+    if (isProjectLoading || isFiltersLoading) {
       showLoader();
     } else {
       hideLoader();
     }
     return () => hideLoader();
-  }, [isLoading, isProjectLoading, isFiltersLoading, showLoader, hideLoader]);
+  }, [isProjectLoading, isFiltersLoading, showLoader, hideLoader]);
 
-  useEffect(() => {
-    if (projectDetails?.name) {
-      setProject(projectDetails.name);
-    }
-  }, [projectDetails]);
+  const projectDisplay = projectDetails?.name ?? "";
 
   useEffect(() => {
     if (hasInitializedRef.current) {
       return;
     }
 
-    if (isLoading || isFiltersLoading) {
+    if (isFiltersLoading) {
       return;
     }
 
-    if (!metadata) {
-      return;
-    }
+    const initialProduct = classificationProduct || "";
+    const initialDeployment = classificationDeployment || "";
 
-    if (!project && !projectId && metadata?.projects?.[0]) {
-      setProject(metadata.projects[0]);
-    }
-
-    const initialProduct =
-      classificationProduct || metadata?.products?.[0] || "";
-    const initialDeployment =
-      classificationDeployment || metadata?.deploymentTypes?.[0] || "";
-
-    // TODO: Remove this fallback logic once the mock interface removed.
-    const fallbackIssueType =
-      filters?.issueTypes?.[0]?.label || metadata?.issueTypes?.[0] || "";
+    const fallbackIssueType = filters?.issueTypes?.[0]?.label || "";
     const initialIssueType = classificationIssueType || fallbackIssueType;
 
-    const severityLevels =
-      filters?.severities || metadata?.severityLevels || [];
+    const severityLevels = (filters?.severities || []) as {
+      id: string;
+      label: string;
+    }[];
     const severityMatch = severityLevels.find(
-      (level: any) =>
+      (level) =>
         level.id === classificationSeverity ||
         level.label === classificationSeverity,
     );
@@ -166,16 +156,18 @@ export default function CreateCasePage(): JSX.Element {
     const initialSeverity =
       severityMatch?.id || classificationSeverity || fallbackSeverity;
 
-    setProduct(initialProduct);
-    setDeployment(initialDeployment);
-    setIssueType(initialIssueType);
-    setSeverity(initialSeverity);
-
-    setTitle(classificationInfo?.shortDescription || getGeneratedIssueTitle());
-    setDescription(
-      classificationInfo?.description || getGeneratedIssueDescription(),
-    );
-
+    queueMicrotask(() => {
+      setProduct(initialProduct);
+      setDeployment(initialDeployment);
+      setIssueType(initialIssueType);
+      setSeverity(initialSeverity);
+      setTitle(
+        classificationInfo?.shortDescription || getGeneratedIssueTitle(),
+      );
+      setDescription(
+        classificationInfo?.description || getGeneratedIssueDescription(),
+      );
+    });
     hasInitializedRef.current = true;
   }, [
     classification,
@@ -186,17 +178,8 @@ export default function CreateCasePage(): JSX.Element {
     classificationSeverity,
     filters,
     isFiltersLoading,
-    isLoading,
-    metadata,
-    project,
     projectId,
   ]);
-
-  useEffect(() => {
-    if (isError) {
-      logger.error("Failed to load case creation details in CreateCasePage");
-    }
-  }, [isError, logger]);
 
   const handleBack = () => {
     if (projectId) {
@@ -216,43 +199,27 @@ export default function CreateCasePage(): JSX.Element {
       return;
     }
 
-    const projectDeploymentMatch = projectDeployments?.find(
-      (d) =>
-        d.type?.label === deployment ||
-        d.name === deployment,
+    const deploymentMatch = resolveDeploymentMatch(
+      deployment,
+      projectDeployments,
+      filters?.deployments,
     );
-    const deploymentFromFilters = filters?.deployments?.find(
-      (d: { id: string; label: string }) =>
-        d.id === deployment || d.label === deployment,
-    );
-    const deploymentMatch = projectDeploymentMatch ?? deploymentFromFilters;
     if (!deploymentMatch) {
       showError("Create case");
       return;
     }
 
-    const productMatch = allDeploymentProducts.find(
-      (item) =>
-        item.product?.label?.trim() === product?.trim(),
-    );
-    if (!productMatch?.product?.id) {
+    const productId = resolveProductId(product, allDeploymentProducts);
+    if (!productId) {
       showError("Create case");
       return;
     }
 
-    const issueTypeItem = filters?.issueTypes?.find(
-      (t: { id: string; label: string }) =>
-        t.id === issueType || t.label === issueType,
-    );
-
-    const deploymentId = deploymentMatch.id;
-    const productId = productMatch.product.id;
-    const issueTypeKey =
-      parseInt(issueTypeItem?.id ?? issueType, 10) || 0;
+    const issueTypeKey = resolveIssueTypeKey(issueType, filters?.issueTypes);
     const severityKey = parseInt(severity, 10) || 0;
 
     const payload: CreateCaseRequest = {
-      deploymentId: String(deploymentId),
+      deploymentId: String(deploymentMatch.id),
       description,
       issueTypeKey,
       productId: String(productId),
@@ -272,17 +239,17 @@ export default function CreateCasePage(): JSX.Element {
     });
   };
 
-  const issueTypesList = filters?.issueTypes || metadata?.issueTypes || [];
-  const hasIssueType = issueTypesList.some((type: any) => {
-    const label = typeof type === "string" ? type : type.label;
-    return label === classificationIssueType;
-  });
+  const issueTypesList = filters?.issueTypes || [];
+  const hasIssueType = issueTypesList.some(
+    (type: string | { id: string; label: string }) => {
+      const label = typeof type === "string" ? type : type.label;
+      return label === classificationIssueType;
+    },
+  );
   const extraIssueTypes =
     classificationIssueType && !hasIssueType ? [classificationIssueType] : [];
 
-  const severityLevelsList = (filters?.severities ||
-    metadata?.severityLevels ||
-    []) as {
+  const severityLevelsList = (filters?.severities || []) as {
     id: string;
     label: string;
     description?: string;
@@ -297,102 +264,99 @@ export default function CreateCasePage(): JSX.Element {
       ? [{ id: classificationSeverity, label: classificationSeverity }]
       : [];
 
-  const baseDeploymentOptions = metadata?.deploymentTypes ?? [];
-  const baseProductOptions = metadata?.products ?? [];
+  const baseDeploymentOptions =
+    getBaseDeploymentOptions(projectDeployments);
+  const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
+  const sectionMetadata = {
+    deploymentTypes: baseDeploymentOptions,
+    products: baseProductOptions,
+  };
   const extraDeploymentOptions =
     classificationDeployment &&
     !baseDeploymentOptions.includes(classificationDeployment)
       ? [classificationDeployment]
       : [];
   const extraProductOptions =
-    classificationProduct && !baseProductOptions.includes(classificationProduct)
+    classificationProduct &&
+    shouldAddClassificationProductToOptions(
+      classificationProduct,
+      baseProductOptions,
+    )
       ? [classificationProduct]
       : [];
 
-  const renderContent = () => {
-    if (isError) {
-      return (
-        <Box sx={{ py: 10, textAlign: "center" }}>
-          <Typography variant="h6" color="error">
-            Error loading case creation details. Please try again later.
-          </Typography>
-        </Box>
-      );
-    }
+  const renderContent = () => (
+    <Grid container spacing={3}>
+      {/* left column - form content */}
+      <Grid size={{ xs: 12, md: 8 }}>
+        {/* case creation form */}
+        <Box
+          component="form"
+          onSubmit={handleSubmit}
+          sx={{ display: "flex", flexDirection: "column", gap: 3 }}
+        >
+          <AIInfoCard />
 
-    return (
-      <Grid container spacing={3}>
-        {/* left column - form content */}
-        <Grid size={{ xs: 12, md: 8 }}>
-          {/* case creation form */}
-          <Box
-            component="form"
-            onSubmit={handleSubmit}
-            sx={{ display: "flex", flexDirection: "column", gap: 3 }}
-          >
-            <AIInfoCard />
+          <BasicInformationSection
+            project={projectDisplay}
+            product={product}
+            setProduct={setProduct}
+            deployment={deployment}
+            setDeployment={setDeployment}
+            metadata={sectionMetadata}
+            isLoading={isProjectLoading}
+            extraDeploymentOptions={extraDeploymentOptions}
+            extraProductOptions={extraProductOptions}
+          />
 
-            <BasicInformationSection
-              project={project}
-              product={product}
-              setProduct={setProduct}
-              deployment={deployment}
-              setDeployment={setDeployment}
-              metadata={metadata}
-              isLoading={isLoading || isProjectLoading}
-              extraDeploymentOptions={extraDeploymentOptions}
-              extraProductOptions={extraProductOptions}
-            />
+          <CaseDetailsSection
+            title={title}
+            setTitle={setTitle}
+            description={description}
+            setDescription={setDescription}
+            issueType={issueType}
+            setIssueType={setIssueType}
+            severity={severity}
+            setSeverity={setSeverity}
+            metadata={undefined}
+            filters={filters}
+            isLoading={isFiltersLoading}
+            storageKey={
+              projectId ? `create-case-draft-${projectId}` : undefined
+            }
+            extraIssueTypes={extraIssueTypes}
+            extraSeverityLevels={extraSeverityLevels}
+          />
 
-            <CaseDetailsSection
-              title={title}
-              setTitle={setTitle}
-              description={description}
-              setDescription={setDescription}
-              issueType={issueType}
-              setIssueType={setIssueType}
-              severity={severity}
-              setSeverity={setSeverity}
-              metadata={metadata}
-              filters={filters}
-              isLoading={isLoading || isFiltersLoading}
-              storageKey={
-                projectId ? `create-case-draft-${projectId}` : undefined
+          {/* form actions container */}
+          <Box sx={{ display: "flex", justifyContent: "right" }}>
+            {/* submit button */}
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<CircleCheck size={18} />}
+              color="primary"
+              disabled={
+                isMockEnabled ||
+                isProjectLoading ||
+                isFiltersLoading ||
+                isCreatePending ||
+                !projectId ||
+                deploymentProductsLoading
               }
-              extraIssueTypes={extraIssueTypes}
-              extraSeverityLevels={extraSeverityLevels}
-            />
-
-            {/* form actions container */}
-            <Box sx={{ display: "flex", justifyContent: "right" }}>
-              {/* submit button */}
-              <Button
-                type="submit"
-                variant="contained"
-                startIcon={<CircleCheck size={18} />}
-                color="primary"
-                disabled={
-                  isMockEnabled ||
-                  isLoading ||
-                  isCreatePending ||
-                  !projectId ||
-                  deploymentProductsLoading ||
-                  deploymentProductsError
-                }
-              >
-                {isCreatePending ? "Creating..." : "Create Support Case"}
-              </Button>
-            </Box>
+            >
+              {isCreatePending ? "Creating..." : "Create Support Case"}
+            </Button>
           </Box>
-        </Grid>
-
-        {/* right column - sidebar */}
-        <Grid size={{ xs: 12, md: 4 }}>
-          <ConversationSummary metadata={metadata} isLoading={isLoading} />
-        </Grid>
+        </Box>
       </Grid>
-    );
-  };
+
+      {/* right column - sidebar */}
+      <Grid size={{ xs: 12, md: 4 }}>
+        <ConversationSummary metadata={undefined} isLoading={false} />
+      </Grid>
+    </Grid>
+  );
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
