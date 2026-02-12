@@ -145,7 +145,9 @@ public isolated function mapCommentsResponse(entity:CommentsResponse response) r
             'type: comment.'type,
             createdOn: comment.createdOn,
             createdBy: comment.createdBy,
-            isEscalated: comment.isEscalated
+            isEscalated: comment.isEscalated,
+            hasInlineAttachments: comment.hasInlineAttachments,
+            inlineAttachments: comment.inlineAttachments
         };
 
     return {
@@ -174,7 +176,7 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
             id: attachment.id,
             name: attachment.name,
             'type: attachment.'type,
-            sizeBytes: attachment.sizeBytes,
+            size: attachment.size,
             createdBy: attachment.createdBy,
             createdOn: attachment.createdOn,
             downloadUrl: attachment.downloadUrl

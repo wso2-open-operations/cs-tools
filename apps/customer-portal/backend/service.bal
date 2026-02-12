@@ -1042,9 +1042,9 @@ service http:InterceptableService / on new http:Listener(9090) {
         entity:CommentCreateResponse|error createdCaseResponse = entity:createComment(userInfo.idToken,
                 {
                     referenceId: id,
-                    referenceType: payload.referenceType,
+                    referenceType: entity:CASE,
                     content: payload.content,
-                    'type: payload.'type
+                    'type: entity:COMMENT
                 });
         if createdCaseResponse is error {
             if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
