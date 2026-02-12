@@ -176,7 +176,7 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
             id: attachment.id,
             name: attachment.name,
             'type: attachment.'type,
-            size: attachment.size,
+            size: attachment.sizeBytes,
             createdBy: attachment.createdBy,
             createdOn: attachment.createdOn,
             downloadUrl: attachment.downloadUrl

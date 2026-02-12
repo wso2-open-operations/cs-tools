@@ -436,7 +436,7 @@ public type Attachment record {|
     # MIME type of the file
     string 'type;
     # File size
-    string size;
+    int sizeBytes;
     # User who created the attachment
     string createdBy;
     # Created date and time
@@ -572,7 +572,7 @@ public type CreatedAttachment record {|
     # System ID of the created attachment
     string id;
     # File size
-    int size;
+    int sizeBytes;
     # Created date and time
     string createdOn;
     # User who created the attachment

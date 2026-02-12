@@ -228,6 +228,20 @@ public type CommentsResponse record {|
     *entity:Pagination;
 |};
 
+# Created attachment details.
+public type CreatedAttachment record {|
+    # System ID of the created attachment
+    string id;
+    # File size(in Bytes)
+    int size;
+    # Created date and time
+    string createdOn;
+    # User who created the attachment
+    string createdBy;
+    # Download URL
+    string downloadUrl;
+|};
+
 # Attachment data.
 public type Attachment record {|
     # ID of the attachment
@@ -236,8 +250,8 @@ public type Attachment record {|
     string name;
     # MIME type of the file
     string 'type;
-    # File size
-    string size;
+    # File size(in Bytes)
+    int size;
     # User who created the attachment
     string createdBy;
     # Created date and time

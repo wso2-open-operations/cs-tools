@@ -1083,7 +1083,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     # + id - ID of the case
     # + return - Created attachment or error response
     resource function post cases/[string id]/attachments(http:RequestContext ctx, AttachmentPayload payload)
-        returns entity:CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -1139,7 +1139,13 @@ service http:InterceptableService / on new http:Listener(9090) {
             };
         }
 
-        return createdAttachmentResponse.attachment;
+        return {
+            id: createdAttachmentResponse.attachment.id,
+            size: createdAttachmentResponse.attachment.sizeBytes,
+            createdOn: createdAttachmentResponse.attachment.createdOn,
+            createdBy: createdAttachmentResponse.attachment.createdBy,
+            downloadUrl: createdAttachmentResponse.attachment.downloadUrl
+        };
     }
 
     # Get products of a deployment by deployment ID.
