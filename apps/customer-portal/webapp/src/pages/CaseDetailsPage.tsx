@@ -67,7 +67,7 @@ export default function CaseDetailsPage(): JSX.Element {
     }
     if (!hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
-      showError("case details");
+      showError("Could not load case details.");
     }
   }, [isError, showError]);
 

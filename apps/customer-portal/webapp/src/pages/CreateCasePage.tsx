@@ -100,7 +100,7 @@ export default function CreateCasePage(): JSX.Element {
   useEffect(() => {
     if (deploymentProductsError) {
       showError(
-        "Failed to load product options. Some options may be unavailable.",
+        "Could not load product options. Some options may be unavailable.",
       );
     }
   }, [deploymentProductsError, showError]);
@@ -214,13 +214,13 @@ export default function CreateCasePage(): JSX.Element {
       filters?.deployments,
     );
     if (!deploymentMatch) {
-      showError("create case: invalid deployment");
+      showError("Please select a valid deployment.");
       return;
     }
 
     const productId = resolveProductId(product, allDeploymentProducts);
     if (!productId) {
-      showError("create case: invalid product");
+      showError("Please select a valid product.");
       return;
     }
 
@@ -243,7 +243,7 @@ export default function CreateCasePage(): JSX.Element {
         navigate(`/${projectId}/support/cases/${data.id}`);
       },
       onError: () => {
-        showError("Create case");
+        showError("We couldn't create your case. Please try again.");
       },
     });
   };

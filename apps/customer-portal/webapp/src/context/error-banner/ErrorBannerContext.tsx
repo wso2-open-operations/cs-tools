@@ -29,8 +29,8 @@ import {
 import { ERROR_BANNER_TIMEOUT_MS } from "@constants/errorBannerConstants";
 
 interface ErrorBannerContextType {
-  /** Show the error banner with "Error loading {apiName}". */
-  showError: (apiName: string) => void;
+  /** Show the error banner with the given user-facing message. */
+  showError: (message: string) => void;
 }
 
 const ErrorBannerContext = createContext<ErrorBannerContextType | undefined>(
@@ -43,7 +43,7 @@ interface ErrorBannerProviderProps {
 
 /**
  * ErrorBannerProvider provides a global error banner above the footer.
- * Any component can call showError(entityName) to display "Error loading {entityName}".
+ * Any component can call showError(message) to display the given message.
  *
  * @param {ErrorBannerProviderProps} props - Provider props.
  * @returns {JSX.Element} The provider with embedded banner.
@@ -51,20 +51,20 @@ interface ErrorBannerProviderProps {
 export function ErrorBannerProvider({
   children,
 }: ErrorBannerProviderProps): JSX.Element {
-  const [apiName, setApiName] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [key, setKey] = useState(0);
 
-  const showError = useCallback((name: string) => {
-    setApiName(name);
+  const showError = useCallback((msg: string) => {
+    setMessage(msg);
     setKey((prev) => prev + 1);
   }, []);
 
   const dismiss = useCallback(() => {
-    setApiName(null);
+    setMessage(null);
   }, []);
 
   useEffect(() => {
-    if (!apiName) return;
+    if (!message) return;
 
     const timeoutId = setTimeout(() => {
       dismiss();
@@ -73,23 +73,23 @@ export function ErrorBannerProvider({
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [apiName, key, dismiss]);
+  }, [message, key, dismiss]);
 
-  const visible = apiName !== null;
+  const visible = message !== null;
   const contextValue = useMemo(() => ({ showError }), [showError]);
 
   return (
     <ErrorBannerContext.Provider value={contextValue}>
       {children}
-      {visible && apiName && (
-        <ErrorBanner apiName={apiName} onClose={dismiss} />
+      {visible && message && (
+        <ErrorBanner message={message} onClose={dismiss} />
       )}
     </ErrorBannerContext.Provider>
   );
 }
 
 /**
- * Hook to access the error banner. Call showError(entityName) to display the banner.
+ * Hook to access the error banner. Call showError(message) to display the banner.
  *
  * @returns {ErrorBannerContextType} The error banner API.
  */
