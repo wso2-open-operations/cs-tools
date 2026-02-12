@@ -23,7 +23,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { ChatAction, ChatStatus } from "@constants/supportConstants";
 import type { Theme } from "@wso2/oxygen-ui";
-import { type ComponentType } from "react";
+import { createElement, type ComponentType, type ReactNode } from "react";
 
 export type ChatActionState =
   | "primary"
@@ -31,6 +31,19 @@ export type ChatActionState =
   | "success"
   | "warning"
   | "error";
+
+/**
+ * Formats a value for display in case details; null/undefined/empty become "--".
+ *
+ * @param value - Raw value from API or state.
+ * @returns {string} Display string.
+ */
+export function formatValue(
+  value: string | number | null | undefined,
+): string {
+  if (value == null || value === "") return "--";
+  return String(value);
+}
 
 /**
  * Returns whether to show View or Resume for a chat status.
@@ -164,7 +177,7 @@ export function deriveFilterLabels(id: string): {
  * @param statusLabel - The case status label (e.g., "Open", "Working in Progress").
  * @returns {ComponentType<any>} The icon component.
  */
-export function getStatusIcon(statusLabel?: string): ComponentType<any> {
+export function getStatusIcon(statusLabel?: string): ComponentType<{ size?: number }> {
   const normalized = statusLabel?.toLowerCase() || "";
   if (normalized.includes("open")) return CircleAlert;
   if (normalized.includes("progress")) return Clock;
@@ -173,4 +186,19 @@ export function getStatusIcon(statusLabel?: string): ComponentType<any> {
   if (normalized.includes("resolved") || normalized.includes("closed"))
     return CircleCheck;
   return CircleAlert;
+}
+
+/**
+ * Returns the icon element for a given case status label (avoids creating a component during render).
+ *
+ * @param statusLabel - The case status label.
+ * @param size - Icon size in pixels.
+ * @returns {ReactNode} The icon element.
+ */
+export function getStatusIconElement(
+  statusLabel: string | null | undefined,
+  size = 12
+): ReactNode {
+  const Icon = getStatusIcon(statusLabel ?? undefined);
+  return createElement(Icon, { size });
 }
