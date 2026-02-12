@@ -59,3 +59,11 @@ export interface CreateCaseRequest {
   severityKey: number;
   title: string;
 }
+
+// Request body for posting a case attachment (POST /cases/:caseId/attachments).
+export interface PostCaseAttachmentRequest {
+  referenceType: "case";
+  name: string;
+  type: string;
+  content: string;
+}
