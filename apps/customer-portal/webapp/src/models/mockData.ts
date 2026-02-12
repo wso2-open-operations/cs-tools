@@ -25,6 +25,8 @@ import type {
   Deployment,
   ChatHistoryResponse,
   CaseMetadataResponse,
+  UpdatesStats,
+  ProductUpdateLevelsResponse,
 } from "@models/responses";
 import {
   PROJECT_TYPE,
@@ -1641,5 +1643,59 @@ export const mockDeployments: Deployment[] = [
     documents: [],
     deployedAt: "2026-02-10",
     uptimePercent: 98.5,
+  },
+];
+
+// Mock updates statistics (used when isMockEnabled for useGetProductUpdatesStats).
+export const mockUpdatesStats: UpdatesStats = {
+  productsTracked: 4,
+  totalUpdatesInstalled: 70,
+  totalUpdatesInstalledBreakdown: { regular: 50, security: 20 },
+  totalUpdatesPending: 69,
+  totalUpdatesPendingBreakdown: { regular: 37, security: 32 },
+  securityUpdatesPending: 32,
+};
+
+// Mock product update levels (used when isMockEnabled for useGetProductUpdateLevels).
+export const mockProductUpdateLevels: ProductUpdateLevelsResponse = [
+  {
+    "product-name": "wso2das",
+    "product-update-levels": [
+      {
+        "product-base-version": "3.2.0",
+        channel: "full",
+        "update-levels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      },
+      {
+        "product-base-version": "3.1.0",
+        channel: "full",
+        "update-levels": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      },
+    ],
+  },
+  {
+    "product-name": "choreo-connect",
+    "product-update-levels": [
+      {
+        "product-base-version": "1.2.0",
+        channel: "full",
+        "update-levels": [1],
+      },
+      {
+        "product-base-version": "1.0.0",
+        channel: "full",
+        "update-levels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      },
+    ],
+  },
+  {
+    "product-name": "wso2mi",
+    "product-update-levels": [
+      {
+        "product-base-version": "1.2.0",
+        channel: "full",
+        "update-levels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      },
+    ],
   },
 ];

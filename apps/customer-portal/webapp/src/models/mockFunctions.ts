@@ -21,6 +21,8 @@ import {
   mockOpenCasesOptions,
   mockDeployments,
   mockStatusOptions,
+  mockUpdatesStats,
+  mockProductUpdateLevels,
 } from "@models/mockData";
 import type { CaseCreationMetadata } from "@models/mockData";
 
@@ -32,6 +34,8 @@ import type {
   ProjectStatsResponse,
   ChatHistoryResponse,
   DeploymentsResponse,
+  UpdatesStats,
+  ProductUpdateLevelsResponse,
   CaseClassificationResponse,
 } from "@models/responses";
 import type { CaseClassificationRequest } from "@models/requests";
@@ -296,6 +300,20 @@ export const getMockDeployments = (
 };
 
 /**
+ * Returns mock updates statistics (used when isMockEnabled for useGetProductUpdatesStats).
+ *
+ * @returns {UpdatesStats} Mock updates statistics.
+ */
+export const getMockUpdatesStats = (): UpdatesStats => mockUpdatesStats;
+
+/**
+ * Returns mock product update levels (used when isMockEnabled for useGetProductUpdateLevels).
+ *
+ * @returns {ProductUpdateLevelsResponse} Mock product update levels.
+ */
+export const getMockProductUpdateLevels =
+  (): ProductUpdateLevelsResponse => mockProductUpdateLevels;
+
  * Returns mock case classification response.
  *
  * @param {CaseClassificationRequest} request - Classification request body.

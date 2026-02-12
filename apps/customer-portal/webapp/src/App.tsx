@@ -21,6 +21,7 @@ import ProjectPage from "@pages/ProjectPage";
 import ProjectDetails from "@pages/ProjectDetails";
 import DashboardPage from "@pages/DashboardPage";
 import SupportPage from "@pages/SupportPage";
+import UpdatesPage from "@pages/UpdatesPage";
 import AllCasesPage from "@pages/AllCasesPage";
 import NoveraChatPage from "@pages/NoveraChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
@@ -63,10 +64,7 @@ export default function App(): JSX.Element {
                   </Route>
                 </Route>
                 {/* Updates */}
-                <Route
-                  path="updates"
-                  element={<ProjectPage title="Updates" />}
-                />
+                <Route path="updates" element={<UpdatesPage />} />
                 {/* SecurityCenter */}
                 <Route
                   path="security-center"

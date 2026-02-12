@@ -349,7 +349,35 @@ export interface CaseAttachmentsResponse {
   offset: number;
   totalRecords: number;
   attachments: CaseAttachment[];
-// Case classification response from /cases/classify.
+}
+
+// Updates statistics response.
+export interface UpdatesStats {
+  productsTracked: number | null;
+  totalUpdatesInstalled: number | null;
+  totalUpdatesInstalledBreakdown?: { regular: number; security: number };
+  totalUpdatesPending: number | null;
+  totalUpdatesPendingBreakdown?: { regular: number; security: number };
+  securityUpdatesPending: number | null;
+}
+
+// Product update levels.
+export interface ProductUpdateLevelEntry {
+  "product-base-version": string;
+  channel: string;
+  "update-levels": number[];
+}
+
+// One product's update levels.
+export interface ProductUpdateLevelsItem {
+  "product-name": string;
+  "product-update-levels": ProductUpdateLevelEntry[];
+}
+
+// Product update levels response.
+export type ProductUpdateLevelsResponse = ProductUpdateLevelsItem[];
+
+// Case classification response.
 export interface CaseClassificationResponse {
   issueType: string;
   severityLevel: string;
