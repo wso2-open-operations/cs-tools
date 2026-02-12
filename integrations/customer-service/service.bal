@@ -61,7 +61,7 @@ service / on new http:Listener(9090) {
     #
     # + filter - Contact search payload
     # + return - Contact | InternalServerError 
-    resource function post contacts/find(entity:ContactSearchPayload filter) returns ContactFindResponse|http:InternalServerError|http:Ok {
+    resource function post contacts/find(entity:ContactSearchPayload filter) returns http:Ok|http:InternalServerError {
         entity:Contact[]|error contacts = entity:searchContacts(filter);
         if contacts is error {
             log:printError(ERR_MSG_GET_CONTACTS, contacts);
