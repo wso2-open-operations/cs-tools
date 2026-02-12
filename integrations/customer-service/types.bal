@@ -29,3 +29,13 @@ public type Account record {|
     # Account ID
     string? id;
 |};
+
+# Contact response.
+public type ContactFindResponse record{|
+    #ID 
+    string? id;
+    # Account ID
+    string? accountId;
+    # Is contact exists
+    boolean isUserExist;
+|};
