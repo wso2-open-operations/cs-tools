@@ -21,9 +21,15 @@ import ChatHeader from "@components/support/novera-ai-assistant/novera-chat-page
 import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageList";
 import { getNoveraResponse } from "@models/mockFunctions";
+import { useQueries } from "@tanstack/react-query";
 import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
-import { useGetDeployments } from "@api/useGetDeployments";
+import {
+  fetchDeploymentProducts,
+} from "@api/useGetDeploymentsProducts";
+import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import { useMockConfig } from "@providers/MockConfigProvider";
+import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useLogger } from "@hooks/useLogger";
 
@@ -45,7 +51,28 @@ export default function NoveraChatPage(): JSX.Element {
   const { showError } = useErrorBanner();
 
   const { projectId } = useParams<{ projectId: string }>();
-  const { data: deploymentsData } = useGetDeployments(projectId || "");
+  const { getIdToken } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
+  const { data: projectDeployments } = useGetProjectDeployments(projectId || "");
+  const deploymentIds = projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
+  const deploymentProductQueries = useQueries({
+    queries: deploymentIds.map((deploymentId) => ({
+      queryKey: ["deployment-products", deploymentId] as const,
+      queryFn: () =>
+        fetchDeploymentProducts(deploymentId, {
+          getIdToken,
+          isMockEnabled,
+        }),
+    })),
+  });
+  const productDetails = Array.from(
+    new Set(
+      deploymentProductQueries
+        .flatMap((q) => q.data ?? [])
+        .map((item) => item.product?.label)
+        .filter((label): label is string => Boolean(label?.trim())),
+    ),
+  );
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
   const { mutateAsync, isPending } = usePostCaseClassifications();
 
@@ -66,23 +93,10 @@ export default function NoveraChatPage(): JSX.Element {
     const environments = Array.from(
       new Set(
         (
-          deploymentsData?.deployments?.map((deployment) => deployment.name) ||
-          []
-        ).filter(Boolean),
+          projectDeployments?.map((d) => d.type?.label).filter(Boolean) ?? []
+        ),
       ),
     );
-    const productDetails = Array.from(
-      new Set(
-        (
-          deploymentsData?.deployments?.flatMap((deployment) =>
-            deployment.products.map(
-              (product) => `${product.name} - ${product.version}`,
-            ),
-          ) || []
-        ).filter(Boolean),
-      ),
-    );
-
     const chatHistory = messages
       .map(
         (message) =>

@@ -18,11 +18,20 @@ import { Box, Button, Grid, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useState, useEffect, useRef, type FormEvent, type JSX } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
+import { useQueries } from "@tanstack/react-query";
+import { useAsgardeo } from "@asgardeo/react";
 import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
+import { fetchDeploymentProducts } from "@api/useGetDeploymentsProducts";
+import { usePostCase } from "@api/usePostCase";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import { useMockConfig } from "@providers/MockConfigProvider";
+import type { CreateCaseRequest } from "@models/requests";
 import { AIInfoCard } from "@components/support/case-creation-layout/header/AIInfoCard";
 import { BasicInformationSection } from "@components/support/case-creation-layout/sections/basic-information-section/BasicInformationSection";
 import { CaseCreationHeader } from "@components/support/case-creation-layout/header/CaseCreationHeader";
@@ -51,6 +60,26 @@ export default function CreateCasePage(): JSX.Element {
   const { data: filters, isLoading: isFiltersLoading } = useGetCasesFilters(
     projectId || "",
   );
+  const { getIdToken } = useAsgardeo();
+  const { isMockEnabled } = useMockConfig();
+  const { data: projectDeployments } = useGetProjectDeployments(projectId || "");
+  const deploymentIds = projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
+  const deploymentProductQueries = useQueries({
+    queries: deploymentIds.map((deploymentId) => ({
+      queryKey: ["deployment-products", deploymentId] as const,
+      queryFn: () =>
+        fetchDeploymentProducts(deploymentId, {
+          getIdToken,
+          isMockEnabled,
+        }),
+    })),
+  });
+  const allDeploymentProducts = deploymentProductQueries.flatMap(
+    (q) => q.data ?? [],
+  );
+  const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
+  const { mutate: postCase, isPending: isCreatePending } = usePostCase();
 
   const [project, setProject] = useState("");
   const [title, setTitle] = useState("");
@@ -171,6 +200,62 @@ export default function CreateCasePage(): JSX.Element {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!projectId) return;
+
+    if (isMockEnabled) {
+      showSuccess("Case created successfully");
+      navigate(`/${projectId}/support/cases/mock-case-created`);
+      return;
+    }
+
+    const projectDeploymentMatch = projectDeployments?.find(
+      (d) =>
+        d.type?.label === deployment ||
+        d.name === deployment,
+    );
+    const deploymentIdFromProject =
+      projectDeploymentMatch?.id ??
+      filters?.deployments?.find(
+        (d: { id: string; label: string }) =>
+          d.id === deployment || d.label === deployment,
+      )?.id ??
+      deployment;
+
+    const issueTypeItem = filters?.issueTypes?.find(
+      (t: { id: string; label: string }) =>
+        t.id === issueType || t.label === issueType,
+    );
+
+    const deploymentId = deploymentIdFromProject;
+    const productMatch = allDeploymentProducts.find(
+      (item) =>
+        item.product?.label === product || item.product?.label?.trim() === product?.trim(),
+    );
+    const productId = productMatch?.product?.id ?? product;
+    const issueTypeKey = issueTypeItem
+      ? parseInt(issueTypeItem.id, 10)
+      : parseInt(issueType, 10) || 0;
+    const severityKey = parseInt(severity, 10) || 0;
+
+    const payload: CreateCaseRequest = {
+      deploymentId: String(deploymentId),
+      description,
+      issueTypeKey: Number.isNaN(issueTypeKey) ? 0 : issueTypeKey,
+      productId: String(productId),
+      projectId,
+      severityKey: Number.isNaN(severityKey) ? 0 : severityKey,
+      title,
+    };
+
+    postCase(payload, {
+      onSuccess: (data) => {
+        showSuccess("Case created successfully");
+        navigate(`/${projectId}/support/cases/${data.id}`);
+      },
+      onError: () => {
+        showError("Create case");
+      },
+    });
   };
 
   const issueTypesList = filters?.issueTypes || metadata?.issueTypes || [];
@@ -272,9 +357,11 @@ export default function CreateCasePage(): JSX.Element {
                 variant="contained"
                 startIcon={<CircleCheck size={18} />}
                 color="primary"
-                disabled={isLoading}
+                disabled={
+                  isMockEnabled || isLoading || isCreatePending || !projectId
+                }
               >
-                Create Support Case
+                {isCreatePending ? "Creating..." : "Create Support Case"}
               </Button>
             </Box>
           </Box>

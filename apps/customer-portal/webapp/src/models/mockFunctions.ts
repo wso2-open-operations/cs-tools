@@ -20,6 +20,8 @@ import {
   mockChatHistory,
   mockOpenCasesOptions,
   mockDeployments,
+  mockProjectDeployments,
+  mockDeploymentProducts,
   mockStatusOptions,
   mockUpdatesStats,
   mockProductUpdateLevels,
@@ -34,6 +36,8 @@ import type {
   ProjectStatsResponse,
   ChatHistoryResponse,
   DeploymentsResponse,
+  ProjectDeploymentItem,
+  DeploymentProductItem,
   UpdatesStats,
   ProductUpdateLevelsResponse,
   CaseClassificationResponse,
@@ -297,6 +301,30 @@ export const getMockDeployments = (
   _projectId?: string,
 ): DeploymentsResponse => {
   return { deployments: mockDeployments };
+};
+
+/**
+ * Returns mock project deployments array (used when isMockEnabled for useGetProjectDeployments).
+ *
+ * @param {string} [_projectId] - Optional project ID; currently returns same list for all projects.
+ * @returns {ProjectDeploymentItem[]} Mock project deployments with type.label for case classification environments.
+ */
+export const getMockProjectDeployments = (
+  _projectId?: string,
+): ProjectDeploymentItem[] => {
+  return [...mockProjectDeployments];
+};
+
+/**
+ * Returns mock deployment products (used when isMockEnabled for useGetDeploymentsProducts).
+ *
+ * @param {string} [_deploymentId] - Optional deployment ID; currently returns same list for all deployments.
+ * @returns {DeploymentProductItem[]} Mock deployment products with product.label for case classification productDetails.
+ */
+export const getMockDeploymentProducts = (
+  _deploymentId?: string,
+): DeploymentProductItem[] => {
+  return [...mockDeploymentProducts];
 };
 
 /**

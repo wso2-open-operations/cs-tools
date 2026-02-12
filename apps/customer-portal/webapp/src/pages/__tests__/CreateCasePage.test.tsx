@@ -19,8 +19,11 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserRouter } from "react-router";
 import { useGetCaseCreationDetails } from "@api/useGetCaseCreationDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CreateCasePage from "@pages/CreateCasePage";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
+import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
@@ -90,6 +93,7 @@ vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
 // Mock @asgardeo/react
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isLoading: false,
     state: { isAuthenticated: true },
   }),
@@ -158,20 +162,63 @@ vi.mock("@api/useGetCasesFilters", () => ({
         { id: "61", label: "S1", description: "S1 desc" },
       ],
       issueTypes: [{ id: "6", label: "Error" }],
+      deployments: [{ id: "1", label: "Production" }],
     },
     isLoading: false,
     isError: false,
   })),
 }));
 
+// Mock useMockConfig
+vi.mock("@providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({ isMockEnabled: false }),
+}));
+
+// Mock useGetProjectDeployments
+vi.mock("@api/useGetProjectDeployments", () => ({
+  useGetProjectDeployments: () => ({
+    data: [
+      { id: "dep-1", name: "Staging", type: { id: "3", label: "Staging" } },
+    ],
+  }),
+}));
+
+// Mock fetchDeploymentProducts (used by useQueries for deployment products)
+vi.mock("@api/useGetDeploymentsProducts", () => ({
+  fetchDeploymentProducts: vi.fn().mockResolvedValue([
+    {
+      product: { id: "prod-1", label: "WSO2 API Manager - v4.2.0" },
+      deployment: { id: "dep-1", label: "Staging" },
+    },
+  ]),
+}));
+
+// Mock usePostCase
+vi.mock("@api/usePostCase", () => ({
+  usePostCase: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+}));
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 describe("CreateCasePage", () => {
   it("should render all sections correctly", () => {
     render(
-      <LoaderProvider>
-        <BrowserRouter>
-          <CreateCasePage />
-        </BrowserRouter>
-      </LoaderProvider>,
+      <QueryClientProvider client={queryClient}>
+        <LoaderProvider>
+          <ErrorBannerProvider>
+            <SuccessBannerProvider>
+              <BrowserRouter>
+                <CreateCasePage />
+              </BrowserRouter>
+            </SuccessBannerProvider>
+          </ErrorBannerProvider>
+        </LoaderProvider>
+      </QueryClientProvider>,
     );
 
     // Header logic
@@ -197,11 +244,17 @@ describe("CreateCasePage", () => {
 
   it("should have a back button that navigates back", () => {
     render(
-      <LoaderProvider>
-        <BrowserRouter>
-          <CreateCasePage />
-        </BrowserRouter>
-      </LoaderProvider>,
+      <QueryClientProvider client={queryClient}>
+        <LoaderProvider>
+          <ErrorBannerProvider>
+            <SuccessBannerProvider>
+              <BrowserRouter>
+                <CreateCasePage />
+              </BrowserRouter>
+            </SuccessBannerProvider>
+          </ErrorBannerProvider>
+        </LoaderProvider>
+      </QueryClientProvider>,
     );
 
     const backButtons = screen.getAllByText("Back to Chat");
@@ -224,11 +277,17 @@ describe("CreateCasePage", () => {
     } as any);
 
     render(
-      <LoaderProvider>
-        <BrowserRouter>
-          <CreateCasePage />
-        </BrowserRouter>
-      </LoaderProvider>,
+      <QueryClientProvider client={queryClient}>
+        <LoaderProvider>
+          <ErrorBannerProvider>
+            <SuccessBannerProvider>
+              <BrowserRouter>
+                <CreateCasePage />
+              </BrowserRouter>
+            </SuccessBannerProvider>
+          </ErrorBannerProvider>
+        </LoaderProvider>
+      </QueryClientProvider>,
     );
 
     expect(

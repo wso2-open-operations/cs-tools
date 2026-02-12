@@ -92,7 +92,11 @@ export default function CaseDetailsContent({
         <Paper
           variant="outlined"
           sx={{
-            p: 2,
+            pt: 2,
+            pb: 2,
+            pl: 3,
+            pr: 3,
+            mx: -3,
             position: "sticky",
             top: 0,
             zIndex: 10,

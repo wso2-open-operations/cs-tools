@@ -23,6 +23,8 @@ import type {
   ProjectDetails,
   UserDetails,
   Deployment,
+  ProjectDeploymentItem,
+  DeploymentProductItem,
   ChatHistoryResponse,
   CaseMetadataResponse,
   UpdatesStats,
@@ -1643,6 +1645,60 @@ export const mockDeployments: Deployment[] = [
     documents: [],
     deployedAt: "2026-02-10",
     uptimePercent: 98.5,
+  },
+];
+
+// Mock project deployments (GET /projects/:projectId/deployments array; used when isMockEnabled for useGetProjectDeployments).
+export const mockProjectDeployments: ProjectDeploymentItem[] = [
+  {
+    id: "3231b6dc1b07b610182c0dc5604bcb61",
+    name: "Staging",
+    createdOn: "2026-02-10 03:42:27",
+    updatedOn: "2026-02-10 03:42:27",
+    description: null,
+    url: null,
+    project: { id: "6fa0b42d1bfaa694a002c9d3604bcb77", label: "Customer 3 Project 1 - Subscription" },
+    type: { id: "3", label: "Staging" },
+  },
+  {
+    id: "e4fe42871b7a7a10a002c9d3604bcb83",
+    name: "Prod",
+    createdOn: "2026-02-06 04:00:19",
+    updatedOn: "2026-02-06 04:00:19",
+    description: null,
+    url: null,
+    project: { id: "6fa0b42d1bfaa694a002c9d3604bcb77", label: "Customer 3 Project 1 - Subscription" },
+    type: { id: "6", label: "Primary Production" },
+  },
+  {
+    id: "70f481301ba7a650a002c9d3604bcbf7",
+    name: "Developement",
+    createdOn: "2025-08-21 09:26:43",
+    updatedOn: "2026-02-06 04:00:02",
+    description: null,
+    url: null,
+    project: { id: "6fa0b42d1bfaa694a002c9d3604bcb77", label: "Customer 3 Project 1 - Subscription" },
+    type: { id: "1", label: "Development" },
+  },
+];
+
+// Mock deployment products (GET /deployments/:deploymentId/products; used when isMockEnabled for useGetDeploymentsProducts).
+export const mockDeploymentProducts: DeploymentProductItem[] = [
+  {
+    id: "2351fe501b47b610182c0dc5604bcb67",
+    createdOn: "2026-02-10 03:43:39",
+    updatedOn: "2026-02-10 03:43:39",
+    description: null,
+    product: { id: "34c5b7b11b0c61d0d64e64a2604bcb5f", label: "WSO2 Identity Server 6.0.0" },
+    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Developement" },
+  },
+  {
+    id: "a02f54101bcf3610182c0dc5604bcb9b",
+    createdOn: "2026-02-09 17:04:44",
+    updatedOn: "2026-02-09 17:05:06",
+    description: null,
+    product: { id: "db16915e1b83cd10d64e64a2604bcbdb", label: "WSO2 API Manager 3.2.0" },
+    deployment: { id: "70f481301ba7a650a002c9d3604bcbf7", label: "Developement" },
   },
 ];
 

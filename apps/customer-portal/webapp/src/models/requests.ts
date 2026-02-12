@@ -48,3 +48,14 @@ export interface CaseClassificationRequest {
   region: string;
   tier: string;
 }
+
+// Request body for creating a support case (POST /cases).
+export interface CreateCaseRequest {
+  deploymentId: string;
+  description: string;
+  issueTypeKey: number;
+  productId: string;
+  projectId: string;
+  severityKey: number;
+  title: string;
+}

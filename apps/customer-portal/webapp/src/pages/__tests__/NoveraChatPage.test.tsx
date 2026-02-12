@@ -17,6 +17,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter, Routes, Route } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NoveraChatPage from "@pages/NoveraChatPage";
 
 // Mock mockFunctions
@@ -78,6 +79,31 @@ vi.mock("@api/useGetDeployments", () => ({
   }),
 }));
 
+vi.mock("@api/useGetProjectDeployments", () => ({
+  useGetProjectDeployments: () => ({
+    data: [
+      { id: "dep-1", type: { label: "Staging" } },
+      { id: "dep-2", type: { label: "QA" } },
+    ],
+  }),
+}));
+
+vi.mock("@api/useGetDeploymentsProducts", () => ({
+  fetchDeploymentProducts: vi.fn().mockResolvedValue([
+    { product: { label: "WSO2 API Manager 3.2.0" } },
+  ]),
+}));
+
+vi.mock("@providers/MockConfigProvider", () => ({
+  useMockConfig: () => ({ isMockEnabled: true }),
+}));
+
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
+  }),
+}));
+
 vi.mock("@api/useGetProjectDetails", () => ({
   default: () => ({
     data: { subscription: { supportTier: "" } },
@@ -101,18 +127,24 @@ vi.mock("@hooks/useLogger", () => ({
   }),
 }));
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 const renderWithRouter = () => {
   return render(
-    <MemoryRouter initialEntries={["/project-1/support/chat"]}>
-      <Routes>
-        <Route path="/:projectId/support/chat" element={<NoveraChatPage />} />
-        <Route path="/:projectId/support" element={<div>Support Page</div>} />
-        <Route
-          path="/:projectId/dashboard"
-          element={<div>Dashboard Page</div>}
-        />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/project-1/support/chat"]}>
+        <Routes>
+          <Route path="/:projectId/support/chat" element={<NoveraChatPage />} />
+          <Route path="/:projectId/support" element={<div>Support Page</div>} />
+          <Route
+            path="/:projectId/dashboard"
+            element={<div>Dashboard Page</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 };
 

@@ -332,6 +332,28 @@ export interface DeploymentsResponse {
   deployments: Deployment[];
 }
 
+// Single item from GET /projects/:projectId/deployments (array response).
+export interface ProjectDeploymentItem {
+  id: string;
+  name: string;
+  createdOn: string;
+  updatedOn: string;
+  description: string | null;
+  url: string | null;
+  project: { id: string; label: string };
+  type: { id: string; label: string };
+}
+
+// Single item from GET /deployments/:deploymentId/products (array response).
+export interface DeploymentProductItem {
+  id: string;
+  createdOn: string;
+  updatedOn: string;
+  description: string | null;
+  product: { id: string; label: string };
+  deployment: { id: string; label: string };
+}
+
 // Case attachment item.
 export interface CaseAttachment {
   id: string;
@@ -390,4 +412,9 @@ export interface CaseClassificationResponse {
     tier: string;
     region: string;
   };
+}
+
+// Response for creating a support case (POST /cases). Used to navigate to case details.
+export interface CreateCaseResponse {
+  id: string;
 }
