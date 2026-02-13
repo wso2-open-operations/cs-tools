@@ -33,10 +33,10 @@ import {
 import { useMemo, useState, type JSX } from "react";
 import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import type { CaseAttachment } from "@models/responses";
+import { CASE_ATTACHMENTS_INITIAL_LIMIT } from "@constants/supportConstants";
 import { formatFileSize, getAttachmentFileCategory } from "@utils/support";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
-
-const INITIAL_LIMIT = 50;
+import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 
 export interface CaseDetailsAttachmentsPanelProps {
   caseId: string;
@@ -58,7 +58,7 @@ function getAttachmentIcon(att: CaseAttachment): JSX.Element {
 
 /**
  * Renders the Attachments tab: upload button, modal, and list from GET /cases/:id/attachments.
- * Fetches first 50, then remaining when totalRecords > 50; shows skeleton until all loaded.
+ * Fetches first page, then remaining when totalRecords > limit; shows skeleton until all loaded.
  *
  * @param {CaseDetailsAttachmentsPanelProps} props - caseId.
  * @returns {JSX.Element} The attachments panel.
@@ -68,14 +68,20 @@ export default function CaseDetailsAttachmentsPanel({
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  const first = useGetCaseAttachments(caseId, { limit: INITIAL_LIMIT, offset: 0 });
+  const first = useGetCaseAttachments(caseId, {
+    limit: CASE_ATTACHMENTS_INITIAL_LIMIT,
+    offset: 0,
+  });
   const totalRecords = first.data?.totalRecords ?? 0;
-  const needMore = totalRecords > INITIAL_LIMIT;
+  const needMore = totalRecords > CASE_ATTACHMENTS_INITIAL_LIMIT;
   const secondEnabled =
-    !!caseId && needMore && !!first.data && totalRecords > INITIAL_LIMIT;
+    !!caseId &&
+    needMore &&
+    !!first.data &&
+    totalRecords > CASE_ATTACHMENTS_INITIAL_LIMIT;
   const second = useGetCaseAttachments(caseId, {
-    limit: Math.max(0, totalRecords - INITIAL_LIMIT),
-    offset: INITIAL_LIMIT,
+    limit: Math.max(0, totalRecords - CASE_ATTACHMENTS_INITIAL_LIMIT),
+    offset: CASE_ATTACHMENTS_INITIAL_LIMIT,
     enabled: secondEnabled,
   });
 
@@ -97,16 +103,14 @@ export default function CaseDetailsAttachmentsPanel({
 
   if (!caseId) {
     return (
-      <Box sx={{ border: 1, borderColor: "divider", p: 2 }}>
-        <Typography variant="body2" color="text.secondary">
-          No case selected.
-        </Typography>
-      </Box>
+      <Typography variant="body2" color="text.secondary">
+        No case selected.
+      </Typography>
     );
   }
 
   return (
-    <Box sx={{ border: 1, borderColor: "divider", p: 2 }}>
+    <>
       <Stack spacing={3}>
         <Button
           variant="contained"
@@ -134,7 +138,12 @@ export default function CaseDetailsAttachmentsPanel({
                 <Skeleton variant="rectangular" width={40} height={40} />
                 <Box sx={{ flex: 1 }}>
                   <Skeleton variant="text" width="60%" height={24} />
-                  <Skeleton variant="text" width="40%" height={16} sx={{ mt: 0.5 }} />
+                  <Skeleton
+                    variant="text"
+                    width="40%"
+                    height={16}
+                    sx={{ mt: 0.5 }}
+                  />
                 </Box>
                 <Skeleton
                   variant="rectangular"
@@ -150,9 +159,26 @@ export default function CaseDetailsAttachmentsPanel({
             Failed to load attachments.
           </Typography>
         ) : allAttachments.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No attachments yet.
-          </Typography>
+          <Stack
+            spacing={2}
+            alignItems="center"
+            justifyContent="center"
+            sx={{ py: 4 }}
+          >
+            <Box
+              sx={{
+                width: 160,
+                maxWidth: "100%",
+                "& svg": { width: "100%", height: "auto" },
+              }}
+              aria-hidden
+            >
+              <EmptyIcon />
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              No attachments found.
+            </Typography>
+          </Stack>
         ) : (
           <Stack spacing={2}>
             {allAttachments.map((att) => (
@@ -251,6 +277,6 @@ export default function CaseDetailsAttachmentsPanel({
         caseId={caseId}
         onClose={() => setUploadOpen(false)}
       />
-    </Box>
+    </>
   );
 }

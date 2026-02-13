@@ -218,6 +218,12 @@ export interface CaseDetails {
   severity: CaseStatus | null;
 }
 
+// Inline attachment for comment images.
+export interface CaseCommentInlineAttachment {
+  sys_id: string;
+  url?: string;
+}
+
 // Case comment
 export interface CaseComment {
   id: string;
@@ -226,6 +232,8 @@ export interface CaseComment {
   createdOn: string;
   createdBy: string;
   isEscalated: boolean;
+  /** Optional inline attachments for images in content. */
+  inlineAttachments?: CaseCommentInlineAttachment[];
 }
 
 // Response for case comments list

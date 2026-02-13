@@ -17,10 +17,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import CaseDetailsAttachmentsPanel from "@case-details/CaseDetailsAttachmentsPanel";
+import CaseDetailsAttachmentsPanel from "../CaseDetailsAttachmentsPanel";
 import { mockCaseAttachments } from "@models/mockData";
+import useGetCaseAttachments from "@api/useGetCaseAttachments";
 
-vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
+vi.mock("../UploadAttachmentModal", () => ({
   __esModule: true,
   default: () => null,
 }));
@@ -72,11 +73,49 @@ describe("CaseDetailsAttachmentsPanel", () => {
   it("should show uploaded-by and size for attachments", () => {
     renderPanel();
     expect(screen.getByText(/240 KB/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Uploaded by para-admin@wso2.com/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Uploaded by para-admin@wso2.com/).length,
+    ).toBeGreaterThan(0);
   });
 
   it("should show no case selected when caseId is empty", () => {
     renderPanel("");
     expect(screen.getByText(/no case selected/i)).toBeInTheDocument();
+  });
+
+  it("should show EmptyIcon and no attachments found when attachments list is empty", () => {
+    vi.mocked(useGetCaseAttachments).mockReturnValueOnce({
+      data: {
+        attachments: [],
+        totalRecords: 0,
+        limit: 50,
+        offset: 0,
+      },
+      error: null,
+      isLoading: false,
+      isError: false,
+      isPending: false,
+      isSuccess: true,
+      status: "success",
+      fetchStatus: "idle",
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isFetching: false,
+      isRefetching: false,
+      isLoadingError: false,
+      isPaused: false,
+      isPlaceholderData: false,
+      isRefetchError: false,
+      isStale: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGetCaseAttachments>);
+    renderPanel("case-1");
+    expect(screen.getByText("No attachments found.")).toBeInTheDocument();
+    expect(document.querySelector("svg[aria-hidden='true']")).toBeInTheDocument();
   });
 });

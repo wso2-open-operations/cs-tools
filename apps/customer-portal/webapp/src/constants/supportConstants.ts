@@ -62,6 +62,9 @@ export type ChatStatus = (typeof ChatStatus)[keyof typeof ChatStatus];
 // Maximum allowed attachment file size in bytes (15 MB).
 export const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 
+// Initial limit for case attachments list (first page).
+export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
+
 // Interface for support statistics card configuration.
 export interface SupportStatConfig<Key = keyof ProjectSupportStats> {
   iconColor: "primary" | "secondary" | "success" | "error" | "info" | "warning";
