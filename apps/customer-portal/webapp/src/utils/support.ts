@@ -274,65 +274,91 @@ export function getStatusIconElement(
 }
 
 /**
- * Formats a comment/activity date for display (e.g. "Jan 1, 2026, 2:30 PM").
+ * Strips the [code]...[/code] wrapper from comment content.
  *
- * @param date - ISO date string or parseable date.
- * @returns {string} Formatted date string.
+ * @param content - Raw content string.
+ * @returns {string} Content without the code wrapper.
  */
-export function formatCommentDate(date: string | undefined): string {
-  if (!date) return "--";
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return "--";
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+export function stripCodeWrapper(content: string): string {
+  if (!content || typeof content !== "string") return "";
+  const trimmed = content.trim();
+  if (trimmed.startsWith("[code]") && trimmed.endsWith("[/code]")) {
+    return trimmed.slice(6, -7).trim();
+  }
+  return content;
 }
 
 /**
- * Strips a code-block wrapper from HTML content if present (e.g. outer div from rich editor).
+ * Strips "Customer comment added" label from comment content.
+ * The backend may append this; we hide it from the activity timeline.
  *
- * @param html - Raw HTML string.
- * @returns {string} HTML without the wrapper.
+ * @param html - HTML content string.
+ * @returns {string} Content without the label.
  */
-export function stripCodeWrapper(html: string): string {
-  if (!html?.trim()) return "";
-  const trimmed = html.trim();
-  const match = trimmed.match(
-    /^<div[^>]*class="[^"]*code-wrapper[^"]*"[^>]*>([\s\S]*)<\/div>$/i,
-  );
-  if (match) return match[1].trim();
-  return trimmed;
+export function stripCustomerCommentAddedLabel(html: string): string {
+  if (!html || typeof html !== "string") return "";
+  return html
+    .replace(/<p>\s*Customer comment added\s*<\/p>/gi, "")
+    .replace(/Customer comment added/gi, "")
+    .trim();
 }
 
-/** Shape used by replaceInlineImageSources (id -> url mapping). */
-export interface InlineAttachmentRef {
-  id: string;
-  url: string;
+/** Inline attachment item for image src replacement (supports API id/downloadUrl or legacy sys_id/url). */
+export interface InlineAttachment {
+  id?: string;
+  downloadUrl?: string;
+  sys_id?: string;
+  url?: string;
 }
 
 /**
- * Replaces inline image placeholders (e.g. cid:xxx or data-attachment-id) with URLs from attachments.
+ * Replaces inline image sources in HTML (e.g. /sys_id.iix or /id.iix) with URLs from attachments.
+ * Matches by id or sys_id; uses downloadUrl or url for the replacement.
  *
- * @param html - HTML string that may contain img src placeholders.
- * @param attachments - Optional list of inline attachments (id, url).
- * @returns {string} HTML with image sources replaced.
+ * @param html - HTML string with img tags.
+ * @param inlineAttachments - Optional list of attachments (id/downloadUrl or sys_id/url).
+ * @returns {string} HTML with img src replaced where matching.
  */
 export function replaceInlineImageSources(
   html: string,
-  attachments: InlineAttachmentRef[] | undefined,
+  inlineAttachments?: InlineAttachment[] | null,
 ): string {
-  if (!html?.trim()) return "";
-  if (!attachments?.length) return html;
-  const byId = new Map(attachments.map((a) => [a.id, a.url]));
+  if (!html || typeof html !== "string") return "";
+  if (!inlineAttachments?.length) return html;
+
   return html.replace(
-    /(<img[^>]*\ssrc=)(["'])(?:cid:)?([^"']+)\2/gi,
-    (_match, prefix, quote, id) => {
-      const url = byId.get(id.trim()) ?? "";
-      return `${prefix}${quote}${url}${quote}`;
+    /<img([^>]*)\ssrc="([^"]+)"([^>]*)>/gi,
+    (_match, before, src, after) => {
+      const refId = src.replace(/^\//, "").replace(/\.iix$/i, "").trim();
+      const attachment = inlineAttachments.find(
+        (a) =>
+          a.id === refId ||
+          a.sys_id === refId ||
+          src.includes(a.id ?? "") ||
+          src.includes(a.sys_id ?? ""),
+      );
+      const newSrc =
+        attachment?.downloadUrl ?? attachment?.url ?? src;
+      return `<img${before} src="${newSrc}"${after}>`;
     },
   );
+}
+
+/**
+ * Formats a comment date string for display (e.g. "Feb 13, 2026 3:45 PM").
+ *
+ * @param date - Date string from API.
+ * @returns {string} Formatted date string.
+ */
+export function formatCommentDate(date: string | null | undefined): string {
+  if (!date) return "--";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "--";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

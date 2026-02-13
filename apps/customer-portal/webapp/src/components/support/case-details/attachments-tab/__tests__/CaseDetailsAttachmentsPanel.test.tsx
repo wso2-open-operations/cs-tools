@@ -21,7 +21,7 @@ import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAt
 import { mockCaseAttachments } from "@models/mockData";
 import useGetCaseAttachments from "@api/useGetCaseAttachments";
 
-vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
+vi.mock("../UploadAttachmentModal", () => ({
   __esModule: true,
   default: () => null,
 }));

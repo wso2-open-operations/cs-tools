@@ -111,8 +111,7 @@ export function resolveProductId(
   if (!normalized) return "";
 
   const match = allDeploymentProducts.find(
-    (item) =>
-      normalizeProductLabel(item.product?.label) === normalized,
+    (item) => normalizeProductLabel(item.product?.label) === normalized,
   );
   return match?.product?.id ?? "";
 }
@@ -182,8 +181,7 @@ export function getBaseDeploymentOptions(
   projectDeployments: ProjectDeploymentOption[] | undefined,
 ): string[] {
   return (
-    projectDeployments
-      ?.map((d) => d.name ?? d.type?.label)
-      .filter(Boolean) ?? []
+    projectDeployments?.map((d) => d.name ?? d.type?.label).filter(Boolean) ??
+    []
   );
 }

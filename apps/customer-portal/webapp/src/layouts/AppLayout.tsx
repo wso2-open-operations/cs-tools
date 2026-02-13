@@ -114,7 +114,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                 display: isCaseDetailsPage ? "flex" : "block",
                 flexDirection: isCaseDetailsPage ? "column" : undefined,
                 ...(isCaseDetailsPage
-                  ? { px: 0, pb: 3, pt: 0 }
+                  ? { px: 0, pb: 0, pt: 0 }
                   : { p: 3 }),
               }}
             >

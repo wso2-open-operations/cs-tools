@@ -1474,33 +1474,41 @@ export const mockCaseDetails: CaseDetails = {
   severity: { id: 60, label: "S0" },
 };
 
-// Mock case comments.
+// Mock case comments (2 from support engineer, 2 from customer).
 export const mockCaseComments: CaseComment[] = [
   {
     id: "1398232c1bceb290a002c9d3604bcb27",
-    content:
-      '[code]<p>Test comment</p><p><img src="/db98232c1bceb290a002c9d3604bcb27.iix"></p><p><br></p><p>test</p>[/code]',
+    content: `[code]<p>Perfect, I can see the issue now. Your http.max.connection.per.host is set to 250, which is the default. Given your peak load of 50,000 requests/hour, this is definitely too low.</p><p><b>Here are my recommended configuration changes:</b></p><p>1. Update your axis2.xml with these parameters:</p><p><code>&lt;parameter name="http.max.connection.per.host"&gt;500&lt;/parameter&gt;</code></p><p><code>&lt;parameter name="defaultMaxConnectionsPerHost"&gt;500&lt;/parameter&gt;</code></p><p><code>&lt;parameter name="maxTotalConnections"&gt;1000&lt;/parameter&gt;</code></p><p>2. Also add connection management settings:</p><p><code>&lt;parameter name="http.connection.disable.keepalive"&gt;false&lt;/parameter&gt;</code></p><p><code>&lt;parameter name="http.connection.stalecheck"&gt;true&lt;/parameter&gt;</code></p><p>3. Adjust JVM heap size if you haven't already: Minimum recommendation: -Xms2048m -Xmx4096m</p><p><b>Implementation Plan:</b> Apply these changes during your next maintenance window. Monitor the connection pool metrics closely after deployment. We should see the connection pool exhaustion warnings disappear. Can you schedule a maintenance window to apply these changes? I recommend doing this during off-peak hours to minimize impact.</p>[/code]`,
     type: "comments",
-    createdOn: "2025-12-23 14:49:58",
-    createdBy: "para-admin@wso2.com",
+    createdOn: "2026-02-12 10:30:15",
+    createdBy: "support-engineer@wso2.com",
     isEscalated: false,
   },
   {
     id: "712727a81bceb290a002c9d3604bcbcc",
     content:
-      '[code]<p>www</p><p><img src="/3d2727a81bceb290a002c9d3604bcbcc.iix"></p>[/code]',
+      "[code]<p>Thanks for the detailed recommendations. I'll review with our DevOps team and schedule a maintenance window for this weekend.</p>[/code]",
     type: "comments",
-    createdOn: "2025-12-23 14:43:36",
-    createdBy: "para-admin@wso2.com",
+    createdOn: "2026-02-12 11:15:42",
+    createdBy: "John@example.com",
     isEscalated: false,
   },
   {
     id: "61f6a7a81bceb290a002c9d3604bcb53",
     content:
-      "[code]<br><b> <u>Description</u> </b><br><p><p>Test Description</p></p>[/code]",
+      "[code]<p>Sounds good. Once you've applied the changes, please share the connection pool metrics. If you see any new warnings, forward the logs and we can troubleshoot further.</p>[/code]",
     type: "comments",
-    createdOn: "2025-12-23 14:42:46",
-    createdBy: "para-admin@wso2.com",
+    createdOn: "2026-02-12 14:22:08",
+    createdBy: "support-engineer@wso2.com",
+    isEscalated: false,
+  },
+  {
+    id: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+    content:
+      "[code]<p>Will do. I'll send an update after the maintenance window. Thanks for your help!</p>[/code]",
+    type: "comments",
+    createdOn: "2026-02-12 16:45:33",
+    createdBy: "John@example.com",
     isEscalated: false,
   },
 ];
