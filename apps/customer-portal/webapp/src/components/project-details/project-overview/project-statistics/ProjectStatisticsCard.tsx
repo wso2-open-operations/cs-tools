@@ -55,24 +55,27 @@ const ProjectStatisticsCard = ({
         <Divider sx={{ mb: 3, pb: 2 }} />
 
         <Grid container spacing={2}>
-          {statItems.map((stat) => (
-            <Grid size={gridSize} key={stat.label}>
-              <StatCard
-                label={stat.label}
-                value={
-                  isLoading
-                    ? ((
-                        <Skeleton variant="text" width="40%" height={24} />
-                      ) as any)
-                    : isError
-                      ? ((<ErrorIndicator entityName={stat.label} />) as any)
-                      : (stats?.[stat.key] ?? "--").toString()
-                }
-                icon={stat.icon}
-                iconColor={stat.iconColor}
-              />
-            </Grid>
-          ))}
+          {statItems.map((stat) => {
+            const StatIcon = stat.icon;
+            return (
+              <Grid size={gridSize} key={stat.label}>
+                <StatCard
+                  label={stat.label}
+                  value={
+                    isLoading
+                      ? ((
+                          <Skeleton variant="text" width="40%" height={24} />
+                        ) as any)
+                      : isError
+                        ? ((<ErrorIndicator entityName={stat.label} />) as any)
+                        : (stats?.[stat.key] ?? "--").toString()
+                  }
+                  icon={<StatIcon size={24} />}
+                  iconColor={stat.iconColor}
+                />
+              </Grid>
+            );
+          })}
         </Grid>
       </CardContent>
     </Card>
