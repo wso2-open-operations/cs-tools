@@ -354,7 +354,7 @@ export interface DeploymentProductItem {
   deployment: { id: string; label: string };
 }
 
-// Case attachment item.
+// Case attachment item (GET /cases/:id/attachments).
 export interface CaseAttachment {
   id: string;
   name: string;
