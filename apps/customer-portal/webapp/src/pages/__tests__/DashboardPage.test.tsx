@@ -129,6 +129,12 @@ vi.mock("@components/dashboard/cases-table/CasesTable", () => ({
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
+  Alert: ({ children, onClose }: any) => (
+    <div data-testid="error-banner" role="alert">
+      {children}
+      {onClose && <button onClick={onClose}>Close</button>}
+    </div>
+  ),
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
   Grid: ({ children, container }: any) => (
     <div data-testid={container ? "grid-container" : "grid-item"}>
@@ -226,7 +232,7 @@ describe("DashboardPage", () => {
 
     expect(screen.getByTestId("error-banner")).toBeInTheDocument();
     expect(
-      screen.getByText("Error loading dashboard statistics"),
+      screen.getByText("Could not load dashboard statistics."),
     ).toBeInTheDocument();
   });
 
@@ -241,7 +247,7 @@ describe("DashboardPage", () => {
 
     expect(screen.getByTestId("error-banner")).toBeInTheDocument();
     expect(
-      screen.getByText("Error loading dashboard statistics"),
+      screen.getByText("Could not load dashboard statistics."),
     ).toBeInTheDocument();
   });
 });

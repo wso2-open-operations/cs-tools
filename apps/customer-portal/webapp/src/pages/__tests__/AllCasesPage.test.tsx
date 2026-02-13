@@ -20,6 +20,7 @@ import AllCasesPage from "@pages/AllCasesPage";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { mockCaseMetadata, mockCases } from "@models/mockData";
+import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
 // Mock API hooks
 vi.mock("@api/useGetProjectCasesStats", () => ({
@@ -126,14 +127,16 @@ describe("AllCasesPage", () => {
   const renderComponent = () => {
     return render(
       <ThemeProvider theme={theme}>
-        <MemoryRouter initialEntries={[`/projects/${projectId}/support/cases`]}>
-          <Routes>
-            <Route
-              path="/projects/:projectId/support/cases"
-              element={<AllCasesPage />}
-            />
-          </Routes>
-        </MemoryRouter>
+        <LoaderProvider>
+          <MemoryRouter initialEntries={[`/projects/${projectId}/support/cases`]}>
+            <Routes>
+              <Route
+                path="/projects/:projectId/support/cases"
+                element={<AllCasesPage />}
+              />
+            </Routes>
+          </MemoryRouter>
+        </LoaderProvider>
       </ThemeProvider>,
     );
   };

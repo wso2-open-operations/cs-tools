@@ -52,8 +52,9 @@ export const getSLAStatusColor = (
   status: string,
 ): "success" | "error" | "default" | "warning" => {
   const normalizedStatus = status?.toLowerCase();
+  const goodValue = SLA_STATUS.GOOD.toLowerCase();
 
-  if (normalizedStatus === SLA_STATUS.GOOD.toLowerCase()) {
+  if (normalizedStatus === goodValue || normalizedStatus === "good") {
     return "success";
   }
 

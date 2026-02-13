@@ -14,9 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ReactElement } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import ProjectDetails from "@pages/ProjectDetails";
+import { MockConfigProvider } from "@providers/MockConfigProvider";
 
 // Mock hooks
 const mockUseLogger = {
@@ -125,6 +127,9 @@ describe("ProjectDetails", () => {
     });
   });
 
+  const renderWithProviders = (ui: ReactElement) =>
+    render(<MockConfigProvider>{ui}</MockConfigProvider>);
+
   it("should render project details content when data is loaded", () => {
     mockUseGetProjectDetails.mockReturnValue({
       data: { id: "123", name: "Test Project" },
@@ -132,7 +137,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     expect(screen.getByTestId("tab-bar")).toBeInTheDocument();
     expect(screen.getByTestId("project-info-card")).toBeInTheDocument();
@@ -145,7 +150,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     expect(mockShowLoader).toHaveBeenCalled();
   });
@@ -162,7 +167,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    const { rerender } = render(<ProjectDetails />);
+    const { rerender } = renderWithProviders(<ProjectDetails />);
     expect(mockShowLoader).toHaveBeenCalledTimes(1);
     expect(mockHideLoader).not.toHaveBeenCalled();
 
@@ -177,7 +182,11 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    rerender(<ProjectDetails />);
+    rerender(
+      <MockConfigProvider>
+        <ProjectDetails />
+      </MockConfigProvider>,
+    );
     expect(mockHideLoader).toHaveBeenCalled();
   });
 
@@ -189,7 +198,7 @@ describe("ProjectDetails", () => {
       error: error,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     await waitFor(() => {
       expect(mockUseLogger.error).toHaveBeenCalledWith(
@@ -207,7 +216,7 @@ describe("ProjectDetails", () => {
       error: error,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     await waitFor(() => {
       expect(mockUseLogger.error).toHaveBeenCalledWith(

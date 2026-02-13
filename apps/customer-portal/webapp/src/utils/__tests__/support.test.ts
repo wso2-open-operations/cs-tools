@@ -128,7 +128,9 @@ describe("support utils", () => {
     });
 
     it("should format milliseconds to days when >= 24 hours", () => {
-      expect(formatSlaResponseTime("129671000")).toBe("2 days");
+      // 129671000 ms ≈ 36 hours → Math.floor(36/24) = 1 day
+      expect(formatSlaResponseTime("129671000")).toBe("1 day");
+      expect(formatSlaResponseTime(172800000)).toBe("2 days");
     });
 
     it("should format milliseconds to days with singular/plural", () => {
