@@ -1287,9 +1287,10 @@ service http:InterceptableService / on new http:Listener(9090) {
     #
     # + payload - Product vulnerability search payload containing filters
     # + return - List of product vulnerabilities or an error
-    isolated resource function post products/vulnerabilities/search(http:RequestContext ctx,
+    resource function post products/vulnerabilities/search(http:RequestContext ctx,
             ProductVulnerabilitySearchPayload payload) returns http:Ok|http:InternalServerError {
 
+        // TODO: Add authorization and validation similar to other endpoints
         // TODO: Implement actual search logic based on filters in the payload. For now, returning mock data.
         ProductVulnerabilitySearchResponse response = {
             productVulnerabilities: MOCK_PRODUCT_VULNERABILITIES,
@@ -1307,9 +1308,11 @@ service http:InterceptableService / on new http:Listener(9090) {
     #
     # + id - ID of the product vulnerability
     # + return - Product vulnerability details or error
-    isolated resource function get products/vulnerabilities/[string id](http:RequestContext ctx)
+    resource function get products/vulnerabilities/[string id](http:RequestContext ctx)
             returns ProductVulnerabilityResponse|http:InternalServerError {
 
+
+        // TODO: Add authorization and validation similar to other endpoints
         // TODO: Implement retrieval logic based on id in the path. For now, returning mock data.
         return MOCK_PRODUCT_VULNERABILITY;
     }
