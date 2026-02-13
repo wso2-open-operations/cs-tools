@@ -25,7 +25,7 @@ import CaseDetailsHeader from "@case-details/CaseDetailsHeader";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import CaseDetailsTabs from "@case-details/CaseDetailsTabs";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
-import CaseDetailsSkeleton from "@case-details/CaseDetailsSkeleton";
+import CaseDetailsSkeleton from "@case-details-details/CaseDetailsSkeleton";
 
 export interface CaseDetailsContentProps {
   data: CaseDetails | undefined;
