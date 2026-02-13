@@ -82,7 +82,7 @@ export default function useGetCaseComments(
         if (offset !== undefined) params.set("offset", String(offset));
         if (limit !== undefined) params.set("limit", String(limit));
         const query = params.toString();
-        const requestUrl = `${baseUrl}/projects/${projectId}/cases/${caseId}/comments${query ? `?${query}` : ""}`;
+        const requestUrl = `${baseUrl}/cases/${caseId}/comments${query ? `?${query}` : ""}`;
         const response = await fetch(requestUrl, {
           method: "GET",
           headers: addApiHeaders(idToken),

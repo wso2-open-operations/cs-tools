@@ -17,6 +17,7 @@
 import { Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
+import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 
@@ -40,10 +41,20 @@ export default function CaseDetailsTabPanels({
   isError = false,
 }: CaseDetailsTabPanelsProps): JSX.Element | null {
   if (activeTab === 0) {
+    const projectId = data?.project?.id ?? "";
+    if (!projectId) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Activity timeline will appear here.
+        </Typography>
+      );
+    }
     return (
-      <Typography variant="body2" color="text.secondary">
-        Activity timeline will appear here.
-      </Typography>
+      <CaseDetailsActivityPanel
+        projectId={projectId}
+        caseId={caseId}
+        caseCreatedOn={data?.createdOn}
+      />
     );
   }
 

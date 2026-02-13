@@ -18,7 +18,12 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import { mockCaseAttachments, mockCaseDetails } from "@models/mockData";
+import {
+  mockCaseAttachments,
+  mockCaseComments,
+  mockCaseDetails,
+  mockUserDetails,
+} from "@models/mockData";
 
 vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
   __esModule: true,
@@ -44,6 +49,29 @@ vi.mock("@api/useGetCaseAttachments", () => ({
   }),
 }));
 
+vi.mock("@api/useGetCaseComments", () => ({
+  __esModule: true,
+  default: vi.fn(() => ({
+    data: {
+      comments: mockCaseComments,
+      totalRecords: mockCaseComments.length,
+      offset: 0,
+      limit: 50,
+    },
+    isLoading: false,
+    isError: false,
+  })),
+}));
+
+vi.mock("@api/useGetUserDetails", () => ({
+  __esModule: true,
+  default: vi.fn(() => ({
+    data: mockUserDetails,
+    isLoading: false,
+    isError: false,
+  })),
+}));
+
 function renderTabPanels(
   activeTab: number,
   caseId = "case-1",
@@ -62,8 +90,19 @@ function renderTabPanels(
 }
 
 describe("CaseDetailsTabPanels", () => {
-  it("should show Activity placeholder when activeTab is 0", () => {
+  it("should show Activity panel with chat messages when activeTab is 0", () => {
     renderTabPanels(0);
+    expect(
+      screen.getByText(/Thanks for the detailed recommendations/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Show more/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Support Engineer/).length).toBeGreaterThan(0);
+  });
+
+  it("should show Activity placeholder when projectId is missing", () => {
+    renderTabPanels(0, "case-1", {
+      data: { ...mockCaseDetails, project: null },
+    });
     expect(
       screen.getByText("Activity timeline will appear here."),
     ).toBeInTheDocument();
