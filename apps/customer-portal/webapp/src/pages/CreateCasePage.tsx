@@ -273,8 +273,7 @@ export default function CreateCasePage(): JSX.Element {
       ? [{ id: classificationSeverity, label: classificationSeverity }]
       : [];
 
-  const baseDeploymentOptions =
-    getBaseDeploymentOptions(projectDeployments);
+  const baseDeploymentOptions = getBaseDeploymentOptions(projectDeployments);
   const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
   const sectionMetadata = {
     deploymentTypes: baseDeploymentOptions,

@@ -72,6 +72,13 @@ vi.mock("@api/useGetUserDetails", () => ({
   })),
 }));
 
+vi.mock("@api/usePostComment", () => ({
+  usePostComment: vi.fn(() => ({
+    mutate: vi.fn(),
+    isPending: false,
+  })),
+}));
+
 function renderTabPanels(
   activeTab: number,
   caseId = "case-1",
