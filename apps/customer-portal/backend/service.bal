@@ -1310,7 +1310,7 @@ service http:InterceptableService / on new http:Listener(9090) {
     isolated resource function get product\-vulnerabilities/[string id](http:RequestContext ctx)
             returns ProductVulnerabilityResponse|http:InternalServerError {
 
-        // TODO: Implement actual search logic based on filters in the payload. For now, returning mock data.
+        // TODO: Implement retrieval logic based on id in the path. For now, returning mock data.
         return MOCK_PRODUCT_VULNERABILITY;
     }
 }
