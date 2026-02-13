@@ -288,6 +288,21 @@ export function stripCodeWrapper(content: string): string {
   return content;
 }
 
+/**
+ * Strips "Customer comment added" label from comment content.
+ * The backend may append this; we hide it from the activity timeline.
+ *
+ * @param html - HTML content string.
+ * @returns {string} Content without the label.
+ */
+export function stripCustomerCommentAddedLabel(html: string): string {
+  if (!html || typeof html !== "string") return "";
+  return html
+    .replace(/<p>\s*Customer comment added\s*<\/p>/gi, "")
+    .replace(/Customer comment added/gi, "")
+    .trim();
+}
+
 /** Inline attachment item for image src replacement (supports API id/downloadUrl or legacy sys_id/url). */
 export interface InlineAttachment {
   id?: string;

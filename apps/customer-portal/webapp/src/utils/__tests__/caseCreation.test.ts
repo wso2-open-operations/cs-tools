@@ -191,9 +191,9 @@ describe("caseCreation utils", () => {
     });
 
     it("returns empty string when no match", () => {
-      expect(
-        resolveProductId("Unknown Product", allDeploymentProducts),
-      ).toBe("");
+      expect(resolveProductId("Unknown Product", allDeploymentProducts)).toBe(
+        "",
+      );
     });
   });
 
@@ -280,10 +280,7 @@ describe("caseCreation utils", () => {
         { id: "1", name: "Dev", type: { id: "t1", label: "Development" } },
         { id: "2", name: "Staging", type: { id: "t2", label: "Staging" } },
       ];
-      expect(getBaseDeploymentOptions(deployments)).toEqual([
-        "Dev",
-        "Staging",
-      ]);
+      expect(getBaseDeploymentOptions(deployments)).toEqual(["Dev", "Staging"]);
     });
 
     it("returns empty array for undefined", () => {
