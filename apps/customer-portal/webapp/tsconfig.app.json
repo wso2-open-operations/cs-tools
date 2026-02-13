@@ -19,6 +19,8 @@
       "@case-details-attachments/*": ["src/components/support/case-details/attachments-tab/*"],
       "@case-details-details": ["src/components/support/case-details/details-tab"],
       "@case-details-details/*": ["src/components/support/case-details/details-tab/*"],
+      "@case-details-activity": ["src/components/support/case-details/activity-tab"],
+      "@case-details-activity/*": ["src/components/support/case-details/activity-tab/*"],
       "@config/*": ["src/config/*"],
       "@constants/*": ["src/constants/*"],
       "@context/*": ["src/context/*"],

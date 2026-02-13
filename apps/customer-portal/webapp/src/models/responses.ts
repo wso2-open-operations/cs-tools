@@ -218,9 +218,17 @@ export interface CaseDetails {
   severity: CaseStatus | null;
 }
 
-// Inline attachment for comment images.
+// Inline attachment for comment images (API shape).
 export interface CaseCommentInlineAttachment {
-  sys_id: string;
+  id: string;
+  fileName: string;
+  contentType: string;
+  downloadUrl: string;
+  createdOn: string;
+  createdBy: string;
+  /** Legacy: sys_id for backward compatibility with older img src format. */
+  sys_id?: string;
+  /** Legacy: url for backward compatibility. Prefer downloadUrl. */
   url?: string;
 }
 
@@ -232,7 +240,9 @@ export interface CaseComment {
   createdOn: string;
   createdBy: string;
   isEscalated: boolean;
-  /** Optional inline attachments for images in content. */
+  /** Whether this comment has inline images. */
+  hasInlineAttachments?: boolean;
+  /** Inline attachments for images in content (img src replacement). */
   inlineAttachments?: CaseCommentInlineAttachment[];
 }
 

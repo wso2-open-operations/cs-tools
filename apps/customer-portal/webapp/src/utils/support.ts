@@ -288,17 +288,20 @@ export function stripCodeWrapper(content: string): string {
   return content;
 }
 
-/** Inline attachment item for image src replacement. */
+/** Inline attachment item for image src replacement (supports API id/downloadUrl or legacy sys_id/url). */
 export interface InlineAttachment {
+  id?: string;
+  downloadUrl?: string;
   sys_id?: string;
   url?: string;
 }
 
 /**
- * Replaces inline image sources in HTML (e.g. /sys_id.iix) with URLs from attachments.
+ * Replaces inline image sources in HTML (e.g. /sys_id.iix or /id.iix) with URLs from attachments.
+ * Matches by id or sys_id; uses downloadUrl or url for the replacement.
  *
  * @param html - HTML string with img tags.
- * @param inlineAttachments - Optional list of inline attachments with sys_id and url.
+ * @param inlineAttachments - Optional list of attachments (id/downloadUrl or sys_id/url).
  * @returns {string} HTML with img src replaced where matching.
  */
 export function replaceInlineImageSources(
@@ -311,11 +314,16 @@ export function replaceInlineImageSources(
   return html.replace(
     /<img([^>]*)\ssrc="([^"]+)"([^>]*)>/gi,
     (_match, before, src, after) => {
-      const sysId = src.replace(/^\//, "").replace(/\.iix$/i, "");
+      const refId = src.replace(/^\//, "").replace(/\.iix$/i, "").trim();
       const attachment = inlineAttachments.find(
-        (a) => a.sys_id === sysId || src.includes(a.sys_id ?? ""),
+        (a) =>
+          a.id === refId ||
+          a.sys_id === refId ||
+          src.includes(a.id ?? "") ||
+          src.includes(a.sys_id ?? ""),
       );
-      const newSrc = attachment?.url ?? src;
+      const newSrc =
+        attachment?.downloadUrl ?? attachment?.url ?? src;
       return `<img${before} src="${newSrc}"${after}>`;
     },
   );
