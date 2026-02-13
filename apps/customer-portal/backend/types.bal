@@ -337,3 +337,65 @@ public type CaseClassificationPayload record {|
     # Tier
     string tier;
 |};
+
+# Product vulnerability search filters.
+public type ProductVulnerabilitySearchFilters record {|
+    # Search query for CVE ID, Vulnerability ID, Component Name and etc.
+    string searchQuery?;
+    # Status ID
+    int statusId?;
+    # Severity ID
+    int severityId?;
+|};
+
+# Payload for product vulnerability search.
+public type ProductVulnerabilitySearchPayload record {|
+    # Filter criteria
+    ProductVulnerabilitySearchFilters filters?;
+    # Sort configuration
+    entity:SortBy sortBy?;
+    # Pagination details
+    entity:Pagination pagination?;
+|};
+
+# Base product vulnerability.
+public type ProductVulnerability record {|
+    # ID of the vulnerability
+    string id;
+    # CVE identifier
+    string cveId;
+    # Vulnerability identifier
+    string vulnerabilityId;
+    # Severity level of the vulnerability
+    entity:ChoiceListItem severity;
+    # Name of the component
+    string componentName;
+    # Version of the component
+    string version;
+    # Type of the vulnerability
+    string 'type;
+    # Use case description
+    string useCase;
+    # Justification for the vulnerability
+    string justification;
+    # Resolution details for the vulnerability
+    string resolution;
+|};
+
+# Product vulnerability information.
+public type ProductVulnerabilityResponse record {|
+    *ProductVulnerability;
+    # Type of the component
+    string componentType;
+    # Update level for the vulnerability
+    string updateLevel;
+|};
+
+# Product vulnerabilities response with pagination.
+public type ProductVulnerabilitySearchResponse record {|
+    # List of product vulnerabilities
+    ProductVulnerability[] productVulnerabilities;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};
