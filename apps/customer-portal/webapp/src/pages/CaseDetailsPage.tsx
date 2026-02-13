@@ -19,7 +19,7 @@ import { useNavigate, useParams } from "react-router";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@api/useGetCaseDetails";
-import CaseDetailsContent from "@case-details/CaseDetailsContent";
+import CaseDetailsContent from "@components/support/case-details/details-tab/CaseDetailsContent";
 
 /**
  * CaseDetailsPage displays details for a single support case.
@@ -28,22 +28,21 @@ import CaseDetailsContent from "@case-details/CaseDetailsContent";
  */
 export default function CaseDetailsPage(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId, caseId } = useParams<{ projectId: string; caseId: string }>();
+  const { projectId, caseId } = useParams<{
+    projectId: string;
+    caseId: string;
+  }>();
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
 
-  const {
-    data,
-    isLoading,
-    isFetching,
-    isError,
-  } = useGetCaseDetails(projectId || "", caseId || "");
+  const { data, isLoading, isFetching, isError } = useGetCaseDetails(
+    projectId || "",
+    caseId || "",
+  );
 
   // Show skeletons immediately when no data (avoid "-" flash on refresh) and when loading/refetching.
   const showSkeletons =
-    isLoading ||
-    isFetching ||
-    (data === undefined && !isError);
+    isLoading || isFetching || (data === undefined && !isError);
 
   useEffect(() => {
     if (showSkeletons) {

@@ -44,6 +44,23 @@ export function formatValue(value: string | number | null | undefined): string {
 }
 
 /**
+ * Formats SLA response time from milliseconds (string or number) to human-readable (e.g. "4 hours", "2 days").
+ *
+ * @param ms - Milliseconds as string or number from API.
+ * @returns {string} Formatted string or "--" if invalid.
+ */
+export function formatSlaResponseTime(
+  ms: string | number | null | undefined,
+): string {
+  const n = typeof ms === "string" ? parseInt(ms, 10) : ms;
+  if (n == null || Number.isNaN(n) || n < 0) return "--";
+  if (n < 60_000) return `${Math.round(n / 1000)} seconds`;
+  if (n < 3600_000) return `${Math.round(n / 60_000)} minutes`;
+  if (n < 86400_000) return `${Math.round(n / 3600_000)} hours`;
+  return `${Math.round(n / 86400_000)} days`;
+}
+
+/**
  * Formats byte count for display (e.g. 1024 -> "1 KB", 245760 -> "240 KB").
  *
  * @param bytes - Size in bytes (number or string from API).
@@ -254,4 +271,71 @@ export function getStatusIconElement(
 ): ReactNode {
   const Icon = getStatusIcon(statusLabel ?? undefined);
   return createElement(Icon, { size });
+}
+
+/**
+ * Strips the [code]...[/code] wrapper from comment content.
+ *
+ * @param content - Raw content string.
+ * @returns {string} Content without the code wrapper.
+ */
+export function stripCodeWrapper(content: string): string {
+  if (!content || typeof content !== "string") return "";
+  const trimmed = content.trim();
+  if (trimmed.startsWith("[code]") && trimmed.endsWith("[/code]")) {
+    return trimmed.slice(6, -7).trim();
+  }
+  return content;
+}
+
+/** Inline attachment item for image src replacement. */
+export interface InlineAttachment {
+  sys_id?: string;
+  url?: string;
+}
+
+/**
+ * Replaces inline image sources in HTML (e.g. /sys_id.iix) with URLs from attachments.
+ *
+ * @param html - HTML string with img tags.
+ * @param inlineAttachments - Optional list of inline attachments with sys_id and url.
+ * @returns {string} HTML with img src replaced where matching.
+ */
+export function replaceInlineImageSources(
+  html: string,
+  inlineAttachments?: InlineAttachment[] | null,
+): string {
+  if (!html || typeof html !== "string") return "";
+  if (!inlineAttachments?.length) return html;
+
+  return html.replace(
+    /<img([^>]*)\ssrc="([^"]+)"([^>]*)>/gi,
+    (_match, before, src, after) => {
+      const sysId = src.replace(/^\//, "").replace(/\.iix$/i, "");
+      const attachment = inlineAttachments.find(
+        (a) => a.sys_id === sysId || src.includes(a.sys_id ?? ""),
+      );
+      const newSrc = attachment?.url ?? src;
+      return `<img${before} src="${newSrc}"${after}>`;
+    },
+  );
+}
+
+/**
+ * Formats a comment date string for display (e.g. "Feb 13, 2026 3:45 PM").
+ *
+ * @param date - Date string from API.
+ * @returns {string} Formatted date string.
+ */
+export function formatCommentDate(date: string | null | undefined): string {
+  if (!date) return "--";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "--";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

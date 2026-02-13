@@ -30,6 +30,7 @@ import {
   formatRelativeTime,
   formatValue,
   formatFileSize,
+  formatSlaResponseTime,
   deriveFilterLabels,
   getStatusIcon,
   getAttachmentFileCategory,
@@ -96,6 +97,26 @@ describe("support utils", () => {
       expect(resolveColorFromTheme("non.existent.color", theme)).toBe(
         "non.existent.color",
       );
+    });
+  });
+
+  describe("formatSlaResponseTime", () => {
+    it("should return '--' for null and undefined", () => {
+      expect(formatSlaResponseTime(null)).toBe("--");
+      expect(formatSlaResponseTime(undefined)).toBe("--");
+    });
+
+    it("should format milliseconds to hours", () => {
+      expect(formatSlaResponseTime(3600000)).toBe("1 hours");
+      expect(formatSlaResponseTime(7200000)).toBe("2 hours");
+    });
+
+    it("should format milliseconds to days when >= 24 hours", () => {
+      expect(formatSlaResponseTime("129671000")).toBe("2 days");
+    });
+
+    it("should format milliseconds to days", () => {
+      expect(formatSlaResponseTime(86400000)).toBe("1 days");
     });
   });
 
