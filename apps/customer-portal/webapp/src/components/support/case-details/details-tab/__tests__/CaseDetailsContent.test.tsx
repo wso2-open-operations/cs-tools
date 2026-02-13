@@ -15,8 +15,9 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import CaseDetailsContent from "@case-details/CaseDetailsContent";
+import CaseDetailsContent from "../CaseDetailsContent";
 import { mockCaseDetails } from "@models/mockData";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
@@ -32,24 +33,40 @@ vi.mock("@utils/support", () => ({
   formatValue: vi.fn((v: unknown) => (v == null || v === "" ? "--" : String(v))),
 }));
 
+vi.mock("@api/useGetCaseAttachments", () => ({
+  default: vi.fn(() => ({ data: { totalRecords: 0 } })),
+}));
+
+vi.mock("@case-details/CaseDetailsTabPanels", () => ({
+  default: ({ activeTab }: { activeTab: number }) =>
+    createElement("div", {
+      "data-testid": "tab-panels",
+      children:
+        activeTab === 1 ? "Case Overview" : "Activity timeline will appear here.",
+    }),
+}));
+
 describe("CaseDetailsContent", () => {
   const theme = createTheme();
   const onBack = vi.fn();
+  const defaultProps = {
+    caseId: mockCaseDetails.id,
+    onBack,
+  };
 
   it("should render skeleton when loading", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={undefined}
           isLoading={true}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
 
     expect(screen.getByText("Back to Support Center")).toBeInTheDocument();
-    // CaseDetailsSkeleton renders multiple Skeleton elements
     const skeletons = document.querySelectorAll(".MuiSkeleton-root");
     expect(skeletons.length).toBeGreaterThan(0);
   });
@@ -58,10 +75,10 @@ describe("CaseDetailsContent", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
@@ -69,33 +86,33 @@ describe("CaseDetailsContent", () => {
     expect(screen.getByText(mockCaseDetails.number!)).toBeInTheDocument();
     expect(screen.getByText(mockCaseDetails.title!)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /details/i }));
-    expect(screen.getByText("Details appear here.")).toBeInTheDocument();
+    expect(screen.getByText("Case Overview")).toBeInTheDocument();
   });
 
-  it("should show details placeholder when Details tab is selected", () => {
+  it("should show details panel when Details tab is selected", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
 
     fireEvent.click(screen.getByRole("tab", { name: /details/i }));
-    expect(screen.getByText("Details appear here.")).toBeInTheDocument();
+    expect(screen.getByText("Case Overview")).toBeInTheDocument();
   });
 
   it("should call onBack when Back button is clicked", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
@@ -108,10 +125,10 @@ describe("CaseDetailsContent", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
@@ -135,10 +152,10 @@ describe("CaseDetailsContent", () => {
     render(
       <ThemeProvider theme={theme}>
         <CaseDetailsContent
+          {...defaultProps}
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
-          onBack={onBack}
         />
       </ThemeProvider>,
     );
