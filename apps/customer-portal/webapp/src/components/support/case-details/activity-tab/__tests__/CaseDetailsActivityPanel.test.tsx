@@ -46,6 +46,13 @@ vi.mock("@api/useGetUserDetails", () => ({
   })),
 }));
 
+vi.mock("@api/usePostComment", () => ({
+  usePostComment: vi.fn(() => ({
+    mutate: vi.fn(),
+    isPending: false,
+  })),
+}));
+
 function renderPanel(props: {
   projectId?: string;
   caseId?: string;
@@ -86,8 +93,14 @@ describe("CaseDetailsActivityPanel", () => {
     expect(screen.queryByText(/Case created on/)).not.toBeInTheDocument();
   });
 
-  it("should show current user comments with You label", () => {
+  it("should not show You label for current user comments", () => {
     renderPanel();
-    expect(screen.getAllByText("You").length).toBeGreaterThan(0);
+    expect(screen.queryByText("You")).not.toBeInTheDocument();
+  });
+
+  it("should render input field and send button", () => {
+    renderPanel();
+    expect(screen.getByPlaceholderText("Add a comment...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send comment/i })).toBeInTheDocument();
   });
 });
