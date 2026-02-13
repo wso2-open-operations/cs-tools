@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import CaseDetailsDetailsPanel from "../CaseDetailsDetailsPanel";
+import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 import { mockCaseDetails } from "@models/mockData";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 

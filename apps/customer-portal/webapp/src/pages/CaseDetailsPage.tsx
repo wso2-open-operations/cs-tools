@@ -19,7 +19,7 @@ import { useNavigate, useParams } from "react-router";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@api/useGetCaseDetails";
-import CaseDetailsContent from "@components/support/case-details/details-tab/CaseDetailsContent";
+import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
 
 /**
  * CaseDetailsPage displays details for a single support case.

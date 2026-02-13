@@ -17,6 +17,8 @@
       "@case-details/*": ["src/components/support/case-details/header/*"],
       "@case-details-attachments": ["src/components/support/case-details/attachments-tab"],
       "@case-details-attachments/*": ["src/components/support/case-details/attachments-tab/*"],
+      "@case-details-details": ["src/components/support/case-details/details-tab"],
+      "@case-details-details/*": ["src/components/support/case-details/details-tab/*"],
       "@config/*": ["src/config/*"],
       "@constants/*": ["src/constants/*"],
       "@context/*": ["src/context/*"],

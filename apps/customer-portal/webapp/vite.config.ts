@@ -40,6 +40,9 @@ export default defineConfig({
       "@case-details-attachments": fileURLToPath(
         new URL("./src/components/support/case-details/attachments-tab", import.meta.url),
       ),
+      "@case-details-details": fileURLToPath(
+        new URL("./src/components/support/case-details/details-tab", import.meta.url),
+      ),
       "@config": fileURLToPath(new URL("./src/config", import.meta.url)),
       "@constants": fileURLToPath(new URL("./src/constants", import.meta.url)),
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),

@@ -18,7 +18,7 @@ import { Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
-import CaseDetailsDetailsPanel from "../details-tab/CaseDetailsDetailsPanel";
+import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 
 export interface CaseDetailsTabPanelsProps {
   activeTab: number;

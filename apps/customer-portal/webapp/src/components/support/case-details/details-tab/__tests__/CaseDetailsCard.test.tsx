@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
-import CaseDetailsCard from "../CaseDetailsCard";
+import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 function renderCard(props: {

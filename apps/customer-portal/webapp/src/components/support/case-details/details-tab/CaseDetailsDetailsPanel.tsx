@@ -34,7 +34,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type ReactElement, type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
-import CaseDetailsCard from "@case-details/CaseDetailsCard";
+import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 import { getStatusColor, getSeverityColor } from "@utils/casesTable";
 import {

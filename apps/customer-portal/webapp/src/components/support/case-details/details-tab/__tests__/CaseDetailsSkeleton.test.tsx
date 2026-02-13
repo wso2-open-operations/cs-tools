@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import CaseDetailsSkeleton, {
   CaseDetailsHeaderSkeleton,
-} from "../CaseDetailsSkeleton";
+} from "@case-details-details/CaseDetailsSkeleton";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 describe("CaseDetailsSkeleton", () => {

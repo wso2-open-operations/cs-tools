@@ -17,4 +17,4 @@
 export {
   default,
   CaseDetailsHeaderSkeleton,
-} from "../details-tab/CaseDetailsSkeleton";
+} from "@case-details-details/CaseDetailsSkeleton";

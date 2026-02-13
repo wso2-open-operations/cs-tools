@@ -17,11 +17,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import CaseDetailsAttachmentsPanel from "../CaseDetailsAttachmentsPanel";
+import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import { mockCaseAttachments } from "@models/mockData";
 import useGetCaseAttachments from "@api/useGetCaseAttachments";
 
-vi.mock("../UploadAttachmentModal", () => ({
+vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
   __esModule: true,
   default: () => null,
 }));
