@@ -17,6 +17,7 @@
 import { Box, Paper, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
+import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import { getStatusColor } from "@utils/casesTable";
 import { resolveColorFromTheme, getStatusIconElement } from "@utils/support";
 import CaseDetailsBackButton from "@case-details/CaseDetailsBackButton";
@@ -29,6 +30,7 @@ export interface CaseDetailsContentProps {
   data: CaseDetails | undefined;
   isLoading: boolean;
   isError: boolean;
+  caseId: string;
   onBack: () => void;
 }
 
@@ -42,6 +44,7 @@ export default function CaseDetailsContent({
   data,
   isLoading,
   isError,
+  caseId,
   onBack,
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
@@ -72,6 +75,9 @@ export default function CaseDetailsContent({
     }),
     [resolvedStatusColor],
   );
+
+  const attachmentsQuery = useGetCaseAttachments(caseId, { limit: 1, offset: 0 });
+  const attachmentCount = attachmentsQuery.data?.totalRecords;
 
   const assignedEngineer = data?.assignedEngineer;
   const engineerInitials =
@@ -132,10 +138,11 @@ export default function CaseDetailsContent({
             value={activeTab}
             onChange={(_e, newValue) => setActiveTab(newValue)}
             onFocusModeToggle={() => setFocusMode((prev) => !prev)}
+            attachmentCount={attachmentCount}
           />
         </Paper>
 
-        <CaseDetailsTabPanels activeTab={activeTab} />
+        <CaseDetailsTabPanels activeTab={activeTab} caseId={caseId} />
       </Box>
     </Box>
   );

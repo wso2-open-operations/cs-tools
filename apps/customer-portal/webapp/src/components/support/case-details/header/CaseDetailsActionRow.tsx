@@ -155,7 +155,9 @@ export default function CaseDetailsActionRow({
             variant="outlined"
             size="small"
             startIcon={<Icon size={ACTION_BUTTON_ICON_SIZE} />}
-            sx={getActionButtonSx(theme, paletteIntent) as Record<string, unknown>}
+            sx={
+              getActionButtonSx(theme, paletteIntent) as Record<string, unknown>
+            }
           >
             {label}
           </Button>

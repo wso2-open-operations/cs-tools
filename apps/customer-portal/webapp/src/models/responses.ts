@@ -218,6 +218,13 @@ export interface CaseDetails {
   severity: CaseStatus | null;
 }
 
+// Inline attachment for comment content (e.g. embedded images by id/url).
+export interface InlineAttachment {
+  id: string;
+  url: string;
+  [key: string]: unknown;
+}
+
 // Case comment
 export interface CaseComment {
   id: string;
@@ -226,6 +233,8 @@ export interface CaseComment {
   createdOn: string;
   createdBy: string;
   isEscalated: boolean;
+  /** Inline attachments (e.g. embedded images) for replaceInlineImageSources. */
+  inlineAttachments?: InlineAttachment[];
 }
 
 // Response for case comments list
@@ -354,7 +363,7 @@ export interface DeploymentProductItem {
   deployment: { id: string; label: string };
 }
 
-// Case attachment item.
+// Case attachment item (GET /cases/:id/attachments).
 export interface CaseAttachment {
   id: string;
   name: string;

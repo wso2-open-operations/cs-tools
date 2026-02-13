@@ -38,11 +38,23 @@ export type ChatActionState =
  * @param value - Raw value from API or state.
  * @returns {string} Display string.
  */
-export function formatValue(
-  value: string | number | null | undefined,
-): string {
+export function formatValue(value: string | number | null | undefined): string {
   if (value == null || value === "") return "--";
   return String(value);
+}
+
+/**
+ * Formats byte count for display (e.g. 1024 -> "1 KB", 245760 -> "240 KB").
+ *
+ * @param bytes - Size in bytes (number or string from API).
+ * @returns {string} Formatted string like "1.2 MB" or "18 KB".
+ */
+export function formatFileSize(bytes: number | string | null | undefined): string {
+  const n = typeof bytes === "string" ? parseInt(bytes, 10) : bytes;
+  if (n == null || Number.isNaN(n)) return "--";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /**
@@ -171,13 +183,54 @@ export function deriveFilterLabels(id: string): {
   return { allLabel, label };
 }
 
+/** Attachment file category for icon selection. */
+export type AttachmentFileCategory =
+  | "image"
+  | "pdf"
+  | "archive"
+  | "text"
+  | "file";
+
+/**
+ * Returns the file category for attachment icon/display (image, pdf, archive, text, file).
+ *
+ * @param fileName - File name.
+ * @param type - MIME type.
+ * @returns {AttachmentFileCategory} The category.
+ */
+export function getAttachmentFileCategory(
+  fileName: string,
+  type: string,
+): AttachmentFileCategory {
+  const n = fileName.toLowerCase();
+  const t = type.toLowerCase();
+  if (
+    /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(n) ||
+    t.startsWith("image/")
+  ) {
+    return "image";
+  }
+  if (/\.pdf$/i.test(n) || t.includes("pdf")) return "pdf";
+  if (
+    /\.(zip|rar|7z|tar|gz)$/i.test(n) ||
+    t.includes("zip") ||
+    t.includes("archive")
+  ) {
+    return "archive";
+  }
+  if (/\.(log|txt)$/i.test(n) || t.startsWith("text/")) return "text";
+  return "file";
+}
+
 /**
  * Returns the icon component for a given case status label.
  *
  * @param statusLabel - The case status label (e.g., "Open", "Working in Progress").
  * @returns {ComponentType<{ size?: number }>} The icon component.
  */
-export function getStatusIcon(statusLabel?: string): ComponentType<{ size?: number }> {
+export function getStatusIcon(
+  statusLabel?: string,
+): ComponentType<{ size?: number }> {
   const normalized = statusLabel?.toLowerCase() || "";
   if (normalized.includes("open")) return CircleAlert;
   if (normalized.includes("progress")) return Clock;
@@ -197,8 +250,72 @@ export function getStatusIcon(statusLabel?: string): ComponentType<{ size?: numb
  */
 export function getStatusIconElement(
   statusLabel: string | null | undefined,
-  size = 12
+  size = 12,
 ): ReactNode {
   const Icon = getStatusIcon(statusLabel ?? undefined);
   return createElement(Icon, { size });
+}
+
+/**
+ * Formats a comment/activity date for display (e.g. "Jan 1, 2026, 2:30 PM").
+ *
+ * @param date - ISO date string or parseable date.
+ * @returns {string} Formatted date string.
+ */
+export function formatCommentDate(date: string | undefined): string {
+  if (!date) return "--";
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "--";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Strips a code-block wrapper from HTML content if present (e.g. outer div from rich editor).
+ *
+ * @param html - Raw HTML string.
+ * @returns {string} HTML without the wrapper.
+ */
+export function stripCodeWrapper(html: string): string {
+  if (!html?.trim()) return "";
+  const trimmed = html.trim();
+  const match = trimmed.match(
+    /^<div[^>]*class="[^"]*code-wrapper[^"]*"[^>]*>([\s\S]*)<\/div>$/i,
+  );
+  if (match) return match[1].trim();
+  return trimmed;
+}
+
+/** Shape used by replaceInlineImageSources (id -> url mapping). */
+export interface InlineAttachmentRef {
+  id: string;
+  url: string;
+}
+
+/**
+ * Replaces inline image placeholders (e.g. cid:xxx or data-attachment-id) with URLs from attachments.
+ *
+ * @param html - HTML string that may contain img src placeholders.
+ * @param attachments - Optional list of inline attachments (id, url).
+ * @returns {string} HTML with image sources replaced.
+ */
+export function replaceInlineImageSources(
+  html: string,
+  attachments: InlineAttachmentRef[] | undefined,
+): string {
+  if (!html?.trim()) return "";
+  if (!attachments?.length) return html;
+  const byId = new Map(attachments.map((a) => [a.id, a.url]));
+  return html.replace(
+    /(<img[^>]*\ssrc=)(["'])(?:cid:)?([^"']+)\2/gi,
+    (_match, prefix, quote, id) => {
+      const url = byId.get(id.trim()) ?? "";
+      return `${prefix}${quote}${url}${quote}`;
+    },
+  );
 }

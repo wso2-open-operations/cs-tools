@@ -16,9 +16,11 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import CaseDetailsAttachmentsPanel from "@case-details/CaseDetailsAttachmentsPanel";
 
 export interface CaseDetailsTabPanelsProps {
   activeTab: number;
+  caseId: string;
 }
 
 /**
@@ -29,6 +31,7 @@ export interface CaseDetailsTabPanelsProps {
  */
 export default function CaseDetailsTabPanels({
   activeTab,
+  caseId,
 }: CaseDetailsTabPanelsProps): JSX.Element | null {
   const panelBorderSx = { border: 1, borderColor: "divider", p: 2 };
 
@@ -53,13 +56,7 @@ export default function CaseDetailsTabPanels({
   }
 
   if (activeTab === 2) {
-    return (
-      <Box sx={panelBorderSx}>
-        <Typography variant="body2" color="text.secondary">
-          Attachments will appear here.
-        </Typography>
-      </Box>
-    );
+    return <CaseDetailsAttachmentsPanel caseId={caseId} />;
   }
 
   if (activeTab === 3) {

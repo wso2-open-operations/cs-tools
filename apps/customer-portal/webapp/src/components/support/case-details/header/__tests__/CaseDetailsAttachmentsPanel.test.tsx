@@ -16,8 +16,8 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
+import CaseDetailsAttachmentsPanel from "@case-details/CaseDetailsAttachmentsPanel";
 import { mockCaseAttachments } from "@models/mockData";
 
 vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
@@ -44,43 +44,39 @@ vi.mock("@api/useGetCaseAttachments", () => ({
   }),
 }));
 
-function renderTabPanels(activeTab: number, caseId = "case-1") {
+function renderPanel(caseId = "case-1") {
   return render(
     <ThemeProvider theme={createTheme()}>
-      <CaseDetailsTabPanels activeTab={activeTab} caseId={caseId} />
+      <CaseDetailsAttachmentsPanel caseId={caseId} />
     </ThemeProvider>,
   );
 }
 
-describe("CaseDetailsTabPanels", () => {
-  it("should show Activity placeholder when activeTab is 0", () => {
-    renderTabPanels(0);
+describe("CaseDetailsAttachmentsPanel", () => {
+  it("should render Upload Attachment button", () => {
+    renderPanel();
     expect(
-      screen.getByText("Activity timeline will appear here."),
+      screen.getByRole("button", { name: /upload attachment/i }),
     ).toBeInTheDocument();
   });
 
-  it("should show Details placeholder when activeTab is 1", () => {
-    renderTabPanels(1);
-    expect(screen.getByText("Details appear here.")).toBeInTheDocument();
-  });
-
-  it("should show Attachments panel with list and download when activeTab is 2", () => {
-    renderTabPanels(2);
-    expect(screen.getByRole("button", { name: /upload attachment/i })).toBeInTheDocument();
+  it("should render attachment list from API with names and download buttons", () => {
+    renderPanel();
     expect(screen.getByText("screenshot-error.png")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /download/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText("logs-debug.txt")).toBeInTheDocument();
+    expect(screen.getByText("config-backup.zip")).toBeInTheDocument();
+    const downloadButtons = screen.getAllByRole("button", { name: /download/i });
+    expect(downloadButtons).toHaveLength(mockCaseAttachments.length);
   });
 
-  it("should show Calls placeholder when activeTab is 3", () => {
-    renderTabPanels(3);
-    expect(screen.getByText("Calls will appear here.")).toBeInTheDocument();
+  it("should show uploaded-by and size for attachments", () => {
+    renderPanel();
+    expect(screen.getByText(/240 KB/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Uploaded by para-admin@wso2.com/).length).toBeGreaterThan(0);
   });
 
-  it("should show Knowledge Base placeholder when activeTab is 4", () => {
-    renderTabPanels(4);
-    expect(
-      screen.getByText("Knowledge Base articles will appear here."),
-    ).toBeInTheDocument();
+  it("should show no case selected when caseId is empty", () => {
+    renderPanel("");
+    expect(screen.getByText(/no case selected/i)).toBeInTheDocument();
   });
 });

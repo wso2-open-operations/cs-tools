@@ -16,6 +16,7 @@
 
 import { Box, Paper, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
+import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import type { CaseDetails } from "@models/responses";
 import { getStatusColor } from "@utils/casesTable";
 import { resolveColorFromTheme, getStatusIconElement } from "@utils/support";
@@ -75,6 +76,9 @@ export default function CaseDetailsContent({
     }),
     [resolvedStatusColor],
   );
+
+  const attachmentsQuery = useGetCaseAttachments(caseId);
+  const attachmentCount = attachmentsQuery.data?.totalRecords;
 
   const assignedEngineer = data?.assignedEngineer;
   const engineerInitials =
@@ -142,6 +146,7 @@ export default function CaseDetailsContent({
             value={activeTab}
             onChange={(_e: unknown, newValue: number) => setActiveTab(newValue)}
             onFocusModeToggle={() => setFocusMode((prev) => !prev)}
+            attachmentCount={attachmentCount}
           />
         </Paper>
 

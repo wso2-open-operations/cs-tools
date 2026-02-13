@@ -24,6 +24,7 @@ export interface CaseDetailsTabsProps {
   onChange: (_e: unknown, newValue: number) => void;
   focusMode?: boolean;
   onFocusModeToggle?: () => void;
+  attachmentCount?: number;
 }
 
 /**
@@ -37,6 +38,7 @@ export default function CaseDetailsTabs({
   onChange,
   focusMode = false,
   onFocusModeToggle,
+  attachmentCount,
 }: CaseDetailsTabsProps): JSX.Element {
   return (
     <Box
@@ -66,14 +68,21 @@ export default function CaseDetailsTabs({
           "& .MuiTabs-indicator": { bgcolor: "primary.main" },
         }}
       >
-        {CASE_DETAILS_TABS.map(({ label, Icon }) => (
-          <Tab
-            key={label}
-            icon={<Icon size={14} />}
-            iconPosition="start"
-            label={label}
-          />
-        ))}
+        {CASE_DETAILS_TABS.map(({ label, Icon }) => {
+          const isAttachmentsTab = label.startsWith("Attachments");
+          const tabLabel =
+            isAttachmentsTab && attachmentCount !== undefined
+              ? `Attachments (${attachmentCount})`
+              : label;
+          return (
+            <Tab
+              key={label}
+              icon={<Icon size={14} />}
+              iconPosition="start"
+              label={tabLabel}
+            />
+          );
+        })}
       </Tabs>
       {onFocusModeToggle && (
         <Button

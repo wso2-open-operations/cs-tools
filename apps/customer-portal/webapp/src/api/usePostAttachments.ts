@@ -49,43 +49,48 @@ export function usePostAttachments(): UseMutationResult<
       caseId,
       body,
     }: PostAttachmentsVariables): Promise<void> => {
-      logger.debug("[usePostAttachments] Request:", {
-        caseId,
-        name: body.name,
-        type: body.type,
-        contentLength: body.content?.length ?? 0,
-      });
+      try {
+        logger.debug("[usePostAttachments] Request:", {
+          caseId,
+          name: body.name,
+          type: body.type,
+          contentLength: body.content?.length ?? 0,
+        });
 
-      if (isMockEnabled) {
-        throw new Error(
-          "Upload attachment is not available when mock is enabled. Disable mock to upload.",
-        );
-      }
+        if (isMockEnabled) {
+          throw new Error(
+            "Upload attachment is not available when mock is enabled. Disable mock to upload.",
+          );
+        }
 
-      if (!isSignedIn || isAuthLoading) {
-        throw new Error("User must be signed in to upload an attachment");
-      }
+        if (!isSignedIn || isAuthLoading) {
+          throw new Error("User must be signed in to upload an attachment");
+        }
 
-      const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
-      if (!baseUrl) {
-        throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
-      }
+        const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
+        if (!baseUrl) {
+          throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
+        }
 
-      const idToken = await getIdToken();
-      const requestUrl = `${baseUrl}/cases/${caseId}/attachments`;
-      const response = await fetch(requestUrl, {
-        method: "POST",
-        headers: addApiHeaders(idToken),
-        body: JSON.stringify(body),
-      });
+        const idToken = await getIdToken();
+        const requestUrl = `${baseUrl}/cases/${caseId}/attachments`;
+        const response = await fetch(requestUrl, {
+          method: "POST",
+          headers: addApiHeaders(idToken),
+          body: JSON.stringify(body),
+        });
 
-      logger.debug("[usePostAttachments] Response status:", response.status);
+        logger.debug("[usePostAttachments] Response status:", response.status);
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(
-          `Error uploading attachment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-        );
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(
+            `Error uploading attachment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
+          );
+        }
+      } catch (error) {
+        logger.error("[usePostAttachments] Error:", error);
+        throw error;
       }
     },
     onSuccess: (_data, { caseId }) => {

@@ -29,8 +29,10 @@ import {
   getChatActionColor,
   formatRelativeTime,
   formatValue,
+  formatFileSize,
   deriveFilterLabels,
   getStatusIcon,
+  getAttachmentFileCategory,
   resolveColorFromTheme,
 } from "@utils/support";
 import { createTheme } from "@wso2/oxygen-ui";
@@ -169,6 +171,56 @@ describe("support utils", () => {
         label: "Deployment",
         allLabel: "All Deployments",
       });
+    });
+  });
+
+  describe("getAttachmentFileCategory", () => {
+    it("should return image for png, jpg, gif, webp, svg", () => {
+      expect(getAttachmentFileCategory("photo.png", "")).toBe("image");
+      expect(getAttachmentFileCategory("photo.jpg", "")).toBe("image");
+      expect(getAttachmentFileCategory("photo.jpeg", "")).toBe("image");
+      expect(getAttachmentFileCategory("photo.gif", "")).toBe("image");
+      expect(getAttachmentFileCategory("photo.webp", "")).toBe("image");
+      expect(getAttachmentFileCategory("photo.svg", "")).toBe("image");
+      expect(getAttachmentFileCategory("x", "image/png")).toBe("image");
+    });
+
+    it("should return pdf for pdf files", () => {
+      expect(getAttachmentFileCategory("doc.pdf", "")).toBe("pdf");
+      expect(getAttachmentFileCategory("x", "application/pdf")).toBe("pdf");
+    });
+
+    it("should return archive for zip, rar, 7z, tar, gz", () => {
+      expect(getAttachmentFileCategory("data.zip", "")).toBe("archive");
+      expect(getAttachmentFileCategory("data.rar", "")).toBe("archive");
+      expect(getAttachmentFileCategory("data.7z", "")).toBe("archive");
+      expect(getAttachmentFileCategory("data.tar", "")).toBe("archive");
+      expect(getAttachmentFileCategory("data.gz", "")).toBe("archive");
+      expect(getAttachmentFileCategory("x", "application/zip")).toBe("archive");
+    });
+
+    it("should return text for log, txt and text/*", () => {
+      expect(getAttachmentFileCategory("app.log", "")).toBe("text");
+      expect(getAttachmentFileCategory("readme.txt", "")).toBe("text");
+      expect(getAttachmentFileCategory("x", "text/plain")).toBe("text");
+    });
+
+    it("should return file for unknown types", () => {
+      expect(getAttachmentFileCategory("data.xml", "")).toBe("file");
+    });
+  });
+
+  describe("formatFileSize", () => {
+    it("should format bytes to KB and MB", () => {
+      expect(formatFileSize(500)).toBe("500 B");
+      expect(formatFileSize(1024)).toBe("1 KB");
+      expect(formatFileSize(245760)).toBe("240 KB");
+      expect(formatFileSize(1024 * 1024)).toBe("1 MB");
+    });
+
+    it("should return -- for null or invalid", () => {
+      expect(formatFileSize(null)).toBe("--");
+      expect(formatFileSize(undefined)).toBe("--");
     });
   });
 

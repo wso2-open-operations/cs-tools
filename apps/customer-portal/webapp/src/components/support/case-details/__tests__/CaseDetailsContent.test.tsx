@@ -43,6 +43,7 @@ describe("CaseDetailsContent", () => {
           data={undefined}
           isLoading={true}
           isError={false}
+          caseId="case-001"
           onBack={onBack}
         />
       </ThemeProvider>,
@@ -61,6 +62,7 @@ describe("CaseDetailsContent", () => {
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
+          caseId={mockCaseDetails.id}
           onBack={onBack}
         />
       </ThemeProvider>,
@@ -85,6 +87,7 @@ describe("CaseDetailsContent", () => {
           data={partialData}
           isLoading={false}
           isError={false}
+          caseId={mockCaseDetails.id}
           onBack={onBack}
         />
       </ThemeProvider>,
@@ -102,6 +105,7 @@ describe("CaseDetailsContent", () => {
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
+          caseId={mockCaseDetails.id}
           onBack={onBack}
         />
       </ThemeProvider>,
@@ -118,6 +122,7 @@ describe("CaseDetailsContent", () => {
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
+          caseId={mockCaseDetails.id}
           onBack={onBack}
         />
       </ThemeProvider>,
@@ -145,6 +150,7 @@ describe("CaseDetailsContent", () => {
           data={mockCaseDetails}
           isLoading={false}
           isError={false}
+          caseId={mockCaseDetails.id}
           onBack={onBack}
         />
       </ThemeProvider>,
