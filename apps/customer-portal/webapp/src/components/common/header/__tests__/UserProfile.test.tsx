@@ -34,7 +34,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
   },
 }));
 
-// Mock icons
+// Mock icons (include TriangleAlert for ErrorIndicator when mock path differs)
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   User: () => <svg data-testid="user-icon" />,
   Shield: () => <svg data-testid="shield-icon" />,
@@ -43,10 +43,11 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Server: () => <svg data-testid="server-icon" />,
   CircleAlert: () => <svg data-testid="circle-alert-icon" />,
   Rocket: () => <svg data-testid="rocket-icon" />,
+  TriangleAlert: () => <svg data-testid="triangle-alert-icon" />,
 }));
 
-// Mock ErrorIndicator
-vi.mock("@/components/common/errorIndicator/ErrorIndicator", () => ({
+// Mock ErrorIndicator (path must match import: @components/common/error-indicator)
+vi.mock("@components/common/error-indicator/ErrorIndicator", () => ({
   default: ({ entityName }: any) => (
     <div data-testid="error-indicator">Error: {entityName}</div>
   ),
