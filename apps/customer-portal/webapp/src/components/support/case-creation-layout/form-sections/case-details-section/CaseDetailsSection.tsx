@@ -223,16 +223,21 @@ export function CaseDetailsSection({
                 <MenuItem value="" disabled>
                   Select Issue Type...
                 </MenuItem>
-                {issueTypes.map((type: unknown) => {
-                  const label =
-                    typeof type === "string" ? type : (type as { label?: string }).label;
-                  const displayLabel = label ?? "--";
-                  return (
-                    <MenuItem key={String(displayLabel)} value={String(displayLabel)}>
-                      {displayLabel}
-                    </MenuItem>
-                  );
-                })}
+                {issueTypes
+                  .filter((type: unknown) => {
+                    const label =
+                      typeof type === "string" ? type : (type as { label?: string }).label;
+                    return label != null && String(label).trim() !== "";
+                  })
+                  .map((type: unknown) => {
+                    const label =
+                      typeof type === "string" ? type : (type as { label?: string }).label as string;
+                    return (
+                      <MenuItem key={label} value={label}>
+                        {label}
+                      </MenuItem>
+                    );
+                  })}
               </Select>
             </FormControl>
           </Grid>
