@@ -14,10 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ReactElement } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import ProjectCard from "@components/project-hub/project-card/ProjectCard";
 import { useGetProjectStat } from "@api/useGetProjectStat";
+import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -91,6 +93,9 @@ vi.mock("@/models/mockFunctions", () => ({
   getMockStatus: vi.fn(() => "All Good"),
 }));
 
+const renderWithLoader = (ui: ReactElement) =>
+  render(<LoaderProvider>{ui}</LoaderProvider>);
+
 describe("ProjectCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,7 +110,7 @@ describe("ProjectCard", () => {
   };
 
   it("should render all sub-components with correct props", () => {
-    render(<ProjectCard {...defaultProps} />);
+    renderWithLoader(<ProjectCard {...defaultProps} />);
 
     expect(screen.getByTestId("badges")).toBeInTheDocument();
     expect(screen.getByTestId("info")).toBeInTheDocument();
@@ -118,7 +123,7 @@ describe("ProjectCard", () => {
   });
 
   it("should navigate to dashboard on click", () => {
-    render(<ProjectCard {...defaultProps} />);
+    renderWithLoader(<ProjectCard {...defaultProps} />);
 
     fireEvent.click(screen.getByTestId("card-button"));
 
@@ -127,7 +132,9 @@ describe("ProjectCard", () => {
 
   it("should call onViewDashboard if provided", () => {
     const onViewDashboard = vi.fn();
-    render(<ProjectCard {...defaultProps} onViewDashboard={onViewDashboard} />);
+    renderWithLoader(
+      <ProjectCard {...defaultProps} onViewDashboard={onViewDashboard} />,
+    );
 
     fireEvent.click(screen.getByTestId("card-button"));
 
@@ -142,7 +149,7 @@ describe("ProjectCard", () => {
       isError: true,
     } as any);
 
-    render(<ProjectCard {...defaultProps} />);
+    renderWithLoader(<ProjectCard {...defaultProps} />);
 
     expect(screen.getByTestId("badges")).toHaveTextContent("Error");
     expect(screen.getByTestId("stats")).toHaveTextContent("Error");
@@ -155,7 +162,7 @@ describe("ProjectCard", () => {
       isError: false,
     } as any);
 
-    render(<ProjectCard {...defaultProps} />);
+    renderWithLoader(<ProjectCard {...defaultProps} />);
 
     expect(screen.getByTestId("badges")).toHaveTextContent("Loading");
     expect(screen.getByTestId("stats")).toHaveTextContent("Loading");

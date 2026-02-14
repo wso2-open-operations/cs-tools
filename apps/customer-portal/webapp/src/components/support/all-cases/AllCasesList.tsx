@@ -77,7 +77,7 @@ export default function AllCasesList({
         return (
           <Form.CardButton
             key={caseItem.id}
-            onClick={onCaseClick ? () => onCaseClick(caseItem) : undefined}
+            onClick={() => onCaseClick?.(caseItem)}
             sx={{
               p: 3,
               display: "flex",

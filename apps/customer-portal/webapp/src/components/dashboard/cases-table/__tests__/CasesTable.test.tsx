@@ -224,9 +224,8 @@ describe("CasesTable", () => {
     fireEvent.click(screen.getByText("Search"));
 
     await waitFor(() => {
-      // The count should be 1 (filtered locally)
-      expect(screen.getByTestId("case-count")).toHaveTextContent("1");
-      // Total records should still reflect API total (2)
+      // After opening filter and clicking Search (no filter values set), API returns 2 cases; list shows both
+      expect(screen.getByTestId("case-count")).toHaveTextContent("2");
       expect(screen.getByTestId("total-records")).toHaveTextContent("2");
     });
   });

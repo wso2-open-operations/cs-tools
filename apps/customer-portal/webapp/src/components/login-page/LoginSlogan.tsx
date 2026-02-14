@@ -30,19 +30,22 @@ export default function LoginSlogan(): JSX.Element {
       </Typography>
 
       <Stack sx={{ gap: 3 }}>
-        {sloganListItems.map((item) => (
-          <Stack
-            key={item.title}
-            direction="row"
-            alignItems="center"
-            sx={{ gap: 2 }}
-          >
-            <div style={{ display: "flex", alignItems: "center" }}>
-              {item.icon}
-            </div>
-            <Typography sx={{ fontSize: "1rem" }}>{item.title}</Typography>
-          </Stack>
-        ))}
+        {sloganListItems.map((item) => {
+          const ItemIcon = item.icon;
+          return (
+            <Stack
+              key={item.title}
+              direction="row"
+              alignItems="center"
+              sx={{ gap: 2 }}
+            >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <ItemIcon className={item.iconClassName} />
+              </div>
+              <Typography sx={{ fontSize: "1rem" }}>{item.title}</Typography>
+            </Stack>
+          );
+        })}
       </Stack>
     </>
   );

@@ -54,13 +54,13 @@ vi.mock("@/constants/projectDetailsConstants", () => ({
     {
       label: "Active Chats",
       key: "activeChats",
-      icon: null,
+      icon: () => null,
       iconColor: "primary",
     },
     {
       label: "Open Cases",
       key: "openCases",
-      icon: null,
+      icon: () => null,
       iconColor: "success",
     },
   ],

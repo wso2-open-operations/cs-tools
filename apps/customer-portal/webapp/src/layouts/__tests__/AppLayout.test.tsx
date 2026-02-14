@@ -71,6 +71,22 @@ vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
   };
 });
 
+// Mock @asgardeo/react to avoid ESM buffer import from @asgardeo/browser
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({
+    getIdToken: vi.fn(),
+    signOut: vi.fn(),
+    isSignedIn: true,
+    isLoading: false,
+    state: { isAuthenticated: true },
+  }),
+}));
+
+// Mock BackgroundTokenRefresh so it does not require LoggerProvider
+vi.mock("@providers/BackgroundTokenRefresh", () => ({
+  BackgroundTokenRefresh: () => null,
+}));
+
 // Mock useLoader
 const mockUseLoader = {
   isVisible: false,

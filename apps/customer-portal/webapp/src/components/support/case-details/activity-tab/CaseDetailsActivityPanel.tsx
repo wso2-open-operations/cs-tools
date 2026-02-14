@@ -14,51 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Avatar,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Divider,
-  IconButton,
-  Paper,
-  Skeleton,
-  Stack,
-  TextField,
-  Typography,
-  alpha,
-  useTheme,
-} from "@wso2/oxygen-ui";
-import { ChevronDown, Send } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type JSX } from "react";
+import { Box, Skeleton, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import { useMemo, type JSX } from "react";
 import useGetCaseComments from "@api/useGetCaseComments";
-import { usePostComment } from "@api/usePostComment";
 import useGetUserDetails from "@api/useGetUserDetails";
 import type { CaseComment } from "@models/responses";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
-import {
-  stripCodeWrapper,
-  stripCustomerCommentAddedLabel,
-  replaceInlineImageSources,
-  formatCommentDate,
-} from "@utils/support";
+import { formatCommentDate } from "@utils/support";
+import ActivityCommentInput from "@case-details-activity/ActivityCommentInput";
+import CommentBubble from "@case-details-activity/CommentBubble";
+import { hasDisplayableContent } from "@utils/support";
 
-/**
- * Returns true if the comment has content worth displaying (after stripping code wrapper and
- * "Customer comment added" label). Used to hide backend entries that render as empty bubbles.
- *
- * @param comment - Case comment from API.
- * @returns {boolean} True when comment has non-empty displayable content.
- */
-function hasDisplayableContent(comment: CaseComment): boolean {
-  const raw = comment.content ?? "";
-  const stripped = stripCodeWrapper(raw);
-  const withoutLabel = stripCustomerCommentAddedLabel(stripped);
-  const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
-  return textOnly.length > 0;
-}
-
+// TODO : DUE TO URGENCY THIS COMPONENT BREAKS THE BEST PRACTICES , NEED FULL REFACTOR
 export interface CaseDetailsActivityPanelProps {
   projectId: string;
   caseId: string;
@@ -161,7 +128,35 @@ export default function CaseDetailsActivityPanel({
         minHeight: "100%",
       }}
     >
-      <Box
+      <ActivityContent
+        commentsToShow={commentsToShow}
+        caseCreatedOn={caseCreatedOn}
+        currentUserEmail={currentUserEmail}
+        primaryBg={primaryBg}
+        userDetails={userDetails}
+      />
+      <ActivityCommentInput caseId={caseId} />
+    </Box>
+  );
+}
+
+interface ActivityContentProps {
+  commentsToShow: CaseComment[];
+  caseCreatedOn?: string | null;
+  currentUserEmail: string;
+  primaryBg: string;
+  userDetails?: { email?: string; firstName?: string; lastName?: string } | null;
+}
+
+function ActivityContent({
+  commentsToShow,
+  caseCreatedOn,
+  currentUserEmail,
+  primaryBg,
+  userDetails,
+}: ActivityContentProps): JSX.Element {
+  return (
+    <Box
         sx={{
           p: 2,
           flex: 1,
@@ -229,303 +224,11 @@ export default function CaseDetailsActivityPanel({
                   comment.createdBy?.toLowerCase() === currentUserEmail
                 }
                 primaryBg={primaryBg}
+                userDetails={userDetails}
               />
             ))
           )}
         </Stack>
       </Box>
-      <ActivityCommentInput caseId={caseId} />
-    </Box>
-  );
-}
-
-interface ActivityCommentInputProps {
-  caseId: string;
-}
-
-/**
- * Fixed (non-scrollable) input row with text field and send button.
- * Posts comment via usePostComment; on success invalidates and refetches comments.
- *
- * @param {ActivityCommentInputProps} props - caseId for POST.
- * @returns {JSX.Element} The comment input component.
- */
-function ActivityCommentInput({ caseId }: ActivityCommentInputProps): JSX.Element {
-  const [value, setValue] = useState("");
-  const postComment = usePostComment();
-
-  const handleSend = () => {
-    if (!value.trim()) return;
-    const content = value.trim();
-    postComment.mutate(
-      { caseId, body: { content } },
-      {
-        onSuccess: () => setValue(""),
-      },
-    );
-  };
-
-  return (
-    <Box
-      sx={{
-        display: "flex",
-        gap: 1,
-        px: 2,
-        py: 1.5,
-        flexShrink: 0,
-      }}
-    >
-      <TextField
-        fullWidth
-        placeholder="Add a comment..."
-        size="small"
-        value={value}
-        disabled={postComment.isPending}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-          }
-        }}
-      />
-      <IconButton
-        disabled={!value.trim() || postComment.isPending}
-        onClick={handleSend}
-        color="warning"
-        aria-label="Send comment"
-      >
-        {postComment.isPending ? (
-          <CircularProgress color="inherit" size={18} />
-        ) : (
-          <Send size={18} />
-        )}
-      </IconButton>
-    </Box>
-  );
-}
-
-/** Line count threshold for showing "Show more" (approximately 4 lines). */
-const COLLAPSE_CHAR_THRESHOLD = 200;
-
-interface ChatMessageCardProps {
-  htmlContent: string;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-  isCurrentUser: boolean;
-  primaryBg: string;
-}
-
-/**
- * Card-style chat message with collapsible long content and "Show more" button.
- * Uses Paper without border or border radius.
- *
- * @param {ChatMessageCardProps} props - Content, expand state, and styling.
- * @returns {JSX.Element} The chat message card.
- */
-function ChatMessageCard({
-  htmlContent,
-  isExpanded,
-  onToggleExpand,
-  isCurrentUser,
-  primaryBg,
-}: ChatMessageCardProps): JSX.Element {
-  const plainLength = htmlContent.replace(/<[^>]+>/g, "").length;
-  const showExpandButton = plainLength > COLLAPSE_CHAR_THRESHOLD;
-
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 1.5,
-        p: 1.5,
-        maxWidth: "100%",
-        bgcolor: isCurrentUser ? primaryBg : "background.paper",
-        border: "none",
-        borderRadius: 0,
-        boxShadow: "none",
-      }}
-    >
-      <Box
-        sx={{
-          fontSize: "0.75rem",
-          fontFamily: "monospace",
-          "& p": {
-            margin: "0 0 0.5em 0",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          },
-          "& p:last-child": { marginBottom: 0 },
-          "& img": {
-            display: "block",
-            maxWidth: "100%",
-            maxHeight: 320,
-            height: "auto",
-            objectFit: "contain",
-            mt: 0.5,
-            mb: 0.5,
-          },
-          "& br": { display: "block", content: '""', marginTop: "0.25em" },
-          ...(!isExpanded &&
-            showExpandButton && {
-              display: "-webkit-box",
-              WebkitLineClamp: 4,
-              WebkitBoxOrient: "vertical" as const,
-              overflow: "hidden",
-            }),
-        }}
-        dangerouslySetInnerHTML={{ __html: htmlContent }}
-      />
-      {showExpandButton && (
-        <>
-          <Divider sx={{ my: 0.25 }} />
-          <Button
-            size="small"
-            variant="text"
-            onClick={onToggleExpand}
-            endIcon={
-              <ChevronDown
-                size={14}
-                style={{
-                  transform: isExpanded ? "rotate(180deg)" : "none",
-                  transition: "transform 0.2s",
-                }}
-              />
-            }
-            sx={{
-              alignSelf: "stretch",
-              justifyContent: "center",
-              fontSize: "0.75rem",
-              color: "text.secondary",
-              "&:hover": {
-                color: "text.primary",
-                bgcolor: "action.hover",
-              },
-            }}
-          >
-            {isExpanded ? "Show less" : "Show more"}
-          </Button>
-        </>
-      )}
-    </Paper>
-  );
-}
-
-interface CommentBubbleProps {
-  comment: CaseComment;
-  isCurrentUser: boolean;
-  primaryBg: string;
-}
-
-function CommentBubble({
-  comment,
-  isCurrentUser,
-  primaryBg,
-}: CommentBubbleProps): JSX.Element {
-  const theme = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const rawContent = comment.content ?? "";
-  const stripped = stripCodeWrapper(rawContent);
-  const withoutLabel = stripCustomerCommentAddedLabel(stripped);
-  const htmlContent = replaceInlineImageSources(
-    withoutLabel,
-    comment.inlineAttachments,
-  );
-  const displayName = isCurrentUser ? null : (comment.createdBy || "Unknown");
-  const initials = useMemo(() => {
-    if (isCurrentUser) return "YO";
-    const email = comment.createdBy ?? "";
-    const part = email.split("@")[0] ?? "";
-    return (
-      part
-        .replace(/[._-]/g, " ")
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((s) => s[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2) || "?"
-    );
-  }, [isCurrentUser, comment.createdBy]);
-
-  const isRight = isCurrentUser;
-
-  return (
-    <Stack
-      direction="row"
-      spacing={1.5}
-      alignItems="flex-start"
-      sx={{
-        flexDirection: isRight ? "row-reverse" : "row",
-      }}
-    >
-      <Avatar
-        sx={{
-          width: 32,
-          height: 32,
-          fontSize: "0.75rem",
-          flexShrink: 0,
-          bgcolor: isCurrentUser
-            ? primaryBg
-            : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
-          color: isCurrentUser
-            ? theme.palette.primary.main
-            : (theme.palette.info?.main ?? "#0288d1"),
-        }}
-      >
-        {initials}
-      </Avatar>
-      <Stack
-        spacing={1}
-        sx={{
-          flex: 1,
-          minWidth: 0,
-          alignItems: isRight ? "flex-end" : "flex-start",
-        }}
-      >
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="center"
-          flexWrap="wrap"
-          sx={{
-            flexDirection: isRight ? "row-reverse" : "row",
-            minHeight: 32,
-          }}
-        >
-          {displayName && (
-            <Typography variant="body2" color="text.primary" fontWeight={500}>
-              {displayName}
-            </Typography>
-          )}
-          <Typography variant="caption" color="text.secondary">
-            {formatCommentDate(comment.createdOn)}
-          </Typography>
-          {!isCurrentUser && (
-            <Chip
-              label="Support Engineer"
-              size="small"
-              variant="outlined"
-              sx={{
-                height: 20,
-                fontSize: "0.75rem",
-                borderColor: "transparent",
-                bgcolor: "action.hover",
-              }}
-            />
-          )}
-        </Stack>
-        <ChatMessageCard
-          htmlContent={htmlContent}
-          isExpanded={expanded}
-          onToggleExpand={() => setExpanded((prev) => !prev)}
-          isCurrentUser={isCurrentUser}
-          primaryBg={primaryBg}
-        />
-      </Stack>
-    </Stack>
   );
 }

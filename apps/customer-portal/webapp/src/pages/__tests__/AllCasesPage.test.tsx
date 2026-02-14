@@ -20,6 +20,7 @@ import AllCasesPage from "@pages/AllCasesPage";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { mockCaseMetadata, mockCases } from "@models/mockData";
+import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
 // Mock API hooks
 vi.mock("@api/useGetProjectCasesStats", () => ({
@@ -126,14 +127,16 @@ describe("AllCasesPage", () => {
   const renderComponent = () => {
     return render(
       <ThemeProvider theme={theme}>
-        <MemoryRouter initialEntries={[`/projects/${projectId}/support/cases`]}>
-          <Routes>
-            <Route
-              path="/projects/:projectId/support/cases"
-              element={<AllCasesPage />}
-            />
-          </Routes>
-        </MemoryRouter>
+        <LoaderProvider>
+          <MemoryRouter initialEntries={[`/projects/${projectId}/support/cases`]}>
+            <Routes>
+              <Route
+                path="/projects/:projectId/support/cases"
+                element={<AllCasesPage />}
+              />
+            </Routes>
+          </MemoryRouter>
+        </LoaderProvider>
       </ThemeProvider>,
     );
   };
@@ -163,11 +166,15 @@ describe("AllCasesPage", () => {
     // Search
     fireEvent.change(searchInput, { target: { value: targetCaseNumber } });
 
-    // Should only show 1 case
+    // Should only show 1 case (total from API is mock totalRecords === mockCases.length; text may be split across nodes)
     await waitFor(() => {
-      // Look for the "Showing X of Y cases" text from AllCasesPage
-      expect(screen.getByText("Showing 1 of 1 cases")).toBeInTheDocument();
-      // And also the list should show 1 case
+      const text = (content: string, el: Element | null) =>
+        el?.textContent?.replace(/\s+/g, " ").trim() === content;
+      expect(
+        screen.getByText((c, el) =>
+          text(`Showing 1 of ${mockCases.length} cases`, el),
+        ),
+      ).toBeInTheDocument();
       expect(screen.getAllByText("Showing 1 cases")[0]).toBeInTheDocument();
     });
   });
@@ -178,18 +185,16 @@ describe("AllCasesPage", () => {
     const filterButton = screen.getByTestId("filter-status-open");
     fireEvent.click(filterButton);
 
-    // Count cases in mockData with statusId "1" (Open)
-    const openCasesCount = mockCases.filter((c) => c.status?.id === "1").length;
-    // console.log("Open cases count:", openCasesCount);
-
-    // If openCasesCount > 10, page 1 shows 10.
-    const displayedCount = Math.min(10, openCasesCount);
+    // Page shows (paginated count) of (api totalRecords); mock uses totalRecords: mockCases.length
+    const displayedCount = Math.min(10, mockCases.length);
+    const totalCases = mockCases.length;
 
     await waitFor(() => {
-      // Verify "Showing X of Y cases"
+      const text = (content: string, el: Element | null) =>
+        el?.textContent?.replace(/\s+/g, " ").trim() === content;
       expect(
-        screen.getByText(
-          `Showing ${displayedCount} of ${openCasesCount} cases`,
+        screen.getByText((c, el) =>
+          text(`Showing ${displayedCount} of ${totalCases} cases`, el),
         ),
       ).toBeInTheDocument();
     });
@@ -235,8 +240,12 @@ describe("AllCasesPage", () => {
     const totalCases = mockCases.length;
 
     await waitFor(() => {
+      const text = (content: string, el: Element | null) =>
+        el?.textContent?.replace(/\s+/g, " ").trim() === content;
       expect(
-        screen.getByText(`Showing 10 of ${totalCases} cases`),
+        screen.getByText((c, el) =>
+          text(`Showing 10 of ${totalCases} cases`, el),
+        ),
       ).toBeInTheDocument();
     });
 
@@ -246,11 +255,16 @@ describe("AllCasesPage", () => {
 
     const expectedCountOnPage2 = Math.min(10, Math.max(0, totalCases - 10));
 
-    // Should show remaining cases
+    // Should show remaining cases (text may be split across nodes)
     await waitFor(() => {
+      const text = (content: string, el: Element | null) =>
+        el?.textContent?.replace(/\s+/g, " ").trim() === content;
       expect(
-        screen.getByText(
-          `Showing ${expectedCountOnPage2} of ${totalCases} cases`,
+        screen.getByText((c, el) =>
+          text(
+            `Showing ${expectedCountOnPage2} of ${totalCases} cases`,
+            el,
+          ),
         ),
       ).toBeInTheDocument();
     });

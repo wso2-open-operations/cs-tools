@@ -22,7 +22,9 @@ import {
   MessageCircle,
 } from "@wso2/oxygen-ui-icons-react";
 import { ChatAction, ChatStatus } from "@constants/supportConstants";
+import type { CaseComment } from "@models/responses";
 import type { Theme } from "@wso2/oxygen-ui";
+import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
 
 export type ChatActionState =
@@ -44,6 +46,25 @@ export function formatValue(value: string | number | null | undefined): string {
 }
 
 /**
+ * Derives initials from a name string (e.g. "John Doe" -> "JD").
+ *
+ * @param name - Full name string.
+ * @returns {string} Up to 2 uppercase initials, or "--" if empty/invalid.
+ */
+export function getInitials(name: string | null | undefined): string {
+  if (!name || typeof name !== "string") return "--";
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  return initials || "--";
+}
+
+/**
  * Formats SLA response time from milliseconds (string or number) to human-readable (e.g. "4 hours", "2 days").
  *
  * @param ms - Milliseconds as string or number from API.
@@ -54,10 +75,20 @@ export function formatSlaResponseTime(
 ): string {
   const n = typeof ms === "string" ? parseInt(ms, 10) : ms;
   if (n == null || Number.isNaN(n) || n < 0) return "--";
-  if (n < 60_000) return `${Math.round(n / 1000)} seconds`;
-  if (n < 3600_000) return `${Math.round(n / 60_000)} minutes`;
-  if (n < 86400_000) return `${Math.round(n / 3600_000)} hours`;
-  return `${Math.round(n / 86400_000)} days`;
+  if (n < 60_000) {
+    const seconds = Math.floor(n / 1000);
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  if (n < 3600_000) {
+    const minutes = Math.floor(n / 60_000);
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  if (n < 86400_000) {
+    const hours = Math.floor(n / 3600_000);
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  const days = Math.floor(n / 86400_000);
+  return `${days} day${days === 1 ? "" : "s"}`;
 }
 
 /**
@@ -130,9 +161,10 @@ export function resolveColorFromTheme(path: string, theme: Theme): string {
   return (
     (path
       .split(".")
-      .reduce(
-        (acc: any, part: string) => acc?.[part],
-        theme.palette,
+      .reduce<unknown>(
+        (acc, part) =>
+          (acc as Record<string, unknown> | null | undefined)?.[part],
+        theme.palette as unknown,
       ) as string) || path
   );
 }
@@ -200,7 +232,7 @@ export function deriveFilterLabels(id: string): {
   return { allLabel, label };
 }
 
-/** Attachment file category for icon selection. */
+/** Attachment file category for icon selection. TODO: Replace with enum in a later PR. */
 export type AttachmentFileCategory =
   | "image"
   | "pdf"
@@ -303,6 +335,21 @@ export function stripCustomerCommentAddedLabel(html: string): string {
     .trim();
 }
 
+/**
+ * Returns true if the comment has content worth displaying (after stripping code wrapper and
+ * "Customer comment added" label). Used to hide backend entries that render as empty bubbles.
+ *
+ * @param comment - Case comment from API.
+ * @returns {boolean} True when comment has non-empty displayable content.
+ */
+export function hasDisplayableContent(comment: CaseComment): boolean {
+  const raw = comment.content ?? "";
+  const stripped = stripCodeWrapper(raw);
+  const withoutLabel = stripCustomerCommentAddedLabel(stripped);
+  const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
+  return textOnly.length > 0;
+}
+
 /** Inline attachment item for image src replacement (supports API id/downloadUrl or legacy sys_id/url). */
 export interface InlineAttachment {
   id?: string;
@@ -314,46 +361,67 @@ export interface InlineAttachment {
 /**
  * Replaces inline image sources in HTML (e.g. /sys_id.iix or /id.iix) with URLs from attachments.
  * Matches by id or sys_id; uses downloadUrl or url for the replacement.
+ * Sanitizes the result with DOMPurify to prevent XSS.
  *
  * @param html - HTML string with img tags.
  * @param inlineAttachments - Optional list of attachments (id/downloadUrl or sys_id/url).
- * @returns {string} HTML with img src replaced where matching.
+ * @returns {string} Sanitized HTML with img src replaced where matching.
  */
 export function replaceInlineImageSources(
   html: string,
   inlineAttachments?: InlineAttachment[] | null,
 ): string {
   if (!html || typeof html !== "string") return "";
-  if (!inlineAttachments?.length) return html;
+  if (!inlineAttachments?.length) {
+    return DOMPurify.sanitize(html);
+  }
 
-  return html.replace(
-    /<img([^>]*)\ssrc="([^"]+)"([^>]*)>/gi,
-    (_match, before, src, after) => {
+  const replaced = html.replace(
+    /<img([^>]*?)\s+src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))([^>]*)>/gi,
+    (_match, before, doubleSrc, singleSrc, bareSrc, after) => {
+      const src = (doubleSrc ?? singleSrc ?? bareSrc ?? "") as string;
       const refId = src.replace(/^\//, "").replace(/\.iix$/i, "").trim();
       const attachment = inlineAttachments.find(
         (a) =>
           a.id === refId ||
           a.sys_id === refId ||
-          src.includes(a.id ?? "") ||
-          src.includes(a.sys_id ?? ""),
+          (a?.id && src.includes(a.id)) ||
+          (a?.sys_id && src.includes(a.sys_id)),
       );
       const newSrc =
         attachment?.downloadUrl ?? attachment?.url ?? src;
-      return `<img${before} src="${newSrc}"${after}>`;
+      const quote = doubleSrc !== undefined ? '"' : singleSrc !== undefined ? "'" : '"';
+      return `<img${before} src=${quote}${newSrc}${quote}${after}>`;
     },
   );
+  return DOMPurify.sanitize(replaced);
+}
+
+/**
+ * Normalizes ServiceNow-style timestamp "YYYY-MM-DD HH:MM:SS" to ISO UTC for parsing.
+ *
+ * @param dateStr - Raw date string (ISO, ServiceNow, or parseable).
+ * @returns {string} Normalized string for Date constructor.
+ */
+function normalizeCommentDateString(dateStr: string): string {
+  const trimmed = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed.replace(" ", "T") + "Z";
+  }
+  return trimmed;
 }
 
 /**
  * Formats a comment date string for display (e.g. "Feb 13, 2026 3:45 PM").
  *
- * @param date - Date string from API.
+ * @param date - Date string from API (ISO or ServiceNow "YYYY-MM-DD HH:MM:SS").
  * @returns {string} Formatted date string.
  */
 export function formatCommentDate(date: string | null | undefined): string {
   if (!date) return "--";
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return "--";
+  const normalized = normalizeCommentDateString(date);
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return "--";
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",

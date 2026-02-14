@@ -123,9 +123,10 @@ export function htmlToMarkdown(html: string): string {
  */
 export function markdownToHtml(md: string): string {
   // 1. Extract and protect fenced code blocks before general escaping
+  // Use {{}} placeholders so the emphasis regex (^|\W)_(.+?)_(?=\W|$) does not match them
   const fencedCodeBlocks: string[] = [];
   let html = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, _lang, code) => {
-    const id = `__BT_FENCED_CODE_PLACEHOLDER_${fencedCodeBlocks.length}__`;
+    const id = `{{BT_FENCED_${fencedCodeBlocks.length}}}`;
     fencedCodeBlocks.push(`<pre><code>${escapeHtml(code)}</code></pre>`);
     return id;
   });
@@ -136,7 +137,7 @@ export function markdownToHtml(md: string): string {
   // 3. Protect inline code spans from formatting rules (now safely escaped)
   const inlinePlaceholders: string[] = [];
   html = html.replace(/`([^`]+)`/g, (_m, code) => {
-    const id = `__BT_INLINE_CODE_PLACEHOLDER_${inlinePlaceholders.length}__`;
+    const id = `{{BT_INLINE_${inlinePlaceholders.length}}}`;
     inlinePlaceholders.push(`<code>${code}</code>`);
     return id;
   });
@@ -160,17 +161,17 @@ export function markdownToHtml(md: string): string {
 
   // 4. Restore code spans
   inlinePlaceholders.forEach((content, i) => {
-    html = html.replace(`__BT_INLINE_CODE_PLACEHOLDER_${i}__`, content);
+    html = html.replace(`{{BT_INLINE_${i}}}`, content);
   });
 
   fencedCodeBlocks.forEach((content, i) => {
-    html = html.replace(`__BT_FENCED_CODE_PLACEHOLDER_${i}__`, content);
+    html = html.replace(`{{BT_FENCED_${i}}}`, content);
   });
 
   // Protect code blocks before splitting by blank lines
   const placeholders: string[] = [];
   html = html.replace(/<pre>[\s\S]*?<\/pre>/g, (match) => {
-    const id = `__BT_CODE_BLOCK_PLACEHOLDER_${placeholders.length}__`;
+    const id = `{{BT_CODE_BLOCK_${placeholders.length}}}`;
     placeholders.push(match);
     return id;
   });
@@ -204,7 +205,7 @@ export function markdownToHtml(md: string): string {
         t.startsWith("<h") ||
         t.startsWith("<ul") ||
         t.startsWith("<ol") ||
-        t.startsWith("__BT_CODE_BLOCK_PLACEHOLDER_")
+        t.startsWith("{{BT_CODE_BLOCK_")
       ) {
         return t;
       }
@@ -214,7 +215,7 @@ export function markdownToHtml(md: string): string {
 
   // Restore code blocks
   placeholders.forEach((content, i) => {
-    result = result.replace(`__BT_CODE_BLOCK_PLACEHOLDER_${i}__`, content);
+    result = result.replace(`{{BT_CODE_BLOCK_${i}}}`, content);
   });
 
   return result || "";

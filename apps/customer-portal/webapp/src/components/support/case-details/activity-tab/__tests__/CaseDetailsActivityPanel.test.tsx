@@ -18,6 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import {
   mockCaseComments,
   mockUserDetails,
@@ -53,6 +54,13 @@ vi.mock("@api/usePostComment", () => ({
   })),
 }));
 
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: vi.fn(() => ({
+    isSignedIn: true,
+    isLoading: false,
+  })),
+}));
+
 function renderPanel(props: {
   projectId?: string;
   caseId?: string;
@@ -60,11 +68,13 @@ function renderPanel(props: {
 } = {}) {
   return render(
     <ThemeProvider theme={createTheme()}>
-      <CaseDetailsActivityPanel
-        projectId={props.projectId ?? "project-001"}
-        caseId={props.caseId ?? "case-001"}
-        caseCreatedOn={props.caseCreatedOn}
-      />
+      <ErrorBannerProvider>
+        <CaseDetailsActivityPanel
+          projectId={props.projectId ?? "project-001"}
+          caseId={props.caseId ?? "case-001"}
+          caseCreatedOn={props.caseCreatedOn}
+        />
+      </ErrorBannerProvider>
     </ThemeProvider>,
   );
 }

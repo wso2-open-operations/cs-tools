@@ -43,7 +43,7 @@ describe("ContactRow", () => {
   const mockContact: Contact = {
     role: "Test Role",
     email: "test@example.com",
-    icon: <User />,
+    icon: User,
     bgColor: "#123456",
   };
 

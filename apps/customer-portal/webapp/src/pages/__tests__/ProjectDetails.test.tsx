@@ -14,9 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ReactElement } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectDetails from "@pages/ProjectDetails";
+import { MockConfigProvider } from "@providers/MockConfigProvider";
 
 // Mock hooks
 const mockUseLogger = {
@@ -65,6 +68,11 @@ vi.mock("@api/useGetProjectStat", () => ({
   useGetProjectStat: () => mockUseGetProjectStat(),
 }));
 
+const mockUseGetProjectTimeTrackingStat = vi.fn();
+vi.mock("@api/useGetProjectTimeTrackingStat", () => ({
+  default: () => mockUseGetProjectTimeTrackingStat(),
+}));
+
 // Mock Child Components
 vi.mock("@components/common/tab-bar/TabBar", () => ({
   default: () => <div data-testid="tab-bar" />,
@@ -110,6 +118,12 @@ vi.mock("@wso2/oxygen-ui", () => ({
   },
 }));
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: false },
+  },
+});
+
 describe("ProjectDetails", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -123,7 +137,19 @@ describe("ProjectDetails", () => {
       isLoading: false,
       error: null,
     });
+    mockUseGetProjectTimeTrackingStat.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+    });
   });
+
+  const renderWithProviders = (ui: ReactElement) =>
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MockConfigProvider>{ui}</MockConfigProvider>
+      </QueryClientProvider>,
+    );
 
   it("should render project details content when data is loaded", () => {
     mockUseGetProjectDetails.mockReturnValue({
@@ -132,7 +158,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     expect(screen.getByTestId("tab-bar")).toBeInTheDocument();
     expect(screen.getByTestId("project-info-card")).toBeInTheDocument();
@@ -145,7 +171,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     expect(mockShowLoader).toHaveBeenCalled();
   });
@@ -162,7 +188,7 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    const { rerender } = render(<ProjectDetails />);
+    const { rerender } = renderWithProviders(<ProjectDetails />);
     expect(mockShowLoader).toHaveBeenCalledTimes(1);
     expect(mockHideLoader).not.toHaveBeenCalled();
 
@@ -177,7 +203,13 @@ describe("ProjectDetails", () => {
       error: null,
     });
 
-    rerender(<ProjectDetails />);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MockConfigProvider>
+          <ProjectDetails />
+        </MockConfigProvider>
+      </QueryClientProvider>,
+    );
     expect(mockHideLoader).toHaveBeenCalled();
   });
 
@@ -189,7 +221,7 @@ describe("ProjectDetails", () => {
       error: error,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     await waitFor(() => {
       expect(mockUseLogger.error).toHaveBeenCalledWith(
@@ -207,7 +239,7 @@ describe("ProjectDetails", () => {
       error: error,
     });
 
-    render(<ProjectDetails />);
+    renderWithProviders(<ProjectDetails />);
 
     await waitFor(() => {
       expect(mockUseLogger.error).toHaveBeenCalledWith(

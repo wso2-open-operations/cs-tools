@@ -35,7 +35,13 @@ import {
   getStatusIcon,
   getAttachmentFileCategory,
   resolveColorFromTheme,
+  stripCodeWrapper,
+  replaceInlineImageSources,
+  formatCommentDate,
+  getInitials,
+  hasDisplayableContent,
 } from "@utils/support";
+import type { CaseComment } from "@models/responses";
 import { createTheme } from "@wso2/oxygen-ui";
 
 describe("support utils", () => {
@@ -106,17 +112,30 @@ describe("support utils", () => {
       expect(formatSlaResponseTime(undefined)).toBe("--");
     });
 
-    it("should format milliseconds to hours", () => {
-      expect(formatSlaResponseTime(3600000)).toBe("1 hours");
+    it("should format milliseconds to hours with singular/plural", () => {
+      expect(formatSlaResponseTime(3600000)).toBe("1 hour");
       expect(formatSlaResponseTime(7200000)).toBe("2 hours");
     });
 
-    it("should format milliseconds to days when >= 24 hours", () => {
-      expect(formatSlaResponseTime("129671000")).toBe("2 days");
+    it("should format milliseconds to minutes with singular/plural", () => {
+      expect(formatSlaResponseTime(60000)).toBe("1 minute");
+      expect(formatSlaResponseTime(120000)).toBe("2 minutes");
     });
 
-    it("should format milliseconds to days", () => {
-      expect(formatSlaResponseTime(86400000)).toBe("1 days");
+    it("should use Math.floor so values just under threshold stay in current unit", () => {
+      expect(formatSlaResponseTime(3599999)).toBe("59 minutes");
+      expect(formatSlaResponseTime(3599999)).not.toBe("1 hour");
+    });
+
+    it("should format milliseconds to days when >= 24 hours", () => {
+      // 129671000 ms ≈ 36 hours → Math.floor(36/24) = 1 day
+      expect(formatSlaResponseTime("129671000")).toBe("1 day");
+      expect(formatSlaResponseTime(172800000)).toBe("2 days");
+    });
+
+    it("should format milliseconds to days with singular/plural", () => {
+      expect(formatSlaResponseTime(86400000)).toBe("1 day");
+      expect(formatSlaResponseTime(172800000)).toBe("2 days");
     });
   });
 
@@ -266,6 +285,156 @@ describe("support utils", () => {
     it("should return CircleCheck for Resolved or Closed", () => {
       expect(getStatusIcon("Resolved")).toBe(CircleCheck);
       expect(getStatusIcon("Closed")).toBe(CircleCheck);
+    });
+  });
+
+  describe("stripCodeWrapper", () => {
+    it("should return empty string for empty or invalid input", () => {
+      expect(stripCodeWrapper("")).toBe("");
+      expect(stripCodeWrapper(null as unknown as string)).toBe("");
+    });
+
+    it("should return content unchanged when no [code] wrapper", () => {
+      expect(stripCodeWrapper("plain text")).toBe("plain text");
+      expect(stripCodeWrapper("[code]only start")).toBe("[code]only start");
+      expect(stripCodeWrapper("only end[/code]")).toBe("only end[/code]");
+    });
+
+    it("should strip [code]...[/code] wrapper", () => {
+      expect(stripCodeWrapper("[code]x[/code]")).toBe("x");
+      expect(stripCodeWrapper("[code]  hello  [/code]")).toBe("hello");
+    });
+  });
+
+  describe("hasDisplayableContent", () => {
+    it("returns true for comment with code wrapper and meaningful content", () => {
+      const comment: CaseComment = {
+        id: "1",
+        content: "[code]<p>Hello world</p>[/code]",
+        type: "comments",
+        createdOn: "2026-02-12 10:00:00",
+        createdBy: "user@example.com",
+        isEscalated: false,
+      };
+      expect(hasDisplayableContent(comment)).toBe(true);
+    });
+
+    it("returns true for comment with plain text", () => {
+      const comment: CaseComment = {
+        id: "2",
+        content: "Some text here",
+        type: "comments",
+        createdOn: "2026-02-12 10:00:00",
+        createdBy: "user@example.com",
+        isEscalated: false,
+      };
+      expect(hasDisplayableContent(comment)).toBe(true);
+    });
+
+    it("returns false for comment with only code wrapper and Customer comment added", () => {
+      const comment: CaseComment = {
+        id: "3",
+        content: "[code]<p>Customer comment added</p>[/code]",
+        type: "comments",
+        createdOn: "2026-02-12 10:00:00",
+        createdBy: "user@example.com",
+        isEscalated: false,
+      };
+      expect(hasDisplayableContent(comment)).toBe(false);
+    });
+
+    it("returns false for empty content", () => {
+      const comment: CaseComment = {
+        id: "4",
+        content: "",
+        type: "comments",
+        createdOn: "2026-02-12 10:00:00",
+        createdBy: "user@example.com",
+        isEscalated: false,
+      };
+      expect(hasDisplayableContent(comment)).toBe(false);
+    });
+
+    it("returns false for null content", () => {
+      const comment: CaseComment = {
+        id: "5",
+        content: undefined as unknown as string,
+        type: "comments",
+        createdOn: "2026-02-12 10:00:00",
+        createdBy: "user@example.com",
+        isEscalated: false,
+      };
+      expect(hasDisplayableContent(comment)).toBe(false);
+    });
+  });
+
+  describe("replaceInlineImageSources", () => {
+    it("should return empty string for empty html", () => {
+      expect(replaceInlineImageSources("")).toBe("");
+    });
+
+    it("should return sanitized html when no attachments", () => {
+      const html = '<img src="/abc.iix" alt="x">';
+      expect(replaceInlineImageSources(html, null)).toContain("src");
+    });
+
+    it("should replace src by sys_id when attachment matches", () => {
+      const html = '<img src="/sys123.iix" alt="x">';
+      const attachments = [{ sys_id: "sys123", url: "https://example.com/img.png" }];
+      const result = replaceInlineImageSources(html, attachments);
+      expect(result).toContain("https://example.com/img.png");
+    });
+
+    it("should replace src by id when attachment matches", () => {
+      const html = '<img src="/att456.iix">';
+      const attachments = [{ id: "att456", downloadUrl: "https://cdn.example.com/att.png" }];
+      const result = replaceInlineImageSources(html, attachments);
+      expect(result).toContain("https://cdn.example.com/att.png");
+    });
+
+    it("should handle single-quoted src", () => {
+      const html = "<img src='/sys99.iix' alt=''>";
+      const attachments = [{ sys_id: "sys99", url: "https://example.com/a.png" }];
+      const result = replaceInlineImageSources(html, attachments);
+      expect(result).toContain("https://example.com/a.png");
+    });
+  });
+
+  describe("getInitials", () => {
+    it("should derive initials from name", () => {
+      expect(getInitials("John Doe")).toBe("JD");
+      expect(getInitials("Alice")).toBe("A");
+    });
+
+    it("should return -- for null, undefined, empty", () => {
+      expect(getInitials(null)).toBe("--");
+      expect(getInitials(undefined)).toBe("--");
+      expect(getInitials("")).toBe("--");
+    });
+  });
+
+  describe("formatCommentDate", () => {
+    it("should return -- for null and undefined", () => {
+      expect(formatCommentDate(null)).toBe("--");
+      expect(formatCommentDate(undefined)).toBe("--");
+    });
+
+    it("should return -- for invalid date", () => {
+      expect(formatCommentDate("not-a-date")).toBe("--");
+    });
+
+    it("should format valid date string", () => {
+      const result = formatCommentDate("2026-02-13T15:45:00Z");
+      expect(result).toMatch(/Feb/);
+      expect(result).toMatch(/13/);
+      expect(result).toMatch(/2026/);
+    });
+
+    it("should normalize ServiceNow timestamp YYYY-MM-DD HH:MM:SS as UTC", () => {
+      const result = formatCommentDate("2026-02-13 15:45:00");
+      expect(result).toMatch(/Feb/);
+      expect(result).toMatch(/13/);
+      expect(result).toMatch(/2026/);
     });
   });
 });

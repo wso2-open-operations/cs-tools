@@ -64,7 +64,7 @@ describe("TimeTrackingStatCards", () => {
     expect(screen.getByTestId("support-stat-grid")).toBeInTheDocument();
     expect(screen.getByText("Total Hours")).toBeInTheDocument();
     expect(screen.getByText("Billable Hours")).toBeInTheDocument();
-    expect(screen.getByText("Non-Billable")).toBeInTheDocument();
+    expect(screen.getByText("Non-Billable Hours")).toBeInTheDocument();
     expect(screen.getByText("17.5")).toBeInTheDocument();
     expect(screen.getByText("15")).toBeInTheDocument();
     expect(screen.getByText("2.5")).toBeInTheDocument();

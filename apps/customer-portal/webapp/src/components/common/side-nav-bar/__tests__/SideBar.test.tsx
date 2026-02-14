@@ -46,8 +46,16 @@ vi.mock("@wso2/oxygen-ui", () => {
     <footer>{children}</footer>
   );
 
+  const Box = ({ children }: any) => <div>{children}</div>;
+  const Typography = ({ children }: any) => <span>{children}</span>;
+  const Paper = ({ children }: any) => <div>{children}</div>;
+  const Button = ({ children }: any) => <button>{children}</button>;
   return {
     Sidebar,
+    Box,
+    Typography,
+    Paper,
+    Button,
     Link: ({ children, to }: { children: any; to: string }) => (
       <a href={to}>{children}</a>
     ),
@@ -93,8 +101,8 @@ vi.mock("react-router", () => ({
   ),
 }));
 
-// Mock SubscriptionWidget
-vi.mock("@/components/common/sideNavBar/SubscriptionWidget", () => ({
+// Mock SubscriptionWidget (path must match: @components/common/side-nav-bar/SubscriptionWidget)
+vi.mock("@components/common/side-nav-bar/SubscriptionWidget", () => ({
   default: () => <div data-testid="subscription-widget" />,
 }));
 

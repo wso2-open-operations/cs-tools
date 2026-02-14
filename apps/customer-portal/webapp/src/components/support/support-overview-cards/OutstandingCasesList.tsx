@@ -74,7 +74,7 @@ export default function OutstandingCasesList({
         return (
           <Form.CardButton
             key={c.id}
-            onClick={onCaseClick ? () => onCaseClick(c) : undefined}
+            onClick={() => onCaseClick?.(c)}
             sx={{
               p: 2,
               display: "flex",

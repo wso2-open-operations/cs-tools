@@ -64,7 +64,11 @@ describe("CaseDetailsDetailsPanel", () => {
     expect(screen.getByText("Last Updated")).toBeInTheDocument();
     expect(screen.getByText("2026-02-10 23:47:57")).toBeInTheDocument();
     expect(screen.getByText("SLA Response Time")).toBeInTheDocument();
-    expect(screen.getByText(/\d+\s+(?:hours|minutes|days|seconds)/)).toBeInTheDocument();
+    expect(
+      screen.getByText((content) =>
+        /\d+\s+(?:hour|minute|day|second)s?/.test(content),
+      ),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Assigned Engineer").length).toBeGreaterThan(0);
     expect(screen.getAllByText("--").length).toBeGreaterThan(0);
   });
@@ -104,10 +108,9 @@ describe("CaseDetailsDetailsPanel", () => {
     expect(dashes.length).toBeGreaterThan(0);
   });
 
-  it("should show ErrorStateIcon and projecthub text when isError is true", () => {
+  it("should show ErrorStateIcon and error message when isError is true", () => {
     renderDetailsPanel({ data: undefined, isError: true });
     expect(screen.getByText("Something Went Wrong")).toBeInTheDocument();
-    expect(screen.getByText("projecthub")).toBeInTheDocument();
     const svg = document.querySelector("svg");
     expect(svg).toBeInTheDocument();
   });

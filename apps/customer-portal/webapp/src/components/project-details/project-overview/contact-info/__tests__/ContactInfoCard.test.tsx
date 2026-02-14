@@ -38,13 +38,13 @@ vi.mock("@/constants/projectDetailsConstants", () => ({
     {
       role: "Role 1",
       email: "email1@example.com",
-      icon: "icon-1",
+      icon: () => null,
       bgColor: "#000",
     },
     {
       role: "Role 2",
       email: "email2@example.com",
-      icon: "icon-2",
+      icon: () => null,
       bgColor: "#FFF",
     },
   ],

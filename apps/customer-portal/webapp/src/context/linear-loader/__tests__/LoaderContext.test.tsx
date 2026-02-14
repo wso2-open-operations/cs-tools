@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen, act } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LoaderProvider, useLoader } from "@context/linear-loader/LoaderContext";
 
 // Mock Oxygen UI
@@ -42,6 +42,14 @@ const TestComponent = () => {
 };
 
 describe("LoaderContext", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("should provide loader state and functions", () => {
     render(
       <LoaderProvider>
@@ -57,9 +65,12 @@ describe("LoaderContext", () => {
     });
     expect(screen.getByTestId("is-visible")).toHaveTextContent("true");
 
-    // Hide loader
+    // Hide loader (implementation uses 500ms delay before hiding)
     act(() => {
       screen.getByText("Hide").click();
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
     });
     expect(screen.getByTestId("is-visible")).toHaveTextContent("false");
   });
@@ -96,9 +107,12 @@ describe("LoaderContext", () => {
     });
     expect(isVisibleSpan).toHaveTextContent("true"); // Should still be visible
 
-    // Second completion
+    // Second completion (implementation uses 500ms delay before hiding)
     act(() => {
       hideBtn.click();
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
     });
     expect(isVisibleSpan).toHaveTextContent("false"); // Should now be hidden
   });

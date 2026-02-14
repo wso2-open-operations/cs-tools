@@ -18,13 +18,16 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CasesTableHeader from "@components/dashboard/cases-table/CasesTableHeader";
 
-// Mock Oxygen UI components
+// Mock Oxygen UI components (include Menu for ActiveFilters)
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
   Typography: ({ children }: any) => <span>{children}</span>,
   Button: ({ children, onClick }: any) => (
     <button onClick={onClick}>{children}</button>
   ),
+  Menu: ({ children, open }: any) =>
+    open ? <div data-testid="menu">{children}</div> : null,
+  MenuItem: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
@@ -32,7 +35,7 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Plus: () => <span>PlusIcon</span>,
 }));
 
-vi.mock("@/components/common/filterPanel/ActiveFilters", () => ({
+vi.mock("@components/common/filter-panel/ActiveFilters", () => ({
   default: ({ appliedFilters }: any) => (
     <div data-testid="active-filters">
       {Object.keys(appliedFilters).map((key) => (

@@ -40,57 +40,51 @@ export default function CaseDetailsTabPanels({
   data,
   isError = false,
 }: CaseDetailsTabPanelsProps): JSX.Element | null {
-  if (activeTab === 0) {
-    const projectId = data?.project?.id ?? "";
-    if (!projectId) {
+  switch (activeTab) {
+    case 0: {
+      const projectId = data?.project?.id ?? "";
+      if (!projectId) {
+        return (
+          <Typography variant="body2" color="text.secondary">
+            Activity timeline will appear here.
+          </Typography>
+        );
+      }
       return (
-        <Typography variant="body2" color="text.secondary">
-          Activity timeline will appear here.
-        </Typography>
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <CaseDetailsActivityPanel
+            projectId={projectId}
+            caseId={caseId}
+            caseCreatedOn={data?.createdOn}
+          />
+        </Box>
       );
     }
-    return (
-      <Box
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        <CaseDetailsActivityPanel
-          projectId={projectId}
-          caseId={caseId}
-          caseCreatedOn={data?.createdOn}
-        />
-      </Box>
-    );
+    case 1:
+      return <CaseDetailsDetailsPanel data={data} isError={isError} />;
+    case 2:
+      return <CaseDetailsAttachmentsPanel caseId={caseId} />;
+    case 3:
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Calls will appear here.
+        </Typography>
+      );
+    case 4:
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Knowledge Base articles will appear here.
+        </Typography>
+      );
+    default:
+      return null;
   }
-
-  if (activeTab === 1) {
-    return <CaseDetailsDetailsPanel data={data} isError={isError} />;
-  }
-
-  if (activeTab === 2) {
-    return <CaseDetailsAttachmentsPanel caseId={caseId} />;
-  }
-
-  if (activeTab === 3) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        Calls will appear here.
-      </Typography>
-    );
-  }
-
-  if (activeTab === 4) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        Knowledge Base articles will appear here.
-      </Typography>
-    );
-  }
-
-  return null;
 }

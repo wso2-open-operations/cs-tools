@@ -84,24 +84,30 @@ export default function UploadAttachmentModal({
     onClose();
   }, [onClose, reset]);
 
-  const setFileWithValidation = useCallback((selected: File | null) => {
-    setFile(selected);
-    if (selected && selected.size > MAX_ATTACHMENT_SIZE_BYTES) {
-      setFileSizeErrorVisible(true);
-    } else {
-      setFileSizeErrorVisible(false);
-    }
-    if (selected && !name.trim()) {
-      setName(selected.name);
-    }
-  }, [name]);
+  const setFileWithValidation = useCallback(
+    (selected: File | null) => {
+      setFile(selected);
+      if (selected && selected.size > MAX_ATTACHMENT_SIZE_BYTES) {
+        setFileSizeErrorVisible(true);
+      } else {
+        setFileSizeErrorVisible(false);
+      }
+      if (selected && !name.trim()) {
+        setName(selected.name);
+      }
+    },
+    [name],
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const item = e.dataTransfer.files[0];
-    if (item) setFileWithValidation(item);
-  }, [setFileWithValidation]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      const item = e.dataTransfer.files[0];
+      if (item) setFileWithValidation(item);
+    },
+    [setFileWithValidation],
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -116,11 +122,14 @@ export default function UploadAttachmentModal({
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0] ?? null;
-    setFileWithValidation(selected);
-    e.target.value = "";
-  }, [setFileWithValidation]);
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = e.target.files?.[0] ?? null;
+      setFileWithValidation(selected);
+      e.target.value = "";
+    },
+    [setFileWithValidation],
+  );
 
   const handleUpload = useCallback(() => {
     if (!file || fileTooLarge || isMockEnabled) return;
@@ -150,7 +159,16 @@ export default function UploadAttachmentModal({
       );
     };
     reader.readAsDataURL(file);
-  }, [caseId, file, name, fileTooLarge, isMockEnabled, postAttachments, handleClose, onSuccess]);
+  }, [
+    caseId,
+    file,
+    name,
+    fileTooLarge,
+    isMockEnabled,
+    postAttachments,
+    handleClose,
+    onSuccess,
+  ]);
 
   return (
     <Dialog

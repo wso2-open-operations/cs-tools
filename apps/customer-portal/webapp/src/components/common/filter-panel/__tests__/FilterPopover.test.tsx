@@ -81,12 +81,18 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
 }));
 
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  X: () => <span data-testid="icon-x" />,
-}));
+// Mock icons (include TriangleAlert for ErrorIndicator)
+vi.mock("@wso2/oxygen-ui-icons-react", () => {
+  const mockIcon = (name: string) => () => <span data-testid={`icon-${name}`} />;
+  return {
+    Filter: mockIcon("Filter"),
+    Search: mockIcon("Search"),
+    X: () => <span data-testid="icon-x" />,
+    TriangleAlert: mockIcon("TriangleAlert"),
+  };
+});
 
-vi.mock("@/components/common/errorIndicator/ErrorIndicator", () => ({
+vi.mock("@components/common/error-indicator/ErrorIndicator", () => ({
   default: ({ entityName }: any) => (
     <div data-testid="error-indicator">Error loading {entityName}</div>
   ),

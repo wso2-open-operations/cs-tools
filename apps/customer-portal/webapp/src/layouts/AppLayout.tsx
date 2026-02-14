@@ -112,7 +112,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
               sx={{
                 flex: 1,
                 minHeight: isCaseDetailsPage ? "60vh" : 0,
-                overflow: isCaseDetailsPage ? "hidden" : "auto",
+                overflow: "auto",
                 display: isCaseDetailsPage ? "flex" : "block",
                 flexDirection: isCaseDetailsPage ? "column" : undefined,
                 ...(isCaseDetailsPage

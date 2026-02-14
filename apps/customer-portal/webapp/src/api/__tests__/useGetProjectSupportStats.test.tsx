@@ -129,6 +129,8 @@ describe("useGetProjectSupportStats", () => {
       resolvedChats: 0,
     };
 
+    const originalConfig = (window as any).config;
+    (window as any).config = { CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test" };
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -145,19 +147,25 @@ describe("useGetProjectSupportStats", () => {
       },
     );
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    try {
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(result.current.data).toEqual(mockResponse);
-    expect(mockGetIdToken).toHaveBeenCalled();
-    expect(mockLogger.debug).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Fetching support stats for project ID: project-1, mock: false",
-      ),
-    );
+      expect(result.current.data).toEqual(mockResponse);
+      expect(mockGetIdToken).toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Fetching support stats for project ID: project-1, mock: false",
+        ),
+      );
+    } finally {
+      (window as any).config = originalConfig;
+    }
   });
 
   it("should handle API error when mock is disabled", async () => {
     mockIsMockEnabled = false;
+    const originalConfig = (window as any).config;
+    (window as any).config = { CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test" };
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -179,6 +187,7 @@ describe("useGetProjectSupportStats", () => {
       "Error fetching support stats: Internal Server Error",
     );
     expect(mockLogger.error).toHaveBeenCalled();
+    (window as any).config = originalConfig;
   });
 
   it("should not fetch if id is missing", () => {

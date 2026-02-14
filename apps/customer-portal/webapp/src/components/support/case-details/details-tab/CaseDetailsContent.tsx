@@ -19,13 +19,17 @@ import { useMemo, useState, type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
 import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import { getStatusColor } from "@utils/casesTable";
-import { resolveColorFromTheme, getStatusIconElement } from "@utils/support";
+import {
+  resolveColorFromTheme,
+  getStatusIconElement,
+  getInitials,
+} from "@utils/support";
 import CaseDetailsBackButton from "@case-details/CaseDetailsBackButton";
 import CaseDetailsHeader from "@case-details/CaseDetailsHeader";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import CaseDetailsTabs from "@case-details/CaseDetailsTabs";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
-import CaseDetailsSkeleton from "@case-details-details/CaseDetailsSkeleton";
+import CaseDetailsSkeleton from "@case-details/CaseDetailsSkeleton";
 
 export interface CaseDetailsContentProps {
   data: CaseDetails | undefined;
@@ -77,24 +81,11 @@ export default function CaseDetailsContent({
     [resolvedStatusColor],
   );
 
-  const attachmentsQuery = useGetCaseAttachments(caseId, {
-    limit: 1,
-    offset: 0,
-  });
+  const attachmentsQuery = useGetCaseAttachments(caseId);
   const attachmentCount = attachmentsQuery.data?.totalRecords;
 
   const assignedEngineer = data?.assignedEngineer;
-  const engineerInitials =
-    assignedEngineer && typeof assignedEngineer === "string"
-      ? assignedEngineer
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((n) => n[0])
-          .join("")
-          .toUpperCase()
-          .slice(0, 2)
-      : "--";
+  const engineerInitials = getInitials(assignedEngineer);
 
   if (isLoading) {
     return (

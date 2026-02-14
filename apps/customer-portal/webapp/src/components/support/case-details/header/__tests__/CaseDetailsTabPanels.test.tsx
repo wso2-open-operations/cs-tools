@@ -18,6 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import {
   mockCaseAttachments,
   mockCaseComments,
@@ -79,6 +80,13 @@ vi.mock("@api/usePostComment", () => ({
   })),
 }));
 
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: vi.fn(() => ({
+    isSignedIn: true,
+    isLoading: false,
+  })),
+}));
+
 function renderTabPanels(
   activeTab: number,
   caseId = "case-1",
@@ -86,12 +94,14 @@ function renderTabPanels(
 ) {
   return render(
     <ThemeProvider theme={createTheme()}>
-      <CaseDetailsTabPanels
+      <ErrorBannerProvider>
+        <CaseDetailsTabPanels
         activeTab={activeTab}
         caseId={caseId}
         data={options?.data ?? mockCaseDetails}
         isError={options?.isError ?? false}
       />
+      </ErrorBannerProvider>
     </ThemeProvider>,
   );
 }

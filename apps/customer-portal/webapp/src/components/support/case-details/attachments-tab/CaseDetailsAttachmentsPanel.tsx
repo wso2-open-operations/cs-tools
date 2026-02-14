@@ -14,49 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Alert,
-  Box,
-  Button,
-  Paper,
-  Skeleton,
-  Stack,
-  Typography,
-} from "@wso2/oxygen-ui";
-import {
-  Download,
-  File,
-  FileArchive,
-  FileText,
-  Image,
-  Paperclip,
-} from "@wso2/oxygen-ui-icons-react";
+import { Alert, Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
+import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import type { CaseAttachment } from "@models/responses";
 import { CASE_ATTACHMENTS_INITIAL_LIMIT } from "@constants/supportConstants";
-import { formatFileSize, getAttachmentFileCategory } from "@utils/support";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
+import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
+import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSkeleton";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 
 export interface CaseDetailsAttachmentsPanelProps {
   caseId: string;
-}
-
-function getAttachmentIcon(att: CaseAttachment): JSX.Element {
-  const category = getAttachmentFileCategory(att.name ?? "", att.type ?? "");
-  switch (category) {
-    case "image":
-      return <Image size={20} aria-hidden />;
-    case "pdf":
-      return <FileText size={20} aria-hidden />;
-    case "text":
-      return <FileText size={20} aria-hidden />;
-    case "archive":
-      return <FileArchive size={20} aria-hidden />;
-    default:
-      return <File size={20} aria-hidden />;
-  }
 }
 
 /**
@@ -98,6 +68,7 @@ export default function CaseDetailsAttachmentsPanel({
   const combinedLength =
     (first.data?.attachments?.length ?? 0) +
     (second.data?.attachments?.length ?? 0);
+
   const hasPartialError =
     secondEnabled &&
     (second.isError ||
@@ -107,9 +78,7 @@ export default function CaseDetailsAttachmentsPanel({
 
   const isLoading =
     first.isLoading ||
-    (secondEnabled &&
-      !second.isError &&
-      (second.isLoading || !second.data));
+    (secondEnabled && !second.isError && (second.isLoading || !second.data));
 
   const handleDownload = (att: CaseAttachment) => {
     if (att.downloadUrl) {
@@ -139,37 +108,7 @@ export default function CaseDetailsAttachmentsPanel({
         </Button>
 
         {isLoading ? (
-          <Stack spacing={2}>
-            {[1, 2, 3, 4].map((i) => (
-              <Paper
-                key={i}
-                variant="outlined"
-                sx={{
-                  p: 2,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 2,
-                }}
-              >
-                <Skeleton variant="rectangular" width={40} height={40} />
-                <Box sx={{ flex: 1 }}>
-                  <Skeleton variant="text" width="60%" height={24} />
-                  <Skeleton
-                    variant="text"
-                    width="40%"
-                    height={16}
-                    sx={{ mt: 0.5 }}
-                  />
-                </Box>
-                <Skeleton
-                  variant="rectangular"
-                  width={100}
-                  height={32}
-                  sx={{ borderRadius: 1 }}
-                />
-              </Paper>
-            ))}
-          </Stack>
+          <AttachmentsListSkeleton />
         ) : first.isError ? (
           <Typography variant="body2" color="error">
             Failed to load attachments.
@@ -199,96 +138,16 @@ export default function CaseDetailsAttachmentsPanel({
           <Stack spacing={2}>
             {hasPartialError && (
               <Alert severity="warning" sx={{ mb: 1 }}>
-                Some attachments may not be shown. The list may be incomplete due
-                to a load error or API limits.
+                Some attachments may not be shown. The list may be incomplete
+                due to a load error or API limits.
               </Alert>
             )}
             {allAttachments.map((att) => (
-              <Paper
+              <AttachmentListItem
                 key={att.id}
-                variant="outlined"
-                sx={{
-                  p: 2,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 2,
-                  "&:hover": {
-                    bgcolor: "action.hover",
-                  },
-                }}
-              >
-                <Box
-                  sx={{
-                    width: 40,
-                    height: 40,
-                    bgcolor: "action.hover",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "text.secondary",
-                    flexShrink: 0,
-                  }}
-                  aria-hidden
-                >
-                  {getAttachmentIcon(att)}
-                </Box>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2" color="text.primary" noWrap>
-                    {att.name}
-                  </Typography>
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    alignItems="center"
-                    flexWrap="wrap"
-                    sx={{ mt: 0.5 }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      component="span"
-                    >
-                      {formatFileSize(att.size ?? att.sizeBytes)}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      component="span"
-                    >
-                      •
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      component="span"
-                    >
-                      Uploaded by {att.createdBy}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      component="span"
-                    >
-                      •
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      component="span"
-                    >
-                      {att.createdOn}
-                    </Typography>
-                  </Stack>
-                </Box>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<Download size={16} aria-hidden />}
-                  onClick={() => handleDownload(att)}
-                >
-                  Download
-                </Button>
-              </Paper>
+                attachment={att}
+                onDownload={handleDownload}
+              />
             ))}
           </Stack>
         )}

@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ProjectCardBadges from "@components/project-hub/project-card/ProjectCardBadges";
 
-// Mock @wso2/oxygen-ui
+// Mock @wso2/oxygen-ui (include IconButton, Tooltip for ErrorIndicator)
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children, display, justifyContent, alignItems }: any) => (
     <div data-testid="box" style={{ display, justifyContent, alignItems }}>
@@ -38,6 +38,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
     ),
   },
   Skeleton: () => <div data-testid="skeleton" />,
+  IconButton: ({ children }: any) => <button>{children}</button>,
+  Tooltip: ({ children }: any) => <span>{children}</span>,
 }));
 
 // Mock utils
@@ -49,8 +51,8 @@ vi.mock("@/utils/projectCard", () => ({
   }),
 }));
 
-// Mock ErrorIndicator
-vi.mock("@/components/common/errorIndicator/ErrorIndicator", () => ({
+// Mock ErrorIndicator (path must match: @components/common/error-indicator)
+vi.mock("@components/common/error-indicator/ErrorIndicator", () => ({
   default: ({ entityName }: any) => (
     <div data-testid="error-indicator">Error: {entityName}</div>
   ),

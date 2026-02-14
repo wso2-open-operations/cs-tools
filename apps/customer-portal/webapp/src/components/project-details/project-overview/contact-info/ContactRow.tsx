@@ -23,26 +23,28 @@ interface ContactRowProps {
   contact: Contact;
 }
 
-const ContactRow = ({ contact }: ContactRowProps): JSX.Element => (
-  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-    <Typography variant="caption" color="text.secondary">
-      {contact.role}
-    </Typography>
-    <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <Box
-        sx={{
-          width: 40,
-          height: 40,
-          borderRadius: "50%",
-          background: contact.bgColor,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "white",
-        }}
-      >
-        {contact.icon}
-      </Box>
+const ContactRow = ({ contact }: ContactRowProps): JSX.Element => {
+  const Icon = contact.icon;
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <Typography variant="caption" color="text.secondary">
+        {contact.role}
+      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Box
+          sx={{
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            background: contact.bgColor,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "white",
+          }}
+        >
+          <Icon size={20} />
+        </Box>
       <Box>
         <a
           href={`mailto:${contact.email}`}
@@ -69,6 +71,7 @@ const ContactRow = ({ contact }: ContactRowProps): JSX.Element => (
       </Box>
     </Box>
   </Box>
-);
+  );
+};
 
 export default ContactRow;

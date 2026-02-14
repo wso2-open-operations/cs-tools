@@ -48,18 +48,27 @@ vi.mock("@wso2/oxygen-ui", () => ({
   ),
 }));
 
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Bot: () => <svg data-testid="icon-bot" />,
-  CircleAlert: () => <svg data-testid="icon-alert" />,
-  CircleCheck: () => <svg data-testid="icon-check" />,
-  Clock: () => <svg data-testid="icon-clock" />,
-  FileText: () => <svg data-testid="icon-file-text" />,
-  MessageSquare: () => <svg data-testid="icon-message" />,
-  MessageSquareDiff: () => <svg data-testid="icon-message-diff" />,
-  MessageSquareMore: () => <svg data-testid="icon-message-more" />,
-  TrendingUp: () => <svg data-testid="icon-trending-up" />,
-}));
+// Mock icons; supportConstants imports many icons, use importOriginal to avoid listing all
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const MockSvg = (name: string) => () => <svg data-testid={`icon-${name}`} />;
+  return {
+    ...actual,
+    Activity: MockSvg("activity"),
+    Bot: MockSvg("bot"),
+    CircleAlert: MockSvg("alert"),
+    CircleCheck: MockSvg("check"),
+    CircleQuestionMark: MockSvg("circle-question"),
+    Clock: MockSvg("clock"),
+    FileText: MockSvg("file-text"),
+    MessageCircle: MockSvg("message-circle"),
+    MessageSquare: MockSvg("message"),
+    MessageSquareDiff: MockSvg("message-diff"),
+    MessageSquareMore: MockSvg("message-more"),
+    TrendingUp: MockSvg("trending-up"),
+    Zap: MockSvg("zap"),
+  };
+});
 
 describe("CasesOverviewStatCard", () => {
   it("should render loading state correctly", () => {

@@ -35,11 +35,12 @@ export default function SelectedFileDisplay({
   fileType,
 }: SelectedFileDisplayProps): JSX.Element {
   const category = getAttachmentFileCategory(fileName, fileType);
-  const icon = category === "archive" ? (
-    <FileArchive size={24} aria-hidden />
-  ) : (
-    <File size={24} aria-hidden />
-  );
+  const icon =
+    category === "archive" ? (
+      <FileArchive size={24} aria-hidden />
+    ) : (
+      <File size={24} aria-hidden />
+    );
 
   return (
     <Box

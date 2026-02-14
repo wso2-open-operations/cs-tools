@@ -14,16 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Avatar,
-  Box,
-  Chip,
-  Stack,
-  Typography,
-  alpha,
-  colors,
-  useTheme,
-} from "@wso2/oxygen-ui";
+import { Box, Chip, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import {
   Calendar,
   Clock,
@@ -34,6 +25,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type ReactElement, type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
+import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 import { getStatusColor, getSeverityColor } from "@utils/casesTable";
@@ -87,17 +79,6 @@ export default function CaseDetailsDetailsPanel({
   const statusChipIcon = getStatusIconElement(statusLabel, 12);
 
   const assignedEngineer = data?.assignedEngineer;
-  const engineerInitials =
-    assignedEngineer && typeof assignedEngineer === "string"
-      ? assignedEngineer
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((n) => n[0])
-          .join("")
-          .toUpperCase()
-          .slice(0, 2)
-      : "--";
 
   const labelSx = {
     variant: "body2" as const,
@@ -189,7 +170,9 @@ export default function CaseDetailsDetailsPanel({
                 color={theme.palette.text.secondary}
                 aria-hidden
               />
-              <Typography {...valueSx}>{formatValue(data?.createdOn)}</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data?.createdOn)}
+              </Typography>
             </Stack>
           </Box>
           <Box>
@@ -200,7 +183,9 @@ export default function CaseDetailsDetailsPanel({
                 color={theme.palette.text.secondary}
                 aria-hidden
               />
-              <Typography {...valueSx}>{formatValue(data?.updatedOn)}</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data?.updatedOn)}
+              </Typography>
             </Stack>
           </Box>
           <Box>
@@ -211,22 +196,7 @@ export default function CaseDetailsDetailsPanel({
           </Box>
           <Box>
             <Typography {...labelSx}>Assigned Engineer</Typography>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
-              <Avatar
-                sx={{
-                  width: 24,
-                  height: 24,
-                  fontSize: "0.75rem",
-                  bgcolor: colors.blue[100],
-                  color: colors.blue[700],
-                }}
-              >
-                {engineerInitials}
-              </Avatar>
-              <Typography {...valueSx}>
-                {formatValue(assignedEngineer)}
-              </Typography>
-            </Stack>
+            <AssignedEngineerDisplay assignedEngineer={assignedEngineer} />
           </Box>
         </Box>
       </CaseDetailsCard>
@@ -290,22 +260,7 @@ export default function CaseDetailsDetailsPanel({
           </Box>
           <Box>
             <Typography {...labelSx}>Assigned Engineer</Typography>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
-              <Avatar
-                sx={{
-                  width: 24,
-                  height: 24,
-                  fontSize: "0.75rem",
-                  bgcolor: colors.blue[100],
-                  color: colors.blue[700],
-                }}
-              >
-                {engineerInitials}
-              </Avatar>
-              <Typography {...valueSx}>
-                {formatValue(assignedEngineer)}
-              </Typography>
-            </Stack>
+            <AssignedEngineerDisplay assignedEngineer={assignedEngineer} />
           </Box>
           <Box>
             <Typography {...labelSx}>CS Manager</Typography>
