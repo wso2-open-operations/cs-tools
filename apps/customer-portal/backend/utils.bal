@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 import customer_portal.entity;
+import customer_portal.types;
 
 import ballerina/http;
 import ballerina/log;
@@ -24,8 +25,8 @@ import ballerina/log;
 # + projectId - Project ID to filter cases
 # + payload - Case search payload
 # + return - Case search response or error
-public isolated function searchCases(string idToken, string projectId, CaseSearchPayload payload)
-    returns CaseSearchResponse|error {
+public isolated function searchCases(string idToken, string projectId, types:CaseSearchPayload payload)
+    returns types:CaseSearchResponse|error {
 
     int? issueId = payload.filters?.issueId;
     entity:CaseSearchPayload searchPayload = {
@@ -41,7 +42,7 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
         sortBy: payload.sortBy
     };
     entity:CaseSearchResponse casesResponse = check entity:searchCases(idToken, searchPayload);
-    Case[] cases = from entity:Case case in casesResponse.cases
+    types:Case[] cases = from entity:Case case in casesResponse.cases
         let entity:ReferenceTableItem? project = case.project
         let entity:ReferenceTableItem? deployedProduct = case.deployedProduct
         let entity:ChoiceListItem? issueType = case.issueType
@@ -77,12 +78,12 @@ public isolated function searchCases(string idToken, string projectId, CaseSearc
 #
 # + caseMetadata - Case metadata response
 # + return - Case filters or error
-public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata) returns CaseFilterOptions {
-    ReferenceItem[] statuses = from entity:ChoiceListItem item in caseMetadata.states
+public isolated function getCaseFilters(entity:CaseMetadataResponse caseMetadata) returns types:CaseFilterOptions {
+    types:ReferenceItem[] statuses = from entity:ChoiceListItem item in caseMetadata.states
         select {id: item.id.toString(), label: item.label};
-    ReferenceItem[] severities = from entity:ChoiceListItem item in caseMetadata.severities
+    types:ReferenceItem[] severities = from entity:ChoiceListItem item in caseMetadata.severities
         select {id: item.id.toString(), label: item.label};
-    ReferenceItem[] issueTypes = from entity:ChoiceListItem item in caseMetadata.issueTypes
+    types:ReferenceItem[] issueTypes = from entity:ChoiceListItem item in caseMetadata.issueTypes
         select {id: item.id.toString(), label: item.label};
 
     // TODO: Other project specific filters will be added later
@@ -137,8 +138,8 @@ public isolated function logForbiddenCaseAccess(string id, string uuid) =>
 #
 # + response - Comments response from the entity service
 # + return - Map comments response
-public isolated function mapCommentsResponse(entity:CommentsResponse response) returns CommentsResponse {
-    Comment[] comments = from entity:Comment comment in response.comments
+public isolated function mapCommentsResponse(entity:CommentsResponse response) returns types:CommentsResponse {
+    types:Comment[] comments = from entity:Comment comment in response.comments
         select {
             id: comment.id,
             content: comment.content,
@@ -170,8 +171,8 @@ public isolated function isInvalidLimitOffset(int? 'limit, int? offset) returns 
 #
 # + response - Attachments response from the entity service
 # + return - Mapped attachments response
-public isolated function mapAttachmentsResponse(entity:AttachmentsResponse response) returns AttachmentsResponse {
-    Attachment[] attachments = from entity:Attachment attachment in response.attachments
+public isolated function mapAttachmentsResponse(entity:AttachmentsResponse response) returns types:AttachmentsResponse {
+    types:Attachment[] attachments = from entity:Attachment attachment in response.attachments
         select {
             id: attachment.id,
             name: attachment.name,
@@ -194,7 +195,7 @@ public isolated function mapAttachmentsResponse(entity:AttachmentsResponse respo
 #
 # + response - Deployments response from the entity service
 # + return - Mapped deployments response
-public isolated function mapDeployments(entity:DeploymentsResponse response) returns Deployment[] {
+public isolated function mapDeployments(entity:DeploymentsResponse response) returns types:Deployment[] {
     return from entity:Deployment deployment in response.deployments
         let entity:ReferenceTableItem? project = deployment.project
         let entity:ChoiceListItem? 'type = deployment.'type
@@ -215,7 +216,7 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
 # + response - Deployed products response from the entity service
 # + return - Mapped deployed products response
 public isolated function mapDeployedProducts(entity:DeployedProductsResponse response)
-    returns DeployedProduct[] {
+    returns types:DeployedProduct[] {
 
     return from entity:DeployedProduct product in response.deployedProducts
         let entity:ReferenceTableItem? associatedProduct = product.product

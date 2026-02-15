@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 import ballerina/constraint;
-import ballerina/data.jsondata;
 
 # [Configurable] Client credentials grant type oauth2 configuration.
 type ClientCredentialsOauth2Config record {|
@@ -44,69 +43,53 @@ public type BasicProductInfo record {|
 # Recommended update level.
 public type RecommendedUpdateLevel record {|
     # Product name
-    @jsondata:Name {value: "product-name"}
-    string productName;
+    string product\-name;
     # Product base version
-    @jsondata:Name {value: "product-base-version"}
-    string productBaseVersion;
+    string product\-base\-version;
     # Channel
     string channel;
     # Starting update level
-    @jsondata:Name {value: "starting-update-level"}
-    int startingUpdateLevel;
+    int starting\-update\-level;
     # Ending update level
-    @jsondata:Name {value: "ending-update-level"}
-    int endingUpdateLevel;
+    int ending\-update\-level;
     # Installed updates count
-    @jsondata:Name {value: "installed-updates-count"}
-    int installedUpdatesCount;
+    int installed\-updates\-count;
     # Installed security updates count
-    @jsondata:Name {value: "installed-security-updates-count"}
-    int installedSecurityUpdatesCount;
+    int installed\-security\-updates\-count;
     # Timestamp
     int timestamp;
     # Recommended update level
-    @jsondata:Name {value: "recommended-update-level"}
-    int recommendedUpdateLevel;
+    int recommended\-update\-level;
     # Available updates count
-    @jsondata:Name {value: "available-updates-count"}
-    int availableUpdatesCount;
+    int available\-updates\-count;
     # Available security updates count
-    @jsondata:Name {value: "available-security-updates-count"}
-    int availableSecurityUpdatesCount;
+    int available\-security\-updates\-count;
 |};
 
 # File changes.
 public type FileChanges record {|
     # Added files
-    @jsondata:Name {value: "added-files"}
-    BasicFileInfo[] addedFiles;
+    BasicFileInfo[] added\-files;
     # Modified files
-    @jsondata:Name {value: "modified-files"}
-    ModifiedFileInfo[] modifiedFiles;
+    ModifiedFileInfo[] modified\-files;
     # Removed files
-    @jsondata:Name {value: "removed-files"}
-    string[] removedFiles;
+    string[] removed\-files;
     # Changes in bundles info
-    @jsondata:Name {value: "bundles-info-changes"}
-    BundlesInfoChange[] bundlesInfoChanges;
+    BundlesInfoChange[] bundles\-info\-changes;
 |};
 
 # Basic file information.
 public type BasicFileInfo record {|
     # File path
-    @jsondata:Name {value: "file-path"}
-    string filePath;
+    string file\-path;
     # MD5 checksum
     string md5sum;
     # SHA256 checksum
     string sha256;
     # JWT token
-    @jsondata:Name {value: "jwt"}
-    string jwtToken;
+    string jwt;
     # Download URL
-    @jsondata:Name {value: "download-url"}
-    string downloadUrl;
+    string download\-url;
 |};
 
 # Modified file information.
@@ -114,24 +97,19 @@ public type ModifiedFileInfo record {|
     # Type
     string 'type;
     # Original file
-    @jsondata:Name {value: "original-file"}
-    BasicFileInfo originalFile;
+    BasicFileInfo original\-file;
     # New file
-    @jsondata:Name {value: "new-file"}
-    BasicFileInfo newFile;
+    BasicFileInfo new\-file;
 |};
 
 # Changes in bundles info.
 public type BundlesInfoChange record {|
     # Bundles info path
-    @jsondata:Name {value: "bundles-info-path"}
-    string bundlesInfoPath;
+    string bundles\-info\-path;
     # Content change
-    @jsondata:Name {value: "content-change"}
-    string contentChange;
+    string content\-change;
     # Change type
-    @jsondata:Name {value: "change-type"}
-    ChangeType changeType;
+    ChangeType change\-type;
     # Order
     int 'order;
 |};
@@ -145,45 +123,33 @@ public type ChangeType record {|
 # Update response.
 public type UpdateResponse record {|
     # File changes
-    @jsondata:Name {value: "file-changes"}
-    FileChanges fileChanges;
+    FileChanges file\-changes;
     # JWT token
     string jwt;
     # Platform name
-    @jsondata:Name {value: "platform-name"}
-    string platformName;
+    string platform\-name;
     # Platform version
-    @jsondata:Name {value: "platform-version"}
-    string platformVersion;
+    string platform\-version;
     # Product name
-    @jsondata:Name {value: "product-name"}
-    string productName;
+    string product\-name;
     # Product base version
-    @jsondata:Name {value: "product-base-version"}
-    string productBaseVersion;
+    string product\-base\-version;
     # Starting update level
-    @jsondata:Name {value: "starting-update-level"}
-    string startingUpdateLevel;
+    string starting\-update\-level;
     # Ending update level
-    @jsondata:Name {value: "ending-update-level"}
-    string endingUpdateLevel;
+    string ending\-update\-level;
     # Environment
     string environment;
     # Update summary message
-    @jsondata:Name {value: "update-summary-message"}
-    string updateSummaryMessage;
+    string update\-summary\-message;
     # Update security message
-    @jsondata:Name {value: "update-security-message"}
-    string updateSecurityMessage;
+    string update\-security\-message;
     # Total updates
-    @jsondata:Name {value: "total-updates"}
-    int totalUpdates;
+    int total\-updates;
     # Total security updates
-    @jsondata:Name {value: "total-security-updates"}
-    int totalSecurityUpdates;
+    int total\-security\-updates;
     # Applied update numbers
-    @jsondata:Name {value: "applied-update-numbers"}
-    int[] appliedUpdateNumbers;
+    int[] applied\-update\-numbers;
 |};
 
 # Update payload for listing updates.
@@ -202,21 +168,17 @@ public type ListUpdatePayload record {|
 # Product update level.
 public type ProductUpdateLevel record {|
     # Product name
-    @jsondata:Name {value: "product-name"}
-    string productName;
+    string product\-name;
     # Product update levels
-    @jsondata:Name {value: "product-update-levels"}
-    UpdateLevel[] productUpdateLevels;
+    UpdateLevel[] product\-update\-levels;
 |};
 
 # Update level.
 public type UpdateLevel record {|
     # Product base version
-    @jsondata:Name {value: "product-base-version"}
-    string productBaseVersion;
+    string product\-base\-version;
     # Channel
     string channel;
     # Update level
-    @jsondata:Name {value: "update-levels"}
-    int[] updateLevels;
+    int[] update\-levels;
 |};
