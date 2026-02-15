@@ -36,4 +36,5 @@ export const ApiQueryKeys = {
   TIME_TRACKING_STATS: "time-tracking-stats",
   UPDATES_STATS: "updates-stats",
   PRODUCT_UPDATE_LEVELS: "product-update-levels",
+  PROJECT_USERS: "project-users",
 } as const;

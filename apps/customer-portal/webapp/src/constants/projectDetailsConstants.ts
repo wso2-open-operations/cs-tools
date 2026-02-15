@@ -58,6 +58,11 @@ export const PROJECT_DETAILS_TABS: TabOption[] = [
     label: "Time Tracking",
     icon: Clock,
   },
+  {
+    id: "users",
+    label: "Users",
+    icon: User,
+  },
 ];
 
 export const contacts: Contact[] = [
@@ -195,3 +200,8 @@ export const CASE_STATUS = {
 } as const;
 
 export type CaseStatus = (typeof CASE_STATUS)[keyof typeof CASE_STATUS];
+
+export const PROJECT_USER_STATUSES = {
+  INVITED: "invited",
+  REGISTERED: "registered",
+} as const;

@@ -21,6 +21,7 @@ import {
   SUPPORT_TIER,
   PROJECT_TYPE,
   SYSTEM_HEALTH,
+  PROJECT_USER_STATUSES,
 } from "@constants/projectDetailsConstants";
 
 /**
@@ -214,4 +215,26 @@ export const calculateProgress = (start: string, end: string): number => {
 
   if (total <= 0) return 100;
   return Math.min(100, Math.max(0, (elapsed / total) * 100));
+};
+
+/**
+ * Get the color for a project user status chip based on the status string.
+ *
+ * @param {string} status - The user status.
+ * @returns {"primary" | "info" | "default" | "success" | "warning" | "error"} The color for the Chip component.
+ */
+export const getUserStatusColor = (
+  status: string,
+): "primary" | "info" | "default" | "success" | "warning" | "error" => {
+  const normalizedStatus = status?.toLowerCase();
+
+  if (normalizedStatus === PROJECT_USER_STATUSES.REGISTERED.toLowerCase()) {
+    return "success";
+  }
+
+  if (normalizedStatus === PROJECT_USER_STATUSES.INVITED.toLowerCase()) {
+    return "warning";
+  }
+
+  return "default";
 };

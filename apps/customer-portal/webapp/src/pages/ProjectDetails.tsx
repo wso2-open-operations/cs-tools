@@ -21,6 +21,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@components/common/tab-bar/TabBar";
 import { PROJECT_DETAILS_TABS } from "@constants/projectDetailsConstants";
 import ProjectInformationCard from "@components/project-details/project-overview/project-information/ProjectInformationCard";
+import ProjectUsersTab from "@components/project-details/users/ProjectUsersTab";
 import ProjectStatisticsCard from "@components/project-details/project-overview/project-statistics/ProjectStatisticsCard";
 import ContactInfoCard from "@components/project-details/project-overview/contact-info/ContactInfoCard";
 import RecentActivityCard from "@components/project-details/project-overview/recent-activity/RecentActivityCard";
@@ -158,6 +159,8 @@ export default function ProjectDetails(): JSX.Element {
             />
           </Box>
         );
+      case "users":
+        return <ProjectUsersTab projectId={projectId ?? ""} />;
       default:
         return null;
     }
