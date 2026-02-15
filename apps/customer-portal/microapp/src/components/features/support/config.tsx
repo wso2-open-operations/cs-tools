@@ -37,22 +37,20 @@ export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> 
   },
 };
 
-export const PRIORITY_CHIP_COLOR_CONFIG: Record<Priority, ChipProps["color"]> = {
-  low: "success",
-  medium: "info",
-  high: "primary",
+export const PRIORITY_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  60: "success",
+  61: "info",
+  62: "primary",
+  63: "primary",
+  64: "primary",
 };
 
-export const STATUS_CHIP_COLOR_CONFIG: Record<Status, ChipProps["color"]> = {
-  "in progress": "info",
-  open: "primary",
-  resolved: "success",
-  waiting: "info",
-  closed: "default",
-  active: "info",
-  scheduled: "warning",
-  approved: "success",
-  draft: "default",
-  rejected: "error",
-  "pending approval": "warning",
+export const STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  1: "info",
+  10: "primary",
+  18: "success",
+  1003: "info",
+  6: "default",
+  3: "info",
+  1006: "info",
 };

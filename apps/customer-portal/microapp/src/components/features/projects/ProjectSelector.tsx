@@ -17,10 +17,12 @@
 import { alpha, Box, Popover, pxToRem, Stack, Typography, type PopoverProps } from "@wso2/oxygen-ui";
 import { ProjectPopoverItem } from "@components/features/projects";
 import { useProject } from "@context/project";
-import { MOCK_PROJECTS } from "@src/mocks/data/projects";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { projects } from "@src/services/projects";
 
 export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
   const { projectId, setProjectId } = useProject();
+  const { data } = useSuspenseQuery(projects.all());
 
   return (
     <Popover
@@ -52,7 +54,7 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
         Select Project
       </Typography>
       <Stack gap={1} pt={1}>
-        {MOCK_PROJECTS.map((props) => (
+        {data.map((props) => (
           <ProjectPopoverItem
             {...props}
             key={props.id}

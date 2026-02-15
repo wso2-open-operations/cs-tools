@@ -18,12 +18,7 @@ import { Box, Button, Card, Chip, Grid, Stack, Typography, alpha, pxToRem } from
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
 import { PROJECT_METRIC_META, PROJECT_STATUS_META } from "@root/src/config/constants";
-
-export type ProjectStatus = "All Good" | "Needs Attention";
-export type ProjectType = "Managed Cloud" | "Regular";
-export type ProjectMetricKey = "cases" | "chats" | "service" | "change" | "users" | "date";
-export type ProjectMetricValue = number | string;
-export type ProjectMetrics = Partial<Record<ProjectMetricKey, ProjectMetricValue>>;
+import type { Project, ProjectMetricKey, ProjectMetricValue } from "@src/types";
 
 export interface ProjectMetricMeta {
   label: string;
@@ -31,26 +26,22 @@ export interface ProjectMetricMeta {
   color?: string;
 }
 
-export interface ProjectCardProps {
-  id: string;
-  name: string;
-  description: string;
-  type: ProjectType;
-  status: ProjectStatus;
-  numberOfOpenCases: number;
-  metrics: ProjectMetrics;
-
-  onClick?: () => void;
-}
-
-export function ProjectCard({ id, name, description, type, status, metrics, onClick }: ProjectCardProps) {
+export function ProjectCard({
+  projectKey,
+  name,
+  description,
+  type,
+  status,
+  metrics,
+  onClick,
+}: Project & { onClick?: () => void }) {
   const statusChipColorVariant = PROJECT_STATUS_META[status].color;
 
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
-          <Typography variant="subtitle2">{id}</Typography>
+          <Typography variant="subtitle2">{projectKey}</Typography>
           <Chip
             label={status}
             size="small"

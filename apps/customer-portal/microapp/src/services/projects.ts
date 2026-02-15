@@ -15,41 +15,45 @@
 // under the License.
 
 import apiClient from "@src/services/apiClient";
-import type { ProjectCardProps } from "@components/features/projects";
+import type { Project, ProjectsDTO, ProjectStatsDTO, ProjectStatus } from "@src/types";
 
-import { PROJECTS_ENDPOINT } from "@config/endpoints";
+import { PROJECT_STATS_ENDPOINT, PROJECTS_ENDPOINT } from "@config/endpoints";
+import { queryOptions } from "@tanstack/react-query";
 
-export interface ProjectsResponseType {
-  projects: {
-    sysId: string;
-    name: string;
-    description: string;
-    projectKey: string;
-    createdOn: string;
-    activeChatsCount: number;
-    openCasesCount: number;
-  }[];
-  pagination: { offset: number; limit: number; totalRecords: number };
+const getAllProjects = async (): Promise<Project[]> => {
+  const projects = (await apiClient.post<ProjectsDTO>(PROJECTS_ENDPOINT, {})).data.projects;
+  const projectsWithStats = await Promise.all(
+    projects.map(async (project) => {
+      const stats = (await apiClient.get<ProjectStatsDTO>(PROJECT_STATS_ENDPOINT(project.id))).data;
+      return mapProjectAndStatsDTOToProject(project, stats);
+    }),
+  );
+
+  return projectsWithStats;
+};
+
+/* Mappers */
+function mapProjectAndStatsDTOToProject(project: ProjectsDTO["projects"][number], stats: ProjectStatsDTO): Project {
+  return {
+    id: project.id,
+    projectKey: project.key,
+    name: project.name,
+    createdOn: new Date(project.createdOn.replace(" ", "T")),
+    description: project.description.replace(/<\/?[^>]+(>|$)/g, ""),
+    metrics: {
+      cases: stats.projectStats.openCases,
+      chats: stats.projectStats.activeChats,
+    },
+    status: stats.projectStats.slaStatus as ProjectStatus,
+    type: "Regular", // TODO:
+  };
 }
 
-export const getProjects = async (): Promise<ProjectCardProps[]> => {
-  const response = await apiClient.get<ProjectsResponseType>(PROJECTS_ENDPOINT);
-
-  return response.data.projects.map((project) => ({
-    id: project.projectKey,
-    name: project.name,
-    description: project.description,
-    // TODO: determine project type from backend
-    // Fallback to "Managed Cloud" until backend provides explicit field
-    type: "Managed Cloud",
-    // TODO: determine project status from backend
-    // Fallback to "All Good" until backend provides explicit field
-    status: "All Good",
-    numberOfOpenCases: project.openCasesCount,
-    metrics: {
-      cases: project.openCasesCount,
-      chats: project.activeChatsCount,
-      // TODO: populate remaining metrics when supported by backend
-    },
-  }));
+/* Query Options */
+export const projects = {
+  all: () =>
+    queryOptions({
+      queryKey: ["projects"],
+      queryFn: getAllProjects,
+    }),
 };

@@ -16,12 +16,10 @@
 
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { SearchBar, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
-import type { NotificationFilter } from "@pages/NotificationsPage";
-import type { Status } from "./ItemCard";
 
 export interface FilterTab {
   label: string;
-  value: Status | NotificationFilter | "all";
+  value: string;
 }
 
 export interface FilterSlotBuilderProps {

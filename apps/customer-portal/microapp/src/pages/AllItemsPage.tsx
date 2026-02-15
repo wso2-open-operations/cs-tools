@@ -14,18 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  FilterSlotBuilder,
-  ItemCardExtended,
-  type FilterSlotBuilderProps,
-  type ItemCardProps,
-} from "@components/features/support";
+import { FilterSlotBuilder, ItemCardExtended, type ItemCardProps } from "@components/features/support";
 import { Stack } from "@wso2/oxygen-ui";
 import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
 import { useLayoutEffect } from "react";
 
-import { MOCK_EXTENDED_ITEMS } from "@src/mocks/data/support";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { cases } from "@src/services/cases";
+import { useProject } from "@context/project";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
@@ -34,20 +31,25 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
   const filter = searchParams.get("filter") ?? "all";
   const search = (searchParams.get("search") ?? "").toLowerCase();
 
-  const items = MOCK_EXTENDED_ITEMS[type].filter((item) => {
-    const matchesFilter = !filter || filter === "all" ? true : item.status === filter;
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    cases.all(projectId!, filter !== "all" ? { filters: { statusId: Number(filter) } } : {}),
+  );
+
+  const items = data.filter((item) => {
+    // const matchesFilter = !filter || filter === "all" ? true : item.statusId === filter;
 
     const matchesSearch =
       !search ||
       item.id.toLowerCase().includes(search) ||
       item.title.toLowerCase().includes(search) ||
-      item.description.toLowerCase().includes(search);
+      item.description?.toLowerCase().includes(search);
 
-    return matchesFilter && matchesSearch;
+    return matchesSearch;
   });
 
   useLayoutEffect(() => {
-    layout.setSubtitleSlotOverride(`${items.length} of ${MOCK_EXTENDED_ITEMS[type].length}`);
+    layout.setSubtitleSlotOverride(`${items.length} of ${data.length}`);
 
     return () => {
       layout.setSubtitleSlotOverride(null);
@@ -57,59 +59,20 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
   return (
     <Stack gap={2}>
       {items.map((item, index) => (
-        <ItemCardExtended key={index} {...item} />
+        <ItemCardExtended key={index} type="case" to="/" {...item} />
       ))}
     </Stack>
   );
 }
 
-const config: Record<ItemCardProps["type"] | "notifications", FilterSlotBuilderProps> = {
-  case: {
-    searchPlaceholder: "Search cases by ID, title, or description...",
-    tabs: [
-      { label: "Open", value: "open" },
-      { label: "In Progress", value: "in progress" },
-      { label: "Waiting", value: "waiting" },
-      { label: "Resolved", value: "resolved" },
-      { label: "Closed", value: "closed" },
-    ],
-  },
-  chat: {
-    searchPlaceholder: "Search chats by ID, title, or message...",
-    tabs: [
-      { label: "Active", value: "active" },
-      { label: "Resolved", value: "resolved" },
-    ],
-  },
-  service: {
-    searchPlaceholder: "Search requests by ID, title, or category...",
-    tabs: [
-      { label: "In Progress", value: "in progress" },
-      { label: "Approved", value: "approved" },
-      { label: "Open", value: "open" },
-      { label: "Closed", value: "closed" },
-    ],
-  },
-  change: {
-    searchPlaceholder: "Search requests by ID, title, or category...",
-    tabs: [
-      { label: "In Progress", value: "in progress" },
-      { label: "Scheduled", value: "scheduled" },
-      { label: "Approved", value: "approved" },
-      { label: "Draft", value: "draft" },
-    ],
-  },
-  notifications: {
-    searchPlaceholder: "Search Notifications",
-    tabs: [
-      { label: "Unread", value: "unread" },
-      { label: "Cases", value: "case" },
-      { label: "Service Requests", value: "service" },
-      { label: "Change Requests", value: "change" },
-    ],
-  },
-};
-
 export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] | "notifications" }) {
-  return <FilterSlotBuilder {...config[type]} />;
+  const { projectId } = useProject();
+  const { data: filters } = useSuspenseQuery(cases.filters(projectId!));
+
+  return (
+    <FilterSlotBuilder
+      searchPlaceholder="Search cases by ID, title, or description..."
+      tabs={filters.statuses.map((filter) => ({ label: filter.label, value: filter.id }))}
+    />
+  );
 }

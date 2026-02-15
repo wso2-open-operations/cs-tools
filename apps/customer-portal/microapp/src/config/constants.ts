@@ -15,33 +15,19 @@
 // under the License.
 
 import { colors } from "@wso2/oxygen-ui";
-import {
-  Calendar,
-  CircleAlert,
-  Cloud,
-  MessageSquare,
-  Moon,
-  RefreshCcw,
-  Settings,
-  Users,
-  type LucideIcon,
-} from "@wso2/oxygen-ui-icons-react";
-import type {
-  ProjectMetricKey,
-  ProjectMetricMeta,
-  ProjectStatus,
-  ProjectType,
-} from "@root/src/components/features/projects";
+import { CircleAlert, Cloud, MessageSquare, Moon, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@src/types";
+import type { ProjectMetricMeta } from "@components/features/projects";
 
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
 export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
   cases: { label: "Cases:", color: colors.red[300], icon: CircleAlert },
   chats: { label: "Chats:", color: colors.indigo[300], icon: MessageSquare },
-  service: { label: "Service:", color: colors.purple[300], icon: Settings },
-  change: { label: "Change:", color: colors.cyan[300], icon: RefreshCcw },
-  users: { label: "Users:", color: "text.primary", icon: Users },
-  date: { label: "Date:", icon: Calendar },
+  // service: { label: "Service:", color: colors.purple[300], icon: Settings },
+  // change: { label: "Change:", color: colors.cyan[300], icon: RefreshCcw },
+  // users: { label: "Users:", color: "text.primary", icon: Users },
+  // date: { label: "Date:", icon: Calendar },
 };
 
 export const PROJECT_TYPE_META: Record<ProjectType, { icon: LucideIcon }> = {
@@ -51,5 +37,4 @@ export const PROJECT_TYPE_META: Record<ProjectType, { icon: LucideIcon }> = {
 
 export const PROJECT_STATUS_META: Record<ProjectStatus, { color: "success" | "warning" }> = {
   "All Good": { color: "success" },
-  "Needs Attention": { color: "warning" },
 };
