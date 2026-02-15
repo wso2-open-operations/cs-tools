@@ -31,5 +31,4 @@ public const int DEFAULT_OFFSET = 0;
 public const int DEFAULT_LIMIT = 10;
 
 public const ERR_STATUS_CODE = "statusCode";
-public const PHONE_PATTERN_STRING = "^\\+\\d{10,14}$";
 public const ERR_BODY = "body";

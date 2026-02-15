@@ -13,8 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import customer_portal.types;
 
-final ProductVulnerability[] & readonly MOCK_PRODUCT_VULNERABILITIES = [
+final types:ProductVulnerability[] & readonly MOCK_PRODUCT_VULNERABILITIES = [
     {
         id: "8f3d2c1a9b7e4d6f8a1c2b3d4e5f6a7b",
         cveId: "CVE-2099-5555",
@@ -62,7 +63,7 @@ final ProductVulnerability[] & readonly MOCK_PRODUCT_VULNERABILITIES = [
     }
 ];
 
-final ProductVulnerabilityResponse & readonly MOCK_PRODUCT_VULNERABILITY = {
+final types:ProductVulnerabilityResponse & readonly MOCK_PRODUCT_VULNERABILITY = {
     id: "abcdef1234567890fedcba0987654321",
     cveId: "CVE-2099-3333",
     vulnerabilityId: "XRAY-999003",
