@@ -36,6 +36,8 @@ declare global {
     nativebridge?: {
       requestToken: () => void;
       resolveToken: (token: string) => void;
+      requestIdToken: () => void;
+      resolveIdToken: (token: string) => void;
       requestQR: () => void;
       resolveQR: (qrString: string) => void;
       requestItemList: () => void;
@@ -58,8 +60,8 @@ declare global {
 // Function to get token from React Native
 export const getToken = (callback: Callback<string>): void => {
   if (window.nativebridge) {
-    window.nativebridge.requestToken();
-    window.nativebridge.resolveToken = (token: string) => {
+    window.nativebridge.requestIdToken();
+    window.nativebridge.resolveIdToken = (token: string) => {
       callback(token);
     };
   } else {

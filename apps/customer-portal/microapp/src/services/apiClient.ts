@@ -60,6 +60,7 @@ apiClient.interceptors.request.use(
       const token = await refreshTokenPromise;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        config.headers["x-user-id-token"] = token;
         config.headers["Content-Type"] = "application/json";
         Logger.info("Added authorization token to request");
       } else {
