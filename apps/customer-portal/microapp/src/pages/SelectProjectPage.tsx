@@ -22,10 +22,11 @@ import { useNavigate } from "react-router-dom";
 import { useProject } from "@context/project";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
+import { ErrorBoundary } from "@components/core";
 
 export default function SelectProjectPage() {
   return (
-    <Suspense
+    <ErrorBoundary
       fallback={
         <Stack
           bgcolor="components.portal.background.main"
@@ -37,8 +38,21 @@ export default function SelectProjectPage() {
         </Stack>
       }
     >
-      <SelectProjectContent />
-    </Suspense>
+      <Suspense
+        fallback={
+          <Stack
+            bgcolor="components.portal.background.main"
+            minHeight="100vh"
+            justifyContent="center"
+            alignItems="center"
+          >
+            <CircularProgress color="primary" />
+          </Stack>
+        }
+      >
+        <SelectProjectContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
