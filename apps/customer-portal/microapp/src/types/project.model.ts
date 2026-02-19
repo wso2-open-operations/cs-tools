@@ -32,5 +32,5 @@ export interface Product {
   description?: string;
   name: string;
   deploymentId: string;
-  versionId: string;
+  versionId?: string;
 }

@@ -28,3 +28,4 @@ export const PROJECT_CASES_FILTERS_ENDPOINT = (id: string) => `/projects/${id}/f
 export const PROJECT_DEPLOYMENTS_ENDPOINT = (id: string) => `/projects/${id}/deployments`;
 export const PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT = (deploymentId: string) => `/deployments/${deploymentId}/products`;
 export const CREATE_CASE_ENDPOINT = "/cases";
+export const CASE_CLASSIFICATION_ENDPOINT = "/cases/classify";

@@ -49,9 +49,9 @@ export interface DeploymentProductDTO {
   description: string | null;
   product: EntityReference;
   deployment: EntityReference;
-  version: EntityReference;
-  cores: number;
-  tps: number;
+  version: EntityReference | null;
+  cores: number | null;
+  tps: number | null;
   releasedOn: string | null;
   endOfLifeOn: string | null;
   updateLevel: string;

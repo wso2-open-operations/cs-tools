@@ -2,6 +2,8 @@ import apiClient from "@src/services/apiClient";
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import type {
   Case,
+  CaseClassificationRequestDTO,
+  CaseClassificationResponseDTO,
   CasesDTO,
   CasesFiltersDTO,
   CreateCaseRequestDTO,
@@ -9,7 +11,12 @@ import type {
   GetCasesRequestDTO,
 } from "@src/types";
 
-import { CREATE_CASE_ENDPOINT, PROJECT_CASES_ENDPOINT, PROJECT_CASES_FILTERS_ENDPOINT } from "@config/endpoints";
+import {
+  CASE_CLASSIFICATION_ENDPOINT,
+  CREATE_CASE_ENDPOINT,
+  PROJECT_CASES_ENDPOINT,
+  PROJECT_CASES_FILTERS_ENDPOINT,
+} from "@config/endpoints";
 
 const getCases = async (id: string, body: GetCasesRequestDTO = {}): Promise<Case[]> => {
   const cases = (await apiClient.post<CasesDTO>(PROJECT_CASES_ENDPOINT(id), body)).data.cases;
@@ -22,6 +29,19 @@ const getFilters = async (id: string): Promise<CasesFiltersDTO> => {
 
 const createCase = async (body: CreateCaseRequestDTO): Promise<CreateCaseResponseDTO> => {
   return (await apiClient.post<CreateCaseResponseDTO>(CREATE_CASE_ENDPOINT, body)).data;
+};
+
+const classify = async (
+  props: Omit<CaseClassificationRequestDTO, "region" | "tier">,
+): Promise<CaseClassificationResponseDTO> => {
+  // TODO: Remove any hardcoded values
+  return (
+    await apiClient.post<CaseClassificationResponseDTO>(CASE_CLASSIFICATION_ENDPOINT, {
+      ...props,
+      region: "EU",
+      tier: "Tier 1",
+    })
+  ).data;
 };
 
 /* Mappers */
@@ -56,5 +76,9 @@ export const cases = {
 
   create: mutationOptions({
     mutationFn: (body: CreateCaseRequestDTO) => createCase(body),
+  }),
+
+  classify: mutationOptions({
+    mutationFn: (body: Omit<CaseClassificationRequestDTO, "region" | "tier">) => classify(body),
   }),
 };

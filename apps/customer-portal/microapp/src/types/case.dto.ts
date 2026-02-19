@@ -82,3 +82,24 @@ export interface CreateCaseResponseDTO {
   state: EntityReference;
   type: EntityReference;
 }
+
+export interface CaseClassificationRequestDTO {
+  chatHistory: string;
+  envProducts: Record<string, string[]>;
+  region: string;
+  tier: string;
+}
+
+export interface CaseClassificationResponseDTO {
+  issueType: string;
+  severityLevel: string;
+  caseInfo: {
+    description: string;
+    shortDescription: string;
+    productName: string;
+    productVersion: string;
+    environment: string;
+    tier: string;
+    region: string;
+  };
+}
