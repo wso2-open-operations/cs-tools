@@ -27,7 +27,7 @@ export function StatusChip({ id, ...props }: StatusChipProps) {
   const { projectId } = useProject();
   const color = STATUS_CHIP_COLOR_CONFIG[id];
   const label =
-    useSuspenseQuery(cases.filters(projectId!)).data.statuses.find((status) => status.id === id)?.label ?? "N/A";
+    useSuspenseQuery(cases.filters(projectId!)).data.caseStates.find((status) => status.id === id)?.label ?? "N/A";
 
   return <Chip color={color} label={label} {...props} />;
 }

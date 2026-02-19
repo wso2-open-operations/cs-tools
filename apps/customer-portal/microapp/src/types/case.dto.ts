@@ -20,9 +20,22 @@ interface CaseDTO {
 }
 
 export interface CasesFiltersDTO {
-  statuses: EntityReference[];
+  caseStates: EntityReference[];
   severities: EntityReference[];
   issueTypes: EntityReference[];
+  deploymentTypes: EntityReference[];
+  callRequestStates: EntityReference[];
+  changeRequestStates: EntityReference[];
+  changeRequestImpacts: EntityReference[];
+  caseTypes: EntityReference[];
+  severityBasedAllocationTime: {
+    "0": number;
+    "10": number;
+    "11": number;
+    "12": number;
+    "13": number;
+    "14": number;
+  };
 }
 
 interface EntityReference {
@@ -32,11 +45,12 @@ interface EntityReference {
 
 export interface GetCasesRequestDTO {
   filters?: {
+    caseTypeIds?: string[];
     deploymentId?: string;
     issueId?: number;
     searchQuery?: string;
     severityId?: number;
-    statusId?: number;
+    statusIds?: number[];
   };
   pagination?: {
     limit?: number;

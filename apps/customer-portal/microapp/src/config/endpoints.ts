@@ -24,4 +24,4 @@ export const PROJECTS_ENDPOINT = "/projects/search";
 export const PROJECT_DETAILS_ENDPOINT = (id: string) => `/projects/${id}`;
 export const PROJECT_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats`;
 export const PROJECT_CASES_ENDPOINT = (id: string) => `/projects/${id}/cases/search`;
-export const PROJECT_CASES_FILTERS_ENDPOINT = (id: string) => `/projects/${id}/cases/filters`;
+export const PROJECT_CASES_FILTERS_ENDPOINT = (id: string) => `/projects/${id}/filters`;

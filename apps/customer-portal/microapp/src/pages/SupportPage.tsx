@@ -26,6 +26,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
+import { ErrorBoundary } from "@components/core";
 
 export default function SupportPage() {
   const theme = useTheme();
@@ -90,9 +91,11 @@ export default function SupportPage() {
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_TITLES[tab]} viewAllPath={`/${tab}s/all`}>
-          <Suspense fallback={<ItemsListContentSkeleton />}>
-            <ItemsListContent />
-          </Suspense>
+          <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
+            <Suspense fallback={<ItemsListContentSkeleton />}>
+              <ItemsListContent />
+            </Suspense>
+          </ErrorBoundary>
         </ItemListView>
       </Card>
     </>

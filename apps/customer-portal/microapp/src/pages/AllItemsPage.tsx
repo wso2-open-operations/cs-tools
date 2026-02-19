@@ -28,6 +28,7 @@ import { Suspense, useLayoutEffect } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
+import { ErrorBoundary } from "@components/core";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
@@ -36,9 +37,11 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
 
   return (
     <Stack gap={2}>
-      <Suspense fallback={<ItemsListContentSkeleton />}>
-        <ItemsListContent filter={filter} search={search} />
-      </Suspense>
+      <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
+        <Suspense fallback={<ItemsListContentSkeleton />}>
+          <ItemsListContent filter={filter} search={search} />
+        </Suspense>
+      </ErrorBoundary>
     </Stack>
   );
 }
@@ -50,7 +53,7 @@ export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] | "noti
   return (
     <FilterSlotBuilder
       searchPlaceholder="Search cases by ID, title, or description..."
-      tabs={filters.statuses.map((filter) => ({ label: filter.label, value: filter.id }))}
+      tabs={filters.caseStates.map((filter) => ({ label: filter.label, value: filter.id }))}
     />
   );
 }
@@ -59,7 +62,7 @@ function ItemsListContent({ filter, search }: { filter: string; search: string }
   const layout = useLayout();
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    cases.all(projectId!, filter !== "all" ? { filters: { statusId: Number(filter) } } : {}),
+    cases.all(projectId!, filter !== "all" ? { filters: { statusIds: [Number(filter)] } } : {}),
   );
 
   const items = data.filter((item) => {

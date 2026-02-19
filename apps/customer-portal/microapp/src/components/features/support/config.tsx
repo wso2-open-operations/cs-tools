@@ -15,7 +15,7 @@
 // under the License.
 
 import { MessageSquare, OctagonAlert, RefreshCcw, Settings, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { ItemType, Priority, Status } from "./ItemCard";
+import type { ItemType } from "./ItemCard";
 import { colors, type ChipProps } from "@wso2/oxygen-ui";
 
 export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> = {
@@ -38,11 +38,11 @@ export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> 
 };
 
 export const PRIORITY_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
-  60: "success",
-  61: "info",
-  62: "primary",
-  63: "primary",
-  64: "primary",
+  13: "success",
+  12: "info",
+  11: "primary",
+  10: "primary",
+  14: "primary",
 };
 
 export const STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
