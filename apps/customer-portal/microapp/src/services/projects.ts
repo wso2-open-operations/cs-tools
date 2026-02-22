@@ -39,7 +39,10 @@ const getAllProjects = async (): Promise<Project[]> => {
   const projects = (await apiClient.post<ProjectsDTO>(PROJECTS_ENDPOINT, {})).data.projects;
   const projectsWithStats = await Promise.all(
     projects.map(async (project) => {
-      const stats = (await apiClient.get<ProjectStatsDTO>(PROJECT_STATS_ENDPOINT(project.id))).data;
+      const stats: ProjectStatsDTO | undefined = await apiClient
+        .get<ProjectStatsDTO>(PROJECT_STATS_ENDPOINT(project.id))
+        .then((res) => res.data)
+        .catch(() => undefined);
       return mapProjectAndStatsDTOToProject(project, stats);
     }),
   );
@@ -61,18 +64,18 @@ const getProductsByDeployment = async (deploymentId: string): Promise<Product[]>
 };
 
 /* Mappers */
-function mapProjectAndStatsDTOToProject(project: ProjectsDTO["projects"][number], stats: ProjectStatsDTO): Project {
+function mapProjectAndStatsDTOToProject(project: ProjectsDTO["projects"][number], stats?: ProjectStatsDTO): Project {
   return {
     id: project.id,
     projectKey: project.key,
     name: project.name,
     createdOn: new Date(project.createdOn.replace(" ", "T")),
-    description: project.description.replace(/<\/?[^>]+(>|$)/g, ""),
+    description: project.description ? project.description.replace(/<\/?[^>]+(>|$)/g, "") : "",
     metrics: {
-      cases: stats.projectStats.openCases,
-      chats: stats.projectStats.activeChats,
+      cases: stats?.projectStats.openCases,
+      chats: stats?.projectStats.activeChats,
     },
-    status: stats.projectStats.slaStatus as ProjectStatus,
+    status: stats?.projectStats.slaStatus as ProjectStatus,
     type: "Regular", // TODO:
   };
 }

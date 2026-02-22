@@ -2,7 +2,7 @@ export type ProjectStatus = "All Good";
 export type ProjectType = "Managed Cloud" | "Regular";
 export type ProjectMetricKey = "cases" | "chats";
 export type ProjectMetricValue = number | string;
-export type ProjectMetrics = Partial<Record<ProjectMetricKey, ProjectMetricValue>>;
+export type ProjectMetrics = Partial<Record<ProjectMetricKey, ProjectMetricValue | undefined>>;
 
 export interface Project {
   id: string;
@@ -11,7 +11,7 @@ export interface Project {
   createdOn: Date;
   description: string;
   metrics: ProjectMetrics;
-  status: ProjectStatus;
+  status?: ProjectStatus;
   type: ProjectType;
 }
 

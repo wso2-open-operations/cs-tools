@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Grid, Stack, Typography, alpha, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Chip, Grid, Skeleton, Stack, Typography, alpha, pxToRem } from "@wso2/oxygen-ui";
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
 import { PROJECT_METRIC_META, PROJECT_STATUS_META } from "@root/src/config/constants";
@@ -35,21 +35,25 @@ export function ProjectCard({
   metrics,
   onClick,
 }: Project & { onClick?: () => void }) {
-  const statusChipColorVariant = PROJECT_STATUS_META[status].color;
+  const statusChipColorVariant = status ? PROJECT_STATUS_META[status].color : "default";
 
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
           <Typography variant="subtitle2">{projectKey}</Typography>
-          <Chip
-            label={status}
-            size="small"
-            sx={(theme) => ({
-              bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-              color: theme.palette[statusChipColorVariant].light,
-            })}
-          />
+          {status ? (
+            <Chip
+              label={status}
+              size="small"
+              sx={(theme) => ({
+                bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+                color: theme.palette[statusChipColorVariant].light,
+              })}
+            />
+          ) : (
+            <Skeleton variant="rounded" width={80} height={24} />
+          )}
         </Stack>
         <Typography variant="h6" mt={-0.8}>
           {name}
@@ -61,8 +65,6 @@ export function ProjectCard({
         {Object.keys(metrics).map((key, index) => {
           const meta = PROJECT_METRIC_META[key as ProjectMetricKey];
           const value = metrics[key as ProjectMetricKey];
-
-          if (value === undefined) return null;
 
           return (
             <Grid key={index} size={{ xs: 6 }}>
@@ -85,7 +87,7 @@ export function ProjectCard({
   );
 }
 
-function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value: ProjectMetricValue }) {
+function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value?: ProjectMetricValue }) {
   return (
     <Stack direction="row" alignItems="center" spacing={1}>
       <Box color="text.secondary">
@@ -95,7 +97,7 @@ function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value: ProjectMe
         {meta.label}
       </Typography>
       <Typography variant="body2" fontWeight="regular" color={meta.color}>
-        {value}
+        {value ?? <Skeleton width={30} height={20} />}
       </Typography>
     </Stack>
   );

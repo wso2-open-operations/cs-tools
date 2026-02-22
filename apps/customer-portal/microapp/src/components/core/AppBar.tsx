@@ -27,6 +27,7 @@ import {
   useTheme,
   Box,
   alpha,
+  Skeleton,
 } from "@wso2/oxygen-ui";
 
 import { NotificationBadge } from "@components/ui";
@@ -65,7 +66,7 @@ export function AppBar() {
 
   if (!project) return null;
 
-  const statusChipColorVariant = PROJECT_STATUS_META[project.status].color;
+  const statusChipColorVariant = project.status ? PROJECT_STATUS_META[project.status].color : "default";
 
   return (
     <>
@@ -116,14 +117,18 @@ export function AppBar() {
         )}
         {config.showChips && (
           <Stack direction="row" gap={2} mt={1.5}>
-            <Chip
-              label={project.status}
-              size="small"
-              sx={(theme) => ({
-                bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-                color: theme.palette[statusChipColorVariant].light,
-              })}
-            />
+            {project.status ? (
+              <Chip
+                label={project.status}
+                size="small"
+                sx={(theme) => ({
+                  bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+                  color: theme.palette[statusChipColorVariant].light,
+                })}
+              />
+            ) : (
+              <Skeleton variant="rounded" width={80} height={24} />
+            )}
             <Chip label={project.type} size="small" sx={{ alignSelf: "start" }} />
           </Stack>
         )}
