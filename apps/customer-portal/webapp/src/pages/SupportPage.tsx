@@ -142,8 +142,16 @@ export default function SupportPage(): JSX.Element {
             subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} support tickets`}
             icon={FileText}
             iconVariant="orange"
-            footerButtonLabel="View all cases"
-            onFooterClick={() => navigate("cases")}
+            footerButtons={[
+              {
+                label: "View my cases",
+                onClick: undefined,
+              },
+              {
+                label: "View all cases",
+                onClick: () => navigate("cases"),
+              },
+            ]}
             isError={isCasesError}
           >
             <OutstandingCasesList
@@ -163,8 +171,16 @@ export default function SupportPage(): JSX.Element {
             subtitle="Recent Novera conversations"
             icon={MessageSquare}
             iconVariant="blue"
-            footerButtonLabel="View all chat history"
-            onFooterClick={() => navigate("conversations")}
+            footerButtons={[
+              {
+                label: "View my chat history",
+                onClick: undefined,
+              },
+              {
+                label: "View all chat history",
+                onClick: () => navigate("conversations"),
+              },
+            ]}
             isError={isChatError}
           >
             <ChatHistoryList

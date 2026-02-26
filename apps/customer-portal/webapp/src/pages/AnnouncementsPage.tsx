@@ -15,12 +15,7 @@
 // under the License.
 
 import { useParams, useNavigate } from "react-router";
-import {
-  useState,
-  useMemo,
-  type JSX,
-  type ChangeEvent,
-} from "react";
+import { useState, useMemo, type JSX, type ChangeEvent } from "react";
 import {
   Box,
   Button,
@@ -35,7 +30,7 @@ import {
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
-import { getAnnouncementCaseTypeId } from "@utils/support";
+import { CaseType } from "@constants/supportConstants";
 import type { AnnouncementFilterValues } from "@constants/supportConstants";
 import AnnouncementStatCards from "@components/support/announcements/AnnouncementStatCards";
 import AnnouncementsSearchBar from "@components/support/announcements/AnnouncementsSearchBar";
@@ -59,18 +54,11 @@ export default function AnnouncementsPage(): JSX.Element {
   const pageSize = 10;
 
   const { data: filterMetadata } = useGetCasesFilters(projectId || "");
-  const announcementId = useMemo(
-    () => getAnnouncementCaseTypeId(filterMetadata?.caseTypes),
-    [filterMetadata?.caseTypes],
-  );
 
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
-        caseTypeIds:
-          announcementId && announcementId.trim()
-            ? [announcementId]
-            : undefined,
+        caseTypes: [CaseType.ANNOUNCEMENT],
         statusIds: undefined,
         severityId: undefined,
         searchQuery: searchTerm.trim() || undefined,
@@ -80,27 +68,22 @@ export default function AnnouncementsPage(): JSX.Element {
         order: sortOrder,
       },
     }),
-    [announcementId, searchTerm, sortOrder],
+    [searchTerm, sortOrder],
   );
 
   const offset = (page - 1) * pageSize;
 
-  const {
-    data,
-    isLoading: isCasesQueryLoading,
-  } = useGetProjectCasesPage(
+  const { data, isLoading: isCasesQueryLoading } = useGetProjectCasesPage(
     projectId || "",
     caseSearchRequest,
     offset,
     pageSize,
-    { enabled: !!announcementId },
   );
 
   const cases = data?.cases ?? [];
   const totalRecords = data?.totalRecords ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
-  const isCasesAreaLoading =
-    isCasesQueryLoading || (!!projectId && !!announcementId && !data);
+  const isCasesAreaLoading = isCasesQueryLoading;
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -194,21 +177,13 @@ export default function AnnouncementsPage(): JSX.Element {
         </Box>
       </Box>
 
-      {!announcementId && filterMetadata ? (
-        <Box sx={{ textAlign: "center", py: 6 }}>
-          <Typography variant="body1" color="text.secondary">
-            Announcement type not found in project filters.
-          </Typography>
-        </Box>
-      ) : isCasesAreaLoading ? (
+      {isCasesAreaLoading ? (
         <AllCasesListSkeleton />
       ) : (
         <AnnouncementList
           cases={cases}
           isLoading={false}
-          onCaseClick={(c) =>
-            navigate(`/${projectId}/announcements/${c.id}`)
-          }
+          onCaseClick={(c) => navigate(`/${projectId}/announcements/${c.id}`)}
         />
       )}
 
