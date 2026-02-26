@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Stack } from "@wso2/oxygen-ui";
+import { Box, Card, Stack, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 /**
@@ -26,51 +26,24 @@ export default function ServiceRequestsListSkeleton(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <Box
-          key={i}
-          sx={{
-            p: 3,
-            bgcolor: "background.paper",
-            display: "flex",
-            flexDirection: "column",
-            gap: 1.5,
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <Skeleton variant="text" width={80} height={24} />
-              <Skeleton variant="rectangular" width={90} height={22} />
-              <Skeleton variant="rectangular" width={120} height={22} />
+        <Card key={i} sx={{ p: 3 }}>
+          <Box sx={{ mb: 1 }}>
+            <Stack direction="row" spacing={1.5} sx={{ mb: 1 }}>
+              <Skeleton variant="text" width={80} height={20} />
+              <Skeleton variant="text" width={60} height={20} />
+              <Skeleton variant="rounded" width={70} height={20} />
+              <Skeleton variant="rounded" width={100} height={20} />
             </Stack>
-            <Skeleton variant="text" width={60} height={20} />
-          </Box>
-
-          <Skeleton variant="text" width="40%" height={28} />
-          <Skeleton variant="text" width="100%" height={20} />
-          <Skeleton variant="text" width="80%" height={20} />
-
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              mt: 1,
-            }}
-          >
-            <Stack direction="row" spacing={3}>
-              <Skeleton variant="text" width={100} height={20} />
-              <Skeleton variant="text" width={120} height={20} />
-              <Skeleton variant="text" width={100} height={20} />
+            <Skeleton variant="text" width="70%" height={32} sx={{ mb: 1 }} />
+            <Skeleton variant="text" width="90%" height={20} />
+            <Skeleton variant="text" width="85%" height={20} />
+            <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+              <Skeleton variant="text" width={120} height={16} />
+              <Skeleton variant="text" width={150} height={16} />
+              <Skeleton variant="text" width={100} height={16} />
             </Stack>
-            <Skeleton variant="text" width={90} height={20} />
           </Box>
-        </Box>
+        </Card>
       ))}
     </Box>
   );

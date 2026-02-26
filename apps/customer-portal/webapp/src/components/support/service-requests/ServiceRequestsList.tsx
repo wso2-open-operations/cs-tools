@@ -17,29 +17,26 @@
 import {
   Box,
   Chip,
-  Link,
+  Form,
   Stack,
   Typography,
   alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
-import {
-  Calendar,
-  ChevronRight,
-  Layers,
-  Package,
-  Users,
-} from "@wso2/oxygen-ui-icons-react";
+import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import type { CaseListItem } from "@models/responses";
 import {
-  formatRelativeTime,
+  formatDateTime,
+  getAssignedEngineerLabel,
+  getSeverityColor,
   getStatusColor,
   getStatusIcon,
+  mapSeverityToDisplay,
   resolveColorFromTheme,
   stripHtml,
 } from "@utils/support";
-import ServiceRequestsListSkeleton from "@components/support/service-requests/ServiceRequestsListSkeleton";
+import ServiceRequestsListSkeleton from "./ServiceRequestsListSkeleton";
 
 export interface ServiceRequestsListProps {
   serviceRequests: CaseListItem[];
@@ -82,171 +79,192 @@ export default function ServiceRequestsList({
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
 
         return (
-          <Box
+          <Form.CardButton
             key={sr.id}
+            onClick={() => onServiceRequestClick?.(sr)}
             sx={{
               p: 3,
-              bgcolor: "background.paper",
               display: "flex",
               flexDirection: "column",
-              gap: 1.5,
-              cursor: "pointer",
-              "&:hover": {
-                bgcolor: "action.hover",
-              },
+              alignItems: "stretch",
+              gap: 1,
             }}
-            onClick={() => onServiceRequestClick?.(sr)}
           >
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-              }}
-            >
-              <Stack direction="row" spacing={1.5} alignItems="center">
-                <Typography
-                  variant="body2"
-                  fontWeight={600}
-                  color="text.primary"
+            <Form.CardHeader
+              sx={{ p: 0 }}
+              title={
+                <Stack
+                  direction="row"
+                  spacing={1.5}
+                  alignItems="center"
+                  sx={{ mb: 1, flexWrap: "wrap" }}
                 >
-                  {sr.number || "--"}
-                </Typography>
-                <Chip
-                  size="small"
-                  variant="filled"
-                  label={sr.status?.label || "--"}
-                  icon={<StatusIcon size={12} />}
-                  sx={{
-                    bgcolor: alpha(resolvedColor, 0.1),
-                    color: resolvedColor,
-                    height: 22,
-                    fontSize: "0.75rem",
-                    "& .MuiChip-icon": {
-                      color: "inherit",
-                      ml: "6px",
-                      mr: "-2px",
-                    },
-                    "& .MuiChip-label": {
-                      px: 1,
-                    },
-                  }}
-                />
-                {sr.issueType?.label && (
+                  <Typography
+                    variant="body2"
+                    fontWeight={500}
+                    color="text.primary"
+                  >
+                    {sr.number || "--"}
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        bgcolor: getSeverityColor(sr.severity?.label),
+                      }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {mapSeverityToDisplay(sr.severity?.label)}
+                    </Typography>
+                  </Box>
                   <Chip
                     size="small"
-                    label={sr.issueType.label}
                     variant="outlined"
+                    label={sr.status?.label || "--"}
+                    icon={<StatusIcon size={12} />}
                     sx={{
-                      height: 22,
+                      bgcolor: alpha(resolvedColor, 0.1),
+                      color: resolvedColor,
+                      height: 20,
                       fontSize: "0.75rem",
-                      bgcolor: "action.hover",
-                      borderColor: "transparent",
+                      px: 0,
+                      "& .MuiChip-icon": {
+                        color: "inherit",
+                        ml: "6px",
+                        mr: "6px",
+                      },
+                      "& .MuiChip-label": {
+                        pl: 0,
+                        pr: "6px",
+                      },
                     }}
                   />
-                )}
-              </Stack>
-              <Typography variant="caption" color="text.secondary">
-                {formatRelativeTime(sr.createdOn)}
-              </Typography>
-            </Box>
+                  {sr.issueType?.label && (
+                    <Chip
+                      size="small"
+                      label={sr.issueType.label || "--"}
+                      variant="outlined"
+                      sx={{
+                        height: 20,
+                        fontSize: "0.75rem",
+                      }}
+                    />
+                  )}
+                </Stack>
+              }
+            />
 
-            <Typography
-              variant="subtitle1"
-              color="text.primary"
-              sx={{ fontWeight: 500 }}
-            >
-              {sr.title || "--"}
-            </Typography>
-
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-              }}
-            >
-              {stripHtml(sr.description) || "--"}
-            </Typography>
-
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                mt: 1,
-              }}
-            >
-              <Stack
-                direction="row"
-                spacing={3}
-                sx={{ flexWrap: "wrap", gap: 1.5 }}
+            <Form.CardContent sx={{ p: 0 }}>
+              <Typography
+                variant="h6"
+                color="text.primary"
+                sx={{ mb: 1, fontWeight: 500 }}
               >
+                {sr.title || "--"}
+              </Typography>
+
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  mb: 2,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {stripHtml(sr.description) || "--"}
+              </Typography>
+            </Form.CardContent>
+
+            <Form.CardActions
+              sx={{
+                p: 0,
+                justifyContent: "flex-start",
+                flexWrap: "wrap",
+                gap: 2,
+              }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 0.5,
+                    flexShrink: 0,
+                  }}
+                >
+                  <Calendar size={14} />
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ lineHeight: 1 }}
+                  >
+                    Created {formatDateTime(sr.createdOn) || "--"}
+                  </Typography>
+                </Box>
+                {(() => {
+                  const assignedLabel = getAssignedEngineerLabel(
+                    sr.assignedEngineer,
+                  );
+                  return assignedLabel ? (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <User size={14} />
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ lineHeight: 1 }}
+                      >
+                        Assigned to {assignedLabel}
+                      </Typography>
+                    </Box>
+                  ) : null;
+                })()}
                 {sr.deployment?.label && (
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                    <Layers size={14} color={theme.palette.text.secondary} />
-                    <Typography variant="caption" color="text.secondary">
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <FileText size={14} />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ lineHeight: 1 }}
+                    >
                       {sr.deployment.label}
                     </Typography>
                   </Box>
                 )}
-                {sr.deployedProduct?.label && (
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                    <Package size={14} color={theme.palette.text.secondary} />
-                    <Typography variant="caption" color="text.secondary">
-                      {sr.deployedProduct.label}
-                    </Typography>
-                  </Box>
-                )}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  <Calendar size={14} color={theme.palette.text.secondary} />
-                  <Typography variant="caption" color="text.secondary">
-                    {sr.createdOn
-                      ? new Date(sr.createdOn).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
-                      : "--"}
-                  </Typography>
-                </Box>
-                {sr.assignedEngineer && (
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                    <Users size={14} color={theme.palette.text.secondary} />
-                    <Typography variant="caption" color="text.secondary">
-                      {typeof sr.assignedEngineer === "string"
-                        ? sr.assignedEngineer
-                        : sr.assignedEngineer.label ||
-                          sr.assignedEngineer.name ||
-                          "--"}
-                    </Typography>
-                  </Box>
-                )}
-              </Stack>
-              <Link
-                component="button"
-                variant="body2"
-                underline="none"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onServiceRequestClick?.(sr);
-                }}
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                  color: "primary.main",
-                  fontWeight: 500,
-                }}
-              >
-                View Details
-                <ChevronRight size={16} />
-              </Link>
-            </Box>
-          </Box>
+              </Box>
+            </Form.CardActions>
+          </Form.CardButton>
         );
       })}
     </Box>

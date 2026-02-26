@@ -14,9 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Paper, TextField, InputAdornment, Tabs, Tab } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Button,
+  Paper,
+  TextField,
+  InputAdornment,
+} from "@wso2/oxygen-ui";
 import { Search } from "@wso2/oxygen-ui-icons-react";
-import type { JSX, ChangeEvent, SyntheticEvent } from "react";
+import type { JSX, ChangeEvent } from "react";
 import type { ServiceRequestStatusFilter } from "@pages/ServiceRequestsPage";
 
 export interface ServiceRequestsSearchBarProps {
@@ -49,15 +55,6 @@ export default function ServiceRequestsSearchBar({
     onSearchChange(event.target.value);
   };
 
-  const handleTabChange = (
-    _event: SyntheticEvent,
-    newValue: ServiceRequestStatusFilter,
-  ) => {
-    onStatusFilterChange(newValue);
-  };
-
-  const currentTabIndex = STATUS_TABS.findIndex((t) => t.value === statusFilter);
-
   return (
     <Paper sx={{ p: 2 }}>
       <Box
@@ -65,10 +62,9 @@ export default function ServiceRequestsSearchBar({
           display: "flex",
           alignItems: "center",
           gap: 2,
-          flexWrap: "wrap",
         }}
       >
-        <Box sx={{ flex: 1, minWidth: 200 }}>
+        <Box sx={{ flex: 1 }}>
           <TextField
             fullWidth
             size="small"
@@ -86,37 +82,25 @@ export default function ServiceRequestsSearchBar({
             }}
           />
         </Box>
-        <Tabs
-          value={currentTabIndex >= 0 ? currentTabIndex : 0}
-          onChange={(_e, idx) => handleTabChange(_e, STATUS_TABS[idx].value)}
-          sx={{
-            minHeight: 36,
-            "& .MuiTabs-indicator": {
-              display: "none",
-            },
-          }}
-        >
+        <Box sx={{ display: "flex", gap: 0.5 }}>
           {STATUS_TABS.map((tab) => (
-            <Tab
+            <Button
               key={tab.value}
-              label={tab.label}
+              size="small"
+              variant={statusFilter === tab.value ? "contained" : "text"}
+              color={statusFilter === tab.value ? "primary" : "inherit"}
+              onClick={() => onStatusFilterChange(tab.value)}
               sx={{
-                minHeight: 36,
-                px: 2,
-                py: 0.5,
                 textTransform: "none",
-                fontSize: "0.875rem",
                 fontWeight: statusFilter === tab.value ? 600 : 400,
-                color:
-                  statusFilter === tab.value
-                    ? "primary.main"
-                    : "text.secondary",
-                bgcolor:
-                  statusFilter === tab.value ? "action.selected" : "transparent",
+                minWidth: "auto",
+                px: 2,
               }}
-            />
+            >
+              {tab.label}
+            </Button>
           ))}
-        </Tabs>
+        </Box>
       </Box>
     </Paper>
   );
