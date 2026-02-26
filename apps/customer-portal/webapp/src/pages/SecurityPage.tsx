@@ -33,10 +33,10 @@ const SecurityPage = (): JSX.Element => {
     },
     [navigate, projectId],
   );
-  const [vulnerabilityTotalRecords, setVulnerabilityTotalRecords] = useState<
+  const [ setVulnerabilityTotalRecords] = useState<
     number | undefined
   >(undefined);
-  const [vulnerabilitiesError, setVulnerabilitiesError] = useState(false);
+  const [ setVulnerabilitiesError] = useState(false);
 
   const tabs = [
     {
