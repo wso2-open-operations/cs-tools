@@ -16,17 +16,16 @@
 import { useState, useCallback, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
-import { Siren, ShieldAlert, Package } from "@wso2/oxygen-ui-icons-react";
-import SecurityStats from "@components/security/SecurityStats";
+import { Siren, Package } from "@wso2/oxygen-ui-icons-react";
+//import SecurityStats from "@components/security/SecurityStats";
 import TabBar from "@components/common/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@components/security/ProductVulnerabilitiesTable";
-import SecurityAdvisoriesTable from "@components/security/SecurityAdvisoriesTable";
 import ComponentAnalysis from "@components/security/ComponentAnalysis";
 
 const SecurityPage = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState("vulnerabilities");
+  const [activeTab, setActiveTab] = useState("components");
 
   const handleVulnerabilityClick = useCallback(
     (vulnerability: { id: string }) => {
@@ -34,53 +33,34 @@ const SecurityPage = (): JSX.Element => {
     },
     [navigate, projectId],
   );
-  const [vulnerabilityTotalRecords, setVulnerabilityTotalRecords] = useState<
-    number | undefined
-  >(undefined);
-  const [vulnerabilitiesError, setVulnerabilitiesError] = useState(false);
 
   const tabs = [
-    {
-      id: "vulnerabilities",
-      label: "Product Vulnerabilities",
-      icon: Siren,
-    },
-    {
-      id: "advisories",
-      label: "Security Advisories",
-      icon: ShieldAlert,
-    },
     {
       id: "components",
       label: "Component Analysis",
       icon: Package,
     },
+    {
+      id: "vulnerabilities",
+      label: "Security Report Analysis",
+      icon: Siren,
+    },
   ];
 
   return (
     <Box>
-      <SecurityStats
-        totalRecords={vulnerabilityTotalRecords}
-        isError={vulnerabilitiesError}
-      />
+      {/* <SecurityStats /> */}
 
       <Box>
-        <TabBar
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-        />
+        <TabBar tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
         <Box>
-          {activeTab === "vulnerabilities" && (
+          {activeTab === "components" && (
             <ProductVulnerabilitiesTable
-              onTotalRecordsChange={setVulnerabilityTotalRecords}
-              onError={setVulnerabilitiesError}
               onVulnerabilityClick={handleVulnerabilityClick}
             />
           )}
-          {activeTab === "advisories" && <SecurityAdvisoriesTable />}
-          {activeTab === "components" && <ComponentAnalysis />}
+          {activeTab === "vulnerabilities" && <ComponentAnalysis />}
         </Box>
       </Box>
     </Box>

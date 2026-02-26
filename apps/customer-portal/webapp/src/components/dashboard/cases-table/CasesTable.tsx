@@ -53,10 +53,11 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       id: "statusId",
       label: "Status",
       type: "select",
-      options:
-        (filtersMetadata?.caseStates ?? filtersMetadata?.statuses ?? []).map(
-          (s) => ({ label: s.label, value: s.id }),
-        ),
+      options: (
+        filtersMetadata?.caseStates ??
+        filtersMetadata?.statuses ??
+        []
+      ).map((s) => ({ label: s.label, value: s.id })),
     },
     {
       id: "severityId",
@@ -89,7 +90,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
         })) || [],
     },
     {
-      id: "caseTypeIds",
+      id: "caseTypes",
       label: "Case Type",
       type: "select",
       options: normalizeCaseTypeOptions(filtersMetadata?.caseTypes || []),
@@ -104,7 +105,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
-        caseTypeIds: filters.caseTypeIds?.length ? [filters.caseTypeIds] : undefined,
+        caseTypes: filters.caseTypes?.length ? [filters.caseTypes] : undefined,
       },
       sortBy: {
         field: "createdOn",
@@ -119,12 +120,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
     data: pageData,
     isFetching: isFetchingCases,
     isError,
-  } = useGetProjectCasesPage(
-    projectId,
-    caseSearchRequest,
-    offset,
-    rowsPerPage,
-  );
+  } = useGetProjectCasesPage(projectId, caseSearchRequest, offset, rowsPerPage);
 
   const paginatedData = useMemo(() => {
     const cases = pageData?.cases ?? [];

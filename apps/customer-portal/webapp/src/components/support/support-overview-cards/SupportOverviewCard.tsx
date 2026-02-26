@@ -36,8 +36,12 @@ export interface SupportOverviewCardProps {
   icon: ComponentType<{ size?: number; color?: string }>;
   iconVariant?: "orange" | "blue";
   children: React.ReactNode;
-  footerButtonLabel: string;
-  onFooterClick: () => void;
+  footerButtonLabel?: string;
+  onFooterClick?: () => void;
+  footerButtons?: Array<{
+    label: string;
+    onClick?: () => void;
+  }>;
   sx?: SxProps<Theme>;
   isError?: boolean;
 }
@@ -56,6 +60,7 @@ export default function SupportOverviewCard({
   children,
   footerButtonLabel,
   onFooterClick,
+  footerButtons,
   sx,
   isError,
 }: SupportOverviewCardProps): JSX.Element {
@@ -129,20 +134,57 @@ export default function SupportOverviewCard({
           mt: 1,
         }}
       />
-      <Button
-        fullWidth
-        variant="text"
-        color="warning"
-        onClick={onFooterClick}
-        endIcon={<ArrowRight size={16} />}
-        sx={{
-          justifyContent: "flex-start",
-          textTransform: "none",
-          fontWeight: 500,
-        }}
-      >
-        {footerButtonLabel}
-      </Button>
+      {footerButtons && footerButtons.length > 0 ? (
+        <Box
+          sx={{
+            display: "flex",
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            overflow: "hidden",
+          }}
+        >
+          {footerButtons.map((btn, index) => (
+            <Button
+              key={index}
+              fullWidth
+              variant="text"
+              color="warning"
+              onClick={btn.onClick}
+              endIcon={<ArrowRight size={16} />}
+              sx={{
+                flex: 1,
+                justifyContent: "flex-start",
+                textTransform: "none",
+                fontWeight: 500,
+                borderRadius: 0,
+                borderRight: index < footerButtons.length - 1 ? 1 : 0,
+                borderColor: "divider",
+                "&:hover": {
+                  bgcolor: alpha(colors.orange[50], 0.5),
+                },
+              }}
+            >
+              {btn.label}
+            </Button>
+          ))}
+        </Box>
+      ) : (
+        <Button
+          fullWidth
+          variant="text"
+          color="warning"
+          onClick={onFooterClick}
+          endIcon={<ArrowRight size={16} />}
+          sx={{
+            justifyContent: "flex-start",
+            textTransform: "none",
+            fontWeight: 500,
+          }}
+        >
+          {footerButtonLabel}
+        </Button>
+      )}
     </Paper>
   );
 }
