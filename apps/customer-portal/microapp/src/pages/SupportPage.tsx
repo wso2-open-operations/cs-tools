@@ -65,7 +65,7 @@ export default function SupportPage() {
               <MessageSquareQuote size={pxToRem(40)} color={theme.palette.primary.main} />
               <Stack>
                 <Typography variant="body1" fontWeight="medium" color="primary">
-                  Create Support Ticket
+                  Need help with something new?
                 </Typography>
                 <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
                   Chat with Novera or Create Support Case

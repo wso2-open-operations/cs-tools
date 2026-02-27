@@ -61,7 +61,7 @@ export function StickyCommentBar({
       justifyContent="space-between"
       bgcolor="background.paper"
     >
-      {topSlot && <Box>{topSlot}</Box>}
+      {topSlot && <Box sx={{ m: -2 }}>{topSlot}</Box>}
 
       <Stack direction="row" gap={2}>
         <TextField

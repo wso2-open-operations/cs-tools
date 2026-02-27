@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState } from "react";
-import { Backdrop, Button, CircularProgress, Stack, Typography } from "@wso2/oxygen-ui";
+import { useEffect, useRef, useState } from "react";
+import { Backdrop, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { StickyCommentBar } from "@components/features/detail";
 import { MessageBubble, type ChatMessage } from "@components/features/chat";
 import { useNavigate } from "react-router-dom";
@@ -23,10 +23,20 @@ import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import { chats } from "../services/chats";
+import type { MessageDispatchDTO } from "../types/chat.dto";
+import { Pin } from "@wso2/oxygen-ui-icons-react";
+
+dayjs.extend(relativeTime);
 
 export default function ChatPage() {
   const navigate = useNavigate();
+  const { projectId } = useProject();
+  const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       author: "assistant",
@@ -40,44 +50,35 @@ export default function ChatPage() {
     },
   ]);
 
-  const handleSend = () => {
-    if (!comment.trim()) return;
-
-    const userMessage: ChatMessage = {
-      author: "you",
-      blocks: [{ type: "text", value: comment }],
-    };
-
-    const assistantMessage: ChatMessage = {
-      author: "assistant",
-      blocks: [
+  const { mutate: createConversation, isPending: isCreatingConversation } = useMutation({
+    ...chats.initiate(projectId!),
+    onSuccess: (response) => {
+      setConversationId(response.conversationId);
+      setMessages((prev) => [
+        ...prev,
         {
-          type: "text",
-          value: "Thanks for those details. Based on what you've shared, here are a few things to check:",
+          author: "assistant",
+          blocks: [{ type: "text", value: response.content }],
+          timestamp: dayjs(response.timestamp).fromNow(),
         },
-        {
-          type: "checklist",
-          items: [
-            "Verify your backend service timeout configurations",
-            "Check system resource utilization CPU, memory",
-            "Review recent deployment or configuration changes",
-          ],
-        },
-        {
-          type: "kb",
-          items: [
-            { id: "KB-1234", title: "Troubleshooting API Gateway Timeouts" },
-            { id: "KB-1234", title: "Troubleshooting API Gateway Timeouts" },
-          ],
-        },
-      ],
-    };
+      ]);
+    },
+  });
 
-    setMessages((prev) => [...prev, userMessage]);
-    setTimeout(() => setMessages((prev) => [...prev, assistantMessage]), 2000);
-  };
+  const { mutate: createMessage, isPending: isCreatingMessage } = useMutation({
+    ...chats.send(projectId!, conversationId!),
+    onSuccess: (response) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          author: "assistant",
+          blocks: [{ type: "text", value: response.content }],
+          timestamp: dayjs(response.timestamp).fromNow(),
+        },
+      ]);
+    },
+  });
 
-  const { projectId } = useProject();
   const { data: deployments = [] } = useQuery(projects.deployments(projectId!));
 
   const productQueries = useQueries({
@@ -96,6 +97,35 @@ export default function ChatPage() {
     },
   });
 
+  const envProducts = deployments.reduce((acc, deployment, index) => {
+    const products = productQueries[index]?.data ?? [];
+    const productNames = products.map((p) => p.name);
+
+    return {
+      ...acc,
+      [deployment.name]: productNames,
+    };
+  }, {});
+
+  const handleSend = () => {
+    if (!comment.trim()) return;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        author: "you",
+        blocks: [{ type: "text", value: comment }],
+        timestamp: dayjs().fromNow(),
+      },
+    ]);
+
+    const payload: Omit<MessageDispatchDTO, "region" | "tier"> = { message: comment, envProducts: envProducts };
+    setComment("");
+
+    if (conversationId) createMessage(payload);
+    else createConversation(payload);
+  };
+
   const handleCreateCase = () => {
     mutation.mutate({
       chatHistory: toString(messages),
@@ -110,6 +140,10 @@ export default function ChatPage() {
       }, {}),
     });
   };
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   return (
     <>
@@ -130,15 +164,28 @@ export default function ChatPage() {
           <MessageBubble key={index} {...message} />
         ))}
       </Stack>
+      <div ref={bottomRef} />
 
       <StickyCommentBar
+        loading={isCreatingConversation || isCreatingMessage}
         value={comment}
         placeholder="Type your message"
         onChange={setComment}
         onSend={handleSend}
         topSlot={
           messages.length > 2 && (
-            <Stack direction="row" alignItems="center" gap={2}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              gap={2}
+              p={2}
+              sx={{ borderBottom: `1px solid ${colors.grey[200]}`, position: "relative" }}
+            >
+              <Pin
+                size={pxToRem(12)}
+                fill={colors.grey[500]}
+                style={{ color: colors.grey[500], position: "absolute", right: 3, top: 5 }}
+              />
               <Typography variant="body2">I can create a support case with all the details we've discussed.</Typography>
               <Button variant="contained" sx={{ textTransform: "initial", flexShrink: 0 }} onClick={handleCreateCase}>
                 Create Case
