@@ -106,7 +106,6 @@ export interface RelatedCaseState {
   number: string;
   title: string;
   description: string;
-  /** Parent case deployment (development type); shown disabled in form. */
   deploymentId?: string;
   deploymentLabel?: string;
 }

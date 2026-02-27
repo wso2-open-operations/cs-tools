@@ -22,7 +22,7 @@ export const SecurityTab = {
   VULNERABILITIES: "vulnerabilities",
 } as const;
 
-export type SecurityTab = (typeof SecurityTab)[keyof typeof SecurityTab];
+export type SecurityTabType = (typeof SecurityTab)[keyof typeof SecurityTab];
 
 /**
  * Case report type values.
@@ -31,5 +31,5 @@ export const CaseReportType = {
   SECURITY: "security",
 } as const;
 
-export type CaseReportType =
+export type CaseReportTypeValue =
   (typeof CaseReportType)[keyof typeof CaseReportType];

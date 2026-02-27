@@ -22,7 +22,10 @@ import { Siren, Package } from "@wso2/oxygen-ui-icons-react";
 import TabBar from "@components/common/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@components/security/ProductVulnerabilitiesTable";
 import SecurityReportAnalysis from "@/components/security/SecurityReportAnalysis";
-import { SecurityTab } from "@constants/securityConstants";
+import {
+  SecurityTab,
+  type SecurityTabType,
+} from "@constants/securityConstants";
 
 const SecurityPage = (): JSX.Element => {
   const navigate = useNavigate();
@@ -31,10 +34,10 @@ const SecurityPage = (): JSX.Element => {
 
   const tabParam = searchParams.get("tab");
   const isValidTab = Object.values(SecurityTab).includes(
-    tabParam as SecurityTab,
+    tabParam as SecurityTabType,
   );
   const activeTab = isValidTab
-    ? (tabParam as SecurityTab)
+    ? (tabParam as SecurityTabType)
     : SecurityTab.COMPONENTS;
 
   const handleTabChange = useCallback(
