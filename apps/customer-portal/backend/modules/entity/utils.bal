@@ -166,7 +166,7 @@ public isolated function validateCaseUpdatePayload(CaseUpdatePayload payload) re
 # + payload - Case create payload
 # + return - Validation error message or null if valid
 public isolated function validateCaseCreatePayload(CaseCreatePayload payload) returns string? {
-    CaseType caseType = payload.'type ?: DEFAULT_CASE;
+    CaseType caseType = payload.'type;
     string? title = payload.title;
     string? description = payload.description;
 
