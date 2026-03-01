@@ -53,14 +53,12 @@ const ContactInfoCard = ({
     });
   }
 
-  if (project?.account?.technicalOwnerEmail) {
-    contacts.push({
-      role: "Technical Owner",
-      email: project.account.technicalOwnerEmail,
-      icon: Shield,
-      bgColor: colors.purple[400],
-    });
-  }
+  contacts.push({
+    role: "Technical Owner",
+    email: project?.account?.technicalOwnerEmail || null,
+    icon: Shield,
+    bgColor: colors.purple[400],
+  });
 
   const renderContactSkeleton = () => (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>

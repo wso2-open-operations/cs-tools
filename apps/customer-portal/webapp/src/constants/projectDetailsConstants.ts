@@ -30,7 +30,7 @@ import { convertMinutesToHours } from "@utils/projectDetails";
 
 export interface Contact {
   role: string;
-  email: string;
+  email: string | null;
   icon: ElementType<{ size?: number }>;
   bgColor: string;
 }

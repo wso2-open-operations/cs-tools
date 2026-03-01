@@ -241,11 +241,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     setPage(value);
   };
 
-  const hasActiveFilters =
-    !!filters.statusId ||
-    !!filters.severityId ||
-    !!filters.issueTypes ||
-    !!filters.deploymentId;
+  const hasActiveFilters = !!filters.statusId || !!filters.deploymentId;
 
   const reportViewTabs = useMemo(
     () => [
@@ -387,56 +383,6 @@ const SecurityReportAnalysis = (): JSX.Element => {
                     {filterMetadata?.statuses?.map((status) => (
                       <MenuItem key={status.id} value={status.id}>
                         <Typography variant="body2">{status.label}</Typography>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel id="severity-label">Severity</InputLabel>
-                  <Select
-                    labelId="severity-label"
-                    value={filters.severityId || ""}
-                    label="Severity"
-                    onChange={(e) =>
-                      handleFilterChange("severityId", e.target.value)
-                    }
-                    disabled
-                  >
-                    <MenuItem value="">
-                      <Typography variant="body2">All Severities</Typography>
-                    </MenuItem>
-                    {filterMetadata?.severities?.map((severity) => (
-                      <MenuItem key={severity.id} value={severity.id}>
-                        <Typography variant="body2">
-                          {severity.label}
-                        </Typography>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel id="issue-type-label">Issue Type</InputLabel>
-                  <Select
-                    labelId="issue-type-label"
-                    value={filters.issueTypes || ""}
-                    label="Issue Type"
-                    onChange={(e) =>
-                      handleFilterChange("issueTypes", e.target.value)
-                    }
-                    disabled
-                  >
-                    <MenuItem value="">
-                      <Typography variant="body2">All Issue Types</Typography>
-                    </MenuItem>
-                    {filterMetadata?.issueTypes?.map((issueType) => (
-                      <MenuItem key={issueType.id} value={issueType.id}>
-                        <Typography variant="body2">
-                          {issueType.label}
-                        </Typography>
                       </MenuItem>
                     ))}
                   </Select>

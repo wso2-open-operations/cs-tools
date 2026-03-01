@@ -26,6 +26,7 @@ import {
   type JSX,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import useGetCasesFilters from "@api/useGetCasesFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
@@ -47,6 +48,7 @@ import {
   getBaseDeploymentOptions,
   getBaseProductOptions,
   getDeploymentDisplayLabelForEnvironment,
+  getDeploymentProductDisplayLabel,
   resolveDeploymentMatch,
   resolveIssueTypeKey,
   resolveProductId,
@@ -59,6 +61,7 @@ import {
   CaseType,
 } from "@constants/supportConstants";
 import { SecurityTab } from "@constants/securityConstants";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { escapeHtml, htmlToPlainText } from "@utils/richTextEditor";
 import UploadAttachmentModal from "@components/support/case-details/attachments-tab/UploadAttachmentModal";
 
@@ -188,6 +191,7 @@ export default function CreateCasePage(): JSX.Element {
 
   const skipChatMode = skipChat;
   const noAiMode = !!relatedCase || skipChatMode;
+  const queryClient = useQueryClient();
 
   const locationState = location.state as {
     messages?: ChatMessageForClassification[];
@@ -277,6 +281,52 @@ export default function CreateCasePage(): JSX.Element {
   const handleProductChange = useCallback((value: string) => {
     setProduct(value);
   }, []);
+
+  // Auto-fill title for security reports when deployment and product are selected
+  // This will overwrite any manually entered title
+  useEffect(() => {
+    if (!isSecurityReport || !deployment || !product) return;
+
+    // Get deployment type label
+    const deploymentMatch = resolveDeploymentMatch(
+      deployment,
+      projectDeployments,
+      undefined,
+    );
+    const deploymentId = deploymentMatch?.id;
+    const deploymentObj = projectDeployments?.find(
+      (d) => d.id === deploymentId,
+    );
+    const deploymentLabel =
+      deploymentObj?.name || deploymentObj?.type?.label || deployment;
+
+    // Get product name without version
+    const selectedProduct = allDeploymentProducts.find(
+      (item) =>
+        item.id === product ||
+        getDeploymentProductDisplayLabel(item) === product,
+    );
+    const productName = selectedProduct?.product?.label?.trim() || "";
+
+    // Format today's date as YYYY-MM-DD
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    const dateStr = `${year}-${month}-${day}`;
+
+    // Generate title: "Deployment Type - Product Name - Date"
+    if (productName) {
+      const generatedTitle = `${deploymentLabel} - ${productName} - ${dateStr}`;
+      setTitle(generatedTitle);
+    }
+  }, [
+    isSecurityReport,
+    deployment,
+    product,
+    projectDeployments,
+    allDeploymentProducts,
+  ]);
 
   useEffect(() => {
     if (hasInitializedRef.current) return;
@@ -620,7 +670,12 @@ export default function CreateCasePage(): JSX.Element {
 
         showSuccess("Case created successfully");
         sessionStorage.removeItem(STORAGE_KEY);
+
+        // Refetch security vulnerabilities if this was a security report
         if (isCreatedSecurityReport) {
+          await queryClient.invalidateQueries({
+            queryKey: [ApiQueryKeys.PROJECT_CASES, projectId],
+          });
           navigate(
             `/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTab.VULNERABILITIES}`,
           );
@@ -742,7 +797,9 @@ export default function CreateCasePage(): JSX.Element {
               {isPreparingAttachments
                 ? "Preparing Attachments..."
                 : isCreatePending
-                  ? "Creating..."
+                  ? isSecurityReport
+                    ? "Submitting..."
+                    : "Creating..."
                   : isSecurityReport
                     ? "Submit Security Report"
                     : relatedCase
