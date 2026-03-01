@@ -297,6 +297,8 @@ public type CaseSearchFilters record {|
     int severityKey?;
     # Deployment ID
     string deploymentId?;
+    # Case created by the logged in user
+    boolean createdByMe?;
 |};
 
 # Case metadata information.
