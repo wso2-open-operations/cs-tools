@@ -85,7 +85,7 @@ public type Project record {|
 public type ProjectSearchPayload record {|
     # Filter criteria
     record {
-        # Search query for project name
+        # Search query for projects
         string searchQuery?;
     } filters?;
     # Pagination details
