@@ -17,15 +17,28 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import useGetCaseAttachments from "@api/useGetCaseAttachments";
+import {
+  useGetCaseAttachments,
+  flattenCaseAttachments,
+} from "@api/useGetCaseAttachments";
 
-const mockAttachmentsResponse = {
+const mockAttachmentsPage1 = {
   attachments: [
-    { id: "a1", name: "file.txt", size: 100, createdOn: "", createdBy: "" },
+    { id: "a1", name: "file1.txt", size: 100, createdOn: "", createdBy: "" },
+    { id: "a2", name: "file2.txt", size: 200, createdOn: "", createdBy: "" },
   ],
-  totalRecords: 1,
+  totalRecords: 12,
   offset: 0,
-  limit: 50,
+  limit: 10,
+};
+
+const mockAttachmentsPage2 = {
+  attachments: [
+    { id: "a3", name: "file3.txt", size: 300, createdOn: "", createdBy: "" },
+  ],
+  totalRecords: 12,
+  offset: 10,
+  limit: 10,
 };
 
 vi.mock("@asgardeo/react", () => ({
@@ -38,7 +51,7 @@ vi.mock("@asgardeo/react", () => ({
 
 const mockAuthFetch = vi.fn().mockResolvedValue({
   ok: true,
-  json: () => Promise.resolve(mockAttachmentsResponse),
+  json: () => Promise.resolve(mockAttachmentsPage1),
 });
 vi.mock("@context/AuthApiContext", () => ({
   useAuthApiClient: () => mockAuthFetch,
@@ -62,14 +75,18 @@ describe("useGetCaseAttachments", () => {
     vi.clearAllMocks();
     mockAuthFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve(mockAttachmentsResponse),
+      json: () => Promise.resolve(mockAttachmentsPage1),
     });
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });
 
-  it("should return attachments from API", async () => {
+  it("should return first page of attachments from infinite query", async () => {
     const { result } = renderHook(() => useGetCaseAttachments("case-001"), {
       wrapper,
     });
@@ -77,13 +94,11 @@ describe("useGetCaseAttachments", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toBeDefined();
-    expect(result.current.data?.attachments).toBeDefined();
-    expect(result.current.data?.attachments.length).toBe(
-      mockAttachmentsResponse.attachments.length,
+    expect(result.current.data?.pages).toBeDefined();
+    expect(result.current.data?.pages[0]?.attachments).toEqual(
+      mockAttachmentsPage1.attachments,
     );
-    expect(result.current.data?.totalRecords).toBe(mockAttachmentsResponse.totalRecords);
-    expect(result.current.data?.offset).toBe(0);
-    expect(result.current.data?.limit).toBe(50);
+    expect(result.current.data?.pages[0]?.totalRecords).toBe(12);
   });
 
   it("should not fetch when caseId is missing", () => {
@@ -91,35 +106,50 @@ describe("useGetCaseAttachments", () => {
     expect(result.current.isFetching).toBe(false);
   });
 
-  it("should use correct query key", () => {
+  it("should use correct query key with infinite flag", () => {
     renderHook(() => useGetCaseAttachments("case-001"), { wrapper });
     const query = queryClient.getQueryCache().findAll({
-      queryKey: ["case-attachments", "case-001", 50, 0],
+      queryKey: ["case-attachments", "case-001", "infinite"],
     })[0];
     expect(query).toBeDefined();
   });
 
-  it("should respect limit and offset options", async () => {
-    const limitedResponse = {
-      ...mockAttachmentsResponse,
-      limit: 2,
-      offset: 1,
-      attachments: mockAttachmentsResponse.attachments.slice(0, 2),
-    };
-    mockAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(limitedResponse),
+  it("should support fetching next page", async () => {
+    mockAuthFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockAttachmentsPage1),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockAttachmentsPage2),
+      });
+
+    const { result } = renderHook(() => useGetCaseAttachments("case-001"), {
+      wrapper,
     });
-    const { result } = renderHook(
-      () => useGetCaseAttachments("case-001", { limit: 2, offset: 1 }),
-      { wrapper },
-    );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.hasNextPage).toBe(true);
 
-    expect(result.current.data?.limit).toBe(2);
-    expect(result.current.data?.offset).toBe(1);
-    expect(result.current.data?.attachments.length).toBeLessThanOrEqual(2);
-    expect(result.current.data?.totalRecords).toBe(mockAttachmentsResponse.totalRecords);
+    result.current.fetchNextPage();
+
+    await waitFor(() => expect(result.current.data?.pages.length).toBe(2));
+    expect(result.current.data?.pages[1]?.attachments).toEqual(
+      mockAttachmentsPage2.attachments,
+    );
+  });
+
+  it("should flatten attachments from all pages", () => {
+    const mockData = {
+      pages: [mockAttachmentsPage1, mockAttachmentsPage2],
+      pageParams: [0, 10],
+    };
+
+    const flattened = flattenCaseAttachments(mockData);
+    expect(flattened).toHaveLength(3);
+    expect(flattened[0].id).toBe("a1");
+    expect(flattened[1].id).toBe("a2");
+    expect(flattened[2].id).toBe("a3");
   });
 });
