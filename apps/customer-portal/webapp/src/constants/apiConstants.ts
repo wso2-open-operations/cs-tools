@@ -56,4 +56,5 @@ export const ApiQueryKeys = {
 // Constants for API-related mutation keys.
 export const ApiMutationKeys = {
   POST_COMMENT: ["postComment"],
+  POST_CHANGE_REQUEST_COMMENT: ["postChangeRequestComment"],
 } as const;

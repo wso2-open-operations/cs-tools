@@ -1058,6 +1058,35 @@ export function stripHtml(html: string | null | undefined): string {
 }
 
 /**
+ * Strips custom tags like [code]...[/code], [p]...[/p], [b]...[/b], etc. from content.
+ * Used for change request comments that may contain these custom markup tags.
+ *
+ * @param content - Content string with custom tags.
+ * @returns {string} Plain text without custom tags.
+ */
+export function stripCustomTags(content: string | null | undefined): string {
+  if (!content || typeof content !== "string") return "";
+  // Remove custom tags like [code], [/code], [p], [/p], [b], [/b], [u], [/u], [br], etc.
+  return content.replace(/\[\/?\w+\]/g, "").trim();
+}
+
+/**
+ * Strips both HTML tags and custom tags from content.
+ * Specifically for change request comments that may contain both <tag> and [tag] formats.
+ *
+ * @param content - Content string with mixed HTML and custom tags.
+ * @returns {string} Plain text without any tags.
+ */
+export function stripAllTags(content: string | null | undefined): string {
+  if (!content || typeof content !== "string") return "";
+  // First remove custom tags like [code], [/code]
+  let cleaned = content.replace(/\[\/?\w+\]/g, "");
+  // Then remove HTML tags like <br>, <p>
+  cleaned = cleaned.replace(/<[^>]+>/g, "");
+  return cleaned.trim();
+}
+
+/**
  * Maps action labels to present tense for display (e.g., "Closed" -> "Close").
  *
  * @param label - Action label (e.g., "Closed", "Reopened").

@@ -158,7 +158,7 @@ export default function ActivityCommentInput({
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
 
     postComment.mutate(
-      { caseId, body: { content: value.trim(), type: CommentType.CASE } },
+      { caseId, body: { content: value.trim(), type: CommentType.COMMENT } },
       {
         onSuccess: async () => {
           // Clear UI immediately to prevent duplicate posts

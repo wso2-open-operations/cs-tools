@@ -15,7 +15,7 @@
 // under the License.
 
 import { useParams, useNavigate } from "react-router";
-import { type JSX, useMemo, useState } from "react";
+import { type JSX, useMemo, useEffect } from "react";
 import {
   Box,
   Button,
@@ -47,14 +47,14 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useIsMutating } from "@tanstack/react-query";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { ApiMutationKeys } from "@constants/apiConstants";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import useGetChangeRequestDetails from "@api/useGetChangeRequestDetails";
-import useGetCaseComments from "@api/useGetCaseComments";
+import { useInfiniteChangeRequestComments } from "@api/useInfiniteChangeRequestComments";
 import ChangeRequestCommentInput from "@components/support/change-requests/ChangeRequestCommentInput";
-import { formatCommentDate, hasDisplayableContent, stripHtml } from "@utils/support";
+import { formatCommentDate, hasDisplayableContent, stripAllTags } from "@utils/support";
 import { generateChangeRequestDetailsPdf } from "@utils/changeRequestDetailsPdf";
+import { ApiMutationKeys } from "@constants/apiConstants";
 import {
   formatImpactLabel,
   getChangeRequestStateIcon,
@@ -102,7 +102,6 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   }>();
 
   const { showError } = useErrorBanner();
-  const [commentsLimit, setCommentsLimit] = useState(50);
 
   const {
     data: changeRequest,
@@ -116,21 +115,31 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
     isLoading: isLoadingComments,
     isFetching: isFetchingComments,
     isError: isErrorComments,
-  } = useGetCaseComments(projectId || "", changeRequestId || "", {
-    offset: 0,
-    limit: commentsLimit,
-  });
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteChangeRequestComments(changeRequestId || "");
 
-  // Check if any comment mutation is pending (scoped to postComment)
-  const isPostingComment = useIsMutating({ mutationKey: ApiMutationKeys.POST_COMMENT }) > 0;
+  // Auto-fetch all pages in background
+  useEffect(() => {
+    if (!commentsData || !hasNextPage || isFetchingNextPage) return;
+    void fetchNextPage();
+  }, [commentsData, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Check if any change request comment mutation is pending
+  const isPostingComment = useIsMutating({ mutationKey: ApiMutationKeys.POST_CHANGE_REQUEST_COMMENT }) > 0;
+
+  // Flatten all comments from all pages with defensive handling
+  const allComments = useMemo(() => {
+    return commentsData?.pages.flatMap((page) => page.comments ?? []) ?? [];
+  }, [commentsData?.pages]);
 
   const commentsSorted = useMemo(() => {
-    const list = commentsData?.comments ?? [];
-    return [...list].sort(
+    return [...allComments].sort(
       (a, b) =>
         new Date(a.createdOn).getTime() - new Date(b.createdOn).getTime(),
     );
-  }, [commentsData?.comments]);
+  }, [allComments]);
 
   const commentsToShow = useMemo(
     () => commentsSorted.filter(hasDisplayableContent),
@@ -999,8 +1008,8 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           ) : (
             <Stack spacing={2}>
               {commentsToShow.map((comment) => {
-                // Strip HTML tags from content using shared utility
-                const cleanContent = stripHtml(comment.content)?.trim() || "No content";
+                // Strip both HTML tags and custom tags like [code]...[/code] from content
+                const cleanContent = stripAllTags(comment.content) || "No content";
 
                 return (
                   <Paper
@@ -1031,22 +1040,8 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                 );
               })}
             </Stack>
-          )}
-          {!isLoadingComments &&
-            !isErrorComments &&
-            commentsData &&
-            commentsData.totalRecords > commentsData.comments.length && (
-              <Box sx={{ textAlign: "center", pt: 2 }}>
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => setCommentsLimit((prev) => prev + 50)}
-                  disabled={isFetchingComments}
-                >
-                  {isFetchingComments ? "Loading..." : "Load More Comments"}
-                </Button>
-              </Box>
-            )}
+          )
+          }
         </Box>
 
         <Divider />
@@ -1067,9 +1062,10 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           sx={{ flex: 1 }}
           onClick={() => {
             try {
+              // Use memoized allComments for PDF generation
               generateChangeRequestDetailsPdf(
                 changeRequest,
-                commentsData?.comments,
+                allComments,
               );
             } catch (error) {
               const message = error instanceof Error ? error.message : "Failed to generate PDF";

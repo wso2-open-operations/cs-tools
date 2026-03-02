@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Grid } from "@wso2/oxygen-ui";
-import { useState, useMemo, useEffect, useRef, type JSX } from "react";
+import { Box, Grid, Pagination, Typography } from "@wso2/oxygen-ui";
+import { useState, useMemo, useEffect, type JSX, type ChangeEvent } from "react";
 import useSearchProjectTimeCards from "@api/useSearchProjectTimeCards";
 import useGetTimeCardsStats from "@api/useGetTimeCardsStats";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -61,8 +61,9 @@ export default function ProjectTimeTracking({
   );
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
-  const [state, setState] = useState("");  const [showLoadMore, setShowLoadMore] = useState(false);  const autoFetchCountRef = useRef(0);
-  const maxAutoFetches = 3;
+  const [state, setState] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   const { data: filters } = useGetProjectFilters(projectId);
 
@@ -89,41 +90,35 @@ export default function ProjectTimeTracking({
     states: state ? [state] : undefined,
   });
 
-  // Auto-fetch pages with limit to prevent request bursts
+  // Auto-fetch all remaining pages in background
   useEffect(() => {
     if (!data || !hasNextPage) return;
-    if (autoFetchCountRef.current >= maxAutoFetches) {
-      // Don't auto-fetch, let user click Load More
-      return;
-    }
-    autoFetchCountRef.current += 1;
     void fetchNextPage();
   }, [data, hasNextPage, fetchNextPage]);
 
   useEffect(() => {
-    if (data && hasNextPage && autoFetchCountRef.current >= maxAutoFetches) {
-      setShowLoadMore(true);
-    } else {
-      setShowLoadMore(false);
-    }
-  }, [data, hasNextPage]);
-
-  // Reset auto-fetch counter when filters change
-  useEffect(() => {
-    autoFetchCountRef.current = 0;
+    setPage(1);
   }, [projectId, startDate, endDate, state]);
 
-  const handleLoadMore = () => {
-    setShowLoadMore(false);
-    autoFetchCountRef.current = 0;
-    void fetchNextPage();
-  };
-
   // Flatten all pages into a single array
-  const timeCards = useMemo(
+  const allTimeCards = useMemo(
     () => data?.pages.flatMap((page) => page.timeCards) ?? [],
     [data]
   );
+
+  const totalItems = data?.pages?.[0]?.totalRecords ?? allTimeCards.length;
+
+  // Client-side pagination
+  const paginatedTimeCards = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return allTimeCards.slice(startIndex, startIndex + pageSize);
+  }, [allTimeCards, page, pageSize]);
+
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
+    setPage(value);
+  };
 
   return (
     <Box>
@@ -145,6 +140,13 @@ export default function ProjectTimeTracking({
         />
       </Box>
 
+      {/* Results count */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary">
+          Showing {paginatedTimeCards.length} of {totalItems} time cards
+        </Typography>
+      </Box>
+
       {isTimeCardsError ? (
         <TimeTrackingErrorState />
       ) : (
@@ -156,39 +158,30 @@ export default function ProjectTimeTracking({
                   <TimeTrackingCardSkeleton />
                 </Grid>
               ))
-            ) : timeCards.length === 0 ? (
+            ) : paginatedTimeCards.length === 0 ? (
               <Grid size={12}>
                 <EmptyState description="No time logs available." />
               </Grid>
             ) : (
-              timeCards.map((card) => (
+              paginatedTimeCards.map((card) => (
                 <Grid key={card.id} size={12}>
                   <TimeTrackingCard card={card} />
                 </Grid>
               ))
             )}
           </Grid>
-          {showLoadMore && (
-            <Box sx={{ display: "flex", justifyContent: "center", mt: 3 }}>
-              <Box
-                component="button"
-                onClick={handleLoadMore}
-                sx={{
-                  px: 3,
-                  py: 1.5,
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: 1,
-                  backgroundColor: "background.paper",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  "&:hover": {
-                    backgroundColor: "action.hover",
-                  },
-                }}
-              >
-                Load More Time Cards
-              </Box>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
+              <Pagination
+                count={totalPages}
+                page={page}
+                onChange={handlePageChange}
+                color="primary"
+                variant="outlined"
+                shape="rounded"
+              />
             </Box>
           )}
         </>

@@ -17,7 +17,7 @@
 import { Box, CircularProgress, IconButton, TextField } from "@wso2/oxygen-ui";
 import { Send } from "@wso2/oxygen-ui-icons-react";
 import { useState } from "react";
-import { usePostComment } from "@api/usePostComment";
+import { usePostChangeRequestComment } from "@api/usePostChangeRequestComment";
 import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import type { JSX } from "react";
@@ -38,20 +38,20 @@ export default function ChangeRequestCommentInput({
   changeRequestId,
 }: ChangeRequestCommentInputProps): JSX.Element {
   const [value, setValue] = useState("");
-  const postComment = usePostComment();
+  const postChangeRequestComment = usePostChangeRequestComment();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const { showError } = useErrorBanner();
 
-  const isDisabled = !isSignedIn || isAuthLoading || postComment.isPending;
+  const isDisabled = !isSignedIn || isAuthLoading || postChangeRequestComment.isPending;
 
   const handleSend = async () => {
     const trimmedValue = value.trim();
     if (trimmedValue.length === 0 || isDisabled) return;
 
-    postComment.mutate(
+    postChangeRequestComment.mutate(
       {
-        caseId: changeRequestId,
-        body: { content: trimmedValue, type: CommentType.CHANGE_REQUEST },
+        changeRequestId,
+        body: { content: trimmedValue, type: CommentType.COMMENT },
       },
       {
         onSuccess: () => {
@@ -131,7 +131,7 @@ export default function ChangeRequestCommentInput({
           height: 40,
         }}
       >
-        {postComment.isPending ? (
+        {postChangeRequestComment.isPending ? (
           <CircularProgress color="inherit" size={18} />
         ) : (
           <Send size={18} />
