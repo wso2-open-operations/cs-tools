@@ -81,6 +81,12 @@ export default defineConfig({
           import.meta.url,
         ),
       ),
+      "@deployments": fileURLToPath(
+        new URL(
+          "./src/components/project-details/deployments",
+          import.meta.url,
+        ),
+      ),
       "@utils": fileURLToPath(new URL("./src/utils", import.meta.url)),
       buffer: "buffer",
       "buffer/": "buffer/index.js",

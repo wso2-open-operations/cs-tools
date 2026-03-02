@@ -15,7 +15,13 @@
 // under the License.
 
 import { Box, Grid, Pagination, Typography } from "@wso2/oxygen-ui";
-import { useState, useMemo, useEffect, type JSX, type ChangeEvent } from "react";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  type JSX,
+  type ChangeEvent,
+} from "react";
 import useSearchProjectTimeCards from "@api/useSearchProjectTimeCards";
 import useGetTimeCardsStats from "@api/useGetTimeCardsStats";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -96,14 +102,16 @@ export default function ProjectTimeTracking({
     void fetchNextPage();
   }, [data, hasNextPage, fetchNextPage]);
 
+  // Reset pagination when filters change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(1);
   }, [projectId, startDate, endDate, state]);
 
   // Flatten all pages into a single array
   const allTimeCards = useMemo(
     () => data?.pages.flatMap((page) => page.timeCards) ?? [],
-    [data]
+    [data],
   );
 
   const totalItems = data?.pages?.[0]?.totalRecords ?? allTimeCards.length;

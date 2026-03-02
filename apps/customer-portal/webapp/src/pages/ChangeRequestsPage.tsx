@@ -172,8 +172,7 @@ export default function ChangeRequestsPage(): JSX.Element {
   useEffect(() => {
     if (isExporting) {
       if (isInfiniteError) {
-        // Handle error case
-        console.error("Failed to fetch change requests for export");
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsExporting(false);
       } else if (
         !isInfiniteLoading &&

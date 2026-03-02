@@ -39,6 +39,16 @@ import {
 import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
 import type { DeploymentProductItem } from "@models/responses";
 
+/**
+ * Validates and parses a string to a finite non-negative number.
+ * Returns undefined for empty, whitespace, negative, NaN, or Infinity values.
+ */
+function validateFiniteNonNegative(value: string): number | undefined {
+  if (!value || !value.trim()) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : undefined;
+}
+
 export interface ManageProductModalProps {
   open: boolean;
   deploymentId: string;
@@ -111,24 +121,24 @@ export default function ManageProductModal({
     // Only send changed fields (PATCH behavior)
     const body: Record<string, number | string | undefined> = {};
 
-    const newCores = cores.trim() ? Number(cores) : undefined;
+    const newCores = validateFiniteNonNegative(cores);
     const originalCores =
       typeof product.cores === "number" ? product.cores : undefined;
     if (newCores !== originalCores) {
       body.cores = newCores;
     }
 
-    const newTps = tps.trim() ? Number(tps) : undefined;
+    const newTps = validateFiniteNonNegative(tps);
     const originalTps =
       typeof product.tps === "number" ? product.tps : undefined;
     if (newTps !== originalTps) {
       body.tps = newTps;
     }
 
-    const newDescription = description.trim() || undefined;
-    const originalDescription = product.description || undefined;
+    const newDescription = description.trim();
+    const originalDescription = (product.description ?? "").trim();
     if (newDescription !== originalDescription) {
-      body.description = newDescription;
+      body.description = newDescription || undefined;
     }
 
     // If nothing changed, just close
