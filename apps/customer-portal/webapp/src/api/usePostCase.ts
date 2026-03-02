@@ -49,9 +49,8 @@ export function usePostCase(): UseMutationResult<
       logger.debug("[usePostCase] Request payload summary:", {
         requestType: "type" in body ? body.type : "case",
         projectId: body.projectId,
-        deploymentId: "deploymentId" in body ? body.deploymentId : undefined,
-        deployedProductId:
-          "deployedProductId" in body ? body.deployedProductId : undefined,
+        deploymentId: body.deploymentId,
+        deployedProductId: body.deployedProductId,
         descriptionPreview:
           "description" in body && body.description
             ? `${body.description.slice(0, 80)}...`
