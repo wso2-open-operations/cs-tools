@@ -24,7 +24,7 @@ import {
   Select,
   MenuItem,
 } from "@wso2/oxygen-ui";
-import { Calendar, Filter } from "@wso2/oxygen-ui-icons-react";
+import { Calendar } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import type { MetadataItem } from "@models/responses";
 
@@ -65,119 +65,95 @@ export default function TimeCardsDateFilter({
       <Box
         sx={{
           display: "flex",
-          alignItems: "flex-start",
+          alignItems: "center",
           gap: 4,
           flexWrap: "wrap",
         }}
       >
         {/* Date Range Filter */}
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: "300px" }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Calendar size={16} style={{ color: "var(--oxygen-palette-text-secondary)" }} />
-            <Typography
-              variant="body2"
-              component="label"
-              sx={{ fontWeight: 500, color: "text.secondary" }}
-            >
-              Filter by Date Range:
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              flexWrap: "wrap",
-            }}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: "300px" }}>
+          <Typography
+            variant="body2"
+            component="label"
+            sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
           >
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography
-                component="label"
-                htmlFor="time-cards-start-date"
-                variant="body2"
-                sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
-              >
-                From:
-              </Typography>
-              <TextField
-                id="time-cards-start-date"
-                type="date"
-                size="small"
-                value={startDate}
-                onChange={(e) => onStartDateChange(e.target.value)}
-                sx={{ minWidth: 200 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Calendar size={16} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Box>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography
-                component="label"
-                htmlFor="time-cards-end-date"
-                variant="body2"
-                sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
-              >
-                To:
-              </Typography>
-              <TextField
-                id="time-cards-end-date"
-                type="date"
-                size="small"
-                value={endDate}
-                onChange={(e) => onEndDateChange(e.target.value)}
-                sx={{ minWidth: 200 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Calendar size={16} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Box>
+            Filter by Date Range:
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography
+              component="label"
+              htmlFor="time-cards-start-date"
+              variant="body2"
+              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+            >
+              From:
+            </Typography>
+            <TextField
+              id="time-cards-start-date"
+              type="date"
+              size="small"
+              value={startDate}
+              onChange={(e) => onStartDateChange(e.target.value)}
+              sx={{ minWidth: 200 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Calendar size={16} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography
+              component="label"
+              htmlFor="time-cards-end-date"
+              variant="body2"
+              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+            >
+              To:
+            </Typography>
+            <TextField
+              id="time-cards-end-date"
+              type="date"
+              size="small"
+              value={endDate}
+              onChange={(e) => onEndDateChange(e.target.value)}
+              sx={{ minWidth: 200 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Calendar size={16} />
+                  </InputAdornment>
+                ),
+              }}
+            />
           </Box>
         </Box>
 
         {/* State Filter */}
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: "300px" }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Filter size={16} style={{ color: "var(--oxygen-palette-text-secondary)" }} />
-            <Typography
-              variant="body2"
-              component="label"
-              sx={{ fontWeight: 500, color: "text.secondary" }}
-            >
-              Filter by State:
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              flexWrap: "wrap",
-            }}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: "300px" }}>
+          <Typography
+            variant="body2"
+            component="label"
+            sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
           >
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <Select
-                value={state}
-                onChange={(e) => onStateChange(e.target.value as string)}
-                displayEmpty
-              >
-                <MenuItem value="">All States</MenuItem>
-                {timeCardStates.map((stateOption) => (
-                  <MenuItem key={stateOption.id} value={stateOption.label}>
-                    {stateOption.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
+            Filter by State:
+          </Typography>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={state}
+              onChange={(e) => onStateChange(e.target.value as string)}
+              displayEmpty
+            >
+              <MenuItem value="">All States</MenuItem>
+              {timeCardStates.map((stateOption) => (
+                <MenuItem key={stateOption.id} value={stateOption.label}>
+                  {stateOption.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
       </Box>
     </Card>
