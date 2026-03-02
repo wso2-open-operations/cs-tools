@@ -21,17 +21,28 @@ import { formatImpactLabel } from "@constants/supportConstants";
 
 /**
  * Formats a date string for display in the PDF.
+ * Normalizes ServiceNow format to UTC for consistent timezone handling.
  *
- * @param {string | null | undefined} dateStr - ISO date string.
+ * @param {string | null | undefined} dateStr - Date string in ServiceNow format (YYYY-MM-DD HH:mm:ss) or ISO format.
  * @returns {string} Formatted date string or "N/A".
  */
 function formatScheduledDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "N/A";
-  const normalizedDateStr = dateStr.includes(" ")
-    ? dateStr.replace(" ", "T")
-    : dateStr;
+  
+  // Normalize ServiceNow format (YYYY-MM-DD HH:mm:ss) to ISO format with UTC timezone
+  let normalizedDateStr = dateStr;
+  if (dateStr.includes(" ")) {
+    // Replace space with "T" and append "Z" for UTC if no timezone info exists
+    normalizedDateStr = dateStr.replace(" ", "T");
+    if (!normalizedDateStr.includes("Z") && !normalizedDateStr.includes("+") && !normalizedDateStr.includes("-", 10)) {
+      normalizedDateStr += "Z";
+    }
+  }
+  
   const d = new Date(normalizedDateStr);
   if (isNaN(d.getTime())) return "N/A";
+  
+  // Format with explicit UTC timezone for consistency
   return d.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -39,6 +50,7 @@ function formatScheduledDate(dateStr: string | null | undefined): string {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: "UTC",
   });
 }
 

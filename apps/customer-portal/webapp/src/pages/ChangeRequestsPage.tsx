@@ -129,33 +129,39 @@ export default function ChangeRequestsPage(): JSX.Element {
     ) {
       void fetchNextPage();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, isExporting, hasNextPage]);
+  }, [viewMode, isExporting, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Handle export completion when all data is fetched
   useEffect(() => {
-    if (
-      isExporting &&
-      !isInfiniteLoading &&
-      !hasNextPage &&
-      !isFetchingNextPage &&
-      infiniteData
-    ) {
-      const allChangeRequests =
-        infiniteData.pages.flatMap(
-          (page: { changeRequests: ChangeRequestItem[] }) =>
-            page.changeRequests,
-        ) || [];
-      generateChangeRequestsSchedulePdf(allChangeRequests, stats);
-      setIsExporting(false);
+    if (isExporting) {
+      if (isInfiniteError) {
+        // Handle error case
+        console.error("Failed to fetch change requests for export");
+        setIsExporting(false);
+      } else if (
+        !isInfiniteLoading &&
+        !hasNextPage &&
+        !isFetchingNextPage &&
+        infiniteData
+      ) {
+        // Success case - all data fetched
+        const allChangeRequests =
+          infiniteData.pages.flatMap(
+            (page: { changeRequests: ChangeRequestItem[] }) =>
+              page.changeRequests,
+          ) || [];
+        generateChangeRequestsSchedulePdf(allChangeRequests, stats);
+        setIsExporting(false);
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isExporting,
     isInfiniteLoading,
+    isInfiniteError,
     hasNextPage,
     isFetchingNextPage,
     infiniteData,
+    stats,
   ]);
 
   // Combine data based on view mode
@@ -217,9 +223,8 @@ export default function ChangeRequestsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleChangeRequestClick = (_item: ChangeRequestItem): void => {
-    // Navigation disabled - details page not yet implemented
-    // navigate(`/${projectId}/support/change-requests/${item.id}`);
+  const handleChangeRequestClick = (item: ChangeRequestItem): void => {
+    navigate(`/${projectId}/support/change-requests/${item.id}`);
   };
 
   const handleExportSchedule = () => {
