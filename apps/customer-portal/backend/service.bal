@@ -1440,7 +1440,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + offset - Offset for pagination
     # + return - Comments response or error
     resource function get cases/[entity:IdString id]/comments(http:RequestContext ctx, int? 'limit, int? offset)
-        returns types:CommentsResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns types:CommentsResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|
+        http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -1470,6 +1471,24 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     }
                 };
             }
+            if getStatusCode(commentsResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access comments for case with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the comments for the requested case. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The case for which you're trying to retrieve comments does not exist. " +
+                        "Please check and try again."
+                    }
+                };
+            }
+
             string customError = "Failed to retrieve comments.";
             log:printError(customError, commentsResponse);
             return <http:InternalServerError>{
@@ -3156,7 +3175,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        entity:ProjectChangeRequestStatsResponse|error response = entity:getProjectChangeRequestStats(userInfo.idToken, id);
+        entity:ProjectChangeRequestStatsResponse|error response = entity:getProjectChangeRequestStats(userInfo.idToken,
+                id);
         if response is error {
             if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
                 log:printWarn(string `User: ${
@@ -3185,5 +3205,136 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
         return mapProjectChangeRequestStatsResponse(response);
+    }
+
+    # Create a new comment for a specific change request.
+    #
+    # + id - ID of the change request
+    # + payload - Comment creation payload
+    # + return - Created comment or error response
+    resource function post change\-requests/[entity:IdString id]/comments(http:RequestContext ctx,
+            types:CommentCreatePayload payload)
+        returns entity:CreatedComment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CommentCreateResponse|error createdCommentResponse = entity:createComment(userInfo.idToken,
+                {
+                    referenceId: id,
+                    referenceType: entity:CHANGE_REQUEST,
+                    content: payload.content,
+                    'type: payload.'type,
+                    createdBy: userInfo.email
+                });
+        if createdCommentResponse is error {
+            if getStatusCode(createdCommentResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(createdCommentResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is forbidden to comment on change request with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to comment on the requested change request. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(createdCommentResponse) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for creating a comment on change request."
+                    }
+                };
+            }
+
+            string customError = "Failed to create a new comment for change request.";
+            log:printError(customError, createdCommentResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return createdCommentResponse.comment;
+    }
+
+    # Get comments for a specific change request.
+    #
+    # + id - ID of the change request
+    # + limit - Number of comments to retrieve
+    # + offset - Offset for pagination
+    # + return - Comments response or error
+    resource function get change\-requests/[entity:IdString id]/comments(http:RequestContext ctx, int? 'limit,
+            int? offset) returns types:CommentsResponse|http:BadRequest|http:Unauthorized|
+        http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isInvalidLimitOffset('limit, offset) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_LIMIT_OFFSET_INVALID
+                }
+            };
+        }
+
+        entity:CommentsResponse|error commentsResponse = entity:getComments(userInfo.idToken, entity:CHANGE_REQUEST, id,
+                'limit, offset);
+        if commentsResponse is error {
+            if getStatusCode(commentsResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User : ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is forbidden to access comments for change request with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the comments for the requested change request."
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested change request or its comments are not found!"
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve comments for change request.";
+            log:printError(customError, commentsResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return mapCommentsResponse(commentsResponse);
     }
 }
