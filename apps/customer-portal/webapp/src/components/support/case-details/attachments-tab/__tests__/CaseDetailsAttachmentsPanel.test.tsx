@@ -119,8 +119,8 @@ describe("CaseDetailsAttachmentsPanel", () => {
     expect(screen.getByText(/no case selected/i)).toBeInTheDocument();
   });
 
-  it("should show EmptyIcon and no attachments found when attachments list is empty", () => {
-    const { useGetCaseAttachments } = require("@api/useGetCaseAttachments");
+  it("should show EmptyIcon and no attachments found when attachments list is empty", async () => {
+    const { useGetCaseAttachments } = await import("@api/useGetCaseAttachments");
     vi.mocked(useGetCaseAttachments).mockReturnValueOnce({
       data: {
         pages: [

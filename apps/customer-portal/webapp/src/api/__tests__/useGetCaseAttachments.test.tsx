@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -24,8 +24,8 @@ import {
 
 const mockAttachmentsPage1 = {
   attachments: [
-    { id: "a1", name: "file1.txt", size: 100, createdOn: "", createdBy: "" },
-    { id: "a2", name: "file2.txt", size: 200, createdOn: "", createdBy: "" },
+    { id: "a1", name: "file1.txt", type: "text/plain", size: 100, downloadUrl: "/a1", createdOn: "", createdBy: "" },
+    { id: "a2", name: "file2.txt", type: "text/plain", size: 200, downloadUrl: "/a2", createdOn: "", createdBy: "" },
   ],
   totalRecords: 12,
   offset: 0,
@@ -34,7 +34,7 @@ const mockAttachmentsPage1 = {
 
 const mockAttachmentsPage2 = {
   attachments: [
-    { id: "a3", name: "file3.txt", size: 300, createdOn: "", createdBy: "" },
+    { id: "a3", name: "file3.txt", type: "text/plain", size: 300, downloadUrl: "/a3", createdOn: "", createdBy: "" },
   ],
   totalRecords: 12,
   offset: 10,
@@ -132,7 +132,9 @@ describe("useGetCaseAttachments", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.hasNextPage).toBe(true);
 
-    result.current.fetchNextPage();
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
 
     await waitFor(() => expect(result.current.data?.pages.length).toBe(2));
     expect(result.current.data?.pages[1]?.attachments).toEqual(
