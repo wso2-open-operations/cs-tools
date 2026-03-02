@@ -38,8 +38,7 @@ public enum ReferenceType {
 
 # Valid comment type values.
 public enum CommentType {
-    COMMENTS = "comments",
-    WORK_NOTE = "work_note"
+    COMMENTS = "comments"
 }
 
 # Valid conversation sort field values.
