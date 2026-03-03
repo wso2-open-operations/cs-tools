@@ -27,7 +27,7 @@ import FilterPopover, {
 } from "@components/common/filter-panel/FilterPopover";
 import CasesTableHeader from "@components/dashboard/cases-table/CasesTableHeader";
 import CasesList from "@components/dashboard/cases-table/CasesList";
-import { normalizeCaseTypeOptions } from "@utils/support";
+import { normalizeCaseTypeOptions, mapSeverityToDisplay } from "@utils/support";
 
 const OUTSTANDING_STATUS_IDS = [1, 10, 18, 1003, 1006] as const;
 
@@ -69,7 +69,7 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       type: "select",
       options:
         filtersMetadata?.severities?.map((s) => ({
-          label: s.label,
+          label: mapSeverityToDisplay(s.label),
           value: s.id,
         })) || [],
     },
