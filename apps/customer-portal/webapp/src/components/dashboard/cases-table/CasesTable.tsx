@@ -21,6 +21,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { getNoveraChatEnabled } from "@utils/settingsStorage";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetProjectFilters from "@api/useGetProjectFilters";
+import { useGetDeployments } from "@api/useGetDeployments";
 import FilterPopover, {
   type FilterField,
 } from "@components/common/filter-panel/FilterPopover";
@@ -47,6 +48,9 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
     isFetching: isFetchingFilters,
     isError: isErrorFilters,
   } = useGetProjectFilters(projectId);
+
+  // Fetch deployments for the deployment filter
+  const { data: deploymentsData } = useGetDeployments(projectId);
 
   const dynamicFilterFields: FilterField[] = [
     {
@@ -84,8 +88,8 @@ const CasesTable = ({ projectId }: CasesTableProps): JSX.Element => {
       label: "Deployment",
       type: "select",
       options:
-        filtersMetadata?.deploymentTypes?.map((d) => ({
-          label: d.label,
+        deploymentsData?.deployments?.map((d) => ({
+          label: d.type?.label || d.name,
           value: d.id,
         })) || [],
     },
