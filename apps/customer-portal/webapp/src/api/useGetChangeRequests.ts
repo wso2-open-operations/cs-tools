@@ -22,9 +22,9 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ChangeRequestSearchRequest } from "@models/requests";
 import type { ChangeRequestSearchResponse } from "@models/responses";
 
@@ -51,7 +51,7 @@ export default function useGetChangeRequests(
 ): UseQueryResult<ChangeRequestSearchResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ChangeRequestSearchResponse, Error>({
     queryKey: [
@@ -84,8 +84,9 @@ export default function useGetChangeRequests(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/change-requests/search`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
+
           body: JSON.stringify(requestBody),
         });
 
@@ -135,7 +136,6 @@ export function useGetChangeRequestsInfinite(
 ): UseInfiniteQueryResult<InfiniteData<ChangeRequestSearchResponse>, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
   const pageSize = 10;
 
   return useInfiniteQuery<ChangeRequestSearchResponse, Error>({
@@ -170,8 +170,9 @@ export function useGetChangeRequestsInfinite(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/change-requests/search`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
+
           body: JSON.stringify(requestBody),
         });
 

@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ChatHistoryResponse } from "@models/responses";
 
 /**
@@ -32,7 +32,7 @@ export function useGetChatHistory(
 ): UseQueryResult<ChatHistoryResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ChatHistoryResponse, Error>({
     queryKey: [ApiQueryKeys.CHAT_HISTORY, projectId],
@@ -48,11 +48,11 @@ export function useGetChatHistory(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/chat-history`;
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
-        logger.debug(
-          `[useGetChatHistory] Response status: ${response.status}`,
-        );
+        logger.debug(`[useGetChatHistory] Response status: ${response.status}`);
 
         if (!response.ok) {
           throw new Error(

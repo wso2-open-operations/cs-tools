@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CaseDetails } from "@models/responses";
 
 /**
@@ -34,7 +34,7 @@ export default function useGetCaseDetails(
 ): UseQueryResult<CaseDetails, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<CaseDetails, Error>({
     queryKey: [ApiQueryKeys.CASE_DETAILS, projectId, caseId],
@@ -50,7 +50,9 @@ export default function useGetCaseDetails(
         }
 
         const requestUrl = `${baseUrl}/cases/${caseId}`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         if (!response.ok) {
           throw new Error(
@@ -66,8 +68,7 @@ export default function useGetCaseDetails(
         throw error;
       }
     },
-    enabled:
-      !!projectId && !!caseId && isSignedIn && !isAuthLoading,
+    enabled: !!projectId && !!caseId && isSignedIn && !isAuthLoading,
     staleTime: 5 * 60 * 1000,
   });
 }

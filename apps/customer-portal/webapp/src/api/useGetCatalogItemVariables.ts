@@ -15,7 +15,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
-import { useAuthApiClient } from "@context/AuthApiContext";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CatalogItemVariablesResponse } from "@models/responses";
@@ -33,7 +33,7 @@ export function useGetCatalogItemVariables(
 ): UseQueryResult<CatalogItemVariablesResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<CatalogItemVariablesResponse, Error>({
     queryKey: [ApiQueryKeys.CATALOG_ITEM_VARIABLES, catalogId, itemId],
@@ -49,7 +49,9 @@ export function useGetCatalogItemVariables(
 
       const requestUrl = `${baseUrl}/catalogs/${catalogId}/items/${itemId}`;
 
-      const response = await fetchFn(requestUrl, { method: "GET" });
+      const response = await authFetch(requestUrl, {
+        method: "GET",
+      });
 
       if (!response.ok) {
         const text = await response.text();
@@ -65,8 +67,7 @@ export function useGetCatalogItemVariables(
       );
       return data;
     },
-    enabled:
-      !!catalogId && !!itemId && isSignedIn && !isAuthLoading,
+    enabled: !!catalogId && !!itemId && isSignedIn && !isAuthLoading,
     staleTime: 5 * 60 * 1000,
   });
 }

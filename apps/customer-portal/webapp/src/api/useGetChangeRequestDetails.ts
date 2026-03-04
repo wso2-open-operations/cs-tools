@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ChangeRequestDetails } from "@models/responses";
 
 /**
@@ -32,7 +32,7 @@ export default function useGetChangeRequestDetails(
 ): UseQueryResult<ChangeRequestDetails, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ChangeRequestDetails, Error>({
     queryKey: [ApiQueryKeys.CHANGE_REQUEST_DETAILS, changeRequestId],
@@ -48,7 +48,9 @@ export default function useGetChangeRequestDetails(
         }
 
         const requestUrl = `${baseUrl}/change-requests/${encodeURIComponent(changeRequestId)}`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         if (!response.ok) {
           throw new Error(

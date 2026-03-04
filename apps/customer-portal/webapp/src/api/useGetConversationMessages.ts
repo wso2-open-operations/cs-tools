@@ -20,9 +20,9 @@ import {
   type UseInfiniteQueryResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ConversationMessagesResponse } from "@models/responses";
 
 export interface UseGetConversationMessagesOptions {
@@ -43,10 +43,14 @@ export function useGetConversationMessages(
 ): UseInfiniteQueryResult<InfiniteData<ConversationMessagesResponse>, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
   const pageSize = options?.pageSize ?? 10;
 
-  return useInfiniteQuery<ConversationMessagesResponse, Error, InfiniteData<ConversationMessagesResponse>>({
+  return useInfiniteQuery<
+    ConversationMessagesResponse,
+    Error,
+    InfiniteData<ConversationMessagesResponse>
+  >({
     queryKey: [ApiQueryKeys.CONVERSATION_MESSAGES, conversationId, pageSize],
     queryFn: async ({ pageParam }): Promise<ConversationMessagesResponse> => {
       const offset = typeof pageParam === "number" ? pageParam : 0;
@@ -64,7 +68,9 @@ export function useGetConversationMessages(
         `[useGetConversationMessages] Fetching messages for conversationId=${conversationId}, limit=${pageSize}, offset=${offset}`,
       );
 
-      const response = await fetchFn(requestUrl, { method: "GET" });
+      const response = await authFetch(requestUrl, {
+        method: "GET",
+      });
 
       logger.debug(
         `[useGetConversationMessages] Response status: ${response.status}`,
@@ -92,4 +98,3 @@ export function useGetConversationMessages(
     initialPageParam: 0,
   });
 }
-
