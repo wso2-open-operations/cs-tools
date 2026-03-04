@@ -16,8 +16,8 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { addApiHeaders } from "@utils/apiUtils";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { UpdateLevelsSearchRequest } from "@models/requests";
 import type { UpdateLevelsSearchResponse } from "@models/responses";
@@ -34,7 +34,8 @@ export function usePostUpdateLevelsSearch(
   params: UpdateLevelsSearchRequest | null,
 ): UseQueryResult<UpdateLevelsSearchResponse, Error> {
   const logger = useLogger();
-  const { isSignedIn, isLoading: isAuthLoading, getIdToken } = useAsgardeo();
+  const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const authFetch = useAuthApiClient();
 
   return useQuery<UpdateLevelsSearchResponse, Error>({
     queryKey: [
@@ -54,10 +55,9 @@ export function usePostUpdateLevelsSearch(
 
       const requestUrl = `${baseUrl}/updates/levels/search`;
 
-      const token = await getIdToken();
-      const response = await fetch(requestUrl, {
+      const response = await authFetch(requestUrl, {
         method: "POST",
-        headers: addApiHeaders(token),
+
         body: JSON.stringify(params),
       });
 

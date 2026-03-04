@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { addApiHeaders } from "@utils/apiUtils";
 import type { ProductVulnerabilitiesSearchRequest } from "@models/requests";
 import type { ProductVulnerabilitiesSearchResponse } from "@models/responses";
 
@@ -32,7 +32,8 @@ export function usePostProductVulnerabilitiesSearch(
   request: ProductVulnerabilitiesSearchRequest,
 ): UseQueryResult<ProductVulnerabilitiesSearchResponse, Error> {
   const logger = useLogger();
-  const { isSignedIn, isLoading: isAuthLoading, getIdToken } = useAsgardeo();
+  const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProductVulnerabilitiesSearchResponse, Error>({
     queryKey: [ApiQueryKeys.PRODUCT_VULNERABILITIES_SEARCH, request],
@@ -48,10 +49,9 @@ export function usePostProductVulnerabilitiesSearch(
       }
 
       const requestUrl = `${baseUrl}/products/vulnerabilities/search`;
-      const token = await getIdToken();
-      const response = await fetch(requestUrl, {
+      const response = await authFetch(requestUrl, {
         method: "POST",
-        headers: addApiHeaders(token),
+
         body: JSON.stringify(request),
       });
 
