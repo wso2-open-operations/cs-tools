@@ -21,12 +21,18 @@ import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
 import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
 
-import { TAB_TITLES } from "@src/mocks/data/support";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
 import { ErrorBoundary } from "@components/core";
+
+export const TAB_CONFIG = {
+  case: { title: "Open Cases", subtitle: "Active support tickets" },
+  chat: { title: "Chat History", subtitle: "Recent Novera coversations" },
+  service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
+  change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
+};
 
 export default function SupportPage() {
   const theme = useTheme();
@@ -86,11 +92,11 @@ export default function SupportPage() {
       <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => setTab(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
-        <Tab label="Services" value="service" disableRipple />
-        <Tab label="Changes" value="change" disableRipple />
+        <Tab label="Services Requests" value="service" disableRipple />
+        <Tab label="Change Requests" value="change" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
-        <ItemListView title={TAB_TITLES[tab]} viewAllPath={`/${tab}s/all`}>
+        <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
           <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
             <Suspense fallback={<ItemsListContentSkeleton />}>
               <ItemsListContent />
