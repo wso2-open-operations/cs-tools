@@ -33,7 +33,7 @@ export default function ProfilePage() {
   const name = data ? data?.firstName + " " + data?.lastName : undefined;
 
   const AppBarSlot = () => (
-    <Stack direction="row" alignItems="center" gap={1.5} mt={1}>
+    <Stack direction="row" alignItems="center" gap={1.5} mt={-2}>
       {name ? <Avatar>{name}</Avatar> : <Skeleton variant="circular" width={40} height={40} sx={{ flexShrink: 0 }} />}
       <Stack width="100%">
         <Typography variant="h6" fontWeight="medium" sx={{ flex: 1 }}>

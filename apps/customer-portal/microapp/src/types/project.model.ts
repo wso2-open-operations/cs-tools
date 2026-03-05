@@ -1,4 +1,4 @@
-export type ProjectStatus = "All Good";
+export type ProjectStatus = "All Good" | "Needs Attention";
 export type ProjectType = "Managed Cloud" | "Regular";
 export type ProjectMetricKey = "cases" | "chats";
 export type ProjectMetricValue = number | string;
@@ -23,6 +23,7 @@ export interface Deployment {
   url?: string;
   typeId: string;
   projectId: string;
+  type: string;
 }
 
 export interface Product {

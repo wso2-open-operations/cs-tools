@@ -25,7 +25,6 @@ import {
   Typography,
   pxToRem,
   useTheme,
-  Box,
   alpha,
   Skeleton,
 } from "@wso2/oxygen-ui";
@@ -37,9 +36,10 @@ import { useProject } from "@context/project";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
 import { PROJECT_STATUS_META } from "@config/constants";
-import { ArrowLeft, Bell, ChevronDown, Folder } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Bell, ChevronDown, Folder, LogOut } from "@wso2/oxygen-ui-icons-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { projects } from "@root/src/services/projects";
+import { projects } from "@src/services/projects";
+import { goToMyAppsScreen } from "../microapp-bridge";
 
 export function AppBar() {
   const theme = useTheme();
@@ -71,15 +71,23 @@ export function AppBar() {
   return (
     <>
       <MuiAppBar
-        position="relative"
+        position="sticky"
         color="transparent"
         elevation={0}
-        sx={{ backgroundColor: "background.paper", display: "flex", flexDirection: "column", gap: 1, p: 1.5, pt: 3 }}
+        sx={{
+          backgroundColor: "background.paper",
+          display: "flex",
+          flexDirection: "column",
+          gap: 1,
+          p: 1.5,
+          pt: 10,
+        }}
       >
         {config.showNotifications && (
-          <Box mb={1}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+            <ExitButton />
             <NotificationButton to="/notifications" />
-          </Box>
+          </Stack>
         )}
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
@@ -115,6 +123,7 @@ export function AppBar() {
             <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />
           </Button>
         )}
+
         {config.showChips && (
           <Stack direction="row" gap={2} mt={1.5}>
             {project.status ? (
@@ -148,13 +157,13 @@ function NotificationButton({ to }: { to: string }) {
 
   return (
     <IconButton
-      aria-label="Open notifications"
+      disableRipple
       component={Link}
       to={to}
       sx={{
         position: "absolute",
+        top: "var(--safe-top)",
         right: 10,
-        top: 10,
         p: 0,
       }}
     >
@@ -168,6 +177,26 @@ function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <IconButton aria-label="Go back" onClick={onClick} sx={{ p: 0 }} disableRipple>
       <ArrowLeft size={pxToRem(20)} />
+    </IconButton>
+  );
+}
+
+function ExitButton() {
+  return (
+    <IconButton
+      disableRipple
+      color="error"
+      sx={{
+        gap: 1,
+        position: "absolute",
+        top: "var(--safe-top)",
+        left: 10,
+        p: 0,
+      }}
+      onClick={goToMyAppsScreen}
+    >
+      <LogOut size={pxToRem(20)} style={{ transform: "rotate(-180deg)" }} />
+      <Typography>Exit</Typography>
     </IconButton>
   );
 }

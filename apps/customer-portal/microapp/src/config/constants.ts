@@ -37,4 +37,5 @@ export const PROJECT_TYPE_META: Record<ProjectType, { icon: LucideIcon }> = {
 
 export const PROJECT_STATUS_META: Record<ProjectStatus, { color: "success" | "warning" }> = {
   "All Good": { color: "success" },
+  "Needs Attention": { color: "warning" },
 };

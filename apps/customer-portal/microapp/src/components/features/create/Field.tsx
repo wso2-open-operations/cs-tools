@@ -36,6 +36,7 @@ interface SelectFieldProps {
   value?: number | string;
   required?: boolean;
   aiLabel?: string;
+  placeholder?: string;
   startAdornment?: React.ReactNode;
   disabled?: boolean;
   onChange?: (event: SelectChangeEvent<number | string>) => void;
@@ -49,6 +50,7 @@ export function SelectField({
   disabled = false,
   required = false,
   aiLabel,
+  placeholder,
   startAdornment,
   onChange,
 }: SelectFieldProps) {
@@ -75,12 +77,22 @@ export function SelectField({
         {aiLabel && <AILabel label={aiLabel} />}
       </Stack>
       <Select
+        displayEmpty={placeholder !== undefined}
         name={name}
         value={value}
         sx={{ bgcolor: "background.paper" }}
         startAdornment={startAdornment}
         onChange={onChange}
         disabled={disabled}
+        renderValue={(selected) => {
+          if (typeof selected === "string" && selected.length === 0)
+            return (
+              <Typography variant="body2" color="text.secondary">
+                {placeholder}
+              </Typography>
+            );
+          return options.find((option) => option.value === selected)?.label ?? selected;
+        }}
       >
         {options.map((option) => (
           <MenuItem key={option.value} value={option.value}>

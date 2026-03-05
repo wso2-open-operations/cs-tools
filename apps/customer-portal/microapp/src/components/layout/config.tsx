@@ -28,7 +28,7 @@ type AppBarConfig = {
 
 export interface MainLayoutConfigType {
   path: string;
-  title: string;
+  title?: string;
   tabIndex: number;
   showAppBar?: boolean;
   hasBackAction?: boolean;
@@ -65,7 +65,7 @@ export const APP_BAR_CONFIG: Record<AppBarVariant, AppBarConfig> = {
 
 export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   { path: "/", appBarVariant: "extended", tabIndex: 0 },
-  { path: "/select", title: "Select Project", tabIndex: -1 },
+  { path: "/select", tabIndex: -1 },
   { path: "/support", tabIndex: 1 },
   { path: "/users", tabIndex: 2 },
   { path: "/users/invite", title: "Invite User", appBarVariant: "notifications", hasBackAction: true, tabIndex: -1 },
@@ -109,7 +109,6 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/cases/:id",
-    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
@@ -124,7 +123,6 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/chats/:id",
-    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
@@ -139,7 +137,6 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/services/:id",
-    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,
@@ -154,7 +151,6 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   },
   {
     path: "/changes/:id",
-    title: "", // DYNAMIC
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: -1,

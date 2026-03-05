@@ -89,6 +89,7 @@ function toDeployment(deployment: ProjectDeploymentDTO): Deployment {
     url: deployment.url ?? undefined,
     typeId: deployment.type.id,
     projectId: deployment.project.id,
+    type: deployment.type.label,
   };
 }
 

@@ -24,7 +24,7 @@ import { useProject } from "@context/project";
 import { projects } from "@src/services/projects";
 import { cases } from "@src/services/cases";
 import type { CaseClassificationResponseDTO } from "@src/types";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 type CreateCaseFormValues = {
   project: string;
@@ -47,6 +47,7 @@ export default function CreateCasePage() {
   const { data: filters } = useSuspenseQuery(cases.filters(projectId!));
   const issueTypeOptions = filters.issueTypes.map((type) => ({ value: Number(type.id), label: type.label }));
   const severityLevelOptions = filters.severities.map((type) => ({ value: Number(type.id), label: type.label }));
+  const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
 
   const formik = useFormik<CreateCaseFormValues>({
     initialValues: {
@@ -87,7 +88,7 @@ export default function CreateCasePage() {
   }));
 
   const deploymentOptions =
-    deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.name })) ?? [];
+    deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.type })) ?? [];
 
   const productOptions =
     productQuery.data?.map((product) => ({
@@ -108,18 +109,43 @@ export default function CreateCasePage() {
   useEffect(() => {
     if (!classifications) return;
 
+    const autoFilledFields = new Set<keyof CreateCaseFormValues>();
+
+    const matchedDeployment = deploymentOptions.find((option) => option.label === classifications.caseInfo.environment);
+    if (matchedDeployment) {
+      formik.setFieldValue("deployment", matchedDeployment.value);
+      autoFilledFields.add("deployment");
+    }
+
+    const matchedProduct = productOptions.find((option) => option.label === classifications.caseInfo.productName);
+    if (matchedProduct) {
+      formik.setFieldValue("product", matchedProduct.value);
+      autoFilledFields.add("product");
+    }
+
     const matchedType = issueTypeOptions.find((option) => option.label === classifications.issueType);
-    if (matchedType) formik.setFieldValue("type", matchedType.value);
+    if (matchedType) {
+      formik.setFieldValue("type", matchedType.value);
+      autoFilledFields.add("type");
+    }
 
     const matchedSeverity = severityLevelOptions.find((option) => option.label.includes(classifications.severityLevel));
-    if (matchedSeverity) formik.setFieldValue("severity", matchedSeverity.value);
+    if (matchedSeverity) {
+      formik.setFieldValue("severity", matchedSeverity.value);
+      autoFilledFields.add("severity");
+    }
 
     if (classifications.caseInfo.shortDescription) {
       formik.setFieldValue("title", classifications.caseInfo.shortDescription);
+      autoFilledFields.add("title");
     }
+
     if (classifications.caseInfo.description) {
       formik.setFieldValue("description", classifications.caseInfo.description);
+      autoFilledFields.add("description");
     }
+
+    setClassified(autoFilledFields);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classifications]);
 
@@ -143,6 +169,7 @@ export default function CreateCasePage() {
         <Stack pb={5} gap={5}>
           <Stack gap={2}>
             <SelectField
+              required
               name="project"
               label="Project"
               options={projectsOptions}
@@ -153,12 +180,12 @@ export default function CreateCasePage() {
                   <Folder size={pxToRem(20)} />
                 </InputAdornment>
               }
-              required
             />
             <SelectField
               name="deployment"
               label="Deployment Type"
-              aiLabel="Auto Detected"
+              aiLabel={classified.has("deployment") ? "Auto Detected" : undefined}
+              placeholder="Select Deployment Type"
               options={deploymentOptions}
               value={formik.values.deployment}
               onChange={(e) => {
@@ -168,13 +195,15 @@ export default function CreateCasePage() {
               disabled={!formik.values.project || deploymentQuery.isLoading}
             />
             <SelectField
+              required
               name="product"
               label="Product & Version"
+              aiLabel={classified.has("product") ? "Auto Detected" : undefined}
+              placeholder="Select Product & Version"
               options={productOptions}
               value={formik.values.product}
               onChange={formik.handleChange}
               disabled={!formik.values.deployment || productQuery.isLoading}
-              required
             />
           </Stack>
           <Stack gap={2}>
@@ -182,39 +211,39 @@ export default function CreateCasePage() {
               Case Details
             </Typography>
             <TextField
+              required
               name="title"
               label="Issue Title"
-              aiLabel="Generated from Chat"
+              aiLabel={classified.has("title") ? "Generated from Chat" : undefined}
               value={formik.values.title}
               onChange={formik.handleChange}
-              required
             />
             <TextField
+              required
               multiline
               name="description"
               label="Case Description"
-              aiLabel="From Coversation"
+              aiLabel={classified.has("description") ? "From Conversation" : undefined}
               value={formik.values.description}
               onChange={formik.handleChange}
-              required
             />
             <SelectField
+              required
               name="type"
               label="Issue Type"
-              aiLabel="AI Classified"
+              aiLabel={classified.has("type") ? "AI Classified" : undefined}
               options={issueTypeOptions}
               value={formik.values.type}
               onChange={formik.handleChange}
-              required
             />
             <SelectField
+              required
               name="severity"
               label="Severity Levels"
-              aiLabel="AI Accessed"
+              aiLabel={classified.has("severity") ? "AI Classified" : undefined}
               options={severityLevelOptions}
               value={formik.values.severity}
               onChange={formik.handleChange}
-              required
             />
           </Stack>
           <ConversationSummary messages={messages} />

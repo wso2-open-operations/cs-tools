@@ -17,32 +17,19 @@
 import App from "@src/App";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { AuthProvider } from "@asgardeo/auth-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
-import "@src/index.css";
-
-import { ASGARDEO_BASE_URL, CLIENT_ID, SIGN_IN_REDIRECT_URL, SIGN_OUT_REDIRECT_URL } from "@config/config";
 import theme from "./theme";
-
-const authConfig = {
-  clientID: CLIENT_ID || "",
-  baseUrl: ASGARDEO_BASE_URL || "",
-  signInRedirectURL: SIGN_IN_REDIRECT_URL || "",
-  signOutRedirectURL: SIGN_OUT_REDIRECT_URL || "",
-  scope: ["openid", "profile", "email"],
-};
+import "@src/index.css";
 
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AuthProvider config={authConfig}>
-      <OxygenUIThemeProvider theme={theme}>
-        <QueryClientProvider client={queryClient}>
-          <App />
-        </QueryClientProvider>
-      </OxygenUIThemeProvider>
-    </AuthProvider>
+    <OxygenUIThemeProvider theme={theme}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </OxygenUIThemeProvider>
   </StrictMode>,
 );

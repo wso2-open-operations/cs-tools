@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import React from "react";
+import React, { useLayoutEffect } from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import SelectProjectPage from "@pages/SelectProjectPage";
 import MainLayout from "@components/layout/MainLayout";
@@ -28,14 +28,29 @@ import ProfilePage from "@pages/ProfilePage";
 import NotificationsPage from "@pages/NotificationsPage";
 import ChatPage from "@pages/ChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
-import AllItemsPage from "@root/src/pages/AllItemsPage";
+import AllItemsPage from "@pages/AllItemsPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
 import ChatDetailPage from "@pages/ChatDetailPage";
 import ServiceDetailPage from "@pages/ServiceDetailPage";
 import ChangeDetailPage from "@pages/ChangeDetailPage";
 import EditUserPage from "@pages/EditUserPage";
+import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
 
 const App: React.FC = () => {
+  useLayoutEffect(() => {
+    requestDeviceSafeAreaInsets((data) => {
+      if (data?.insets) {
+        const { top, right, bottom, left } = data.insets;
+
+        const root = document.documentElement;
+        root.style.setProperty("--safe-top", `${top}px`);
+        root.style.setProperty("--safe-right", `${right}px`);
+        root.style.setProperty("--safe-bottom", `${bottom}px`);
+        root.style.setProperty("--safe-left", `${left}px`);
+      }
+    });
+  }, []);
+
   return (
     <Router>
       <AppProvider>

@@ -32,3 +32,10 @@ export const Topic = {
 export type TopicType = (typeof Topic)[keyof typeof Topic];
 
 export type LogLevel = "error" | "warn" | "info" | "debug";
+
+export interface EdgeInsets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}

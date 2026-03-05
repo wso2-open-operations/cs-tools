@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { Logger } from "@utils/logger";
 import { ErrorMessages } from "@utils/constants";
-import { Topic } from "./types";
-import type { LogLevel, TopicType } from "./types";
+import { Topic, type EdgeInsets, type LogLevel, type TopicType } from "./types";
 
 type Callback<T> = (data?: T) => void;
 
@@ -38,6 +38,7 @@ declare global {
       resolveToken: (token: string) => void;
       requestIdToken: () => void;
       resolveIdToken: (token: string) => void;
+      resolveDeviceSafeAreaInsets?: (data: { insets: EdgeInsets }) => void;
       requestQR: () => void;
       resolveQR: (qrString: string) => void;
       requestItemList: () => void;
@@ -234,5 +235,34 @@ export const sendNativeLog = (message?: string, data?: unknown, level: LogLevel 
   } else {
     // TODO: Replace this with Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE)
     console.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+  }
+};
+
+/**
+ * Send a request to the native app to navigate back to the previous screen. I.e., close the webview.
+ */
+export const goToMyAppsScreen = (): void => {
+  triggerSuperAppAction(Topic.navigateToMyApps);
+};
+
+
+/**
+ * Request the device safe area insets from the native app
+ * @param callback - The callback to receive the device safe area insets
+ */
+export const requestDeviceSafeAreaInsets = (
+  callback: Callback<{ insets: EdgeInsets }>,
+): void => {
+  if (window.nativebridge) {
+    triggerSuperAppAction(Topic.deviceSafeAreaInsets);
+    window.nativebridge.resolveDeviceSafeAreaInsets = (data) => {
+      callback(data);
+    };
+  } else {
+    Logger.error(
+      ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE +
+        " to fetch device safe area insets",
+    );
+    callback();
   }
 };

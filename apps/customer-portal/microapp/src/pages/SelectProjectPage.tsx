@@ -77,7 +77,7 @@ function SelectProjectContent() {
   }, [projectsData, search]);
 
   return (
-    <Box minHeight="100vh" px={2.5} py={5}>
+    <Box minHeight="100vh" px={2.5} py={5} mt="var(--safe-top)">
       <Stack direction="row" justifyContent="center" alignItems="center" gap={1}>
         <Folder size={24} color={theme.palette.primary.main} />
         <Typography variant="h4" fontWeight="bold">

@@ -56,7 +56,7 @@ export function StickyCommentBar({
       width="100%"
       p={2}
       mx={-2}
-      bottom={100}
+      bottom={90}
       gap={4}
       justifyContent="space-between"
       bgcolor="background.paper"
