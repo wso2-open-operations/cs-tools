@@ -78,6 +78,8 @@ public type Project record {|
     string createdOn;
     # Description
     string? description;
+    # Project type
+    ReferenceTableItem 'type;
     json...;
 |};
 
@@ -105,8 +107,6 @@ public type ProjectsResponse record {|
 # Project information.
 public type ProjectResponse record {|
     *Project;
-    # Project type
-    string 'type;
     # Salesforce ID
     string sfId;
     # Indicates if the project has service requests
