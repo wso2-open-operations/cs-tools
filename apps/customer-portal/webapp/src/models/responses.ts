@@ -29,27 +29,30 @@ export interface ProjectListItem {
 export interface ProjectDetailsAccount {
   id: string;
   name: string;
-  activationDate: string | null;
-  deactivationDate: string | null;
-  supportTier: string;
-  region: string | null;
-  ownerEmail: string | null;
-  technicalOwnerEmail: string | null;
+  activationDate?: string | null;
+  deactivationDate?: string | null;
+  supportTier?: string;
+  region?: string | null;
+  ownerEmail?: string | null;
+  technicalOwnerEmail?: string | null;
 }
 
 /** Detailed project information including account/subscription details. */
 export interface ProjectDetails {
-  type: string;
-  sfId?: string;
-  account: ProjectDetailsAccount;
   id: string;
-  name: string;
   key: string;
-  createdOn: string;
+  name: string;
   description: string;
-  hasSR: boolean;
+  createdOn: string;
+  type: {
+    id: string;
+    label: string;
+  };
+  sfId?: string;
+  hasSr: boolean;
   startDate?: string;
   endDate?: string;
+  account?: ProjectDetailsAccount;
 }
 
 // Project Search Response.
