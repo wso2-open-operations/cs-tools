@@ -20,22 +20,15 @@ import {
   Typography,
   TextField,
   InputAdornment,
-  FormControl,
-  Select,
-  MenuItem,
 } from "@wso2/oxygen-ui";
 import { Calendar } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import type { MetadataItem } from "@models/responses";
 
 export interface TimeCardsDateFilterProps {
   startDate: string;
   endDate: string;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
-  state: string;
-  onStateChange: (value: string) => void;
-  timeCardStates?: MetadataItem[];
 }
 
 /**
@@ -49,9 +42,6 @@ export default function TimeCardsDateFilter({
   endDate,
   onStartDateChange,
   onEndDateChange,
-  state,
-  onStateChange,
-  timeCardStates = [],
 }: TimeCardsDateFilterProps): JSX.Element {
   return (
     <Card
@@ -71,11 +61,23 @@ export default function TimeCardsDateFilter({
         }}
       >
         {/* Date Range Filter */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: "300px" }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            flex: 1,
+            minWidth: "300px",
+          }}
+        >
           <Typography
             variant="body2"
             component="label"
-            sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+            sx={{
+              fontWeight: 500,
+              color: "text.secondary",
+              whiteSpace: "nowrap",
+            }}
           >
             Filter by Date Range:
           </Typography>
@@ -84,7 +86,11 @@ export default function TimeCardsDateFilter({
               component="label"
               htmlFor="time-cards-start-date"
               variant="body2"
-              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+              sx={{
+                fontWeight: 500,
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+              }}
             >
               From:
             </Typography>
@@ -109,7 +115,11 @@ export default function TimeCardsDateFilter({
               component="label"
               htmlFor="time-cards-end-date"
               variant="body2"
-              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+              sx={{
+                fontWeight: 500,
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+              }}
             >
               To:
             </Typography>
@@ -129,35 +139,6 @@ export default function TimeCardsDateFilter({
               }}
             />
           </Box>
-        </Box>
-
-        {/* State Filter */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: "300px", marginLeft: "auto" }}>
-          <Typography
-            id="state-filter-label"
-            variant="body2"
-            component="label"
-            sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
-          >
-            Filter by State:
-          </Typography>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <Select
-              labelId="state-filter-label"
-              id="state-filter-select"
-              value={state}
-              onChange={(e) => onStateChange(e.target.value as string)}
-              displayEmpty
-              aria-labelledby="state-filter-label"
-            >
-              <MenuItem value="">All States</MenuItem>
-              {timeCardStates.map((stateOption) => (
-                <MenuItem key={stateOption.id} value={stateOption.id}>
-                  {stateOption.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
         </Box>
       </Box>
     </Card>

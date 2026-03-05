@@ -67,11 +67,26 @@ export default function ProjectTimeTracking({
   );
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
-  const [state, setState] = useState("");
+  const [approvedStateId, setApprovedStateId] = useState<string | undefined>(
+    undefined,
+  );
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  const { data: filters } = useGetProjectFilters(projectId);
+  const { data: filters, isLoading: isFiltersLoading } =
+    useGetProjectFilters(projectId);
+
+  // Find approved state id from filters
+  useEffect(() => {
+    if (filters?.timeCardStates) {
+      const approved = filters.timeCardStates.find(
+        (s) => s.label.toLowerCase() === "approved",
+      );
+      if (approved?.id !== approvedStateId) {
+        Promise.resolve().then(() => setApprovedStateId(approved?.id));
+      }
+    }
+  }, [filters, approvedStateId]);
 
   const {
     data: stats,
@@ -93,7 +108,8 @@ export default function ProjectTimeTracking({
     projectId,
     startDate,
     endDate,
-    states: state ? [state] : undefined,
+    states: approvedStateId ? [approvedStateId] : undefined,
+    enabled: !isFiltersLoading && Boolean(approvedStateId),
   });
 
   // Auto-fetch all remaining pages in background
@@ -106,7 +122,7 @@ export default function ProjectTimeTracking({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(1);
-  }, [projectId, startDate, endDate, state]);
+  }, [projectId, startDate, endDate, approvedStateId]);
 
   // Flatten all pages into a single array
   const allTimeCards = useMemo(
@@ -142,9 +158,6 @@ export default function ProjectTimeTracking({
           endDate={endDate}
           onStartDateChange={setStartDate}
           onEndDateChange={setEndDate}
-          state={state}
-          onStateChange={setState}
-          timeCardStates={filters?.timeCardStates}
         />
       </Box>
 
