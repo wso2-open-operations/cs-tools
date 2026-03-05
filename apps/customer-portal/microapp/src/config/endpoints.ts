@@ -24,10 +24,11 @@ export const PROJECTS_ENDPOINT = "/projects/search";
 export const PROJECT_DETAILS_ENDPOINT = (id: string) => `/projects/${id}`;
 export const PROJECT_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats`;
 export const PROJECT_CASES_ENDPOINT = (id: string) => `/projects/${id}/cases/search`;
+export const PROJECT_CHATS_ENDPOINT = (id: string) => `/projects/${id}/conversations/search`;
 export const PROJECT_CASES_FILTERS_ENDPOINT = (id: string) => `/projects/${id}/filters`;
 export const PROJECT_DEPLOYMENTS_ENDPOINT = (id: string) => `/projects/${id}/deployments`;
 export const PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT = (deploymentId: string) => `/deployments/${deploymentId}/products`;
-export const PROJECT_USERS_ENDPOINT = (id: string) => `/projects/${id}/contacts`; 
+export const PROJECT_USERS_ENDPOINT = (id: string) => `/projects/${id}/contacts`;
 export const CREATE_CASE_ENDPOINT = "/cases";
 export const CASE_CLASSIFICATION_ENDPOINT = "/cases/classify";
 export const CASE_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats/cases`;
@@ -37,3 +38,4 @@ export const USERS_ME_ENDPOINT = "/users/me";
 export const CHAT_INITIATE_ENDPOINT = (id: string) => `/projects/${id}/conversations`;
 export const CHAT_ADD_MESSAGE_ENDPOINT = (id: string, conversationId: string) =>
   `/projects/${id}/conversations/${conversationId}/messages`;
+export const CHAT_COMMENTS_ENDPOINT = (id: string) => `/conversations/${id}/messages`;

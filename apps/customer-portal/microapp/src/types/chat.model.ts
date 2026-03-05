@@ -4,7 +4,8 @@ export interface Chat {
   description: string;
   count: number;
   createdOn: Date;
-  statusId: string;
+  createdBy: string;
+  statusId?: string;
 }
 
 export interface Message {

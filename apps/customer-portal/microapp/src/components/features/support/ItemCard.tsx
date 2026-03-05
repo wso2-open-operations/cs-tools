@@ -23,7 +23,8 @@ import { PriorityChip, StatusChip } from "@components/features/support";
 import { Link } from "react-router-dom";
 
 import { TYPE_CONFIG } from "./config";
-import type { CaseSummary } from "@root/src/types";
+import type { CaseSummary } from "@src/types";
+import type { Chat } from "@src/types/chat.model";
 
 dayjs.extend(relativeTime);
 
@@ -54,11 +55,8 @@ interface CaseItemCardProps extends BaseItemCardProps, CaseSummary {
   type: "case";
 }
 
-interface ChatItemCardProps extends BaseItemCardProps {
+interface ChatItemCardProps extends BaseItemCardProps, Chat {
   type: "chat";
-  status: Status;
-  count: number;
-  kb: number;
 }
 
 interface ServiceItemCardProps extends BaseItemCardProps {
@@ -78,7 +76,7 @@ interface ChangeItemCardProps extends BaseItemCardProps {
 
 export type ItemCardProps = CaseItemCardProps | ChatItemCardProps | ServiceItemCardProps | ChangeItemCardProps;
 
-export function ItemCard(props: CaseItemCardProps) {
+export function ItemCard(props: ItemCardProps) {
   const theme = useTheme();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
@@ -90,36 +88,40 @@ export function ItemCard(props: CaseItemCardProps) {
           <Stack direction="row" alignItems="center" gap={1}>
             <Icon size={pxToRem(18)} color={color} />
             <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-              {props.number}
+              {(type === "case" || type === "chat") && props.number}
             </Typography>
-            <PriorityChip size="small" id={props.severityId ?? "N/A"} />
+            {type === "case" && <PriorityChip size="small" id={props.severityId ?? "N/A"} />}
           </Stack>
           <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary">
-          {props.title}
+          {type === "case" && props.title}
+          {type === "chat" && props.description}
         </Typography>
 
         <Stack direction="row" alignItems="center" gap={1}>
-          <StatusChip size="small" id={props.statusId ?? "N/A"} />
+          {(type === "case" || type === "chat") && <StatusChip size="small" id={props.statusId ?? "N/A"} />}
           <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
           <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
             {type === "case" && (props.assigned ?? "N/A")}
+            {type === "chat" && `${props.count} messages`}
           </Typography>
         </Stack>
 
         <Stack gap={0.5} mt={1}>
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
-            <Typography
-              fontWeight="regular"
-              color="text.tertiary"
-              sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}
-            >
-              {dayjs(props.createdOn).fromNow()}
-            </Typography>
-          </Stack>
+          {(type === "case" || type === "chat") && (
+            <Stack direction="row" alignItems="center" gap={1}>
+              <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
+              <Typography
+                fontWeight="regular"
+                color="text.tertiary"
+                sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}
+              >
+                {dayjs(props.createdOn).fromNow()}
+              </Typography>
+            </Stack>
+          )}
         </Stack>
       </Stack>
     </Card>

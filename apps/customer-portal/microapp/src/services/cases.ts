@@ -109,7 +109,7 @@ function toCase(dto: CaseDTO): Case {
   };
 }
 
-function toComment(dto: CommentDTO): Comment {
+export function toComment(dto: CommentDTO): Comment {
   return {
     id: dto.id,
     content: dto.content,

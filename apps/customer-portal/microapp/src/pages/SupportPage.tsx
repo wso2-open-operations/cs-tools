@@ -26,12 +26,20 @@ import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
 import { ErrorBoundary } from "@components/core";
+import { chats } from "../services/chats";
 
 export const TAB_CONFIG = {
   case: { title: "Open Cases", subtitle: "Active support tickets" },
   chat: { title: "Chat History", subtitle: "Recent Novera coversations" },
   service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
   change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
+};
+
+export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
+  case: (id) => `/cases/${id}`,
+  chat: (id) => `/chats/${id}`,
+  service: (id) => `/services/${id}`,
+  change: (id) => `/changes/${id}`,
 };
 
 export default function SupportPage() {
@@ -97,9 +105,9 @@ export default function SupportPage() {
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
-          <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
-            <Suspense fallback={<ItemsListContentSkeleton />}>
-              <ItemsListContent />
+          <ErrorBoundary fallback={<ItemsListContentSkeleton tab={tab} />}>
+            <Suspense fallback={<ItemsListContentSkeleton tab={tab} />}>
+              <ItemsListContent tab={tab} />
             </Suspense>
           </ErrorBoundary>
         </ItemListView>
@@ -108,27 +116,28 @@ export default function SupportPage() {
   );
 }
 
-function ItemsListContent() {
+function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(cases.all(projectId!, { pagination: { limit: 3 } }));
+  const caseQuery = tab === "case" ? useSuspenseQuery(cases.all(projectId!, { pagination: { limit: 3 } })) : null;
+  const chatQuery = tab === "chat" ? useSuspenseQuery(chats.all(projectId!, { pagination: { limit: 3 } })) : null;
 
   const items = {
-    cases: data,
-    chat: [],
+    case: caseQuery?.data,
+    chat: chatQuery?.data,
     service: [],
     change: [],
   };
 
   return (
     <>
-      {items["cases"].map((item) => (
-        <ItemCard key={item.id} type="case" to={`/cases/${item.id}`} {...item} />
+      {items[tab]?.map((item) => (
+        <ItemCard key={item.id} type={tab} to={ITEM_DETAIL_PATHS[tab](item.id)} {...item} />
       ))}
     </>
   );
 }
 
-function ItemsListContentSkeleton() {
+function ItemsListContentSkeleton({ tab }: { tab: ItemCardProps["type"] }) {
   return (
     <>
       {Array.from({ length: 3 }).map((_, index) => (
