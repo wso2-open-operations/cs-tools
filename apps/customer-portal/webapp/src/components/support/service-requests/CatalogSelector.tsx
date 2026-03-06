@@ -47,7 +47,6 @@ export interface CatalogSelectorProps {
 
 interface CatalogIconConfig {
   Icon: ComponentType<{ size?: number; color?: string }>;
-  /** Oxygen UI theme palette key for icon color (e.g. "info", "success"). */
   paletteKey: "primary" | "secondary" | "info" | "success" | "warning" | "error";
 }
 
