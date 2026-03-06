@@ -17,6 +17,7 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  alpha,
   Box,
   Paper,
   Skeleton,
@@ -168,10 +169,19 @@ export default function CatalogSelector({
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {catalogs.map((catalog) => {
           const { Icon, paletteKey } = getCatalogIconConfig(catalog.name);
-          const iconColor =
-            theme.palette[paletteKey]?.main ?? theme.palette.text.secondary;
-          const bgColor =
-            theme.palette[paletteKey]?.light ?? theme.palette.grey?.[100];
+          const palette = theme.palette[paletteKey] as
+            | { main?: string; light?: string }
+            | undefined;
+          const baseColor =
+            palette?.main ?? palette?.light ?? theme.palette.text.secondary;
+          const iconColor = baseColor;
+          const bgColor = alpha(
+            palette?.light ??
+              palette?.main ??
+              theme.palette.grey?.[300] ??
+              theme.palette.text.secondary,
+            0.12,
+          );
           const itemCount = catalog.catalogItems?.length ?? 0;
           const optionsLabel =
             itemCount === 1 ? "1 option" : `${itemCount} options`;
@@ -227,6 +237,7 @@ export default function CatalogSelector({
                       justifyContent: "center",
                       flexShrink: 0,
                       bgcolor: bgColor,
+                      color: iconColor,
                     }}
                   >
                     <Icon size={20} color={iconColor} />
