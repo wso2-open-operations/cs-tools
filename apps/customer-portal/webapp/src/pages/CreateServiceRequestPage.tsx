@@ -48,6 +48,7 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
   getFirstEmptyRequiredField,
   isContextField,
+  isDescriptionField,
 } from "@utils/serviceRequestValidation";
 import {
   getBaseDeploymentOptions,
@@ -268,7 +269,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
       .filter((v) => !isContextField(v.questionText ?? ""))
       .map((v) => {
         const raw = variableValues[v.id] ?? "";
-        const value = htmlToPlainText(raw).trim();
+        const value = isDescriptionField(v.questionText ?? "")
+          ? raw.trim()
+          : htmlToPlainText(raw).trim();
         return { id: v.id, value };
       })
       .filter((v) => v.value !== "");

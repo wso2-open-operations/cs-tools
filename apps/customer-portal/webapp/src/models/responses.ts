@@ -457,6 +457,8 @@ export interface CaseDetails {
   issueType: IdLabelRef | null;
   catalog?: IdLabelRef | null;
   catalogItem?: IdLabelRef | null;
+  /** Filled variables for service requests (from backend). */
+  variables?: { name: string; value: string }[];
   deployment: IdLabelRef | null;
   severity: IdLabelRef | null;
   status: IdLabelRef | null;

@@ -51,6 +51,15 @@ function isAttachmentFieldByQuestionText(questionText: string): boolean {
   return patterns.some((p) => p.test(q));
 }
 
+/** True if variable is the Description field (uses rich text editor; value should be sent as HTML). */
+export function isDescriptionField(questionText: string): boolean {
+  const normalized = (questionText ?? "")
+    .replace(/^\s*\*?\s*/, "")
+    .trim()
+    .toLowerCase();
+  return normalized === "description";
+}
+
 /** True if variable is a File Copy Path field (use text input instead of upload). */
 export function isFileCopyPathField(variable: CatalogItemVariable): boolean {
   const q = (variable.questionText ?? "").trim().toLowerCase();
@@ -138,8 +147,9 @@ export function getFirstEmptyRequiredField(
   const userEditable = getUserEditableVariables(variables, contextValues);
   for (const v of userEditable) {
     if (isAttachmentField(v) || isFileCopyPathField(v)) continue; // Attachments and File Copy Path are optional
-    const value = (variableValues[v.id] ?? "").trim();
-    if (!value) {
+    const raw = (variableValues[v.id] ?? "").trim();
+    const textContent = raw.replace(/<[^>]+>/g, "").trim();
+    if (!textContent) {
       const label = (v.questionText ?? "").replace(/^\s*\*?\s*/, "").trim() || "Field";
       return label;
     }

@@ -20,10 +20,8 @@ import {
   Paper,
   TextField,
   InputAdornment,
-  useTheme,
 } from "@wso2/oxygen-ui";
 import { Search } from "@wso2/oxygen-ui-icons-react";
-import { useState, useEffect } from "react";
 import type { JSX, ChangeEvent } from "react";
 import type { ServiceRequestStatusFilter } from "@pages/ServiceRequestsPage";
 
@@ -64,31 +62,6 @@ const TAB_VALUE_TO_STATS_KEY: Record<
  * @param {ServiceRequestsSearchBarProps} props - Search and filter props.
  * @returns {JSX.Element} The rendered search bar.
  */
-function useIsDarkMode(): boolean {
-  const theme = useTheme();
-  const [domDark, setDomDark] = useState(false);
-
-  useEffect(() => {
-    const check = () => {
-      const scheme =
-        document.documentElement.getAttribute("data-color-scheme") ??
-        document.documentElement.getAttribute("data-mui-color-scheme") ??
-        document.documentElement.style.colorScheme;
-      setDomDark(scheme === "dark");
-    };
-    check();
-    const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-color-scheme", "data-mui-color-scheme", "style"],
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  const fromTheme = theme.palette?.mode === "dark";
-  return fromTheme || domDark;
-}
-
 export default function ServiceRequestsSearchBar({
   searchTerm,
   onSearchChange,
@@ -96,8 +69,6 @@ export default function ServiceRequestsSearchBar({
   onStatusFilterChange,
   stats,
 }: ServiceRequestsSearchBarProps): JSX.Element {
-  const isDark = useIsDarkMode();
-
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(event.target.value);
   };
@@ -147,17 +118,13 @@ export default function ServiceRequestsSearchBar({
                 key={tab.value}
                 size="small"
                 variant={statusFilter === tab.value ? "contained" : "text"}
-                color="inherit"
+                color={statusFilter === tab.value ? "primary" : "inherit"}
                 onClick={() => onStatusFilterChange(tab.value)}
                 sx={{
                   textTransform: "none",
                   fontWeight: statusFilter === tab.value ? 600 : 400,
                   minWidth: "auto",
                   px: 2,
-                  ...(statusFilter === tab.value && {
-                    bgcolor: isDark ? "#fff" : "#000",
-                    color: isDark ? "#000" : "#fff",
-                  }),
                 }}
               >
                 {label}

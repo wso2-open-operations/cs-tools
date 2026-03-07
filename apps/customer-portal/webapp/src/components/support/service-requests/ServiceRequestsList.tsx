@@ -125,7 +125,6 @@ export default function ServiceRequestsList({
                       sx={{
                         width: 8,
                         height: 8,
-                        borderRadius: "50%",
                         bgcolor: getSeverityColor(sr.severity?.label),
                       }}
                     />

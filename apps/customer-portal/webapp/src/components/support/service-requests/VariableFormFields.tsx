@@ -32,6 +32,7 @@ import type { CatalogItemVariable } from "@models/responses";
 import {
   isAttachmentField,
   isFileCopyPathField,
+  isDescriptionField,
 } from "@utils/serviceRequestValidation";
 import Editor from "@components/common/rich-text-editor/Editor";
 
@@ -60,14 +61,6 @@ const VARIABLE_TYPE_SELECT = "Select Box";
 const VARIABLE_TYPE_CHECKBOX = "Checkbox";
 const VARIABLE_TYPE_RADIO = "Radio Buttons";
 
-function isDescriptionField(questionText: string): boolean {
-  const normalized = (questionText ?? "")
-    .replace(/^\s*\*?\s*/, "")
-    .trim()
-    .toLowerCase();
-  return normalized === "description";
-}
-
 /** Parse display label (strip leading asterisk). Hot fix: all typable fields are mandatory. */
 function parseRequiredLabel(questionText: string): { label: string } {
   const raw = (questionText ?? "").trim();
@@ -93,8 +86,14 @@ const CONTEXT_FIELD_PATTERNS: Array<{
   { pattern: /^environment$/i, getValue: (c) => c.deploymentDisplay },
 ];
 
-/** Context fields to hide from UI (display only Product, not WSO2 Product). */
-const CONTEXT_FIELDS_HIDDEN_FROM_DISPLAY = [/^wso2\s*product$/i];
+/** Context fields to hide from UI (Project, Deployment, Product, Environment already selected above). */
+const CONTEXT_FIELDS_HIDDEN_FROM_DISPLAY = [
+  /^project$/i,
+  /^deployments?$/i,
+  /^product$/i,
+  /^wso2\s*product$/i,
+  /^environment$/i,
+];
 
 /** Fields hidden from customers but still sent in the payload (internal/system use). */
 const HIDDEN_FIELD_PATTERNS: RegExp[] = [
@@ -154,7 +153,7 @@ function FieldLabel({
       {isRequired && (
         <Box
           component="span"
-          sx={{ color: "#d32f2f", fontWeight: 600, marginLeft: "2px" }}
+          sx={{ color: "error.main", fontWeight: 600, marginLeft: "2px" }}
           aria-hidden
         >
           *
@@ -482,7 +481,7 @@ export default function VariableFormFields({
       </Box>
 
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
-        <Box component="span" sx={{ color: "#d32f2f", fontWeight: 600 }}>*</Box> Indicates required
+        <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>*</Box> Indicates required
       </Typography>
 
       {contextFieldsForDisplay.length > 0 && contextValues && (
