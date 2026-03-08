@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { RecommendedUpdateLevelItem } from "@models/responses";
 
@@ -67,7 +68,12 @@ export function useGetRecommendedUpdateLevels(): UseQueryResult<
         return data;
       } catch (error) {
         logger.error("[useGetRecommendedUpdateLevels] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(
+            error,
+            "Failed to load recommended update levels.",
+          ),
+        );
       }
     },
     enabled: isSignedIn && !isAuthLoading,
