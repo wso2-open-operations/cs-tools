@@ -78,7 +78,14 @@ export default function CaseDetailsTabPanels({
     case 1:
       return <CaseDetailsDetailsPanel data={data} isError={isError} />;
     case 2:
-      return <CaseDetailsAttachmentsPanel caseId={caseId} />;
+      return (
+        <CaseDetailsAttachmentsPanel
+          caseId={caseId}
+          isCaseClosed={
+            !!data?.closedOn || data?.status?.label === "Closed"
+          }
+        />
+      );
     case 3: {
       const resolvedProjectId = data?.project?.id ?? projectId;
       if (!resolvedProjectId) {
@@ -88,7 +95,15 @@ export default function CaseDetailsTabPanels({
           </Typography>
         );
       }
-      return <CallsPanel projectId={resolvedProjectId} caseId={caseId} />;
+      return (
+        <CallsPanel
+          projectId={resolvedProjectId}
+          caseId={caseId}
+          isCaseClosed={
+            !!data?.closedOn || data?.status?.label === "Closed"
+          }
+        />
+      );
     }
     case 4:
       return (
