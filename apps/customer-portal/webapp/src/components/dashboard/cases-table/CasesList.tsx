@@ -54,6 +54,8 @@ interface CasesListProps {
   onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
   /** When provided, case title is clickable and navigates to case details. */
   onCaseClick?: (caseItem: CaseListItem) => void;
+  /** When false, hide pagination controls (e.g. when showing all). */
+  showPagination?: boolean;
 }
 
 const CasesList = ({
@@ -65,6 +67,7 @@ const CasesList = ({
   onPageChange,
   onRowsPerPageChange,
   onCaseClick,
+  showPagination = true,
 }: CasesListProps): JSX.Element => {
   return (
     <>
@@ -267,15 +270,17 @@ const CasesList = ({
           </TableBody>
         </Table>
       </TableContainer>
-      <TablePagination
-        component="div"
-        count={data?.totalRecords || 0}
-        page={page}
-        onPageChange={onPageChange}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={onRowsPerPageChange}
-        rowsPerPageOptions={[5, 10, 25, 50]}
-      />
+      {showPagination && (
+        <TablePagination
+          component="div"
+          count={data?.totalRecords || 0}
+          page={page}
+          onPageChange={onPageChange}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={onRowsPerPageChange}
+          rowsPerPageOptions={[5, 10, 25, 50]}
+        />
+      )}
     </>
   );
 };
