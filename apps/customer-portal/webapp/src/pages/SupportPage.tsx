@@ -26,6 +26,7 @@ import ServiceRequestCard from "@components/support/request-cards/ServiceRequest
 import ChangeRequestCard from "@components/support/request-cards/ChangeRequestCard";
 import ChatHistoryList from "@components/support/support-overview-cards/ChatHistoryList";
 import { useGetProjectSupportStats } from "@api/useGetProjectSupportStats";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useSearchConversations } from "@api/useSearchConversations";
@@ -35,7 +36,8 @@ import {
   SUPPORT_OVERVIEW_CHAT_LIMIT,
   CaseType,
 } from "@constants/supportConstants";
-import { getIncidentAndQueryIds } from "@utils/support";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { getIncidentAndQueryIds, isS0Case } from "@utils/support";
 import type { ChatHistoryItem } from "@models/responses";
 
 /**
@@ -47,6 +49,10 @@ export default function SupportPage(): JSX.Element {
   const logger = useLogger();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+
+  const { data: project } = useGetProjectDetails(projectId || "");
+  const isManagedCloudSubscription =
+    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
@@ -97,8 +103,11 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const cases =
+  const rawCases =
     data?.pages?.[0]?.cases?.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
+  const cases = isManagedCloudSubscription
+    ? rawCases
+    : rawCases.filter((c) => !isS0Case(c));
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??
@@ -212,16 +221,18 @@ export default function SupportPage(): JSX.Element {
           </SupportOverviewCard>
         </Grid>
       </Grid>
-      <Box sx={{ mt: 3 }}>
-        <Grid container spacing={2}>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <ServiceRequestCard />
+      {isManagedCloudSubscription && (
+        <Box sx={{ mt: 3 }}>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <ServiceRequestCard />
+            </Grid>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <ChangeRequestCard />
+            </Grid>
           </Grid>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <ChangeRequestCard />
-          </Grid>
-        </Grid>
-      </Box>
+        </Box>
+      )}
     </Stack>
   );
 }
