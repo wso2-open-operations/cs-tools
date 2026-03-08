@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type {
   ProjectDeploymentItem,
@@ -69,7 +70,9 @@ export function useGetDeployments(
         return data;
       } catch (error) {
         logger.error("[useGetDeployments] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load deployments."),
+        );
       }
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,

@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ConversationStats } from "@models/responses";
 
@@ -73,8 +74,12 @@ export function useGetConversationStats(
         logger.error(
           `[useGetConversationStats] Error fetching conversation stats for ${projectId}: ${error}`,
         );
-
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(
+            error,
+            "Failed to load conversation stats.",
+          ),
+        );
       }
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
