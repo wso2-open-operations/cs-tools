@@ -18,6 +18,7 @@ import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import type {
   CreateCaseRequest,
   CreateServiceRequestPayload,
@@ -91,7 +92,9 @@ export function usePostCase(): UseMutationResult<
         return data;
       } catch (error) {
         logger.error("[usePostCase] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to create case."),
+        );
       }
     },
   });

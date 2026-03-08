@@ -22,6 +22,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PostCaseAttachmentRequest } from "@models/requests";
 
@@ -85,7 +86,9 @@ export function usePostAttachments(): UseMutationResult<
         }
       } catch (error) {
         logger.error("[usePostAttachments] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to upload attachment."),
+        );
       }
     },
     onSuccess: (_data, { caseId }) => {
