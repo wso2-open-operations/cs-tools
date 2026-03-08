@@ -34,6 +34,7 @@ import { useGetDeploymentsProducts } from "@api/useGetDeploymentsProducts";
 import { usePostCase } from "@api/usePostCase";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useLogger } from "@hooks/useLogger";
 import type { CreateCaseRequest } from "@models/requests";
@@ -681,11 +682,12 @@ export default function CreateCasePage(): JSX.Element {
           });
         }
       } catch (error) {
-        const message =
-          error instanceof Error && error.message
-            ? error.message
-            : "Failed to process attachments. Please try again.";
-        showError(message);
+        showError(
+          getUserFacingErrorMessage(
+            error,
+            "Failed to process attachments. Please try again.",
+          ),
+        );
         return;
       } finally {
         setIsPreparingAttachments(false);
@@ -748,10 +750,12 @@ export default function CreateCasePage(): JSX.Element {
         }
       },
       onError: (error) => {
-        const msg =
-          error?.message?.trim() ||
-          "We couldn't create your case. Please check required fields and try again.";
-        showError(msg);
+        showError(
+          getUserFacingErrorMessage(
+            error,
+            "We couldn't create your case. Please check required fields and try again.",
+          ),
+        );
       },
     });
   };

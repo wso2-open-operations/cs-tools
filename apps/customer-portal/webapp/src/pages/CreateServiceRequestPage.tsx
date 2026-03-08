@@ -44,6 +44,7 @@ import { usePostCase } from "@api/usePostCase";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
   getFirstEmptyRequiredField,
@@ -313,10 +314,12 @@ export default function CreateServiceRequestPage(): JSX.Element {
         navigate(`/${projectId}/support/service-requests/${data.id}`);
       },
       onError: (error) => {
-        const msg =
-          error?.message?.trim() ||
-          "We couldn't create your service request. Please try again.";
-        showError(msg);
+        showError(
+          getUserFacingErrorMessage(
+            error,
+            "We couldn't create your service request. Please try again.",
+          ),
+        );
       },
     });
   };

@@ -48,6 +48,7 @@ import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 import useGetChangeRequestDetails from "@api/useGetChangeRequestDetails";
 import ScheduledMaintenanceWindowCard from "@components/support/change-requests/ScheduledMaintenanceWindowCard";
 import { generateChangeRequestDetailsPdf } from "@utils/changeRequestDetailsPdf";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import {
   formatImpactLabel,
   getChangeRequestStateIcon,
@@ -320,7 +321,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
             Error Loading Change Request
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {error?.message || "Could not load change request details"}
+            {getUserFacingErrorMessage(error, "Could not load change request details.")}
           </Typography>
         </Paper>
       </Stack>
@@ -911,7 +912,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
             try {
               generateChangeRequestDetailsPdf(changeRequest, []);
             } catch (error) {
-              const message = error instanceof Error ? error.message : "Failed to generate PDF";
+              const message = getUserFacingErrorMessage(error, "Failed to generate PDF.");
               showError(message);
               console.error("PDF generation error:", error);
             }
