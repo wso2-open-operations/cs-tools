@@ -38,6 +38,7 @@ import {
 } from "react";
 import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
 import type { DeploymentProductItem } from "@models/responses";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 
 /**
  * Validates and parses a string to a finite non-negative number.
@@ -157,7 +158,7 @@ export default function ManageProductModal({
       onSuccess?.();
     } catch (error) {
       onError?.(
-        error instanceof Error ? error.message : "Failed to update product",
+        getUserFacingErrorMessage(error, "Failed to update product."),
       );
     }
   }, [

@@ -35,6 +35,7 @@ import { Code, X, Monitor } from "@wso2/oxygen-ui-icons-react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import type { CreateProjectContactRequest } from "@models/requests";
 import { useValidateProjectContact } from "@api/useValidateProjectContact";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 
 type ContactRole = "portal_user" | "system_user";
 
@@ -143,7 +144,7 @@ export default function AddUserModal({
           setStep("details");
         },
         onError: (err) => {
-          setEmailError(err.message || "Email validation failed. Please try again.");
+          setEmailError(getUserFacingErrorMessage(err, "Email validation failed. Please try again."));
         },
       },
     );

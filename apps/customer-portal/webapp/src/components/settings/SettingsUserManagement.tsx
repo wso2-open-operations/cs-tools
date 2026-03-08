@@ -49,6 +49,7 @@ import { useDeleteProjectContact } from "@api/useDeleteProjectContact";
 import { NULL_PLACEHOLDER, ROLE_CONFIG } from "@constants/settingsConstants";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import AddUserModal from "@components/settings/AddUserModal";
 import RemoveUserModal from "@components/settings/RemoveUserModal";
@@ -120,7 +121,7 @@ export default function SettingsUserManagement({
           showSuccess("Invitation sent successfully");
         },
         onError: (err) => {
-          showError(err?.message ?? "Failed to add user. Please try again.");
+          showError(getUserFacingErrorMessage(err, "Failed to add user. Please try again."));
         },
       });
     },
@@ -136,7 +137,7 @@ export default function SettingsUserManagement({
         showSuccess("User removed successfully");
       },
       onError: (err) => {
-        showError(err?.message ?? "Failed to remove user. Please try again.");
+        showError(getUserFacingErrorMessage(err, "Failed to remove user. Please try again."));
       },
     });
   }, [removeTarget, deleteContact, showSuccess, showError]);
