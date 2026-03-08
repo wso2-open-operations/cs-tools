@@ -81,16 +81,12 @@ export default function CaseDetailsTabPanels({
     case 1:
       return <CaseDetailsDetailsPanel data={data} isError={isError} />;
     case 2:
-<<<<<<< Updated upstream
-      return <CaseDetailsAttachmentsPanel caseId={caseId} />;
-=======
       return (
         <CaseDetailsAttachmentsPanel
           caseId={caseId}
           isCaseClosed={isCaseClosed}
         />
       );
->>>>>>> Stashed changes
     case 3: {
       const resolvedProjectId = data?.project?.id ?? projectId;
       if (!resolvedProjectId) {
@@ -100,9 +96,6 @@ export default function CaseDetailsTabPanels({
           </Typography>
         );
       }
-<<<<<<< Updated upstream
-      return <CallsPanel projectId={resolvedProjectId} caseId={caseId} />;
-=======
       return (
         <CallsPanel
           projectId={resolvedProjectId}
@@ -110,7 +103,6 @@ export default function CaseDetailsTabPanels({
           isCaseClosed={isCaseClosed}
         />
       );
->>>>>>> Stashed changes
     }
     case 4:
       return (
