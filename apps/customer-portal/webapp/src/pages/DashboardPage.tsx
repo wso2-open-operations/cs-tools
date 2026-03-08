@@ -22,12 +22,14 @@ import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetProjectFilters from "@api/useGetProjectFilters";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
 import {
   DASHBOARD_STATS,
   OUTSTANDING_ENGAGEMENTS_CHART_DATA,
   SEVERITY_API_LABELS,
 } from "@constants/dashboardConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
 import { getIncidentAndQueryIds } from "@utils/support";
 import { StatCard } from "@components/dashboard/stats/StatCard";
 import ChartLayout from "@components/dashboard/charts/ChartLayout";
@@ -45,11 +47,16 @@ export default function DashboardPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
+  const { data: project } = useGetProjectDetails(projectId || "");
+
   const {
     data: filters,
     isLoading: isFiltersLoading,
     isError: isErrorFilters,
   } = useGetProjectFilters(projectId || "");
+
+  const isManagedCloudSubscription =
+    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
 
   const { incidentId, queryId } = useMemo(
     () => getIncidentAndQueryIds(filters?.caseTypes),
@@ -147,11 +154,15 @@ export default function DashboardPage(): JSX.Element {
         (c) => /security\s*report\s*analysis/i.test(c.label),
       )?.count ?? 0;
 
-    const catastrophic = severityByKey.catastrophic ?? 0;
+    let catastrophic = severityByKey.catastrophic ?? 0;
     const critical = severityByKey.critical ?? 0;
     const high = severityByKey.high ?? 0;
     const medium = severityByKey.medium ?? 0;
     const low = severityByKey.low ?? 0;
+
+    if (!isManagedCloudSubscription) {
+      catastrophic = 0;
+    }
 
     const total =
       catastrophic +
@@ -172,12 +183,16 @@ export default function DashboardPage(): JSX.Element {
       securityReportAnalysis,
       total,
     };
-  }, [casesStats]);
+  }, [casesStats, isManagedCloudSubscription]);
 
   const casesTrend = useMemo(() => {
+    const catastrophicCount = isManagedCloudSubscription
+      ? (s: { label: string }[]) =>
+          s.find((x) => x.label === SEVERITY_API_LABELS[0])?.count ?? 0
+      : () => 0;
     const mapped = (casesStats?.casesTrend ?? []).map(({ period, severities }) => ({
       period,
-      catastrophic: severities.find((s) => s.label === SEVERITY_API_LABELS[0])?.count ?? 0,
+      catastrophic: catastrophicCount(severities),
       critical: severities.find((s) => s.label === SEVERITY_API_LABELS[1])?.count ?? 0,
       high: severities.find((s) => s.label === SEVERITY_API_LABELS[2])?.count ?? 0,
       medium: severities.find((s) => s.label === SEVERITY_API_LABELS[3])?.count ?? 0,
@@ -190,7 +205,7 @@ export default function DashboardPage(): JSX.Element {
       };
       return parse(a.period) - parse(b.period);
     });
-  }, [casesStats]);
+  }, [casesStats, isManagedCloudSubscription]);
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
@@ -271,11 +286,15 @@ export default function DashboardPage(): JSX.Element {
         isErrorOutstanding={isErrorCases}
         isErrorActiveCases={isErrorCases}
         isErrorTrend={isErrorCases}
+        excludeS0={!isManagedCloudSubscription}
       />
       {/* Cases Table */}
       {projectId && (
         <Box sx={{ mt: 3 }}>
-          <CasesTable projectId={projectId} />
+          <CasesTable
+            projectId={projectId}
+            excludeS0={!isManagedCloudSubscription}
+          />
         </Box>
       )}
     </Box>
