@@ -34,6 +34,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { PencilLine, X } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@api/useGetUserDetails";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { usePatchUserMe } from "@api/usePatchUserMe";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -130,6 +131,7 @@ export default function UserProfileModal({
         onClose();
       },
       onError: (err) => {
+<<<<<<< Updated upstream
         const msg = err?.message ?? "";
         const hasPhoneInPayload = payload.phoneNumber !== undefined;
         const isValidationError =
@@ -144,6 +146,9 @@ export default function UserProfileModal({
         } else {
           showError(msg || "Failed to update profile");
         }
+=======
+        showError(getUserFacingErrorMessage(err, "Failed to update profile."));
+>>>>>>> Stashed changes
       },
     });
   }, [userDetails, countryCode, nationalNumber, timeZone, patchUserMe, showSuccess, showError, onClose]);

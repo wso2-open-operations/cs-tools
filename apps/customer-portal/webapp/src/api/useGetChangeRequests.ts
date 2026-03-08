@@ -24,6 +24,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ChangeRequestSearchRequest } from "@models/requests";
 import type { ChangeRequestSearchResponse } from "@models/responses";
@@ -105,7 +106,9 @@ export default function useGetChangeRequests(
         return data;
       } catch (error) {
         logger.error("[useGetChangeRequests] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load change requests."),
+        );
       }
     },
     enabled:
@@ -192,7 +195,9 @@ export function useGetChangeRequestsInfinite(
         return data;
       } catch (error) {
         logger.error("[useGetChangeRequestsInfinite] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load change requests."),
+        );
       }
     },
     getNextPageParam: (lastPage) => {

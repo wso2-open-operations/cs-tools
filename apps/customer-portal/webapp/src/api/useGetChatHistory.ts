@@ -18,6 +18,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ChatHistoryResponse } from "@models/responses";
 
@@ -65,7 +66,9 @@ export function useGetChatHistory(
         return data;
       } catch (error) {
         logger.error("[useGetChatHistory] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load chat history."),
+        );
       }
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,

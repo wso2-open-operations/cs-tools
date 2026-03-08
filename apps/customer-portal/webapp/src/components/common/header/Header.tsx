@@ -83,6 +83,18 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     return projects.find((p) => p.id === projectId);
   }, [projectId, projects]);
 
+<<<<<<< Updated upstream
+=======
+  const {
+    data: projectDetails,
+    isLoading: isProjectDetailsLoading,
+  } = useGetProjectDetails(projectId || "");
+  const projectDetailsReady = !isProjectDetailsLoading && projectDetails !== undefined;
+  const isManagedCloudSubscription =
+    projectDetails?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+  const excludeS0 = projectDetailsReady ? !isManagedCloudSubscription : false;
+
+>>>>>>> Stashed changes
   /**
    * Handles the project change.
    *
