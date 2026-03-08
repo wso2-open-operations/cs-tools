@@ -40,6 +40,7 @@ import {
 } from "react";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchDeployment } from "@api/usePatchDeployment";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 
 export interface EditDeploymentModalProps {
   open: boolean;
@@ -159,7 +160,7 @@ export default function EditDeploymentModal({
       onSuccess?.();
     } catch (error) {
       onError?.(
-        error instanceof Error ? error.message : "Failed to update deployment",
+        getUserFacingErrorMessage(error, "Failed to update deployment."),
       );
     }
   }, [

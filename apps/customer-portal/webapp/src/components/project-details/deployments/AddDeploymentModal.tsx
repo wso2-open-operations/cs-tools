@@ -44,6 +44,7 @@ import { usePostCreateDeployment } from "@api/usePostCreateDeployment";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import ErrorBanner from "@components/common/error-banner/ErrorBanner";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 
 export interface AddDeploymentModalProps {
   open: boolean;
@@ -127,7 +128,7 @@ export default function AddDeploymentModal({
           onSuccess?.();
         },
         onError: (error: Error) => {
-          onError?.(error.message ?? "Failed to create deployment.");
+          onError?.(getUserFacingErrorMessage(error, "Failed to create deployment."));
         },
       },
     );

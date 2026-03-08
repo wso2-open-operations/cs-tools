@@ -38,6 +38,7 @@ import {
 import { useGetProducts } from "@api/useGetProducts";
 import { useSearchProductVersions } from "@api/useSearchProductVersions";
 import { usePostDeploymentProduct } from "@api/usePostDeploymentProduct";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 
 export interface AddProductModalProps {
   open: boolean;
@@ -158,7 +159,7 @@ export default function AddProductModal({
       onSuccess?.();
     } catch (error) {
       onError?.(
-        error instanceof Error ? error.message : "Failed to add product",
+        getUserFacingErrorMessage(error, "Failed to add product."),
       );
     }
   }, [
