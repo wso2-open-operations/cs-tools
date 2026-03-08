@@ -22,6 +22,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 
 /**
@@ -79,7 +80,9 @@ export function useDeleteProjectContact(
         }
       } catch (error) {
         logger.error("[useDeleteProjectContact] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to delete project contact."),
+        );
       }
     },
     onSuccess: () => {

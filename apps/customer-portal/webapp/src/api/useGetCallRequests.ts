@@ -23,6 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import type { CallRequestsResponse } from "@models/responses";
 
 const LIMIT = 10;
@@ -92,7 +93,9 @@ export function useGetCallRequests(
         return data;
       } catch (error) {
         logger.error("[useGetCallRequests] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load call requests."),
+        );
       }
     },
     initialPageParam: 0,

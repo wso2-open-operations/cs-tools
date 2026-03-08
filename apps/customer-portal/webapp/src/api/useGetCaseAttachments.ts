@@ -18,6 +18,7 @@ import { useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type {
   CaseAttachmentsResponse,
@@ -90,7 +91,9 @@ export function useGetCaseAttachments(caseId: string) {
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
         logger.error(`[useGetCaseAttachments] Error: ${errorMessage}`);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to load case attachments."),
+        );
       }
     },
     initialPageParam: 0,
