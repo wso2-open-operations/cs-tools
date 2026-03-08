@@ -22,6 +22,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchCallRequest } from "@models/requests";
 import type { CallRequestResponse } from "@models/responses";
@@ -107,7 +108,9 @@ export function usePatchCallRequest(
         return data;
       } catch (error) {
         logger.error("[usePatchCallRequest] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to update call request."),
+        );
       }
     },
     onSuccess: () => {

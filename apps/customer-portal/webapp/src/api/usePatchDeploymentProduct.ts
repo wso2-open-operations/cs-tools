@@ -22,6 +22,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { getUserFacingErrorMessage } from "@utils/errorMessages";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchDeploymentProductRequest } from "@models/requests";
 
@@ -92,7 +93,9 @@ export function usePatchDeploymentProduct(): UseMutationResult<
         }
       } catch (error) {
         logger.error("[usePatchDeploymentProduct] Error:", error);
-        throw error;
+        throw new Error(
+          getUserFacingErrorMessage(error, "Failed to update deployment product."),
+        );
       }
     },
     onSuccess: (_data, { deploymentId }) => {
