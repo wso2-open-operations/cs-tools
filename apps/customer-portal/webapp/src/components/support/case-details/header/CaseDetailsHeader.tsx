@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Chip, Stack, Typography, alpha } from "@wso2/oxygen-ui";
 import { type ReactElement, type ReactNode, type JSX } from "react";
-import { formatValue, getSeverityColor } from "@utils/support";
+import { getSeverityLegendColor } from "@constants/dashboardConstants";
+import { formatValue, mapSeverityToDisplay } from "@utils/support";
 import { CaseDetailsHeaderSkeleton } from "@case-details/CaseDetailsSkeleton";
 
 export interface CaseDetailsHeaderProps {
@@ -59,25 +60,30 @@ export default function CaseDetailsHeader({
         <Typography variant="body2" fontWeight={500} color="text.primary">
           {formatValue(caseNumber)}
         </Typography>
-        <Box
+        <Chip
+          label={mapSeverityToDisplay(severityLabel ?? undefined)}
+          size="small"
+          variant="outlined"
           sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 0.5,
+            bgcolor: alpha(
+              getSeverityLegendColor(severityLabel ?? undefined),
+              0.1,
+            ),
+            color: getSeverityLegendColor(severityLabel ?? undefined),
+            borderColor: alpha(
+              getSeverityLegendColor(severityLabel ?? undefined),
+              0.3,
+            ),
+            fontWeight: 500,
+            px: 0,
+            height: 20,
+            fontSize: "0.75rem",
+            "& .MuiChip-label": {
+              pl: "6px",
+              pr: "6px",
+            },
           }}
-        >
-          <Box
-            sx={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              bgcolor: getSeverityColor(severityLabel ?? undefined),
-            }}
-          />
-          <Typography variant="caption" color="text.secondary">
-            {formatValue(severityLabel)}
-          </Typography>
-        </Box>
+        />
         <Chip
           size="small"
           variant="outlined"

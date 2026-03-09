@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProjectDetails } from "@models/responses";
 
 /**
@@ -32,14 +32,12 @@ export default function useGetProjectDetails(
 ): UseQueryResult<ProjectDetails, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProjectDetails, Error>({
     queryKey: [ApiQueryKeys.PROJECT_DETAILS, projectId],
     queryFn: async (): Promise<ProjectDetails> => {
-      logger.debug(
-        `Fetching project details for project ID: ${projectId}`,
-      );
+      logger.debug(`Fetching project details for project ID: ${projectId}`);
 
       try {
         const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -50,7 +48,9 @@ export default function useGetProjectDetails(
 
         const requestUrl = `${baseUrl}/projects/${projectId}`;
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetProjectDetails] Response status for ${projectId}: ${response.status}`,

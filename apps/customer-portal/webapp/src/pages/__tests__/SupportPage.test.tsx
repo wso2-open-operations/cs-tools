@@ -160,8 +160,8 @@ vi.mock("@api/useGetProjectSupportStats", () => ({
   useGetProjectSupportStats: (id: string) => mockUseGetProjectSupportStats(id),
 }));
 
-// Mock useGetCasesFilters (provides caseTypes so caseTypeIds are derived for cases query)
-vi.mock("@api/useGetCasesFilters", () => ({
+// Mock useGetProjectFilters (provides caseTypes so caseTypeIds are derived for cases query)
+vi.mock("@api/useGetProjectFilters", () => ({
   __esModule: true,
   default: () => ({
     data: {

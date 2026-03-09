@@ -34,7 +34,7 @@ import {
   CASE_STATUS_ACTIONS,
   type CaseStatusPaletteIntent,
 } from "@constants/supportConstants";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchCase } from "@api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -79,7 +79,7 @@ export interface CaseDetailsActionRowProps {
   /** When case is closed, used to hide "Open Related Case" after 2 months. */
   closedOn?: string | null;
   onOpenRelatedCase?: () => void;
-  /** Project ID for useGetCasesFilters and usePatchCase. */
+  /** Project ID for useGetProjectFilters and usePatchCase. */
   projectId?: string;
   /** Case ID for PATCH case state. */
   caseId?: string;
@@ -95,7 +95,7 @@ export interface CaseDetailsActionRowProps {
 /**
  * Resolves stateKey for an action by looking up caseState in caseStates.
  * @param actionLabel - Action label (e.g. "Closed", "Accept Solution").
- * @param caseStates - caseStates from useGetCasesFilters.
+ * @param caseStates - caseStates from useGetProjectFilters.
  * @returns stateKey as number, or undefined if not found.
  */
 function getStateKeyForAction(
@@ -126,7 +126,7 @@ export default function CaseDetailsActionRow({
   const theme = useTheme();
   const hasEngineer = !!getAssignedEngineerLabel(assignedEngineer);
 
-  const { data: filterMetadata } = useGetCasesFilters(projectId);
+  const { data: filterMetadata } = useGetProjectFilters(projectId);
   const caseStates = filterMetadata?.caseStates;
 
   const { showSuccess } = useSuccessBanner();

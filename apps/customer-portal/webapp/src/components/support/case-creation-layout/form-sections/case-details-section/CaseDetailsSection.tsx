@@ -27,9 +27,16 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { PencilLine, Sparkles } from "@wso2/oxygen-ui-icons-react";
+import {
+  File,
+  PencilLine,
+  Sparkles,
+  Upload,
+  X,
+} from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@constants/supportConstants";
+import { isS0SeverityLabel } from "@constants/dashboardConstants";
 import type { CaseMetadataResponse } from "@models/responses";
 import { getSeverityColor } from "@utils/support";
 import Editor from "@components/common/rich-text-editor/Editor";
@@ -55,6 +62,8 @@ export interface CaseDetailsSectionProps {
   isRelatedCaseMode?: boolean;
   isTitleDisabled?: boolean;
   relatedCaseNumber?: string;
+  isSecurityReport?: boolean;
+  excludeS0?: boolean;
 }
 
 /**
@@ -82,6 +91,8 @@ export function CaseDetailsSection({
   isRelatedCaseMode = false,
   isTitleDisabled = false,
   relatedCaseNumber,
+  isSecurityReport = false,
+  excludeS0 = false,
 }: CaseDetailsSectionProps): JSX.Element {
   const [isEditing, setIsEditing] = useState(false);
   const effectiveEditing = isRelatedCaseMode || isEditing;
@@ -122,11 +133,17 @@ export function CaseDetailsSection({
     [CaseSeverity.CATASTROPHIC]: CaseSeverityLevel.S0,
   };
 
+  const filteredBase = excludeS0
+    ? baseSeverityLevels.filter((level) => !isS0SeverityLabel(level.label))
+    : baseSeverityLevels;
+  const filteredExtra = (extraSeverityLevels ?? []).filter(
+    (extra) =>
+      !filteredBase.some((level) => level.id === extra.id) &&
+      (!excludeS0 || !isS0SeverityLabel(extra.label)),
+  );
   const severityLevels = [
-    ...baseSeverityLevels,
-    ...(extraSeverityLevels ?? []).filter(
-      (extra) => !baseSeverityLevels.some((level) => level.id === extra.id),
-    ),
+    ...filteredBase,
+    ...filteredExtra,
   ].map((level) => ({
     ...level,
     label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
@@ -143,7 +160,9 @@ export function CaseDetailsSection({
           mb: 3,
         }}
       >
-        <Typography variant="h6">Case Details</Typography>
+        <Typography variant="h6">
+          {isSecurityReport ? "Report Details" : "Case Details"}
+        </Typography>
         {!isRelatedCaseMode && (
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Tooltip
@@ -251,9 +270,13 @@ export function CaseDetailsSection({
                   ? `related-${relatedCaseNumber ?? "new"}`
                   : "default"
               }
-              onAttachmentClick={onAttachmentClick}
-              attachments={attachments}
-              onAttachmentRemove={onAttachmentRemove}
+              onAttachmentClick={
+                isSecurityReport ? undefined : onAttachmentClick
+              }
+              attachments={isSecurityReport ? [] : attachments}
+              onAttachmentRemove={
+                isSecurityReport ? undefined : onAttachmentRemove
+              }
               disabled={!effectiveEditing}
               value={description}
               onChange={setDescription}
@@ -277,170 +300,307 @@ export function CaseDetailsSection({
           )}
         </Box>
 
-        {/* issue type and severity grid container */}
-        <Grid container spacing={3}>
-          <Grid size={{ xs: 12 }}>
+        {isSecurityReport && (
+          <Box>
             <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
               <Typography variant="caption">
-                Issue Type{" "}
+                Attach Security Report{" "}
                 <Box component="span" sx={{ color: "warning.main" }}>
                   *
                 </Box>
               </Typography>
-              {!isRelatedCaseMode && (
-                <Chip
-                  label="AI classified"
-                  size="small"
-                  variant="outlined"
-                  icon={<Sparkles size={10} />}
-                  sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-                />
-              )}
             </Box>
-            <FormControl
-              fullWidth
-              size="small"
-              disabled={isLoading || !effectiveEditing}
-            >
-              <Select
-                id="issue-type-select"
-                value={issueType}
-                onChange={(e) => setIssueType(e.target.value)}
-                displayEmpty
-                renderValue={(value) =>
-                  value === "" ? "Select Issue Type..." : value
+
+            <Paper
+              role={effectiveEditing ? "button" : undefined}
+              tabIndex={0}
+              aria-disabled={!effectiveEditing}
+              onClick={() => {
+                if (!effectiveEditing) return;
+                onAttachmentClick?.();
+              }}
+              onKeyDown={(e) => {
+                if (!effectiveEditing) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onAttachmentClick?.();
                 }
-              >
-                <MenuItem value="" disabled>
-                  Select Issue Type...
-                </MenuItem>
-                {issueTypes
-                  .filter((type: unknown) => {
-                    const label =
-                      typeof type === "string"
-                        ? type
-                        : (type as { label?: string }).label;
-                    return label != null && String(label).trim() !== "";
-                  })
-                  .map((type: unknown) => {
-                    const label =
-                      typeof type === "string"
-                        ? type
-                        : ((type as { label?: string }).label as string);
-                    return (
-                      <MenuItem key={label} value={label}>
-                        {label}
-                      </MenuItem>
-                    );
-                  })}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid size={{ xs: 12 }}>
-            <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography variant="caption">
-                Severity Level{" "}
-                <Box component="span" sx={{ color: "warning.main" }}>
-                  *
-                </Box>
-              </Typography>
-              {!isRelatedCaseMode && (
-                <Chip
-                  label="AI assessed"
-                  size="small"
-                  variant="outlined"
-                  icon={<Sparkles size={10} />}
-                  sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-                />
-              )}
-            </Box>
-            <FormControl
-              fullWidth
-              size="small"
-              disabled={isLoading || !effectiveEditing}
+              }}
+              sx={{
+                border: 1,
+                borderColor: effectiveEditing ? "divider" : "action.disabled",
+                p: 2,
+                bgcolor: effectiveEditing
+                  ? "action.hover"
+                  : "action.disabledBackground",
+                cursor: effectiveEditing ? "pointer" : "not-allowed",
+                transition: "border-color 0.2s ease",
+                "&:hover": {
+                  borderColor: effectiveEditing
+                    ? "warning.main"
+                    : "action.disabled",
+                },
+                "&:focus-visible": {
+                  outline: "2px solid",
+                  outlineColor: effectiveEditing
+                    ? "warning.main"
+                    : "action.disabled",
+                },
+              }}
             >
-              <Select
-                id="severity-level-select"
-                value={severity}
-                onChange={(e) => setSeverity(e.target.value)}
-                displayEmpty
-                renderValue={(value) => {
-                  if (value === "") {
-                    return "Select Severity Level...";
-                  }
-                  const selectedLevel = severityLevels.find(
-                    (level) => level.id === value,
-                  );
-                  if (!selectedLevel) {
-                    return value as string;
-                  }
-                  return (
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
-                    >
-                      <Box
-                        sx={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          bgcolor: getSeverityColor(selectedLevel.label),
-                          flexShrink: 0,
-                        }}
-                      />
-                      <Typography variant="body2">
-                        {selectedLevel.label}
-                      </Typography>
-                    </Box>
-                  );
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                <Box
+                  sx={{
+                    p: 1,
+                    bgcolor: "background.paper",
+                    border: 1,
+                    borderColor: "divider",
+                    borderRadius: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Upload size={18} />
+                </Box>
+
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography
+                    sx={{
+                      color: effectiveEditing
+                        ? "warning.main"
+                        : "text.disabled",
+                      fontSize: "0.875rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Upload files
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ mt: 1, display: "block" }}
+                  >
+                    PDF, DOCX, TXT, CSV or other formats • Max 15MB per file
+                  </Typography>
+                </Box>
+              </Box>
+            </Paper>
+
+            {attachments.length > 0 && (
+              <Box
+                sx={{
+                  mt: 1.5,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
                 }}
               >
-                <MenuItem value="" disabled>
-                  Select Severity Level...
-                </MenuItem>
-                {severityLevels.map((lvl) => (
-                  <MenuItem key={lvl.id} value={lvl.id}>
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
-                    >
-                      <Box
-                        sx={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: "50%",
-                          bgcolor: getSeverityColor(lvl.label),
-                        }}
-                      />
-                      <Box
-                        sx={{
-                          display: "flex",
-                          flexDirection: "column",
-                          minWidth: 0,
-                        }}
-                      >
-                        <Typography variant="body2">{lvl.label}</Typography>
-                        {lvl.description && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{
-                              display: "block",
-                              lineHeight: 1.2,
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            {lvl.description}
-                          </Typography>
-                        )}
-                      </Box>
+                {attachments.map((file, index) => (
+                  <Box
+                    key={`${file.name}-${file.size}-${index}`}
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      px: 1.5,
+                      py: 1,
+                      border: 1,
+                      borderColor: "divider",
+                      borderRadius: 1,
+                      bgcolor: "background.paper",
+                    }}
+                  >
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <File size={16} />
+                      <Typography variant="body2" sx={{ minWidth: 0 }} noWrap>
+                        {file.name}
+                      </Typography>
                     </Box>
-                  </MenuItem>
+                    <IconButton
+                      aria-label={`remove security report file ${file.name}`}
+                      size="small"
+                      onClick={() => onAttachmentRemove?.(index)}
+                    >
+                      <X size={14} />
+                    </IconButton>
+                  </Box>
                 ))}
-              </Select>
-            </FormControl>
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* issue type and severity grid container */}
+        {!isSecurityReport && (
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12 }}>
+              <Box
+                sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Typography variant="caption">
+                  Issue Type{" "}
+                  <Box component="span" sx={{ color: "warning.main" }}>
+                    *
+                  </Box>
+                </Typography>
+                {!isRelatedCaseMode && (
+                  <Chip
+                    label="AI classified"
+                    size="small"
+                    variant="outlined"
+                    icon={<Sparkles size={10} />}
+                    sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+                  />
+                )}
+              </Box>
+              <FormControl
+                fullWidth
+                size="small"
+                disabled={isLoading || !effectiveEditing}
+              >
+                <Select
+                  id="issue-type-select"
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value)}
+                  displayEmpty
+                  renderValue={(value) =>
+                    value === "" ? "Select Issue Type..." : value
+                  }
+                >
+                  <MenuItem value="" disabled>
+                    Select Issue Type...
+                  </MenuItem>
+                  {issueTypes
+                    .filter((type: unknown) => {
+                      const label =
+                        typeof type === "string"
+                          ? type
+                          : (type as { label?: string }).label;
+                      return label != null && String(label).trim() !== "";
+                    })
+                    .map((type: unknown) => {
+                      const label =
+                        typeof type === "string"
+                          ? type
+                          : ((type as { label?: string }).label as string);
+                      return (
+                        <MenuItem key={label} value={label}>
+                          {label}
+                        </MenuItem>
+                      );
+                    })}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <Box
+                sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Typography variant="caption">
+                  Severity Level{" "}
+                  <Box component="span" sx={{ color: "warning.main" }}>
+                    *
+                  </Box>
+                </Typography>
+                {!isRelatedCaseMode && (
+                  <Chip
+                    label="AI assessed"
+                    size="small"
+                    variant="outlined"
+                    icon={<Sparkles size={10} />}
+                    sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+                  />
+                )}
+              </Box>
+              <FormControl
+                fullWidth
+                size="small"
+                disabled={isLoading || !effectiveEditing}
+              >
+                <Select
+                  id="severity-level-select"
+                  value={severity}
+                  onChange={(e) => setSeverity(e.target.value)}
+                  displayEmpty
+                  renderValue={(value) => {
+                    if (value === "") {
+                      return "Select Severity Level...";
+                    }
+                    const selectedLevel = severityLevels.find(
+                      (level) => level.id === value,
+                    );
+                    if (!selectedLevel) {
+                      return value as string;
+                    }
+                    return (
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                      >
+                        <Box
+                          sx={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            bgcolor: getSeverityColor(selectedLevel.label),
+                            flexShrink: 0,
+                          }}
+                        />
+                        <Typography variant="body2">
+                          {selectedLevel.label}
+                        </Typography>
+                      </Box>
+                    );
+                  }}
+                >
+                  <MenuItem value="" disabled>
+                    Select Severity Level...
+                  </MenuItem>
+                  {severityLevels.map((lvl) => (
+                    <MenuItem key={lvl.id} value={lvl.id}>
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                      >
+                        <Box
+                          sx={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: "50%",
+                            bgcolor: getSeverityColor(lvl.label),
+                          }}
+                        />
+                        <Box
+                          sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            minWidth: 0,
+                          }}
+                        >
+                          <Typography variant="body2">{lvl.label}</Typography>
+                          {lvl.description && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{
+                                display: "block",
+                                lineHeight: 1.2,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {lvl.description}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
-        </Grid>
+        )}
       </Box>
     </Paper>
   );

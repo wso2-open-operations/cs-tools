@@ -48,4 +48,16 @@ export const ApiQueryKeys = {
   TIME_CARDS_SEARCH: "time-cards-search",
   PROJECT_DEPLOYMENT_DETAILS: "project-deployment-details",
   UPDATE_LEVELS_SEARCH: "update-levels-search",
+  CHANGE_REQUESTS: "change-requests",
+  CHANGE_REQUEST_DETAILS: "change-request-details",
+  CHANGE_REQUEST_COMMENTS: "change-request-comments",
+  CHANGE_REQUEST_STATS: "change-request-stats",
+  CATALOGS_SEARCH: "catalogs-search",
+  CATALOG_ITEM_VARIABLES: "catalog-item-variables",
+} as const;
+
+// Constants for API-related mutation keys.
+export const ApiMutationKeys = {
+  POST_COMMENT: ["postComment"],
+  POST_CHANGE_REQUEST_COMMENT: ["postChangeRequestComment"],
 } as const;

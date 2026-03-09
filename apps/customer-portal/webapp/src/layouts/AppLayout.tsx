@@ -24,6 +24,10 @@ import GlobalNotificationBanner from "@components/common/notification-banner/Glo
 import Footer from "@components/common/footer/Footer";
 import Header from "@components/common/header/Header";
 import SideBar from "@components/common/side-nav-bar/SideBar";
+import {
+  getSidebarCollapsed,
+  setSidebarCollapsed,
+} from "@utils/settingsStorage";
 /**
  * AppLayout component.
  *
@@ -44,25 +48,35 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   }, [location.pathname]);
 
   const { state: shellState, actions: shellActions } = useAppShell({
-    initialCollapsed: false,
+    initialCollapsed: getSidebarCollapsed(),
   });
 
   const { isVisible } = useLoader();
+
+  // Persist sidebar collapsed state to localStorage
+  useEffect(() => {
+    setSidebarCollapsed(shellState.sidebarCollapsed);
+  }, [shellState.sidebarCollapsed]);
 
   const isProjectHub = location.pathname === "/";
   const isCaseDetailsPage = /\/[^/]+\/support\/cases\/[^/]+$/.test(
     location.pathname,
   );
+  const isSecurityReportAnalysisDetailsPage =
+    /\/[^/]+\/security-center\/security-report-analysis\/[^/]+$/.test(
+      location.pathname,
+    );
   const isVulnerabilityDetailsPage =
-    /\/[^/]+\/security-center\/[^/]+$/.test(location.pathname);
+    /\/[^/]+\/security-center\/[^/]+$/.test(location.pathname) &&
+    !location.pathname.includes("security-report-analysis");
   const isPendingUpdatesPage = /\/[^/]+\/updates\/pending$/.test(
     location.pathname,
   );
-  const isUpdateLevelDetailsPage = /\/[^/]+\/updates\/pending\/level\/[^/]+$/.test(
-    location.pathname,
-  );
+  const isUpdateLevelDetailsPage =
+    /\/[^/]+\/updates\/pending\/level\/[^/]+$/.test(location.pathname);
   const isDetailsStylePage =
     isCaseDetailsPage ||
+    isSecurityReportAnalysisDetailsPage ||
     isVulnerabilityDetailsPage ||
     isPendingUpdatesPage ||
     isUpdateLevelDetailsPage;
@@ -126,9 +140,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                 overflow: "auto",
                 display: isDetailsStylePage ? "flex" : "block",
                 flexDirection: isDetailsStylePage ? "column" : undefined,
-                ...(isDetailsStylePage
-                  ? { px: 0, pb: 0, pt: 0 }
-                  : { p: 3 }),
+                ...(isDetailsStylePage ? { px: 0, pb: 0, pt: 0 } : { p: 3 }),
               }}
             >
               {children || (

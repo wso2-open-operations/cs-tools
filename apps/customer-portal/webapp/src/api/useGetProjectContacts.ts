@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProjectContact } from "@models/responses";
 
 /**
@@ -32,12 +32,14 @@ export default function useGetProjectContacts(
 ): UseQueryResult<ProjectContact[], Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProjectContact[], Error>({
     queryKey: [ApiQueryKeys.PROJECT_CONTACTS, projectId],
     queryFn: async (): Promise<ProjectContact[]> => {
-      logger.debug(`[useGetProjectContacts] Fetching contacts for project: ${projectId}`);
+      logger.debug(
+        `[useGetProjectContacts] Fetching contacts for project: ${projectId}`,
+      );
 
       try {
         const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -46,7 +48,9 @@ export default function useGetProjectContacts(
         }
 
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetProjectContacts] Response status: ${response.status}`,

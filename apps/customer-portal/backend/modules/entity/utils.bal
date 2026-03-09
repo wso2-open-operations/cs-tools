@@ -24,7 +24,7 @@ public configurable CaseStateIds & readonly caseStateIds = {
     solutionProposed: 6,
     workInProgress: 10
 };
-public configurable ConverstaionStateIds & readonly conversationStateIds =
+public configurable ConversationStateIds & readonly conversationStateIds =
     {open: 1, active: 2, resolved: 3, converted: 4, abandonded: 5};
 
 # Generate authorization headers.
@@ -126,7 +126,7 @@ public isolated function validateUtcTimes(DateTime[]? utcTimes) returns string|e
 # + payload - Deployment update payload
 # + return - Error message if validation fails, nil otherwise
 public isolated function validateDeploymentUpdatePayload(DeploymentUpdatePayload payload) returns string? {
-    boolean hasDeploymentFields = payload.name !is () && payload.typeKey !is ();
+    boolean hasDeploymentFields = payload.name !is () || payload.typeKey !is () || payload?.description !is ();
 
     // Check if payload has at least one field
     if !hasDeploymentFields && payload.active is () {
@@ -166,7 +166,7 @@ public isolated function validateCaseUpdatePayload(CaseUpdatePayload payload) re
 # + payload - Case create payload
 # + return - Validation error message or null if valid
 public isolated function validateCaseCreatePayload(CaseCreatePayload payload) returns string? {
-    CaseType caseType = payload.caseType ?: DEFAULT_CASE;
+    CaseType caseType = payload.'type;
     string? title = payload.title;
     string? description = payload.description;
 
@@ -177,8 +177,8 @@ public isolated function validateCaseCreatePayload(CaseCreatePayload payload) re
         if title.trim().length() == 0 || title.length() > 500 {
             return "Title must be between 1 and 500 characters long for default case.";
         }
-        if description is () || description.trim().length() == 0  {
-            return "Description cannnot be empty for default case.";
+        if description is () || description.trim().length() == 0 {
+            return "Description cannot be empty for default case.";
         }
         if payload.issueTypeKey is () {
             return "Issue type key is required for default case.";
@@ -188,16 +188,99 @@ public isolated function validateCaseCreatePayload(CaseCreatePayload payload) re
         }
     } else if caseType == SERVICE_REQUEST {
         if payload.catalogId is () {
-            return "Catalog ID is required for service request case.";
+            return "Catalog is required for service request case.";
         }
         if payload.catalogItemId is () {
-            return "Catalog Item ID is required for service request case.";
+            return "Catalog Item is required for service request case.";
         }
         Variable[]? variables = payload.variables;
         if variables is () || variables.length() == 0 {
             return "At least one variable is required for service request case.";
         }
-    } else if caseType == ANNOUNCEMENT || caseType == SECURITY_REPORT_ANALYSIS {
+    } else if caseType == SECURITY_REPORT_ANALYSIS {
+        if title is () {
+            return "Title is required for security report analysis case type.";
+        }
+        if title.trim().length() == 0 || title.length() > 500 {
+            return "Title must be between 1 and 500 characters long for security report analysis case.";
+        }
+        if description is () || description.trim().length() == 0 {
+            return "Description is required for security report analysis case.";
+        }
+        CaseCreateAttachment[]? attachments = payload.attachments;
+        if attachments is CaseCreateAttachment[] {
+            foreach CaseCreateAttachment attachment in attachments {
+                if attachment.name.trim().length() == 0 {
+                    return "Attachment name cannot be empty for security analysis case.";
+                }
+                if attachment.file.trim().length() == 0 {
+                    return "Attachment content cannot be empty for security analysis case.";
+                }
+            }
+        } else {
+            return "At least one attachment is required for security report analysis case.";
+        }
+    } else {
         return string `Case type ${caseType} is not supported.`;
     }
+    return;
+}
+
+# Validate deployed product update payload.
+#
+# + payload - Deployed product update payload
+# + return - Error message if validation fails, () otherwise
+public isolated function validateDeployedProductUpdatePayload(DeployedProductUpdatePayload payload) returns string? {
+    boolean? active = payload.active;
+    int? cores = payload?.cores;
+    decimal? tps = payload?.tps;
+    string? description = payload?.description;
+    if active is boolean {
+        if active {
+            return "Invalid value for active field. When updating cores or tps, active field should be set to false.";
+        }
+        if cores !is () || tps !is () || description !is () {
+            return "When deactivating, cores, tps and description fields should not be provided.";
+        }
+    } else if cores is () && tps is () && description is () {
+        return "At least one of cores or tps or description should be provided when updating deployed product details.";
+    }
+    return;
+}
+
+# Validate attachment update payload.
+#
+# + payload - Attachment update payload
+# + return - Validation error message or null if valid
+public isolated function validateAttachmentUpdatePayload(AttachmentUpdatePayload payload) returns string? {
+    ReferenceType referenceType = payload.referenceType;
+    string? description = payload?.description;
+    string? name = payload?.name;
+
+    // Validate reference type
+    if referenceType != CASE && referenceType != DEPLOYMENT {
+        return string `Invalid type '${referenceType}'. Only 'case' and 'deployment' are allowed.`;
+    }
+
+    // If referenceType is CASE, name is required and description should not be present
+    if referenceType == CASE {
+        if description !is () {
+            return "Description field is not allowed for case type.";
+        }
+        if name is () || name.trim().length() == 0 {
+            return "Name field is required for case type.";
+        }
+    }
+
+    // If referenceType is DEPLOYMENT, at least one of name or description should be present
+    if referenceType == DEPLOYMENT {
+        boolean hasName = name !is () && name.trim().length() > 0;
+        boolean hasDescription = description !is () && description.trim().length() > 0;
+
+        if !hasName && !hasDescription {
+            return "At least one field (name or description) must be provided for deployment type.";
+        }
+    }
+
+    return;
 }

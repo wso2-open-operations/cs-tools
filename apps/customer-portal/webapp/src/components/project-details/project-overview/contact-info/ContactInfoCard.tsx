@@ -14,13 +14,62 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, CardContent, Typography, Divider } from "@wso2/oxygen-ui";
-import { Users } from "@wso2/oxygen-ui-icons-react";
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Divider,
+  Skeleton,
+} from "@wso2/oxygen-ui";
+import { Users, User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { contacts } from "@constants/projectDetailsConstants";
+import type { Contact } from "@constants/projectDetailsConstants";
 import ContactRow from "@components/project-details/project-overview/contact-info/ContactRow";
+import { colors } from "@wso2/oxygen-ui";
+import type { ProjectDetails } from "@models/responses";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
-const ContactInfoCard = (): JSX.Element => {
+interface ContactInfoCardProps {
+  project?: ProjectDetails;
+  isLoading?: boolean;
+  isError?: boolean;
+}
+
+const ContactInfoCard = ({
+  project,
+  isLoading,
+  isError,
+}: ContactInfoCardProps): JSX.Element => {
+  // Build contacts array from project data
+  const contacts: Contact[] = [];
+
+  if (project?.account?.ownerEmail) {
+    contacts.push({
+      role: "Account Manager",
+      email: project.account.ownerEmail,
+      icon: User,
+      bgColor: colors.blue[700],
+    });
+  }
+
+  contacts.push({
+    role: "Technical Owner",
+    email: project?.account?.technicalOwnerEmail || null,
+    icon: Shield,
+    bgColor: colors.purple[400],
+  });
+
+  const renderContactSkeleton = () => (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <Skeleton variant="text" width={120} height={16} />
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Skeleton variant="circular" width={40} height={40} />
+        <Skeleton variant="text" width={200} height={20} />
+      </Box>
+    </Box>
+  );
+
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent sx={{ p: 3 }}>
@@ -30,15 +79,33 @@ const ContactInfoCard = (): JSX.Element => {
         </Box>
         <Divider sx={{ mb: 2, pb: 2 }} />
 
-        <Box sx={{ display: "flex", flexDirection: "column" }}>
-          {contacts.map((contact, index) => (
-            <Box key={index}>
-              <ContactRow contact={contact} />
+        {isLoading ? (
+          <Box sx={{ display: "flex", flexDirection: "column" }}>
+            {renderContactSkeleton()}
+            <Divider sx={{ my: 2 }} />
+            {renderContactSkeleton()}
+          </Box>
+        ) : isError ? (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <ErrorIndicator entityName="contact information" />
+          </Box>
+        ) : contacts.length > 0 ? (
+          <Box sx={{ display: "flex", flexDirection: "column" }}>
+            {contacts.map((contact, index) => (
+              <Box key={index}>
+                <ContactRow contact={contact} />
 
-              {index < contacts.length - 1 && <Divider sx={{ my: 2 }} />}
-            </Box>
-          ))}
-        </Box>
+                {index < contacts.length - 1 && <Divider sx={{ my: 2 }} />}
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              No contact information available
+            </Typography>
+          </Box>
+        )}
       </CardContent>
     </Card>
   );

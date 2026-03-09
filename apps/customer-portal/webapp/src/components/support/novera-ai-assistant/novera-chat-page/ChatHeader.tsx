@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Typography, Paper } from "@wso2/oxygen-ui";
 import { Bot, ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 
@@ -31,17 +31,25 @@ interface ChatHeaderProps {
  */
 export default function ChatHeader({ onBack }: ChatHeaderProps): JSX.Element {
   return (
-    <Box sx={{ mb: 3 }}>
-      <Button
-        startIcon={<ArrowLeft size={18} />}
-        onClick={onBack}
-        sx={{ mb: 2, textTransform: "none" }}
-        variant="text"
-      >
-        Back to Support
-      </Button>
-
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        mb: 3,
+        flexShrink: 0,
+        borderRadius: 0,
+      }}
+    >
       <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Button
+          onClick={onBack}
+          sx={{ minWidth: "auto", p: 1 }}
+          variant="text"
+          aria-label="Back"
+        >
+          <ArrowLeft size={18} />
+        </Button>
+
         <Box
           sx={{
             width: (theme) => theme.spacing(5),
@@ -62,6 +70,6 @@ export default function ChatHeader({ onBack }: ChatHeaderProps): JSX.Element {
           </Typography>
         </Box>
       </Box>
-    </Box>
+    </Paper>
   );
 }

@@ -48,6 +48,8 @@
       "@utils/*": ["src/utils/*"],
       "@time-tracking": ["src/components/project-details/time-tracking"],
       "@time-tracking/*": ["src/components/project-details/time-tracking/*"],
+      "@deployments": ["src/components/project-details/deployments"],
+      "@deployments/*": ["src/components/project-details/deployments/*"],
       "@update-cards/*": ["src/components/updates/update-cards/*"]
     },
 

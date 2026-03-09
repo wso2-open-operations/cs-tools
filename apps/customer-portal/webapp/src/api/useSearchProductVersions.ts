@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type {
   ProductVersionItem,
   ProductVersionsSearchResponse,
@@ -39,7 +39,7 @@ export function useSearchProductVersions(
   const { limit = 10, offset = 0 } = params ?? {};
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProductVersionItem[], Error>({
     queryKey: [ApiQueryKeys.PRODUCT_VERSIONS_SEARCH, productId, limit, offset],
@@ -59,9 +59,9 @@ export function useSearchProductVersions(
           pagination: { limit, offset },
         };
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
         });
 

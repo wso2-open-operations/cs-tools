@@ -21,6 +21,7 @@ import {
   Paper,
   Typography,
   alpha,
+  colors,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
@@ -37,8 +38,12 @@ export interface RequestCardProps {
   infoBoxTitle: string;
   infoBoxDescription: string;
   bulletItems: readonly string[];
-  secondaryButtonLabel: string;
-  onSecondaryClick: () => void;
+  secondaryButtonLabel?: string;
+  onSecondaryClick?: () => void;
+  footerButtons?: Array<{
+    label: string;
+    onClick?: () => void;
+  }>;
   primaryButton?: {
     label: string;
     onClick: () => void;
@@ -64,6 +69,7 @@ export default function RequestCard({
   bulletItems,
   secondaryButtonLabel,
   onSecondaryClick,
+  footerButtons,
   primaryButton,
 }: RequestCardProps): JSX.Element {
   const theme = useTheme();
@@ -179,20 +185,46 @@ export default function RequestCard({
             {primaryButton.label}
           </Button>
         )}
-        <Button
-          fullWidth
-          variant="outlined"
-          color="inherit"
-          endIcon={<ArrowRight size={16} />}
-          onClick={onSecondaryClick}
-          sx={{
-            textTransform: "none",
-            borderColor: "divider",
-            color: "text.primary",
-          }}
-        >
-          {secondaryButtonLabel}
-        </Button>
+        {footerButtons && footerButtons.length > 0 ? (
+          <Box sx={{ display: "flex", gap: 1 }}>
+            {footerButtons.map((btn, index) => (
+              <Button
+                key={index}
+                fullWidth
+                variant="text"
+                color="info"
+                onClick={btn.onClick}
+                endIcon={<ArrowRight size={16} />}
+                sx={{
+                  flex: 1,
+                  justifyContent: "flex-start",
+                  textTransform: "none",
+                  fontWeight: 500,
+                  color: colors.blue[600],
+                }}
+              >
+                {btn.label}
+              </Button>
+            ))}
+          </Box>
+        ) : (
+          secondaryButtonLabel &&
+          onSecondaryClick && (
+            <Button
+              fullWidth
+              variant="outlined"
+              color="inherit"
+              endIcon={<ArrowRight size={16} />}
+              onClick={onSecondaryClick}
+              sx={{
+                textTransform: "none",
+                color: "text.primary",
+              }}
+            >
+              {secondaryButtonLabel}
+            </Button>
+          )
+        )}
       </Box>
     </Paper>
   );

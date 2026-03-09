@@ -82,7 +82,7 @@ export default function TimeTrackingCard({
               sx={getPlainChipSx()}
             />
             <Chip
-              label={state || "--"}
+              label={state?.label || "--"}
               size="small"
               variant="outlined"
               sx={getSupportOverviewChipSx(stateColorPath, theme)}

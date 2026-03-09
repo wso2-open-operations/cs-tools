@@ -25,7 +25,7 @@ describe("TimeTrackingCard", () => {
     totalTime: 60,
     createdOn: "2025-12-10 03:47:10",
     hasBillable: true,
-    state: "Approved",
+    state: { id: "approved", label: "Approved" },
     approvedBy: { id: "a1", label: "Dileepa Peiris (Intern)" },
     project: { id: "p1", label: "Customer 3 Project 1" },
     case: {
@@ -51,7 +51,7 @@ describe("TimeTrackingCard", () => {
   it("should show fallback '--' for missing values", () => {
     const incompleteCard: TimeCard = {
       ...mockCard,
-      state: "",
+      state: null,
       approvedBy: null,
       case: { number: "", id: "c1", label: "" },
       totalTime: 0,
@@ -60,6 +60,7 @@ describe("TimeTrackingCard", () => {
     render(<TimeTrackingCard card={incompleteCard} />);
 
     expect(screen.getByText(/Approved by: --/)).toBeInTheDocument();
+    expect(screen.getByText(/State:\s*--/)).toBeInTheDocument();
   });
 
   it("should not render Billable chip when hasBillable is false", () => {

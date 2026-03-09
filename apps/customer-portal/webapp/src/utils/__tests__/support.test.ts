@@ -46,7 +46,10 @@ import {
   getPlainChipSx,
   mapSeverityToDisplay,
   getSeverityIcon,
+  hasSingleCodeWrapper,
   stripCodeWrapper,
+  stripAllCodeBlocks,
+  trimLeadingBr,
   convertCodeTagsToHtml,
   replaceInlineImageSources,
   formatCommentDate,
@@ -507,19 +510,34 @@ describe("support utils", () => {
     });
   });
 
+  describe("hasSingleCodeWrapper", () => {
+    it("returns false for empty or multiple [code] blocks", () => {
+      expect(hasSingleCodeWrapper("")).toBe(false);
+      expect(hasSingleCodeWrapper("[code]a[/code][code]b[/code]")).toBe(false);
+    });
+
+    it("returns true for single [code]...[/code] wrapper", () => {
+      expect(hasSingleCodeWrapper("[code]x[/code]")).toBe(true);
+      expect(hasSingleCodeWrapper("[code]<p>Hello</p>[/code]")).toBe(true);
+    });
+  });
+
   describe("stripCodeWrapper", () => {
     it("should return empty string for empty or invalid input", () => {
       expect(stripCodeWrapper("")).toBe("");
       expect(stripCodeWrapper(null as unknown as string)).toBe("");
     });
 
-    it("should return content unchanged when no [code] wrapper", () => {
+    it("should return content unchanged when no [code] wrapper or multiple blocks", () => {
       expect(stripCodeWrapper("plain text")).toBe("plain text");
       expect(stripCodeWrapper("[code]only start")).toBe("[code]only start");
       expect(stripCodeWrapper("only end[/code]")).toBe("only end[/code]");
+      expect(stripCodeWrapper("[code]a[/code][code]b[/code]")).toBe(
+        "[code]a[/code][code]b[/code]",
+      );
     });
 
-    it("should strip [code]...[/code] wrapper", () => {
+    it("should strip [code]...[/code] wrapper when single block", () => {
       expect(stripCodeWrapper("[code]x[/code]")).toBe("x");
       expect(stripCodeWrapper("[code]  hello  [/code]")).toBe("hello");
     });
@@ -544,6 +562,29 @@ describe("support utils", () => {
       expect(
         convertCodeTagsToHtml("Refs [code]A[/code] and [code]B[/code]"),
       ).toBe("Refs <code>A</code> and <code>B</code>");
+    });
+  });
+
+  describe("stripAllCodeBlocks", () => {
+    it("should strip all [code]...[/code] blocks and return inner HTML", () => {
+      expect(
+        stripAllCodeBlocks(
+          "[code]<br><b>Title</b>[/code][code]<br><p>Desc</p>[/code]",
+        ),
+      ).toBe("<br><b>Title</b><br><p>Desc</p>");
+    });
+    it("should return empty for empty input", () => {
+      expect(stripAllCodeBlocks("")).toBe("");
+    });
+  });
+
+  describe("trimLeadingBr", () => {
+    it("should remove leading br tags", () => {
+      expect(trimLeadingBr("<br><b>Title</b>")).toBe("<b>Title</b>");
+      expect(trimLeadingBr("<br/><br><b>Title</b>")).toBe("<b>Title</b>");
+    });
+    it("should return trimmed string for empty input", () => {
+      expect(trimLeadingBr("")).toBe("");
     });
   });
 

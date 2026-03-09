@@ -15,6 +15,7 @@
 // under the License.
 
 const NOVERA_CHAT_ENABLED_KEY = "novera_chat_enabled";
+const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
 /**
  * Reads whether Novera chat assistant is enabled from localStorage.
@@ -40,5 +41,32 @@ export function getNoveraChatEnabled(): boolean {
 export function setNoveraChatEnabled(enabled: boolean): void {
   try {
     localStorage.setItem(NOVERA_CHAT_ENABLED_KEY, String(enabled));
+  } catch {}
+}
+
+/**
+ * Reads the sidebar collapsed state from localStorage.
+ * Defaults to false (expanded) when not set.
+ *
+ * @returns {boolean} Whether the sidebar is collapsed.
+ */
+export function getSidebarCollapsed(): boolean {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (stored === null) return false;
+    return stored === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Persists the sidebar collapsed state.
+ *
+ * @param {boolean} collapsed - Whether the sidebar is collapsed.
+ */
+export function setSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
   } catch {}
 }

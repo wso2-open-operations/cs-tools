@@ -45,7 +45,7 @@ export default function SuccessBanner({
         top: HEADER_HEIGHT_PX + BANNER_HEADER_GAP_PX,
         right: BANNER_RIGHT_GAP_PX,
         width: 400,
-        zIndex: 10,
+        zIndex: 1500,
       }}
     >
       <Alert

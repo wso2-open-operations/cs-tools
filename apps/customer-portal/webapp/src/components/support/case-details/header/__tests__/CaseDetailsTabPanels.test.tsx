@@ -56,15 +56,42 @@ const mockCaseDetails = {
 };
 
 const mockCaseComments = [
-  { id: "c1", content: "Thanks for the detailed recommendations. I'll review.", type: "comments", createdOn: "2026-02-12T11:15:42", createdBy: "user@test.com", isEscalated: false },
-  { id: "c2", content: "Show more content here.", type: "comments", createdOn: "2026-02-12T10:30:15", createdBy: "support@wso2.com", isEscalated: false },
+  {
+    id: "c1",
+    content: "Thanks for the detailed recommendations. I'll review.",
+    type: "comments",
+    createdOn: "2026-02-12T11:15:42",
+    createdBy: "user@test.com",
+    isEscalated: false,
+  },
+  {
+    id: "c2",
+    content: "Show more content here.",
+    type: "comments",
+    createdOn: "2026-02-12T10:30:15",
+    createdBy: "support@wso2.com",
+    isEscalated: false,
+  },
 ];
 
 const mockCaseAttachments = [
-  { id: "a1", name: "file.txt", type: "text/plain", downloadUrl: "/file", createdOn: "2026-02-01", createdBy: "user@test.com" },
+  {
+    id: "a1",
+    name: "file.txt",
+    type: "text/plain",
+    downloadUrl: "/file",
+    createdOn: "2026-02-01",
+    createdBy: "user@test.com",
+  },
 ];
 
-const mockUserDetails = { id: "u1", email: "user@test.com", lastName: "User", firstName: "Test", timeZone: "UTC" };
+const mockUserDetails = {
+  id: "u1",
+  email: "user@test.com",
+  lastName: "User",
+  firstName: "Test",
+  timeZone: "UTC",
+};
 
 vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
   __esModule: true,
@@ -72,22 +99,27 @@ vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
 }));
 
 vi.mock("@api/useGetCaseAttachments", () => ({
-  __esModule: true,
-  default: vi.fn((_caseId: string, opts?: { enabled?: boolean }) => {
-    const enabled = opts?.enabled !== false;
-    return {
-      data: enabled
-        ? {
-            attachments: mockCaseAttachments,
-            totalRecords: mockCaseAttachments.length,
-            limit: 50,
-            offset: 0,
-          }
-        : undefined,
-      isLoading: false,
-      isError: false,
-    };
-  }),
+  useGetCaseAttachments: vi.fn(() => ({
+    data: {
+      pages: [
+        {
+          attachments: mockCaseAttachments,
+          totalRecords: mockCaseAttachments.length,
+          limit: 10,
+          offset: 0,
+        },
+      ],
+      pageParams: [0],
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+    isFetchNextPageError: false,
+  })),
+  flattenCaseAttachments: (data: any) =>
+    data?.pages?.flatMap((p: any) => p.attachments ?? []) ?? [],
 }));
 
 vi.mock("@api/useGetCaseComments", () => ({
@@ -178,16 +210,22 @@ describe("CaseDetailsTabPanels", () => {
 
   it("should show Attachments panel with list and download when activeTab is 2", () => {
     renderTabPanels(2);
-    expect(screen.getByRole("button", { name: /upload attachment/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /upload attachment/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText("file.txt")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /download/i }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: /download/i }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("should show Calls placeholder when activeTab is 3 and project is missing", () => {
     renderTabPanels(3, "case-1", {
       data: { ...mockCaseDetails, project: null } as CaseDetails,
     });
-    expect(screen.getByText("Call requests will appear here.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Call requests will appear here."),
+    ).toBeInTheDocument();
   });
 
   it("should show Knowledge Base placeholder when activeTab is 4", () => {

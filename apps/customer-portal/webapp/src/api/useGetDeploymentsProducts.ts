@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
-import { useAuthApiClient } from "@context/AuthApiContext";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { DeploymentProductItem } from "@models/responses";
@@ -74,7 +74,7 @@ export function useGetDeploymentsProducts(
 ): UseQueryResult<DeploymentProductItem[], Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<DeploymentProductItem[], Error>({
     queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
@@ -82,7 +82,9 @@ export function useGetDeploymentsProducts(
       logger.debug(
         `Fetching deployment products for deployment ID: ${deploymentId}`,
       );
-      const data = await fetchDeploymentProducts(deploymentId, { fetchFn });
+      const data = await fetchDeploymentProducts(deploymentId, {
+        fetchFn: authFetch,
+      });
       logger.debug(
         `Deployment products fetched for deployment ID: ${deploymentId}`,
         data,

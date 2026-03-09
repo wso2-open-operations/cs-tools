@@ -15,8 +15,7 @@
 // under the License.
 
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
-import { WSO2 } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 
 /**
@@ -33,6 +32,28 @@ export default function Brand({
 }): JSX.Element {
   const navigate = useNavigate();
 
+  // TODO : This need to remove once svg available on oxygen ui
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(
+    document.documentElement.getAttribute("data-color-scheme") === "dark",
+  );
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const currentScheme =
+        document.documentElement.getAttribute("data-color-scheme");
+      setIsDarkMode(currentScheme === "dark");
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-color-scheme"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  const logoSrc = isDarkMode ? "/logo-white.svg" : "/logo-dark.svg";
+
   return (
     <HeaderUI.Brand
       onClick={() => !isNavigationDisabled && navigate("/")}
@@ -40,7 +61,12 @@ export default function Brand({
     >
       {/* brand logo */}
       <HeaderUI.BrandLogo>
-        <WSO2 />
+        <img
+          key={logoSrc}
+          src={logoSrc}
+          alt="Company Logo"
+          style={{ height: "24px", width: "auto" }}
+        />
       </HeaderUI.BrandLogo>
       {/* brand title */}
       <HeaderUI.BrandTitle>Customer Portal</HeaderUI.BrandTitle>

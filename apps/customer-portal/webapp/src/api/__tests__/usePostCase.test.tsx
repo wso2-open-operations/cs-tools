@@ -29,6 +29,8 @@ vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
 
+const mockAuthFetch = vi.fn();
+
 const mockGetIdToken = vi.fn().mockResolvedValue("mock-token");
 let mockIsSignedIn = true;
 let mockIsAuthLoading = false;
@@ -40,11 +42,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-const mockAuthFetch = vi.fn();
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
-
 describe("usePostCase", () => {
   let queryClient: QueryClient;
   const originalConfig = window.config;
@@ -54,7 +51,7 @@ describe("usePostCase", () => {
   );
 
   const requestBody: CreateCaseRequest = {
-    caseType: "default_case",
+    type: "default_case",
     deploymentId: "deploy-1",
     description: "Test case description",
     issueTypeKey: 1,
@@ -75,6 +72,7 @@ describe("usePostCase", () => {
     mockIsSignedIn = true;
     mockIsAuthLoading = false;
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", mockAuthFetch);
   });
 
   afterEach(() => {

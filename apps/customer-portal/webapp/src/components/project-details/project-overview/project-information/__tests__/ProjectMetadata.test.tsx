@@ -41,7 +41,7 @@ vi.mock("@/utils/projectStats", () => ({
 describe("ProjectMetadata", () => {
   const defaultProps = {
     createdDate: "Jan 1, 2024",
-    projectType: "Subscription",
+    type: { id: "subscription", label: "Subscription" },
     supportTier: "Enterprise",
     slaStatus: "Good",
     isLoading: false,

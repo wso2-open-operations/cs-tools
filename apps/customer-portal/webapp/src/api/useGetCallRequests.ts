@@ -20,9 +20,9 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CallRequestsResponse } from "@models/responses";
 
 const LIMIT = 10;
@@ -41,7 +41,7 @@ export function useGetCallRequests(
 ): UseInfiniteQueryResult<InfiniteData<CallRequestsResponse>, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useInfiniteQuery<
     CallRequestsResponse,
@@ -71,9 +71,9 @@ export function useGetCallRequests(
           pagination: { limit: LIMIT, offset: pageParam },
         });
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body,
         });
 
@@ -98,7 +98,11 @@ export function useGetCallRequests(
     initialPageParam: 0,
     getNextPageParam: (lastPage) => {
       const { offset, limit, totalRecords } = lastPage;
-      if (offset === undefined || limit === undefined || totalRecords === undefined) {
+      if (
+        offset === undefined ||
+        limit === undefined ||
+        totalRecords === undefined
+      ) {
         logger.warn(
           "[useGetCallRequests] Missing pagination metadata: offset, limit, or totalRecords undefined. Stopping pagination.",
           { offset, limit, totalRecords },

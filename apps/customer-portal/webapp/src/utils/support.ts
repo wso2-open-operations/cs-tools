@@ -15,23 +15,34 @@
 // under the License.
 
 import {
+  Activity,
+  CheckCircle,
   CircleAlert,
   CircleCheck,
   CircleQuestionMark,
   CircleX,
   Clock,
   MessageCircle,
+  PlayCircle,
   RotateCcw,
   TriangleAlert,
+  XCircle,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   ChatAction,
   ChatStatus,
+  ConversationStatus,
   CaseStatus,
   CallRequestStatus,
+  CaseType,
   CaseSeverityLevel,
+  type CaseTypeInput,
 } from "@constants/supportConstants";
-import { SEVERITY_LABEL_TO_DISPLAY } from "@constants/dashboardConstants";
+import { CaseReportType } from "@constants/securityConstants";
+import {
+  SEVERITY_LABEL_TO_DISPLAY,
+  isS0SeverityLabel,
+} from "@constants/dashboardConstants";
 import type { CaseComment, MetadataItem } from "@models/responses";
 import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
@@ -41,7 +52,7 @@ import { createElement, type ComponentType, type ReactNode } from "react";
  * Extracts Incident and Query case type IDs from caseTypes metadata.
  * Used for default caseTypeIds filter in Support overview and All Cases.
  *
- * @param caseTypes - Case types from useGetCasesFilters response.
+ * @param caseTypes - Case types from useGetProjectFilters response.
  * @returns {string[]} IDs for Incident and Query types.
  */
 export function getIncidentAndQueryCaseTypeIds(
@@ -58,7 +69,7 @@ export function getIncidentAndQueryCaseTypeIds(
  * Extracts Incident and Query case type IDs separately for stats API.
  * API expects caseTypes=queryId&caseTypes=incidentId.
  *
- * @param caseTypes - Case types from useGetCasesFilters response.
+ * @param caseTypes - Case types from useGetProjectFilters response.
  * @returns {{ incidentId?: string; queryId?: string }} Incident and Query IDs.
  */
 export function getIncidentAndQueryIds(caseTypes?: MetadataItem[]): {
@@ -76,6 +87,90 @@ export function getIncidentAndQueryIds(caseTypes?: MetadataItem[]): {
     else if (/^query$/i.test(n) && queryId === undefined) queryId = ct.id;
   }
   return { incidentId, queryId };
+}
+
+/**
+ * Detects whether a case type represents Security Report Analysis.
+ * Prefers stable id matching and falls back to normalized label matching.
+ */
+export function isSecurityReportAnalysisType(type: CaseTypeInput): boolean {
+  if (!type) return false;
+
+  const target = CaseType.SECURITY_REPORT_ANALYSIS.toLowerCase().replace(
+    /_/g,
+    "",
+  );
+
+  // Helper to normalize any string (id, label, or raw string)
+  const normalize = (val: string) =>
+    val
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "")
+      .trim();
+
+  switch (typeof type) {
+    case "string":
+      return normalize(type) === target;
+
+    case "object":
+      switch (true) {
+        case type.id === CaseType.SECURITY_REPORT_ANALYSIS:
+          return true;
+        case !!type.label:
+          return normalize(type.label!) === target;
+        default:
+          return false;
+      }
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * Comprehensive check to determine if a created case is a security report.
+ * Consolidates multiple possible indicators into a single check.
+ *
+ * @param {object} caseData - The case data object returned from the API
+ * @param {boolean} isInitialSecurityReport - Whether the case was initially created as a security report
+ * @returns {boolean} True if the case is a security report
+ */
+export function isCreatedCaseSecurityReport(
+  caseData: {
+    isSecurityReport?: boolean;
+    reportType?: string;
+    type?: CaseTypeInput | { id?: string | null; label?: string | null } | null;
+  },
+  isInitialSecurityReport: boolean,
+): boolean {
+  // Check multiple indicators using a switch-based approach
+  switch (true) {
+    case isInitialSecurityReport:
+      return true;
+    case caseData.isSecurityReport === true:
+      return true;
+    case caseData.reportType === CaseReportType.SECURITY:
+      return true;
+    case typeof caseData.type === "string":
+      return caseData.type === CaseType.SECURITY_REPORT_ANALYSIS;
+    case caseData.type !== null && caseData.type !== undefined:
+      // Type is object - use the existing type checker
+      if (typeof caseData.type === "object") {
+        const typeObj = caseData.type as {
+          id?: string | null;
+          label?: string | null;
+        };
+        if (typeObj.id != null || typeObj.label != null) {
+          return isSecurityReportAnalysisType({
+            id: typeObj.id ?? "",
+            label: typeObj.label ?? "",
+          });
+        }
+      }
+      return false;
+    default:
+      return false;
+  }
 }
 
 /**
@@ -221,12 +316,15 @@ export function formatDateTime(
   formatStr: "short" | "long" = "long",
 ): string {
   if (!dateStr) {
-    return "--";
+    return "Not Available";
   }
 
-  const date = new Date(dateStr);
+  // Handle API date format "YYYY-MM-DD HH:mm:ss" by converting space to 'T' for ISO format
+  const normalizedDateStr = dateStr.trim().replace(" ", "T");
+  const date = new Date(normalizedDateStr);
+
   if (isNaN(date.getTime())) {
-    return "--";
+    return "Not Available";
   }
 
   if (formatStr === "short") {
@@ -255,7 +353,7 @@ export function formatDateTime(
  * @returns {string} Formatted date without time (e.g., "Feb 25, 2026").
  */
 export function formatDateOnly(dateStr: string | null | undefined): string {
-  if (!dateStr) return "--";
+  if (!dateStr) return "Not Available";
 
   const trimmed = dateStr.trim();
 
@@ -287,7 +385,31 @@ export function formatDateOnly(dateStr: string | null | undefined): string {
     }
   }
 
-  return "--";
+  return "Not Available";
+}
+
+/**
+ * Converts duration from minutes to formatted string (e.g., "4h 30m").
+ * Used for change request duration display.
+ *
+ * @param {number | string | null | undefined} minutes - Duration in minutes (API may return string).
+ * @returns {string} Formatted duration string (e.g., "4h 30m") or "Not Available".
+ */
+export function formatDuration(
+  minutes: number | string | null | undefined,
+): string {
+  if (minutes == null) return "Not Available";
+  const n = typeof minutes === "number" ? minutes : parseInt(String(minutes), 10);
+  if (Number.isNaN(n) || n < 0) return "Not Available";
+
+  const hours = Math.floor(n / 60);
+  const mins = n % 60;
+
+  if (hours === 0 && mins === 0) return "0m";
+  if (hours === 0) return `${mins}m`;
+  if (mins === 0) return `${hours}h`;
+
+  return `${hours}h ${mins}m`;
 }
 
 export type ChatActionState =
@@ -428,10 +550,10 @@ export function getChatStatusAction(status: string): ChatAction {
   const normalized = status?.toLowerCase() || "";
 
   switch (true) {
-    case normalized.includes("open"):
-      return ChatAction.RESUME;
-    default:
+    case normalized.includes("resolved"):
       return ChatAction.VIEW;
+    default:
+      return ChatAction.RESUME;
   }
 }
 
@@ -444,6 +566,8 @@ export function getChatStatusAction(status: string): ChatAction {
 export function getChatActionColor(action: ChatAction): ChatActionState {
   switch (action) {
     case ChatAction.RESUME:
+      return "warning";
+    case ChatAction.VIEW:
       return "info";
     default:
       return "primary";
@@ -468,6 +592,59 @@ export function getChatStatusColor(status: string): string {
       return "error.main";
     default:
       return "secondary.main";
+  }
+}
+
+/**
+ * Returns the color path for a conversation status.
+ *
+ * @param status - Conversation status string.
+ * @returns {string} Palette color path.
+ */
+export function getConversationStatusColor(status: string): string {
+  const normalized = status?.toLowerCase() || "";
+
+  switch (true) {
+    case normalized.includes(ConversationStatus.ABANDONED.toLowerCase()):
+      return "error.main";
+    case normalized.includes(ConversationStatus.ACTIVE.toLowerCase()):
+      return "success.main";
+    case normalized.includes(ConversationStatus.CONVERTED.toLowerCase()):
+      return "info.main";
+    case normalized.includes(ConversationStatus.OPEN.toLowerCase()):
+      return "warning.main";
+    case normalized.includes(ConversationStatus.RESOLVED.toLowerCase()):
+      return "success.main";
+    default:
+      return "secondary.main";
+  }
+}
+
+/**
+ * Returns the icon component for a conversation status.
+ *
+ * @param status - Conversation status string.
+ * @returns {ComponentType} Icon component.
+ */
+export function getConversationStatusIcon(status?: string): ComponentType<{
+  size?: number;
+  color?: string;
+}> {
+  const normalized = status?.toLowerCase() || "";
+
+  switch (true) {
+    case normalized.includes(ConversationStatus.ABANDONED.toLowerCase()):
+      return XCircle;
+    case normalized.includes(ConversationStatus.ACTIVE.toLowerCase()):
+      return Activity;
+    case normalized.includes(ConversationStatus.CONVERTED.toLowerCase()):
+      return CheckCircle;
+    case normalized.includes(ConversationStatus.OPEN.toLowerCase()):
+      return PlayCircle;
+    case normalized.includes(ConversationStatus.RESOLVED.toLowerCase()):
+      return CircleCheck;
+    default:
+      return CircleAlert;
   }
 }
 
@@ -701,6 +878,19 @@ export function mapSeverityToDisplay(label?: string): string {
 }
 
 /**
+ * Returns true if the case has S0 (Catastrophic) severity.
+ * Used to filter out S0 cases when project type is not Managed Cloud Subscription.
+ *
+ * @param caseItem - Case with optional severity.
+ * @returns {boolean}
+ */
+export function isS0Case(
+  caseItem: { severity?: { label?: string } | null },
+): boolean {
+  return isS0SeverityLabel(caseItem?.severity?.label);
+}
+
+/**
  * Returns the icon component for a severity label (announcement cards).
  * S0/S1: TriangleAlert, S2: CircleAlert, S3: Clock, S4: CircleCheck.
  *
@@ -808,7 +998,50 @@ export function convertCodeTagsToHtml(content: string): string {
 }
 
 /**
+ * Strips all [code]...[/code] blocks and returns concatenated inner HTML.
+ * Used for multi-block content to avoid grey <code> background on structured sections.
+ *
+ * @param content - Raw content with one or more [code]...[/code] blocks.
+ * @returns {string} Inner HTML without code wrappers.
+ */
+export function stripAllCodeBlocks(content: string): string {
+  if (!content || typeof content !== "string") return "";
+  return content.replace(/\[code\]([\s\S]*?)\[\/code\]/gi, "$1");
+}
+
+/**
+ * Removes leading <br>, <br/>, <br /> and whitespace from HTML.
+ * Fixes extra blank first line from content like "[code]<br><b>...</b>[/code]".
+ *
+ * @param html - HTML string.
+ * @returns {string} HTML with leading br/whitespace removed.
+ */
+export function trimLeadingBr(html: string): string {
+  if (!html || typeof html !== "string") return "";
+  return html.replace(/^(\s*<br\s*\/?>\s*)+/i, "").trimStart();
+}
+
+/**
+ * Returns true if content has exactly one top-level [code]...[/code] wrapper
+ * (no multiple [code] blocks). Used to decide between stripCodeWrapper and convertCodeTagsToHtml.
+ *
+ * @param content - Raw content string.
+ * @returns {boolean} True when single wrapper.
+ */
+export function hasSingleCodeWrapper(content: string): boolean {
+  if (!content || typeof content !== "string") return false;
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("[code]") || !trimmed.endsWith("[/code]")) {
+    return false;
+  }
+  const codeOpen = trimmed.match(/\[code\]/gi);
+  const codeClose = trimmed.match(/\[\/code\]/gi);
+  return (codeOpen?.length ?? 0) === 1 && (codeClose?.length ?? 0) === 1;
+}
+
+/**
  * Strips the [code]...[/code] wrapper from comment content.
+ * Only strips when there is exactly one wrapper (use hasSingleCodeWrapper first).
  *
  * @param content - Raw content string.
  * @returns {string} Content without the code wrapper.
@@ -816,10 +1049,8 @@ export function convertCodeTagsToHtml(content: string): string {
 export function stripCodeWrapper(content: string): string {
   if (!content || typeof content !== "string") return "";
   const trimmed = content.trim();
-  if (trimmed.startsWith("[code]") && trimmed.endsWith("[/code]")) {
-    return trimmed.slice(6, -7).trim();
-  }
-  return content;
+  if (!hasSingleCodeWrapper(content)) return content;
+  return trimmed.slice(6, -7).trim();
 }
 
 /**
@@ -948,6 +1179,35 @@ export function stripHtml(html: string | null | undefined): string {
 }
 
 /**
+ * Strips custom tags like [code]...[/code], [p]...[/p], [b]...[/b], etc. from content.
+ * Used for change request comments that may contain these custom markup tags.
+ *
+ * @param content - Content string with custom tags.
+ * @returns {string} Plain text without custom tags.
+ */
+export function stripCustomTags(content: string | null | undefined): string {
+  if (!content || typeof content !== "string") return "";
+  // Remove custom tags like [code], [/code], [p], [/p], [b], [/b], [u], [/u], [br], etc.
+  return content.replace(/\[\/?\w+\]/g, "").trim();
+}
+
+/**
+ * Strips both HTML tags and custom tags from content.
+ * Specifically for change request comments that may contain both <tag> and [tag] formats.
+ *
+ * @param content - Content string with mixed HTML and custom tags.
+ * @returns {string} Plain text without any tags.
+ */
+export function stripAllTags(content: string | null | undefined): string {
+  if (!content || typeof content !== "string") return "";
+  // First remove custom tags like [code], [/code]
+  let cleaned = content.replace(/\[\/?\w+\]/g, "");
+  // Then remove HTML tags like <br>, <p>
+  cleaned = cleaned.replace(/<[^>]+>/g, "");
+  return cleaned.trim();
+}
+
+/**
  * Maps action labels to present tense for display (e.g., "Closed" -> "Close").
  *
  * @param label - Action label (e.g., "Closed", "Reopened").
@@ -1020,7 +1280,7 @@ export function getAvailableCaseActions(
  * Returns the Announcement case type ID from the case types metadata.
  * Used to fetch announcements (cases with type Announcement) from the cases API.
  *
- * @param caseTypes - Array of case types from useGetCasesFilters.
+ * @param caseTypes - Array of case types from useGetProjectFilters.
  * @returns {string | undefined} The Announcement type ID or undefined.
  */
 export function getAnnouncementCaseTypeId(

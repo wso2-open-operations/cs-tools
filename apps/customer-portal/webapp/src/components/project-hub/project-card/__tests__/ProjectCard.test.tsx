@@ -36,10 +36,9 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 // Mock sub-components
 vi.mock("../ProjectCardBadges", () => ({
-  default: ({ projectKey, status, isError, isLoading }: any) => (
+  default: ({ projectKey, isError, isLoading }: any) => (
     <div data-testid="badges">
-      {projectKey} {status} {isError ? "Error" : "No Error"}{" "}
-      {isLoading ? "Loading" : "Not Loading"}
+      {isError ? "Error" : isLoading ? "Loading" : projectKey}
     </div>
   ),
 }));

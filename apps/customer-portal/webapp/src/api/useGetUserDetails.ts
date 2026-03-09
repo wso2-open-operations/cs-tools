@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { type UserDetails } from "@models/responses";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
 
 /**
  * Hook to get user details.
@@ -27,8 +27,8 @@ import { useAuthApiClient } from "@context/AuthApiContext";
  */
 const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const authFetch = useAuthApiClient();
   const logger = useLogger();
-  const fetchFn = useAuthApiClient();
 
   return useQuery({
     queryKey: ["userDetails"],
@@ -45,7 +45,9 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
 
         logger.debug(`[useGetUserDetails] URL: ${requestUrl}`);
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(`[useGetUserDetails] Response status: ${response.status}`);
 

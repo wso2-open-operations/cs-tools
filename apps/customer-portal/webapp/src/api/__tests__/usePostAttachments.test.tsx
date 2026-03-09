@@ -41,9 +41,6 @@ vi.mock("@asgardeo/react", () => ({
 }));
 
 const mockAuthFetch = vi.fn();
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
 
 describe("usePostAttachments", () => {
   let queryClient: QueryClient;

@@ -39,11 +39,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockImplementation((url, init) => fetch(url, init)),
-}));
-
 describe("usePostCreateDeployment", () => {
   let queryClient: QueryClient;
   const originalConfig = window.config;

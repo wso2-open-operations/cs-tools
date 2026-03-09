@@ -33,11 +33,12 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type JSX,
 } from "react";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchDeployment } from "@api/usePatchDeployment";
 
 export interface EditDeploymentModalProps {
@@ -56,8 +57,9 @@ const INITIAL_FORM = {
 };
 
 /**
- * Modal for editing a deployment (name, type, description). Always sends active: true.
- * Deployment type options come from useGetCasesFilters.
+ * Modal for editing a deployment (name, type, description).
+ * Only sends changed fields to the API (PATCH behavior).
+ * Deployment type options come from useGetProjectFilters.
  *
  * @param {EditDeploymentModalProps} props - open, deployment, projectId, onClose, optional onSuccess/onError.
  * @returns {JSX.Element} The edit deployment modal.
@@ -71,34 +73,25 @@ export default function EditDeploymentModal({
   onError,
 }: EditDeploymentModalProps): JSX.Element {
   const { data: filtersData, isLoading: isFiltersLoading } =
-    useGetCasesFilters(projectId);
+    useGetProjectFilters(projectId);
   const patchDeployment = usePatchDeployment();
 
   const deploymentTypes = filtersData?.deploymentTypes ?? [];
 
   const [form, setForm] = useState(INITIAL_FORM);
+  const prevDeploymentIdRef = useRef<string | null>(null);
 
   const isSubmitting = patchDeployment.isPending;
-  const isValid =
-    form.name.trim() !== "" &&
-    form.typeKey !== "" &&
-    form.description.trim() !== "" &&
-    !!projectId &&
-    !!deployment?.id;
+  const isValid = !!projectId && !!deployment?.id;
 
-  const handleClose = useCallback(() => {
-    setForm(INITIAL_FORM);
-    onClose();
-  }, [onClose]);
-
+  // Reset form when modal closes or deployment changes
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm(INITIAL_FORM);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (open && deployment) {
+      prevDeploymentIdRef.current = null;
+    } else if (deployment && deployment.id !== prevDeploymentIdRef.current) {
+      prevDeploymentIdRef.current = deployment.id;
       setForm({
         name: deployment.name ?? "",
         typeKey: deployment.type?.id ?? "",
@@ -106,6 +99,11 @@ export default function EditDeploymentModal({
       });
     }
   }, [open, deployment]);
+
+  const handleClose = useCallback(() => {
+    setForm(INITIAL_FORM);
+    onClose();
+  }, [onClose]);
 
   const handleTextChange =
     (field: "name" | "description") =>
@@ -123,16 +121,39 @@ export default function EditDeploymentModal({
   const handleSubmit = useCallback(async () => {
     if (!isValid || !deployment) return;
 
+    // Only send changed fields (PATCH behavior)
+    const body: Record<string, string | number | boolean | undefined> = {};
+
+    const newName = form.name.trim();
+    if (newName !== (deployment.name ?? "")) {
+      body.name = newName;
+    }
+
+    const newDescription = form.description.trim();
+    if (newDescription !== (deployment.description ?? "")) {
+      body.description = newDescription;
+    }
+
+    const newTypeKey =
+      form.typeKey && form.typeKey.trim() ? Number(form.typeKey) : undefined;
+    const originalTypeKey = deployment.type?.id
+      ? Number(deployment.type.id)
+      : undefined;
+    if (newTypeKey !== undefined && newTypeKey !== originalTypeKey) {
+      body.typeKey = newTypeKey;
+    }
+
+    // If nothing changed, just close
+    if (Object.keys(body).length === 0) {
+      handleClose();
+      return;
+    }
+
     try {
       await patchDeployment.mutateAsync({
         projectId,
         deploymentId: deployment.id,
-        body: {
-          name: form.name.trim(),
-          description: form.description.trim(),
-          typeKey: Number(form.typeKey),
-          active: true,
-        },
+        body,
       });
       handleClose();
       onSuccess?.();
@@ -198,7 +219,7 @@ export default function EditDeploymentModal({
         <Box sx={{ mt: 2, mb: 2 }}>
           <TextField
             id="edit-deployment-name"
-            label="Deployment Name *"
+            label="Deployment Name"
             placeholder="e.g., Production US-East"
             value={form.name}
             onChange={handleTextChange("name")}
@@ -221,7 +242,7 @@ export default function EditDeploymentModal({
               fullWidth
               size="small"
               id="edit-deployment-type"
-              label="Deployment Type *"
+              label="Deployment Type"
               value={form.typeKey}
               onChange={handleTypeChange}
               disabled={isSubmitting}
@@ -243,7 +264,7 @@ export default function EditDeploymentModal({
 
         <TextField
           id="edit-deployment-description"
-          label="Description *"
+          label="Description"
           placeholder="Describe this deployment environment..."
           value={form.description}
           onChange={handleTextChange("description")}

@@ -47,7 +47,7 @@ modules = [
 [[package]]
 org = "ballerina"
 name = "crypto"
-version = "2.9.3"
+version = "2.10.1"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"},
 	{org = "ballerina", name = "time"}
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 org = "ballerina"
 name = "observe"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"}
 ]
@@ -282,10 +282,11 @@ dependencies = [
 [[package]]
 org = "ballerina"
 name = "task"
-version = "2.7.0"
+version = "2.11.1"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"},
-	{org = "ballerina", name = "time"}
+	{org = "ballerina", name = "time"},
+	{org = "ballerina", name = "uuid"}
 ]
 
 [[package]]
@@ -322,6 +323,17 @@ dependencies = [
 ]
 
 [[package]]
+org = "ballerina"
+name = "uuid"
+version = "1.10.0"
+dependencies = [
+	{org = "ballerina", name = "crypto"},
+	{org = "ballerina", name = "jballerina.java"},
+	{org = "ballerina", name = "lang.int"},
+	{org = "ballerina", name = "time"}
+]
+
+[[package]]
 org = "ballerinai"
 name = "observe"
 version = "0.0.0"
@@ -353,6 +365,7 @@ modules = [
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.ai_chat_agent"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.authorization"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.entity"},
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.registry"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.scim"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.types"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.updates"},

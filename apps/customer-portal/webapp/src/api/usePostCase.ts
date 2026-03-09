@@ -16,34 +16,47 @@
 
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
-import type { CreateCaseRequest } from "@models/requests";
+import type {
+  CreateCaseRequest,
+  CreateServiceRequestPayload,
+} from "@models/requests";
 import type { CreateCaseResponse } from "@models/responses";
 
 /**
- * Posts a new support case to the backend.
+ * Posts a new support case or service request to the backend.
  *
- * @returns {UseMutationResult<CreateCaseResponse, Error, CreateCaseRequest>} Mutation result.
+ * @returns {UseMutationResult<CreateCaseResponse, Error, CreateCaseRequest | CreateServiceRequestPayload>} Mutation result.
  */
 export function usePostCase(): UseMutationResult<
   CreateCaseResponse,
   Error,
-  CreateCaseRequest
+  CreateCaseRequest | CreateServiceRequestPayload
 > {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
-  return useMutation<CreateCaseResponse, Error, CreateCaseRequest>({
+  return useMutation<
+    CreateCaseResponse,
+    Error,
+    CreateCaseRequest | CreateServiceRequestPayload
+  >({
     mutationFn: async (
-      body: CreateCaseRequest,
+      body: CreateCaseRequest | CreateServiceRequestPayload,
     ): Promise<CreateCaseResponse> => {
-      logger.debug("[usePostCase] Request payload:", {
-        ...body,
-        description: body.description
-          ? `${body.description.slice(0, 80)}...`
-          : "",
+      logger.debug("[usePostCase] Request payload summary:", {
+        requestType: "type" in body ? body.type : "case",
+        projectId: body.projectId,
+        deploymentId: body.deploymentId,
+        deployedProductId: body.deployedProductId,
+        descriptionPreview:
+          "description" in body && body.description
+            ? `${body.description.slice(0, 80)}...`
+            : undefined,
+        variableCount: "variables" in body ? body.variables.length : undefined,
+        attachmentCount: body.attachments?.length ?? 0,
       });
 
       try {
@@ -58,8 +71,9 @@ export function usePostCase(): UseMutationResult<
 
         const requestUrl = `${baseUrl}/cases`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
+
           body: JSON.stringify(body),
         });
 

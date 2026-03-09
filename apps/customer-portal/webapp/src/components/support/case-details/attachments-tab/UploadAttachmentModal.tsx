@@ -35,6 +35,30 @@ import SelectedFileDisplay from "@case-details-attachments/SelectedFileDisplay";
 
 export { MAX_ATTACHMENT_SIZE_BYTES } from "@constants/supportConstants";
 
+function getFileExtension(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) {
+    return "";
+  }
+  return fileName.slice(dotIndex);
+}
+
+function getBaseFileName(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) {
+    return fileName;
+  }
+  return fileName.slice(0, dotIndex);
+}
+
+function ensureExtension(fileName: string, extension: string): string {
+  if (!extension) return fileName;
+  if (fileName.toLowerCase().endsWith(extension.toLowerCase())) {
+    return fileName;
+  }
+  return `${fileName}${extension}`;
+}
+
 export interface UploadAttachmentModalProps {
   open: boolean;
   /** Case ID for case attachment upload. */
@@ -64,10 +88,9 @@ export default function UploadAttachmentModal({
   const postAttachments = usePostAttachments();
   const postDeploymentAttachment = usePostDeploymentAttachment();
   const isDeploymentMode = !!deploymentId && !caseId;
-  const isPending =
-    isDeploymentMode
-      ? postDeploymentAttachment.isPending
-      : postAttachments.isPending;
+  const isPending = isDeploymentMode
+    ? postDeploymentAttachment.isPending
+    : postAttachments.isPending;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
@@ -77,7 +100,7 @@ export default function UploadAttachmentModal({
   const [readErrorVisible, setReadErrorVisible] = useState(false);
 
   const fileTooLarge = file ? file.size > MAX_ATTACHMENT_SIZE_BYTES : false;
-  const displayName = name.trim() || (file?.name ?? "");
+  const displayName = name.trim() || (file ? getBaseFileName(file.name) : "");
   const canUpload =
     !!file &&
     !fileTooLarge &&
@@ -105,7 +128,7 @@ export default function UploadAttachmentModal({
         setFileSizeErrorVisible(false);
       }
       if (selected && !name.trim()) {
-        setName(selected.name);
+        setName(getBaseFileName(selected.name));
       }
     },
     [name],
@@ -145,7 +168,11 @@ export default function UploadAttachmentModal({
 
   const handleUpload = useCallback(() => {
     if (!file || fileTooLarge) return;
-    const attachmentName = (name.trim() || file.name).trim();
+    const normalizedName = (name.trim() || getBaseFileName(file.name)).trim();
+    const attachmentName = ensureExtension(
+      normalizedName,
+      getFileExtension(file.name),
+    );
     if (!attachmentName) return;
 
     if (onSelect) {

@@ -50,10 +50,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@/context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
-
 describe("useGetProductVulnerabilities", () => {
   let queryClient: QueryClient;
   const originalConfig = window.config;
@@ -71,7 +67,11 @@ describe("useGetProductVulnerabilities", () => {
       json: () => Promise.resolve(mockVulnerabilityResponse),
       status: 200,
     } as Response);
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
     vi.clearAllMocks();
@@ -136,10 +136,9 @@ describe("useGetProductVulnerabilities", () => {
   });
 
   it("does not fetch when vulnerabilityId is empty", () => {
-    const { result } = renderHook(
-      () => useGetProductVulnerabilities(""),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useGetProductVulnerabilities(""), {
+      wrapper,
+    });
 
     expect(result.current.isPending).toBe(true);
     expect(result.current.fetchStatus).toBe("idle");

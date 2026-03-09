@@ -60,7 +60,7 @@ export default function AnnouncementsFilters({
       {ANNOUNCEMENT_FILTER_DEFINITIONS.map((def) => {
         const { label, allLabel } = deriveFilterLabels(def.id);
         const metadataOptions = filterMetadata?.[def.metadataKey];
-        const options = Array.isArray(metadataOptions)
+        let options = Array.isArray(metadataOptions)
           ? metadataOptions.map((item: { label: string; id: string }) => ({
               label:
                 def.metadataKey === "severities"
@@ -69,6 +69,12 @@ export default function AnnouncementsFilters({
               value: def.useLabelAsValue ? item.label : item.id,
             }))
           : [];
+
+        if (def.metadataKey === "caseStates") {
+          options = options.filter(
+            (option) => option.value === "1" || option.value === "3",
+          );
+        }
 
         return (
           <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>

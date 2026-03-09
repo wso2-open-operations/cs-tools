@@ -55,10 +55,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
-
 describe("useGetProductUpdateLevels", () => {
   let queryClient: QueryClient;
 

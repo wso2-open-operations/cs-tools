@@ -45,9 +45,12 @@ const mockCaseDetails = {
   closedBy: null,
   closeNotes: null,
   hasAutoClosed: null,
+  engineerEmail: null,
+  findingsResolved: null,
+  findingsTotal: null,
 };
 
-vi.mock("@api/useGetCasesFilters", () => ({
+vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({
     data: { caseStates: [{ id: "3", label: "Closed" }] },
   }),
@@ -66,10 +69,16 @@ vi.mock("@context/error-banner/ErrorBannerContext", () => ({
 }));
 
 vi.mock("@api/useGetCaseAttachments", () => ({
-  default: vi.fn(() => ({
-    data: { totalRecords: 3, attachments: [], limit: 50, offset: 0 },
+  useGetCaseAttachments: vi.fn(() => ({
+    data: {
+      pages: [{ totalRecords: 3, attachments: [], limit: 10, offset: 0 }],
+      pageParams: [0],
+    },
     isLoading: false,
     isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
   })),
 }));
 
@@ -84,13 +93,15 @@ vi.mock("@case-details/CaseDetailsTabPanels", () => ({
   default: () => <div data-testid="tab-panels">Tab panels</div>,
 }));
 
-function renderContent(props: {
-  data?: typeof mockCaseDetails;
-  isLoading?: boolean;
-  isError?: boolean;
-  caseId?: string;
-  onBack?: () => void;
-} = {}) {
+function renderContent(
+  props: {
+    data?: typeof mockCaseDetails;
+    isLoading?: boolean;
+    isError?: boolean;
+    caseId?: string;
+    onBack?: () => void;
+  } = {},
+) {
   return render(
     <ThemeProvider theme={createTheme()}>
       <CaseDetailsContent

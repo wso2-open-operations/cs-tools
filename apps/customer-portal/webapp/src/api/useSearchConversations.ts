@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ConversationSearchRequest } from "@models/requests";
 import type { ConversationSearchResponse } from "@models/responses";
 
@@ -35,7 +35,7 @@ export function useSearchConversations(
 ): UseQueryResult<ConversationSearchResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ConversationSearchResponse, Error>({
     queryKey: [ApiQueryKeys.CONVERSATIONS_SEARCH, projectId, request],
@@ -54,9 +54,9 @@ export function useSearchConversations(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/conversations/search`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(request),
         });
 

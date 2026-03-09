@@ -20,26 +20,24 @@ import { Box, Grid, Stack } from "@wso2/oxygen-ui";
 import { FileText, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import CasesOverviewStatCard from "@components/support/cases-overview-stats/CasesOverviewStatCard";
-import NoveraChatBanner from "@components/support/novera-ai-assistant/novera-chat-banner/NoveraChatBanner";
 import SupportOverviewCard from "@components/support/support-overview-cards/SupportOverviewCard";
 import OutstandingCasesList from "@components/support/support-overview-cards/OutstandingCasesList";
 import ServiceRequestCard from "@components/support/request-cards/ServiceRequestCard";
 import ChangeRequestCard from "@components/support/request-cards/ChangeRequestCard";
 import ChatHistoryList from "@components/support/support-overview-cards/ChatHistoryList";
 import { useGetProjectSupportStats } from "@api/useGetProjectSupportStats";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useSearchConversations } from "@api/useSearchConversations";
 import { useLogger } from "@hooks/useLogger";
 import {
   SUPPORT_OVERVIEW_CASES_LIMIT,
   SUPPORT_OVERVIEW_CHAT_LIMIT,
+  CaseType,
 } from "@constants/supportConstants";
-import {
-  getIncidentAndQueryCaseTypeIds,
-  getIncidentAndQueryIds,
-} from "@utils/support";
-import { formatDateTime } from "@utils/support";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { getIncidentAndQueryIds, isS0Case } from "@utils/support";
 import type { ChatHistoryItem } from "@models/responses";
 
 /**
@@ -53,12 +51,16 @@ export default function SupportPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
 
   const {
-    data: filterMetadata,
-    isFetching: isFiltersFetching,
-    isError: isFiltersError,
-  } = useGetCasesFilters(projectId || "");
+    data: project,
+    isLoading: isProjectLoading,
+  } = useGetProjectDetails(projectId || "");
+  const isProjectLoaded = !isProjectLoading && project !== undefined;
+  const isManagedCloudSubscription =
+    isProjectLoaded &&
+    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
 
-  const caseTypeIds = getIncidentAndQueryCaseTypeIds(filterMetadata?.caseTypes);
+  const { data: filterMetadata } = useGetProjectFilters(projectId || "");
+
   const { incidentId, queryId } = getIncidentAndQueryIds(
     filterMetadata?.caseTypes,
   );
@@ -86,14 +88,12 @@ export default function SupportPage(): JSX.Element {
     projectId || "",
     {
       filters: {
-        caseTypeIds: caseTypeIds.length > 0 ? caseTypeIds : undefined,
+        caseTypes: [CaseType.DEFAULT_CASE],
       },
       sortBy: { field: "createdOn", order: "desc" },
     },
     {
-      enabled:
-        !!projectId &&
-        (caseTypeIds.length > 0 || isFiltersFetching || !!isFiltersError),
+      enabled: !!projectId,
     },
   );
 
@@ -108,8 +108,12 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const cases =
+  const rawCases =
     data?.pages?.[0]?.cases?.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
+  const cases =
+    isProjectLoaded && !isManagedCloudSubscription
+      ? rawCases.filter((c) => !isS0Case(c))
+      : rawCases;
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??
@@ -117,7 +121,7 @@ export default function SupportPage(): JSX.Element {
   ).map((c) => ({
     chatId: c.id,
     title: c.initialMessage || c.number,
-    startedTime: formatDateTime(c.createdOn, "short") ?? "--",
+    startedTime: c.createdOn,
     messages: c.messageCount,
     kbArticles: 0,
     status: c.state?.label ?? "Open",
@@ -144,7 +148,6 @@ export default function SupportPage(): JSX.Element {
         isError={isError}
         stats={stats}
       />
-      <NoveraChatBanner />
       <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
         <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>
           <SupportOverviewCard
@@ -152,8 +155,16 @@ export default function SupportPage(): JSX.Element {
             subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} support tickets`}
             icon={FileText}
             iconVariant="orange"
-            footerButtonLabel="View all cases"
-            onFooterClick={() => navigate("cases")}
+            footerButtons={[
+              {
+                label: "View my cases",
+                onClick: () => navigate("cases?createdByMe=true"),
+              },
+              {
+                label: "View all cases",
+                onClick: () => navigate("cases"),
+              },
+            ]}
             isError={isCasesError}
           >
             <OutstandingCasesList
@@ -173,8 +184,16 @@ export default function SupportPage(): JSX.Element {
             subtitle="Recent Novera conversations"
             icon={MessageSquare}
             iconVariant="blue"
-            footerButtonLabel="View all chat history"
-            onFooterClick={() => navigate("conversations")}
+            footerButtons={[
+              {
+                label: "View my chat history",
+                onClick: () => navigate("conversations?createdByMe=true"),
+              },
+              {
+                label: "View all chat history",
+                onClick: () => navigate("conversations"),
+              },
+            ]}
             isError={isChatError}
           >
             <ChatHistoryList
@@ -182,7 +201,7 @@ export default function SupportPage(): JSX.Element {
               isLoading={isChatLoading}
               onItemAction={
                 projectId
-                  ? (chatId) => {
+                  ? (chatId, action) => {
                       const summary = chatItems.find(
                         (item) => item.chatId === chatId,
                       );
@@ -191,12 +210,16 @@ export default function SupportPage(): JSX.Element {
                         return;
                       }
 
-                      navigate(
-                        `/${projectId}/support/conversations/${chatId}`,
-                        {
-                          state: { conversationSummary: summary },
-                        },
-                      );
+                      if (action === "resume") {
+                        navigate(`/${projectId}/support/chat/${chatId}`);
+                      } else {
+                        navigate(
+                          `/${projectId}/support/conversations/${chatId}`,
+                          {
+                            state: { conversationSummary: summary },
+                          },
+                        );
+                      }
                     }
                   : undefined
               }
@@ -204,16 +227,18 @@ export default function SupportPage(): JSX.Element {
           </SupportOverviewCard>
         </Grid>
       </Grid>
-      <Box sx={{ mt: 3 }}>
-        <Grid container spacing={2}>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <ServiceRequestCard />
+      {isProjectLoaded && isManagedCloudSubscription && (
+        <Box sx={{ mt: 3 }}>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <ServiceRequestCard />
+            </Grid>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <ChangeRequestCard />
+            </Grid>
           </Grid>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <ChangeRequestCard />
-          </Grid>
-        </Grid>
-      </Box>
+        </Box>
+      )}
     </Stack>
   );
 }

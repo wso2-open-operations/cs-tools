@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import {
   useState,
   useMemo,
@@ -35,7 +35,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useSearchConversations } from "@api/useSearchConversations";
 import { useGetConversationStats } from "@api/useGetConversationStats";
 import type {
@@ -55,6 +55,8 @@ import AllConversationsList from "@components/support/all-conversations/AllConve
 export default function AllConversationsPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  const createdByMe = searchParams.get("createdByMe") === "true";
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -63,13 +65,14 @@ export default function AllConversationsPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  const { data: filterMetadata } = useGetCasesFilters(projectId || "");
+  const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
   const searchRequest = useMemo(
     () => ({
       filters: {
         searchQuery: searchTerm.trim() || undefined,
         stateKeys: filters.stateId ? [Number(filters.stateId)] : undefined,
+        createdByMe: createdByMe || undefined,
       },
       pagination: {
         offset: (page - 1) * pageSize,
@@ -80,13 +83,14 @@ export default function AllConversationsPage(): JSX.Element {
         order: sortOrder,
       },
     }),
-    [searchTerm, filters.stateId, page, pageSize, sortOrder],
+    [searchTerm, filters.stateId, page, pageSize, sortOrder, createdByMe],
   );
 
-  const { data, isLoading: isConversationsLoading } = useSearchConversations(
-    projectId || "",
-    searchRequest,
-  );
+  const {
+    data,
+    isLoading: isConversationsLoading,
+    isError: isConversationsError,
+  } = useSearchConversations(projectId || "", searchRequest);
 
   const {
     data: statsData,
@@ -182,10 +186,12 @@ export default function AllConversationsPage(): JSX.Element {
         </Button>
         <Box>
           <Typography variant="h4" color="text.primary" sx={{ mb: 1 }}>
-            All Chat History
+            {createdByMe ? "My Chat History" : "All Chat History"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Browse and search your complete conversation history with Novera
+            {createdByMe
+              ? "Browse and search your conversation history with Novera"
+              : "Browse and search your complete conversation history with Novera"}
           </Typography>
         </Box>
       </Box>
@@ -243,6 +249,7 @@ export default function AllConversationsPage(): JSX.Element {
       <AllConversationsList
         conversations={conversations}
         isLoading={isConversationsAreaLoading}
+        isError={isConversationsError}
         onConversationClick={handleConversationClick}
       />
 

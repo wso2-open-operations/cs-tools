@@ -35,16 +35,21 @@ import type { ProjectStatsResponse } from "@models/responses";
 
 interface RecentActivityCardProps {
   activity?: ProjectStatsResponse["recentActivity"];
+  projectTypeLabel?: string | null;
   isLoading?: boolean;
   isError?: boolean;
 }
 
 const RecentActivityCard = ({
   activity,
+  projectTypeLabel,
   isLoading,
   isError,
 }: RecentActivityCardProps): JSX.Element => {
-  const activities: ActivityItem[] = getRecentActivityItems(activity);
+  const activities: ActivityItem[] = getRecentActivityItems(
+    activity,
+    projectTypeLabel,
+  );
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent

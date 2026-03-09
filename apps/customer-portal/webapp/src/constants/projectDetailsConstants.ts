@@ -27,10 +27,11 @@ import type { ElementType } from "react";
 import type { TabOption } from "@components/common/tab-bar/TabBar";
 import { colors } from "@wso2/oxygen-ui";
 import type { ProjectStatsResponse } from "@models/responses";
+import { convertMinutesToHours } from "@utils/projectDetails";
 
 export interface Contact {
   role: string;
-  email: string;
+  email: string | null;
   icon: ElementType<{ size?: number }>;
   bgColor: string;
 }
@@ -41,6 +42,13 @@ export interface Stat {
   iconColor: "primary" | "success" | "warning";
   key: keyof NonNullable<ProjectStatsResponse["projectStats"]>;
 }
+
+/** Project type labels for conditional UI visibility. */
+export const PROJECT_TYPE_LABELS = {
+  MANAGED_CLOUD_SUBSCRIPTION: "Managed Cloud Subscription",
+  CLOUD_SUPPORT: "Cloud Support",
+  CLOUD_EVALUATION_SUPPORT: "Cloud Evaluation Support",
+} as const;
 
 export const PROJECT_DETAILS_TABS: TabOption[] = [
   {
@@ -105,10 +113,11 @@ export const statItems: Stat[] = [
 
 export const getRecentActivityItems = (
   activity?: ProjectStatsResponse["recentActivity"],
+  projectTypeLabel?: string | null,
 ): ActivityItem[] => {
-  const convertMinutesToHours = (minutes: number): number => {
-    return Math.round((minutes / 60) * 100) / 100;
-  };
+  const hideTimeTracking =
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
 
   const formatDateTime = (dateString: string): string => {
     if (!dateString) return "";
@@ -131,31 +140,38 @@ export const getRecentActivityItems = (
     }
   };
 
-  return [
-    {
-      label: "Total Time Logged",
-      value:
-        activity?.totalTimeLogged !== undefined
-          ? `${convertMinutesToHours(activity.totalTimeLogged)} hrs`
-          : "N/A",
-      type: "text",
-    },
-    {
-      label: "Billable Hours",
-      value:
-        activity?.billableHours !== undefined
-          ? `${convertMinutesToHours(activity.billableHours)} hrs`
-          : "N/A",
-      type: "text",
-    },
-    {
-      label: "Last Deployment",
-      value: activity?.lastDeploymentOn
-        ? formatDateTime(activity.lastDeploymentOn)
-        : "N/A",
-      type: "text",
-    },
-  ];
+  const items: ActivityItem[] = [];
+
+  if (!hideTimeTracking) {
+    items.push(
+      {
+        label: "Total Time Logged",
+        value:
+          activity?.totalHours !== undefined
+            ? `${convertMinutesToHours(activity.totalHours)} hrs`
+            : "N/A",
+        type: "text",
+      },
+      {
+        label: "Billable Hours",
+        value:
+          activity?.billableHours !== undefined
+            ? `${convertMinutesToHours(activity.billableHours)} hrs`
+            : "N/A",
+        type: "text",
+      },
+    );
+  }
+
+  items.push({
+    label: "Last Deployment",
+    value: activity?.lastDeploymentOn
+      ? formatDateTime(activity.lastDeploymentOn)
+      : "N/A",
+    type: "text",
+  });
+
+  return items;
 };
 
 export const SUBSCRIPTION_STATUS = {
@@ -189,8 +205,8 @@ export const SYSTEM_HEALTH = {
 export type SystemHealth = (typeof SYSTEM_HEALTH)[keyof typeof SYSTEM_HEALTH];
 
 export const SLA_STATUS = {
-  GOOD: "All Good",
-  BAD: "Bad",
+  ALL_GOOD: "All Good",
+  NEEDS_ATTENTION: "Needs attention",
 } as const;
 
 export type SLAStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
@@ -239,6 +255,18 @@ export const TIME_TRACKING_BADGE_TYPES = {
 
 export type TimeTrackingBadgeType =
   (typeof TIME_TRACKING_BADGE_TYPES)[keyof typeof TIME_TRACKING_BADGE_TYPES];
+
+export const TIME_CARD_STATE = {
+  PENDING: "Pending",
+  SUBMITTED: "Submitted",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  PROCESSED: "Processed",
+  RECALLED: "Recalled",
+} as const;
+
+export type TimeCardState =
+  (typeof TIME_CARD_STATE)[keyof typeof TIME_CARD_STATE];
 
 export const DEPLOYMENT_STATUS = {
   HEALTHY: "Healthy",

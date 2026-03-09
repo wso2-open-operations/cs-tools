@@ -14,10 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Grid } from "@wso2/oxygen-ui";
-import { useState, useMemo, type JSX } from "react";
+import { Box, Grid, Pagination, Typography } from "@wso2/oxygen-ui";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  type JSX,
+  type ChangeEvent,
+} from "react";
 import useSearchProjectTimeCards from "@api/useSearchProjectTimeCards";
 import useGetTimeCardsStats from "@api/useGetTimeCardsStats";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import TimeTrackingStatCards from "@time-tracking/TimeTrackingStatCards";
 import TimeCardsDateFilter from "@time-tracking/TimeCardsDateFilter";
 import TimeTrackingCard from "@time-tracking/TimeTrackingCard";
@@ -55,11 +62,31 @@ export default function ProjectTimeTracking({
   projectId,
 }: ProjectTimeTrackingProps): JSX.Element {
   const { startDate: defaultStart, endDate: defaultEnd } = useMemo(
-    getDefaultDateRange,
+    () => getDefaultDateRange(),
     [],
   );
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
+  const [approvedStateId, setApprovedStateId] = useState<string | undefined>(
+    undefined,
+  );
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  const { data: filters, isLoading: isFiltersLoading } =
+    useGetProjectFilters(projectId);
+
+  // Find approved state id from filters
+  useEffect(() => {
+    if (filters?.timeCardStates) {
+      const approved = filters.timeCardStates.find(
+        (s) => s.label.toLowerCase() === "approved",
+      );
+      if (approved?.id !== approvedStateId) {
+        Promise.resolve().then(() => setApprovedStateId(approved?.id));
+      }
+    }
+  }, [filters, approvedStateId]);
 
   const {
     data: stats,
@@ -72,19 +99,50 @@ export default function ProjectTimeTracking({
   });
 
   const {
-    data: timeCardsData,
+    data,
     isLoading: isTimeCardsLoading,
     isError: isTimeCardsError,
+    hasNextPage,
+    fetchNextPage,
   } = useSearchProjectTimeCards({
     projectId,
     startDate,
     endDate,
-    limit: 50,
-    offset: 0,
+    states: approvedStateId ? [approvedStateId] : undefined,
+    enabled: !isFiltersLoading && Boolean(approvedStateId),
   });
 
-  const timeCards = timeCardsData?.timeCards ?? [];
-  const totalRecords = timeCardsData?.totalRecords ?? 0;
+  // Auto-fetch all remaining pages in background
+  useEffect(() => {
+    if (!data || !hasNextPage) return;
+    void fetchNextPage();
+  }, [data, hasNextPage, fetchNextPage]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [projectId, startDate, endDate, approvedStateId]);
+
+  // Flatten all pages into a single array
+  const allTimeCards = useMemo(
+    () => data?.pages.flatMap((page) => page.timeCards) ?? [],
+    [data],
+  );
+
+  const totalItems = data?.pages?.[0]?.totalRecords ?? allTimeCards.length;
+
+  // Client-side pagination
+  const paginatedTimeCards = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return allTimeCards.slice(startIndex, startIndex + pageSize);
+  }, [allTimeCards, page, pageSize]);
+
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
+    setPage(value);
+  };
 
   return (
     <Box>
@@ -100,34 +158,54 @@ export default function ProjectTimeTracking({
           endDate={endDate}
           onStartDateChange={setStartDate}
           onEndDateChange={setEndDate}
-          shownCount={timeCards.length}
-          totalCount={totalRecords}
-          isLoading={isTimeCardsLoading}
         />
+      </Box>
+
+      {/* Results count */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary">
+          Showing {paginatedTimeCards.length} of {totalItems} time cards
+        </Typography>
       </Box>
 
       {isTimeCardsError ? (
         <TimeTrackingErrorState />
       ) : (
-        <Grid container spacing={3}>
-          {isTimeCardsLoading ? (
-            Array.from({ length: 7 }).map((_, index) => (
-              <Grid key={`skeleton-${index}`} size={12}>
-                <TimeTrackingCardSkeleton />
+        <>
+          <Grid container spacing={3}>
+            {isTimeCardsLoading ? (
+              Array.from({ length: 7 }).map((_, index) => (
+                <Grid key={`skeleton-${index}`} size={12}>
+                  <TimeTrackingCardSkeleton />
+                </Grid>
+              ))
+            ) : paginatedTimeCards.length === 0 ? (
+              <Grid size={12}>
+                <EmptyState description="No time logs available." />
               </Grid>
-            ))
-          ) : timeCards.length === 0 ? (
-            <Grid size={12}>
-              <EmptyState description="No time logs available." />
-            </Grid>
-          ) : (
-            timeCards.map((card) => (
-              <Grid key={card.id} size={12}>
-                <TimeTrackingCard card={card} />
-              </Grid>
-            ))
+            ) : (
+              paginatedTimeCards.map((card) => (
+                <Grid key={card.id} size={12}>
+                  <TimeTrackingCard card={card} />
+                </Grid>
+              ))
+            )}
+          </Grid>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
+              <Pagination
+                count={totalPages}
+                page={page}
+                onChange={handlePageChange}
+                color="primary"
+                variant="outlined"
+                shape="rounded"
+              />
+            </Box>
           )}
-        </Grid>
+        </>
       )}
     </Box>
   );

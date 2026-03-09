@@ -30,9 +30,6 @@ vi.mock("@/hooks/useLogger", () => ({
 }));
 
 const mockAuthFetch = vi.fn();
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
 
 const mockGetIdToken = vi.fn().mockResolvedValue("mock-token");
 let mockIsSignedIn = true;

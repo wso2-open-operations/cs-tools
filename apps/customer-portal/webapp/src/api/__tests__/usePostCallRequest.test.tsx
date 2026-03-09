@@ -35,12 +35,8 @@ vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     isSignedIn: mockIsSignedIn,
     isLoading: mockIsAuthLoading,
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockImplementation((url, init) => fetch(url, init)),
 }));
 
 describe("usePostCallRequest", () => {

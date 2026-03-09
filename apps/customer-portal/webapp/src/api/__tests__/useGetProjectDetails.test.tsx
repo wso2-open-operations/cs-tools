@@ -41,27 +41,10 @@ const mockProjectDetail = {
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isSignedIn: true,
     isLoading: false,
   }),
-}));
-
-const mockAuthFetch = vi.fn().mockImplementation((url: string) => {
-  if (url.includes("invalid-id")) {
-    return Promise.resolve({
-      ok: false,
-      status: 404,
-      statusText: "Project with ID invalid-id not found",
-    } as Response);
-  }
-  return Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve(mockProjectDetail),
-  } as Response);
-});
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
 }));
 
 vi.mock("@/hooks/useLogger", () => ({
@@ -89,7 +72,11 @@ const createWrapper = () => {
 describe("useGetProjectDetails", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });

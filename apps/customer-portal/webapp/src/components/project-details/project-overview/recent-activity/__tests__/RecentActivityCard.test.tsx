@@ -50,7 +50,7 @@ describe("RecentActivityCard", () => {
     // but we are mocking getRecentActivityItems so we can pass anything here
     // or pass null, as long as getRecentActivityItems handles it or we mock the return.
     lastDeploymentOn: "2026-01-01",
-    totalTimeLogged: 10,
+    totalHours: 10,
     billableHours: 5,
     systemHealth: "Good",
   };

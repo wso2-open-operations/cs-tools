@@ -61,6 +61,33 @@ public type UserResponse record {|
     string? firstName;
     # Time zone
     string? timeZone;
+    # User roles
+    string[] roles = [];
+    json...;
+|};
+
+# Request payload for updating user.
+public type UserUpdatePayload record {|
+    # Time zone to update for the user
+    string timeZone;
+|};
+
+# Response payload for user update.
+public type UserUpdateResponse record {|
+    # Success message
+    string message;
+    # Updated user details
+    UpdatedUser user;
+|};
+
+# Updated user details.
+public type UpdatedUser record {|
+    # ID of the user
+    IdString id;
+    # User who performed the update
+    string updatedBy;
+    # Updated date and time
+    DateTimeWithoutTimezone updatedOn;
     json...;
 |};
 
@@ -76,11 +103,18 @@ public type Project record {|
     string createdOn;
     # Description
     string? description;
+    # Project type
+    ReferenceTableItem 'type;
     json...;
 |};
 
 # Payload for searching projects.
 public type ProjectSearchPayload record {|
+    # Filter criteria
+    record {
+        # Search query for projects
+        string searchQuery?;
+    } filters?;
     # Pagination details
     Pagination pagination = {};
 |};
@@ -98,42 +132,81 @@ public type ProjectsResponse record {|
 # Project information.
 public type ProjectResponse record {|
     *Project;
-    # Project type
-    string 'type;
     # Salesforce ID
     string sfId;
+    # Indicates if the project has service requests
+    boolean hasSr;
+    # Project start date
+    Date? startDate;
+    # Project end date 
+    Date? endDate;
     # Account information
-    record {|
-        # ID of the account
-        IdString id;
-        # Name of the account
-        string? name;
-        # Activation date
-        string? activationDate;
-        # Deactivation date
-        string? deactivationDate;
-        # Support tier
-        string? supportTier;
-        # Region
-        string? region;
-        json...;
-    |}? account;
+    Account account;
+    json...;
+|};
+
+# Account Information.
+public type Account record {|
+    # ID of the account
+    IdString id;
+    # Indicates whether the agent is enabled for the account
+    boolean hasAgent;
+    # Name of the account
+    string? name;
+    # Activation date
+    string? activationDate;
+    # Deactivation date
+    string? deactivationDate;
+    # Support tier
+    string? supportTier;
+    # Region
+    string? region;
+    # Owner email
+    string? ownerEmail;
+    # Technical owner email
+    string? technicalOwnerEmail;
+    json...;
+|};
+
+# Payload for updating a project.
+public type ProjectUpdatePayload record {|
+    # Indicates whether the agent is enabled for the project
+    boolean hasAgent;
+|};
+
+# Response from updating a project.
+public type ProjectUpdateResponse record {|
+    # Success message
+    string message;
+    # Updated project metadata
+    UpdatedProject project;
+    json...;
+|};
+
+# Updated project details.
+public type UpdatedProject record {|
+    # ID of the project
+    IdString id;
+    # User who updated the project
+    string updatedBy;
+    # Updated date and time
+    DateTimeWithoutTimezone updatedOn;
     json...;
 |};
 
 # Payload for creating a case.
 public type CaseCreatePayload record {|
     # Case type
-    CaseType caseType?;
+    CaseType 'type;
     # Project ID
     IdString projectId;
     # Deployment ID
     IdString deploymentId;
     # Deployed product ID
     IdString deployedProductId?;
-    # Case title (required for DEFAULT_CASE)
+    # Case title (required for DEFAULT_CASE and SECURITY_REPORT_ANALYSIS)
     string title?;
-    # Case description (required for DEFAULT_CASE)
+    # Case description (required for DEFAULT_CASE and SECURITY_REPORT_ANALYSIS)
     string description?;
     # Issue type ID (required for DEFAULT_CASE)
     int issueTypeKey?;
@@ -149,6 +222,16 @@ public type CaseCreatePayload record {|
     IdString catalogItemId?;
     # Variables for service request (required for SERVICE_REQUEST)
     Variable[] variables?;
+    # List of attachments
+    CaseCreateAttachment[] attachments?;
+|};
+
+# Attachment for creating a case.
+public type CaseCreateAttachment record {|
+    # File name
+    string name;
+    # Base64 encoded file content
+    string file;
 |};
 
 # Response from creating a case.
@@ -217,6 +300,8 @@ public type Case record {|
     string number;
     # Created date and time
     string createdOn;
+    # Created by (User email)
+    string createdBy;
     # Case title
     string? title;
     # Case description
@@ -227,13 +312,19 @@ public type Case record {|
     ChoiceListItem? state;
     # Severity information
     ChoiceListItem? severity;
+    # Catalog information (if the case is a service request)
+    ReferenceTableItem? catalog;
+    # Catalog item information (if the case is a service request)
+    ReferenceTableItem? catalogItem;
+    # Assigned team
+    ReferenceTableItem? assignedTeam;
     json...;
 |};
 
 # Choice list item information.
 public type ChoiceListItem record {|
     # Choice list item value
-    int id;
+    int|string id;
     # Choice list item label
     string label;
     # Count
@@ -247,6 +338,8 @@ public type ReferenceTableItem record {|
     string id;
     # Display name
     string name;
+    # Number
+    string? number?;
     # Count value
     int count?;
     json...;
@@ -268,6 +361,8 @@ public type CaseSearchFilters record {|
     int severityKey?;
     # Deployment ID
     string deploymentId?;
+    # Case created by the logged in user
+    boolean createdByMe?;
 |};
 
 # Case metadata information.
@@ -358,7 +453,19 @@ public type CaseResponse record {|
     string? closeNotes?;
     # Indicates if the case is auto closed
     boolean? hasAutoClosed?;
+    # Associated change requests (only for service requests)
+    ReferenceTableItem[]? changeRequests?;
+    # Variables for service request
+    ServiceRequestVariable[]? variables?;
     json...;
+|};
+
+# Service request variables.
+public type ServiceRequestVariable record {|
+    # Variable name
+    string name;
+    # Variable value
+    string value;
 |};
 
 # Sort configuration.
@@ -374,6 +481,8 @@ public type SortBy record {|
 public type ProjectMetadataResponse record {|
     # List of available case states (eg: Open, Closed, etc.)
     ChoiceListItem[] caseStates;
+    # List of available time zones (eg: UTC, GMT, etc.)
+    ChoiceListItem[] timeZones;
     # List of available case severities (eg: S0, S1, etc.)
     ChoiceListItem[] severities;
     # List of available issue types (eg: Error, Total Outage, etc.)
@@ -384,6 +493,8 @@ public type ProjectMetadataResponse record {|
     ChoiceListItem[] callRequestStates;
     # List of available change request states
     ChoiceListItem[] changeRequestStates;
+    # List of available time card states
+    ChoiceListItem[] timeCardStates;
     # List of available change request impacts
     ChoiceListItem[] changeRequestImpacts;
     # List of available conversation states
@@ -397,8 +508,8 @@ public type ProjectMetadataResponse record {|
 
 # Project statistics response.
 public type ProjectStatsResponse record {|
-    # Total time logged
-    decimal totalTimeLogged?;
+    # Total hours logged
+    decimal totalHours?;
     # Billable hours
     decimal billableHours?;
     # SLA status
@@ -560,6 +671,10 @@ public type Attachment record {|
     string createdOn;
     # Download URL
     string downloadUrl;
+    # Base64 encoded file content (data URI format: data:@file/<type>;base64,<content>)
+    string content;
+    # Description of the attachment
+    string? description;
     json...;
 |};
 
@@ -570,6 +685,54 @@ public type AttachmentsResponse record {|
     # Total records count
     int totalRecords;
     *Pagination;
+|};
+
+# Request payload for updating an attachment.
+public type AttachmentUpdatePayload record {|
+    # Reference ID (case or deployment ID)
+    IdString referenceId;
+    # Reference type
+    ReferenceType referenceType;
+    # File name
+    string? name?;
+    # Description of the attachment (only for deployment type)
+    string? description?;
+    json...;
+|};
+
+# Response from updating an attachment.
+public type AttachmentUpdateResponse record {|
+    # Success message
+    string message;
+    # Updated attachment details
+    UpdatedAttachment attachment;
+|};
+
+# Updated attachment details.
+public type UpdatedAttachment record {|
+    # ID of the updated attachment
+    IdString id;
+    # Updated date and time
+    string updatedOn;
+    # User who updated the attachment
+    string updatedBy;
+    json...;
+|};
+
+# Delete attachment response from ServiceNow.
+public type AttachmentDeleteResponse record {|
+    # Success message
+    string message;
+    # Deleted attachment details
+    record {|
+        # ID of the deleted attachment
+        IdString id;
+        # User who deleted the attachment
+        string deletedBy;
+        # Deleted date and time
+        string deletedOn;
+        json...;
+    |} attachment;
 |};
 
 # Deployed product data.
@@ -623,6 +786,8 @@ public type DeployedProductCreatePayload record {|
     int? cores?;
     # TPS allocated for the product
     decimal? tps?;
+    # Description of the deployed product
+    string? description?;
 |};
 
 # Response from creating a deployed product.
@@ -651,6 +816,10 @@ public type DeployedProductUpdatePayload record {|
     int? cores?;
     # TPS allocated for the product
     decimal? tps?;
+    # Description of the deployed product
+    string? description?;
+    # Active status (can only be set to false to deactivate deployed product)
+    boolean active?;
 |};
 
 # Response from updating a deployed product.
@@ -795,12 +964,12 @@ public type CreatedAttachment record {|
     # User who created the attachment
     string createdBy;
     # Download URL
-    string downloadUrl;
+    string downloadUrl?;
     json...;
 |};
 
 # Payload for creating an attachment.
-public type AttachmentPayload record {|
+public type AttachmentCreatePayload record {|
     # Reference ID to which the attachment is associated (e.g., query ID, incident ID, etc)
     IdString referenceId;
     # Reference type
@@ -811,6 +980,8 @@ public type AttachmentPayload record {|
     string 'type;
     # Content of the file as a byte array
     string file;
+    # Description of the attachment
+    string? description?;
 |};
 
 # Inline attachment.
@@ -1120,6 +1291,8 @@ public type TimeCardSearchPayload record {|
         Date startDate?;
         # End date for filtering time cards (ISO 8601 format)
         Date endDate?;
+        # States of the time cards to filter (e.g., "Approved", "Submitted", etc.)
+        TimeCardState[] states?;
     } filters?;
     # Pagination details
     Pagination pagination?;
@@ -1135,6 +1308,8 @@ public type ConversationSearchPayload record {|
         int[] stateKeys?;
         # Search query for conversations
         string searchQuery?;
+        # Conversations created by logged in user
+        boolean createdByMe?;
     } filters?;
     # Sort configuration
     record {
@@ -1157,8 +1332,8 @@ public type TimeCard record {|
     string createdOn;
     # Indicates if the time card has billable hours
     boolean hasBillable;
-    # State information (e.g., "Approved", "Submitted")
-    string state;
+    # State information (e.g., "Approved", "Submitted", etc.)
+    ChoiceListItem? state;
     # User who approved the time card
     ReferenceTableItem? approvedBy;
     # Associated project
@@ -1318,7 +1493,7 @@ public type CaseStateIds record {|
 |};
 
 # Conversation state IDs.
-public type ConverstaionStateIds record {|
+public type ConversationStateIds record {|
     # Open state ID
     int open;
     # Active state ID
@@ -1337,4 +1512,190 @@ public type Variable record {|
     IdString id;
     # Variable value
     string value;
+|};
+
+# Request payload for searching change requests.
+public type ChangeRequestSearchPayload record {|
+    # Filter criteria
+    record {|
+        # List of project IDs to filter
+        IdString[] projectIds?;
+        # Search query for change request number and title
+        string searchQuery?;
+        # List of change request state keys
+        int[] stateKeys?;
+        # Change request impact key
+        int impactKey?;
+    |} filters?;
+    # Pagination details
+    Pagination pagination?;
+|};
+
+# Change request data.
+public type ChangeRequest record {|
+    # ID
+    IdString id;
+    # Change request number
+    string number;
+    # Change request title
+    string? title;
+    # Associated project information
+    ReferenceTableItem? project;
+    # Service request information (case)
+    ReferenceTableItem? case;
+    # Deployment information
+    ReferenceTableItem? deployment;
+    # Deployed product information
+    ReferenceTableItem? deployedProduct;
+    # Product information
+    ReferenceTableItem? product;
+    # Assigned engineer
+    ReferenceTableItem? assignedEngineer;
+    # Assigned team
+    ReferenceTableItem? assignedTeam;
+    # Planned start date and time
+    Date? plannedStartOn;
+    # Planned end date and time
+    Date? plannedEndOn;
+    # Duration
+    string? duration;
+    # Indicates if the change request has a service outage
+    boolean hasServiceOutage = false;
+    # Impact information
+    ChoiceListItem? impact;
+    # State information
+    ChoiceListItem? state;
+    # Type information
+    ChoiceListItem? 'type;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    json...;
+|};
+
+# Change requests response.
+public type ChangeRequestSearchResponse record {|
+    # List of change requests
+    ChangeRequest[] changeRequests;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+|};
+
+# Request payload for searching catalogs.
+public type CatalogSearchPayload record {|
+    # Deployed product ID
+    IdString deployedProductId;
+    # Pagination details (optional)
+    Pagination pagination?;
+|};
+
+# Catalog data.
+public type Catalog record {|
+    # ID
+    IdString id;
+    # Name of the catalog
+    string name;
+    # List of catalog items
+    ReferenceTableItem[] catalogItems;
+    json...;
+|};
+
+# Catalog search response.
+public type CatalogSearchResponse record {|
+    # List of catalogs
+    Catalog[] catalogs;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+|};
+
+# Catalog item variable information.
+public type CatalogItemVariable record {|
+    # Variable ID
+    IdString id;
+    # Question text for the variable
+    string questionText;
+    # Display order of the variable
+    int 'order;
+    # Type of the variable (e.g., "Single Line Text", "Multi Line Text")
+    string 'type;
+    json...;
+|};
+
+# Catalog item variables response.
+public type CatalogItemVariablesResponse record {|
+    # List of catalog item variables
+    CatalogItemVariable[] variables;
+|};
+
+# Change request details information.
+public type ChangeRequestResponse record {|
+    *ChangeRequest;
+    # Change request description
+    string? description;
+    # User who created the change request
+    string createdBy;
+    # Justification for the change request
+    string? justification;
+    # Impact description
+    string? impactDescription;
+    # Service outage details
+    string? serviceOutage;
+    # Communication plan
+    string? communicationPlan;
+    # Rollback plan
+    string? rollbackPlan;
+    # Test plan
+    string? testPlan;
+    # Indicates if the customer has approved
+    boolean hasCustomerApproved;
+    # Indicates if the customer has reviewed
+    boolean hasCustomerReviewed;
+    # Internal approval details
+    ReferenceTableItem? approvedBy;
+    # Internal approval date and time
+    string? approvedOn;
+    json...;
+|};
+
+# Change request statistics.
+public type ProjectChangeRequestStatsResponse record {|
+    # Total change request count
+    int totalCount;
+    # Count of change requests by state
+    ChoiceListItem[] stateCount;
+    json...;
+|};
+
+# DateTime string type with YYYY-MM-DD HH:MM:SS format constraint.
+@constraint:String {
+    pattern: re `^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$`
+}
+public type DateTimeWithoutTimezone string;
+
+# Request payload for updating a change request.
+public type ChangeRequestUpdatePayload record {|
+    # Planned start date and time (format: YYYY-MM-DD HH:MM:SS)
+    DateTimeWithoutTimezone plannedStartOn;
+|};
+
+# Response from updating a change request.
+public type ChangeRequestUpdateResponse record {|
+    # Success message
+    string message;
+    # Updated change request details
+    UpdatedChangeRequest changeRequest;
+|};
+
+# Updated change request details.
+public type UpdatedChangeRequest record {|
+    # ID of the updated change request
+    IdString id;
+    # Updated date and time
+    string updatedOn;
+    # User who updated the change request
+    string updatedBy;
+    json...;
 |};

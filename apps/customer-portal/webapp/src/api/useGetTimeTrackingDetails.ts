@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { TimeTrackingDetailsResponse } from "@models/responses";
 
 /**
@@ -32,7 +32,7 @@ export default function useGetTimeTrackingDetails(
 ): UseQueryResult<TimeTrackingDetailsResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<TimeTrackingDetailsResponse, Error>({
     queryKey: [ApiQueryKeys.TIME_TRACKING_DETAILS, projectId],
@@ -50,7 +50,9 @@ export default function useGetTimeTrackingDetails(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/timetracking`;
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetTimeTrackingDetails] Response status for ${projectId}: ${response.status}`,

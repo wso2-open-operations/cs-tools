@@ -101,6 +101,7 @@ export const ActiveCasesChart = ({
             position: "relative",
             opacity: isError ? 0.3 : 1,
             filter: isError ? "grayscale(1)" : "none",
+            "& *:focus": { outline: "none" },
           }}
         >
           <ResponsiveContainer width="100%" height="100%">

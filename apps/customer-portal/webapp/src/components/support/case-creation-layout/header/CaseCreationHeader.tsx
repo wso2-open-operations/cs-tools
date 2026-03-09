@@ -39,7 +39,7 @@ export function CaseCreationHeader({
   subtitle = "Please review and edit the auto-populated information before submitting",
   title: titleProp,
 }: CaseCreationHeaderProps): JSX.Element {
-  const title = titleProp ?? "Review Case Details";
+  const title = titleProp ?? "Complete Case Details";
   return (
     <Box sx={{ mb: 3 }}>
       {/* navigation button container */}

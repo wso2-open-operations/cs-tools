@@ -42,4 +42,6 @@ public type UserInfoPayload record {|
 public type AppRoles record {|
     # Role for the user
     string userRole;
+    # Role for an Admin
+    string adminRole;
 |};

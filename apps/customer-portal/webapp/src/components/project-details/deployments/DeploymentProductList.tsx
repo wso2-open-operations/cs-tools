@@ -19,8 +19,8 @@ import { displayValue, formatProjectDate } from "@utils/projectDetails";
 import {
   Box,
   Button,
-  Checkbox,
   Chip,
+  CircularProgress,
   IconButton,
   Skeleton,
   Typography,
@@ -33,16 +33,20 @@ import {
   Package,
   PencilLine,
   Plus,
+  Server,
   Trash2,
   Zap,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGetDeploymentsProducts } from "@api/useGetDeploymentsProducts";
+import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
+import ErrorBanner from "@components/common/error-banner/ErrorBanner";
 import AddProductModal from "@components/project-details/deployments/AddProductModal";
 import ManageProductModal from "@components/project-details/deployments/ManageProductModal";
+import DeleteProductModal from "@components/project-details/deployments/DeleteProductModal";
 
 interface DeploymentProductListProps {
   deploymentId: string;
@@ -68,15 +72,40 @@ function ProductsSkeleton(): JSX.Element {
               justifyContent: "space-between",
             }}
           >
-            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, flex: 1 }}>
-              <Skeleton variant="rounded" width={20} height={20} sx={{ mt: -0.5, flexShrink: 0 }} />
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 1.5,
+                flex: 1,
+              }}
+            >
+              <Skeleton
+                variant="rounded"
+                width={20}
+                height={20}
+                sx={{ mt: 0.25, flexShrink: 0 }}
+              />
               <Box sx={{ flex: 1 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, flexWrap: "wrap" }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1,
+                    mb: 1,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <Skeleton variant="text" width="35%" height={20} />
                   <Skeleton variant="rounded" width={50} height={20} />
                   <Skeleton variant="rounded" width={24} height={24} />
                 </Box>
-                <Skeleton variant="text" width="70%" height={16} sx={{ mb: 1.5 }} />
+                <Skeleton
+                  variant="text"
+                  width="70%"
+                  height={16}
+                  sx={{ mb: 1.5 }}
+                />
                 <Box
                   sx={{
                     display: "grid",
@@ -119,112 +148,180 @@ export default function DeploymentProductList({
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] =
     useState<DeploymentProductItem | null>(null);
-  const { data: products = [], isLoading, isError } =
-    useGetDeploymentsProducts(deploymentId);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(
+    null,
+  );
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [productToDelete, setProductToDelete] =
+    useState<DeploymentProductItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const {
+    data: products = [],
+    isLoading,
+    isFetching,
+    isError,
+  } = useGetDeploymentsProducts(deploymentId);
+  const patchProduct = usePatchDeploymentProduct();
+
+  const handleDeleteClick = (item: DeploymentProductItem) => {
+    setProductToDelete(item);
+    setDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
+    setDeletingProductId(productToDelete.id);
+    setDeleteError(null);
+    try {
+      await patchProduct.mutateAsync({
+        deploymentId,
+        productId: productToDelete.id,
+        body: { active: false },
+      });
+      setDeleteModalOpen(false);
+      setProductToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete product:", error);
+      const productName = productToDelete.product?.label || "product";
+      setDeleteError(`Failed to delete ${productName}. Please try again.`);
+    } finally {
+      setDeletingProductId(null);
+    }
+  };
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Package size={16} />
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            WSO2 Products
-          </Typography>
-          {isLoading ? (
-            <Skeleton variant="rounded" width={32} height={20} sx={{ flexShrink: 0 }} />
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              ({products.length})
-            </Typography>
-          )}
-        </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<Plus />}
-          sx={{ height: 32, fontSize: "0.75rem" }}
-          onClick={() => setIsAddProductModalOpen(true)}
-        >
-          Add Product
-        </Button>
-      </Box>
-      {isLoading ? (
-        <ProductsSkeleton />
-      ) : isError ? (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 2 }}>
-          <ErrorIndicator entityName="products" size="small" />
-          <Typography variant="body2" color="text.secondary">
-            Failed to load products
-          </Typography>
-        </Box>
-      ) : products.length === 0 ? (
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ py: 2, textAlign: "center" }}
-        >
-          No products added yet
-        </Typography>
-      ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {products.map((item) => (
-            <ProductItemRow
-              key={item.id}
-              item={item}
-              deploymentId={deploymentId}
-              isEditing={editingProduct?.id === item.id}
-              onEdit={() => setEditingProduct(item)}
-            />
-          ))}
-        </Box>
+    <>
+      {deleteError && (
+        <ErrorBanner
+          message={deleteError}
+          onClose={() => setDeleteError(null)}
+        />
       )}
+      <Box>
+        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Package size={16} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              WSO2 Products
+            </Typography>
+            {isLoading || isFetching ? (
+              <Skeleton
+                variant="rounded"
+                width={32}
+                height={20}
+                sx={{ flexShrink: 0 }}
+              />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                ({products.length})
+              </Typography>
+            )}
+          </Box>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<Plus />}
+            sx={{ height: 32, fontSize: "0.75rem" }}
+            onClick={() => setIsAddProductModalOpen(true)}
+          >
+            Add Product
+          </Button>
+        </Box>
+        {isLoading || isFetching ? (
+          <ProductsSkeleton />
+        ) : isError ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 2 }}>
+            <ErrorIndicator entityName="products" size="small" />
+            <Typography variant="body2" color="text.secondary">
+              Failed to load products
+            </Typography>
+          </Box>
+        ) : products.length === 0 ? (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ py: 2, textAlign: "center" }}
+          >
+            No products added yet
+          </Typography>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {products.map((item) => (
+              <ProductItemRow
+                key={item.id}
+                item={item}
+                deploymentId={deploymentId}
+                onEdit={() => setEditingProduct(item)}
+                onDelete={() => handleDeleteClick(item)}
+                isDeleting={deletingProductId === item.id}
+              />
+            ))}
+          </Box>
+        )}
 
-      <AddProductModal
-        open={isAddProductModalOpen}
-        deploymentId={deploymentId}
-        projectId={projectId}
-        onClose={() => setIsAddProductModalOpen(false)}
-        onSuccess={() => {
-          setIsAddProductModalOpen(false);
-          queryClient.invalidateQueries({
-            queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
-          });
-        }}
-      />
-      <ManageProductModal
-        open={!!editingProduct}
-        deploymentId={deploymentId}
-        product={editingProduct}
-        onClose={() => setEditingProduct(null)}
-        onSuccess={() => {
-          setEditingProduct(null);
-          queryClient.invalidateQueries({
-            queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
-          });
-        }}
-      />
-    </Box>
+        <AddProductModal
+          open={isAddProductModalOpen}
+          deploymentId={deploymentId}
+          projectId={projectId}
+          onClose={() => setIsAddProductModalOpen(false)}
+          onSuccess={() => {
+            setIsAddProductModalOpen(false);
+            queryClient.invalidateQueries({
+              queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
+            });
+          }}
+        />
+        <ManageProductModal
+          open={!!editingProduct}
+          deploymentId={deploymentId}
+          product={editingProduct}
+          onClose={() => setEditingProduct(null)}
+          onSuccess={() => {
+            setEditingProduct(null);
+            queryClient.invalidateQueries({
+              queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
+            });
+          }}
+        />
+        <DeleteProductModal
+          open={deleteModalOpen}
+          product={productToDelete}
+          onClose={() => {
+            setDeleteModalOpen(false);
+            setProductToDelete(null);
+          }}
+          onConfirm={handleConfirmDelete}
+          isDeleting={
+            !!deletingProductId && deletingProductId === productToDelete?.id
+          }
+        />
+      </Box>
+    </>
   );
 }
 
 interface ProductItemRowProps {
   item: DeploymentProductItem;
   deploymentId: string;
-  isEditing: boolean;
   onEdit: () => void;
+  onDelete: (item: DeploymentProductItem) => void;
+  isDeleting: boolean;
 }
 
 function ProductItemRow({
   item,
-  isEditing,
   onEdit,
+  onDelete,
+  isDeleting,
 }: ProductItemRowProps): JSX.Element {
   const emptyVal = "Not Available";
   const name = displayValue(item.product?.label, emptyVal);
   const version = displayValue(item.version, emptyVal);
   const description = displayValue(item.description, emptyVal);
   const coresStr =
-    typeof item.cores === "number" ? String(item.cores) : displayValue(null, emptyVal);
+    typeof item.cores === "number"
+      ? String(item.cores)
+      : displayValue(null, emptyVal);
   const tpsStr =
     typeof item.tps === "number"
       ? item.tps.toLocaleString()
@@ -260,13 +357,7 @@ function ProductItemRow({
             flex: 1,
           }}
         >
-          <Checkbox
-            sx={{ p: 0.5, mt: -0.5 }}
-            checked={isEditing}
-            disabled
-            aria-disabled
-            aria-label="Batch select (not yet implemented)"
-          />
+          <Server size={20} style={{ marginTop: 2, flexShrink: 0 }} />
           <Box sx={{ flex: 1 }}>
             <Box
               sx={{
@@ -289,7 +380,6 @@ function ProductItemRow({
                 variant="outlined"
                 sx={{ height: 20, fontSize: "0.75rem" }}
               />
-              <ErrorIndicator entityName="support status" size="small" />
             </Box>
             <Typography
               variant="caption"
@@ -315,15 +405,12 @@ function ProductItemRow({
                   flexShrink: 0,
                 }}
               >
-                <Cpu
-                  size={12}
-                  style={{ display: "block", flexShrink: 0 }}
-                />
+                <Cpu size={12} style={{ display: "block", flexShrink: 0 }} />
                 <Typography
                   variant="caption"
                   sx={{ whiteSpace: "nowrap", lineHeight: 1 }}
                 >
-                  {coresStr} cores
+                  Cores: {coresStr}
                 </Typography>
               </Box>
               <Box
@@ -335,15 +422,12 @@ function ProductItemRow({
                   flexShrink: 0,
                 }}
               >
-                <Zap
-                  size={12}
-                  style={{ display: "block", flexShrink: 0 }}
-                />
+                <Zap size={12} style={{ display: "block", flexShrink: 0 }} />
                 <Typography
                   variant="caption"
                   sx={{ whiteSpace: "nowrap", lineHeight: 1 }}
                 >
-                  {tpsStr} TPS
+                  TPS: {tpsStr}
                 </Typography>
               </Box>
               <Box
@@ -424,15 +508,19 @@ function ProductItemRow({
           <IconButton
             size="small"
             aria-label={`Delete ${name}`}
-            disabled
-            aria-disabled
+            onClick={() => onDelete(item)}
+            disabled={isDeleting}
             sx={{
               color: "text.secondary",
-              "&:hover": { color: "primary.main" },
-              "&.Mui-focusVisible": { color: "primary.main" },
+              "&:hover": { color: "error.main" },
+              "&.Mui-focusVisible": { color: "error.main" },
             }}
           >
-            <Trash2 size={16} aria-hidden />
+            {isDeleting ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : (
+              <Trash2 size={16} aria-hidden />
+            )}
           </IconButton>
         </Box>
       </Box>

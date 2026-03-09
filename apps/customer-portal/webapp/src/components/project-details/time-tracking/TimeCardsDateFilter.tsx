@@ -29,15 +29,12 @@ export interface TimeCardsDateFilterProps {
   endDate: string;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
-  shownCount: number;
-  totalCount: number;
-  isLoading?: boolean;
 }
 
 /**
- * TimeCardsDateFilter provides date range filters for time cards and shows count summary.
+ * TimeCardsDateFilter provides date range and state filters for time cards.
  *
- * @param {TimeCardsDateFilterProps} props - Date values, handlers, and counts.
+ * @param {TimeCardsDateFilterProps} props - Date values (startDate, endDate), change handlers (onStartDateChange, onEndDateChange, onStateChange), current state value, and available timeCardStates.
  * @returns {JSX.Element} The rendered filter card.
  */
 export default function TimeCardsDateFilter({
@@ -45,9 +42,6 @@ export default function TimeCardsDateFilter({
   endDate,
   onStartDateChange,
   onEndDateChange,
-  shownCount,
-  totalCount,
-  isLoading = false,
 }: TimeCardsDateFilterProps): JSX.Element {
   return (
     <Card
@@ -58,31 +52,45 @@ export default function TimeCardsDateFilter({
         gap: 3,
       }}
     >
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Calendar size={16} style={{ color: "var(--oxygen-palette-text-secondary)" }} />
-          <Typography
-            variant="body2"
-            component="label"
-            sx={{ fontWeight: 500, color: "text.secondary" }}
-          >
-            Filter by Date Range:
-          </Typography>
-        </Box>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Date Range Filter */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
             gap: 2,
-            flexWrap: "wrap",
+            flex: 1,
+            minWidth: "300px",
           }}
         >
+          <Typography
+            variant="body2"
+            component="label"
+            sx={{
+              fontWeight: 500,
+              color: "text.secondary",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Filter by Date Range:
+          </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Typography
               component="label"
               htmlFor="time-cards-start-date"
               variant="body2"
-              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+              sx={{
+                fontWeight: 500,
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+              }}
             >
               From:
             </Typography>
@@ -107,7 +115,11 @@ export default function TimeCardsDateFilter({
               component="label"
               htmlFor="time-cards-end-date"
               variant="body2"
-              sx={{ fontWeight: 500, color: "text.secondary", whiteSpace: "nowrap" }}
+              sx={{
+                fontWeight: 500,
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+              }}
             >
               To:
             </Typography>
@@ -127,14 +139,6 @@ export default function TimeCardsDateFilter({
               }}
             />
           </Box>
-          <Typography
-            variant="body2"
-            sx={{ color: "text.secondary", ml: "auto" }}
-          >
-            {isLoading
-              ? "Loading..."
-              : `Showing ${shownCount} of ${totalCount} time logs`}
-          </Typography>
         </Box>
       </Box>
     </Card>

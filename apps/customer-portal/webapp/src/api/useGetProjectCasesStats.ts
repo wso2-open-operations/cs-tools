@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProjectCasesStats } from "@models/responses";
 
 export { DASHBOARD_CASE_TYPE_LABELS } from "@constants/dashboardConstants";
@@ -44,7 +44,7 @@ export function useGetProjectCasesStats(
 ): UseQueryResult<ProjectCasesStats, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
   const { incidentId, queryId, enabled = true } = options ?? {};
 
   return useQuery<ProjectCasesStats, Error>({
@@ -67,7 +67,9 @@ export function useGetProjectCasesStats(
           requestUrl += `?${params.toString()}`;
         }
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetProjectCasesStats] Response status for ${id}: ${response.status}`,

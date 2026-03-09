@@ -15,9 +15,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CaseSearchRequest } from "@models/requests";
 import type { CaseSearchResponse } from "@models/responses";
 
@@ -45,7 +45,7 @@ export function useGetProjectCasesPage(
 ): UseQueryResult<CaseSearchResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<CaseSearchResponse, Error>({
     queryKey: [
@@ -68,9 +68,13 @@ export function useGetProjectCasesPage(
       if (!baseUrl) {
         throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
       }
-      const response = await fetchFn(
+      const response = await authFetch(
         `${baseUrl}/projects/${projectId}/cases/search`,
-        { method: "POST", body: JSON.stringify(requestBody) },
+        {
+          method: "POST",
+
+          body: JSON.stringify(requestBody),
+        },
       );
       if (!response.ok) {
         throw new Error(`Error fetching project cases: ${response.statusText}`);

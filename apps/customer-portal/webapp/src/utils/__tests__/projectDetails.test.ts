@@ -90,7 +90,9 @@ describe("projectDetails utils", () => {
       expect(getSLAStatusColor("good")).toBe("success");
     });
 
-    it("should return 'error' for 'Bad'", () => {
+    it("should return 'error' for 'Needs attention' or 'Bad'", () => {
+      expect(getSLAStatusColor("Needs attention")).toBe("error");
+      expect(getSLAStatusColor("needs attention")).toBe("error");
       expect(getSLAStatusColor("Bad")).toBe("error");
       expect(getSLAStatusColor("bad")).toBe("error");
     });

@@ -15,7 +15,8 @@
 // under the License.
 
 import { type JSX } from "react";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router";
+import { Route, Routes, Navigate } from "react-router";
+import { ProtectedRoute } from "@asgardeo/react-router";
 import ProjectHub from "@pages/ProjectHub";
 import ProjectPage from "@pages/ProjectPage";
 import ProjectDetails from "@pages/ProjectDetails";
@@ -25,144 +26,157 @@ import UpdatesPage from "@pages/UpdatesPage";
 import PendingUpdatesPage from "@pages/PendingUpdatesPage";
 import UpdateLevelDetailsPage from "@pages/UpdateLevelDetailsPage";
 import AllCasesPage from "@pages/AllCasesPage";
+import ChangeRequestsPage from "@pages/ChangeRequestsPage";
+import ChangeRequestDetailsPage from "@pages/ChangeRequestDetailsPage";
 import AnnouncementsPage from "@pages/AnnouncementsPage";
 import AnnouncementDetailsPage from "@pages/AnnouncementDetailsPage";
 import AllConversationsPage from "@pages/AllConversationsPage";
 import ConversationDetailsPage from "@pages/ConversationDetailsPage";
 import CaseDetailsPage from "@pages/CaseDetailsPage";
+import ServiceRequestsPage from "@pages/ServiceRequestsPage";
+import ServiceRequestDetailsPage from "@pages/ServiceRequestDetailsPage";
+import CreateServiceRequestPage from "@pages/CreateServiceRequestPage";
 import NoveraChatPage from "@pages/NoveraChatPage";
 import DescribeIssuePage from "@pages/DescribeIssuePage";
 import CreateCasePage from "@pages/CreateCasePage";
 import AppLayout from "@layouts/AppLayout";
-import { AuthApiProvider } from "@context/AuthApiContext";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import LoginPage from "@pages/LoginPage";
-import AuthGuard from "./AuthGuard";
 import SecurityPage from "@pages/SecurityPage";
 import SettingsPage from "@pages/SettingsPage";
 import VulnerabilityDetailsPage from "@pages/VulnerabilityDetailsPage";
 
 export default function App(): JSX.Element {
   return (
-    <BrowserRouter>
-      <AuthApiProvider>
-        <LoaderProvider>
-          <ErrorBannerProvider>
-            <SuccessBannerProvider>
-              <Routes>
-                {/* Public Route */}
-                <Route path="/login" element={<LoginPage />} />
+    <LoaderProvider>
+      <ErrorBannerProvider>
+        <SuccessBannerProvider>
+          <Routes>
+            {/* Public Route */}
+            <Route path="/login" element={<LoginPage />} />
 
-                {/* Protected Routes */}
-                <Route element={<AuthGuard />}>
-                  {/* AppLayout component */}
-                  <Route element={<AppLayout />}>
-                    {/* ProjectHub Page */}
-                    <Route path="/" element={<ProjectHub />} />
+            {/* Protected Routes - All routes inside ProtectedRoute are automatically protected */}
+            <Route
+              element={
+                <ProtectedRoute redirectTo="/login">
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              {/* ProjectHub Page */}
+              <Route path="/" element={<ProjectHub />} />
 
-                    {/* Project Specific Routes */}
-                    <Route path="/:projectId">
-                      {/* Dashboard */}
-                      <Route
-                        index
-                        element={<Navigate to="dashboard" replace />}
-                      />
-                      <Route path="dashboard" element={<DashboardPage />} />
-                      {/* Project Details */}
-                      <Route
-                        path="project-details"
-                        element={<ProjectDetails />}
-                      />
-                      {/* Support */}
-                      <Route path="support">
-                        <Route index element={<SupportPage />} />
-                        <Route path="cases">
-                          <Route index element={<AllCasesPage />} />
-                          <Route path=":caseId" element={<CaseDetailsPage />} />
-                        </Route>
-                        <Route path="conversations">
-                          <Route index element={<AllConversationsPage />} />
-                          <Route
-                            path=":conversationId"
-                            element={<ConversationDetailsPage />}
-                          />
-                        </Route>
-                        <Route path="chat">
-                          <Route index element={<NoveraChatPage />} />
-                          <Route
-                            path="describe-issue"
-                            element={<DescribeIssuePage />}
-                          />
-                          <Route
-                            path="create-case"
-                            element={<CreateCasePage />}
-                          />
-                          <Route
-                            path="create-related-case"
-                            element={<CreateCasePage />}
-                          />
-                        </Route>
-                      </Route>
-                      {/* Updates */}
-                      <Route path="updates">
-                        <Route index element={<UpdatesPage />} />
-                        <Route path="pending">
-                          <Route index element={<PendingUpdatesPage />} />
-                          <Route
-                            path="level/:levelKey"
-                            element={<UpdateLevelDetailsPage />}
-                          />
-                        </Route>
-                      </Route>
-                      {/* SecurityCenter */}
-                      <Route path="security-center">
-                        <Route index element={<SecurityPage />} />
-                        <Route
-                          path=":vulnerabilityId"
-                          element={<VulnerabilityDetailsPage />}
-                        />
-                      </Route>
-                      {/* Engagements */}
-                      <Route
-                        path="engagements"
-                        element={<ProjectPage title="Engagements" />}
-                      />
-                      {/* LegalContracts */}
-                      <Route
-                        path="legal-contracts"
-                        element={<ProjectPage title="Legal Contracts" />}
-                      />
-                      {/* Community */}
-                      <Route
-                        path="community"
-                        element={<ProjectPage title="Community" />}
-                      />
-                      {/* Announcements */}
-                      <Route path="announcements">
-                        <Route index element={<AnnouncementsPage />} />
-                        <Route
-                          path=":caseId"
-                          element={<AnnouncementDetailsPage />}
-                        />
-                      </Route>
-                      {/* Settings */}
-                      <Route
-                        path="settings"
-                        element={<SettingsPage />}
-                      />
-                    </Route>
+              {/* Project Specific Routes */}
+              <Route path="/:projectId">
+                {/* Dashboard */}
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<DashboardPage />} />
+                {/* Project Details */}
+                <Route path="project-details" element={<ProjectDetails />} />
+                {/* Support */}
+                <Route path="support">
+                  <Route index element={<SupportPage />} />
+                  <Route path="cases">
+                    <Route index element={<AllCasesPage />} />
+                    <Route path=":caseId" element={<CaseDetailsPage />} />
+                  </Route>
+                  <Route path="change-requests">
+                    <Route index element={<ChangeRequestsPage />} />
+                    <Route
+                      path=":changeRequestId"
+                      element={<ChangeRequestDetailsPage />}
+                    />
+                  </Route>
+                  <Route path="conversations">
+                    <Route index element={<AllConversationsPage />} />
+                    <Route
+                      path=":conversationId"
+                      element={<ConversationDetailsPage />}
+                    />
+                  </Route>
+                  <Route path="service-requests">
+                    <Route index element={<ServiceRequestsPage />} />
+                    <Route
+                      path="create"
+                      element={<CreateServiceRequestPage />}
+                    />
+                    <Route
+                      path=":serviceRequestId"
+                      element={<ServiceRequestDetailsPage />}
+                    />
+                  </Route>
+                  <Route path="chat">
+                    <Route index element={<NoveraChatPage />} />
+                    <Route
+                      path=":conversationId"
+                      element={<NoveraChatPage />}
+                    />
+                    <Route
+                      path="describe-issue"
+                      element={<DescribeIssuePage />}
+                    />
+                    <Route path="create-case" element={<CreateCasePage />} />
+                    <Route
+                      path="create-related-case"
+                      element={<CreateCasePage />}
+                    />
                   </Route>
                 </Route>
+                {/* Updates */}
+                <Route path="updates">
+                  <Route index element={<UpdatesPage />} />
+                  <Route path="pending">
+                    <Route index element={<PendingUpdatesPage />} />
+                    <Route
+                      path="level/:levelKey"
+                      element={<UpdateLevelDetailsPage />}
+                    />
+                  </Route>
+                </Route>
+                {/* SecurityCenter */}
+                <Route path="security-center">
+                  <Route index element={<SecurityPage />} />
+                  <Route
+                    path="security-report-analysis/:caseId"
+                    element={<CaseDetailsPage />}
+                  />
+                  <Route
+                    path=":vulnerabilityId"
+                    element={<VulnerabilityDetailsPage />}
+                  />
+                </Route>
+                {/* Engagements */}
+                <Route
+                  path="engagements"
+                  element={<ProjectPage title="Engagements" />}
+                />
+                {/* LegalContracts */}
+                <Route
+                  path="legal-contracts"
+                  element={<ProjectPage title="Legal Contracts" />}
+                />
+                {/* Community */}
+                <Route
+                  path="community"
+                  element={<ProjectPage title="Community" />}
+                />
+                {/* Announcements */}
+                <Route path="announcements">
+                  <Route index element={<AnnouncementsPage />} />
+                  <Route path=":caseId" element={<AnnouncementDetailsPage />} />
+                </Route>
+                {/* Settings */}
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+            </Route>
 
-                {/* Fallback */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </SuccessBannerProvider>
-          </ErrorBannerProvider>
-        </LoaderProvider>
-      </AuthApiProvider>
-    </BrowserRouter>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </SuccessBannerProvider>
+      </ErrorBannerProvider>
+    </LoaderProvider>
   );
 }

@@ -15,6 +15,7 @@
 // under the License.
 
 import type { JSX } from "react";
+import { BrowserRouter } from "react-router";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -35,16 +36,17 @@ export default function AppWithConfig(): JSX.Element {
       afterSignInUrl={authConfig.signInRedirectURL}
       afterSignOutUrl={authConfig.signOutRedirectURL}
       scopes={["openid", "email", "groups"]}
-      storage="localStorage"
     >
-      <LoggerProvider config={loggerConfig}>
-        <OxygenUIThemeProvider theme={themeConfig}>
-          <QueryClientProvider client={queryClient}>
-            <App />
-            <ReactQueryDevtools initialIsOpen={false} />
-          </QueryClientProvider>
-        </OxygenUIThemeProvider>
-      </LoggerProvider>
+      <BrowserRouter>
+        <LoggerProvider config={loggerConfig}>
+          <OxygenUIThemeProvider theme={themeConfig}>
+            <QueryClientProvider client={queryClient}>
+              <App />
+              <ReactQueryDevtools initialIsOpen={false} />
+            </QueryClientProvider>
+          </OxygenUIThemeProvider>
+        </LoggerProvider>
+      </BrowserRouter>
     </AsgardeoProvider>
   );
 }

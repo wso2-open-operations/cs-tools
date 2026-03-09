@@ -55,14 +55,14 @@ export const TrendIndicator = ({
         <>
           <Skeleton variant="rounded" width={45} height={16} />
           <Typography variant="caption" color="text.secondary">
-            vs last month
+            vs Previous 30 Days
           </Typography>
         </>
       ) : isError ? (
         <>
           <ErrorIndicator entityName="trend" />
           <Typography variant="caption" color="text.secondary">
-            vs last month
+            vs Previous 30 Days
           </Typography>
         </>
       ) : (
@@ -101,7 +101,7 @@ export const TrendIndicator = ({
 
             {/* Trend period */}
             <Typography variant="caption" color="text.secondary">
-              vs last month
+              vs Previous 30 Days
             </Typography>
           </>
         )

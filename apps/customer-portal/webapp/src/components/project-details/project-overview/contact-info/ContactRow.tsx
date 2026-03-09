@@ -45,32 +45,47 @@ const ContactRow = ({ contact }: ContactRowProps): JSX.Element => {
         >
           <Icon size={20} />
         </Box>
-      <Box>
-        <a
-          href={`mailto:${contact.email}`}
-          style={{
-            textDecoration: "none",
-            color: "inherit",
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              color: "text.primary",
-              "&:hover": { color: "primary.main" },
-            }}
-          >
-            <Mail size={16} />
-            <Typography variant="body2" color="inherit">
-              {contact.email}
-            </Typography>
-          </Box>
-        </a>
+        <Box>
+          {contact.email ? (
+            <a
+              href={`mailto:${contact.email}`}
+              style={{
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  color: "text.primary",
+                  "&:hover": { color: "primary.main" },
+                }}
+              >
+                <Mail size={16} />
+                <Typography variant="body2" color="inherit">
+                  {contact.email}
+                </Typography>
+              </Box>
+            </a>
+          ) : (
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+              }}
+            >
+              <Mail size={16} />
+              <Typography variant="body2" color="text.secondary">
+                Not Available
+              </Typography>
+            </Box>
+          )}
+        </Box>
       </Box>
     </Box>
-  </Box>
   );
 };
 

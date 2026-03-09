@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 import customer_portal.entity;
+import customer_portal.registry;
 
 import ballerina/constraint;
 
@@ -45,6 +46,8 @@ public type CaseSearchFilters record {|
     int severityId?;
     # Deployment ID
     string deploymentId?;
+    # Case created by the logged in user
+    boolean createdByMe?;
 |};
 
 # Payload for case search.
@@ -67,6 +70,8 @@ public type Case record {|
     string number;
     # Created date and time
     string createdOn;
+    # Created by (User email)
+    string createdBy;
     # Case title
     string? title;
     # Case description
@@ -77,6 +82,12 @@ public type Case record {|
     ReferenceItem? severity;
     # State of the case
     ReferenceItem? status;
+    # Catalog information (if the case is a service request)
+    ReferenceItem? catalog;
+    # Catalog item information (if the case is a service request)
+    ReferenceItem? catalogItem;
+    # Assigned team
+    ReferenceItem? assignedTeam;
 |};
 
 # Case information.
@@ -128,7 +139,10 @@ public type CaseResponse record {|
     string? closeNotes?;
     # Indicates if the case is auto closed
     boolean? hasAutoClosed?;
-    json...;
+    # Change requests (only for service requests)
+    ReferenceItem[]? changeRequests?;
+    # Variables for service request
+    entity:ServiceRequestVariable[]? variables?;
 |};
 
 # Reference item.
@@ -139,6 +153,8 @@ public type ReferenceItem record {|
     string label;
     # Count
     int count?;
+    # Number
+    string? number?;
 |};
 
 # Case metadata information.
@@ -202,6 +218,8 @@ public type UpdatedUser record {|
 public type ProjectFilterOptions record {|
     # List of case states
     ReferenceItem[] caseStates;
+    # List of available time zones (eg: UTC, GMT, etc.)
+    ReferenceItem[] timeZones;
     # List of case severities
     ReferenceItem[] severities;
     # List of issue types
@@ -218,8 +236,70 @@ public type ProjectFilterOptions record {|
     ReferenceItem[] conversationStates;
     # List of available case types
     ReferenceItem[] caseTypes;
+    # List of available time card states
+    ReferenceItem[] timeCardStates;
     # Severity based allocation time mapping (severity ID to allocation time in minutes)
     map<int> severityBasedAllocationTime;
+|};
+
+# Project data.
+public type Project record {|
+    # ID
+    entity:IdString id;
+    # Name
+    string name;
+    # Project key
+    string key;
+    # Created date and time
+    string createdOn;
+    # Description
+    string? description;
+    # Project type
+    ReferenceItem 'type;
+    json...;
+|};
+
+# Project information.
+public type ProjectResponse record {|
+    *Project;
+    # Salesforce ID
+    string sfId;
+    # Indicates if the project has service requests
+    boolean hasSr;
+    # Project start date
+    entity:Date? startDate;
+    # Project end date 
+    entity:Date? endDate;
+    # Account information
+    record {|
+        # ID of the account
+        entity:IdString id;
+        # Indicates whether the agent is enabled for the account
+        boolean hasAgent;
+        # Name of the account
+        string? name;
+        # Activation date
+        string? activationDate;
+        # Deactivation date
+        string? deactivationDate;
+        # Support tier
+        string? supportTier;
+        # Region
+        string? region;
+        # Owner email
+        string? ownerEmail;
+        # Technical owner email
+        string? technicalOwnerEmail;
+    |} account;
+|};
+
+# Projects response.
+public type ProjectsResponse record {|
+    # List of projects
+    Project[] projects;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
 |};
 
 # Case statistics for a project.
@@ -284,8 +364,8 @@ public type ProjectStats record {|
 
 # Recent activity details.
 public type RecentActivity record {|
-    # Total time logged
-    decimal totalTimeLogged?;
+    # Total hours
+    decimal totalHours?;
     # Billable hours
     decimal billableHours?;
     # Last deployment date
@@ -359,7 +439,7 @@ public type CreatedAttachment record {|
     # User who created the attachment
     string createdBy;
     # Download URL
-    string downloadUrl;
+    string downloadUrl?;
 |};
 
 # Attachment data.
@@ -378,6 +458,10 @@ public type Attachment record {|
     string createdOn;
     # Download URL
     string downloadUrl;
+    # Base64 encoded file content (data URI format: data:@file/<type>;base64,<content>)
+    string content;
+    # Description of the attachment
+    string? description;
 |};
 
 # Attachments response.
@@ -387,6 +471,14 @@ public type AttachmentsResponse record {|
     # Total records count
     int totalRecords;
     *entity:Pagination;
+|};
+
+# Payload for updating an attachment.
+public type AttachmentUpdatePayload record {|
+    # File name
+    string? name?;
+    # Description of the attachment (only for deployment type)
+    string? description?;
 |};
 
 # Deployment information.
@@ -451,6 +543,8 @@ public type DeployedProductCreatePayload record {|
     int? cores?;
     # TPS allocated for the product
     decimal? tps?;
+    # Description of the deployed product
+    string? description?;
 |};
 
 # Payload for creating a comment.
@@ -463,13 +557,15 @@ public type CommentCreatePayload record {|
 |};
 
 # Payload for creating an attachment.
-public type AttachmentPayload record {|
+public type AttachmentCreatePayload record {|
     # File name
     string name;
     # MIME type of the file
     string 'type;
     # Base 64 encoded content
     string content;
+    # Description of the attachment
+    string? description?;
 |};
 
 # Product vulnerability metadata response.
@@ -814,7 +910,7 @@ public type TimeCard record {|
     # Indicates if the time card has billable hours
     boolean hasBillable;
     # State information (e.g., "Approved", "Submitted")
-    string state;
+    ReferenceItem? state;
     # User who approved the time card
     ReferenceItem? approvedBy;
     # Associated project
@@ -877,6 +973,8 @@ public type TimeCardSearchPayload record {|
         entity:Date startDate?;
         # End date for filtering time cards (ISO 8601 format)
         entity:Date endDate?;
+        # List of time card states to filter (e.g., "Approved", "Submitted", etc.)
+        entity:TimeCardState[] states?;
     } filters?;
     # Pagination details
     entity:Pagination pagination?;
@@ -974,6 +1072,8 @@ public type ConversationSearchPayload record {|
         int[] stateKeys?;
         # Search query for conversations
         string searchQuery?;
+        # Conversations created by logged in user
+        boolean createdByMe?;
     } filters?;
     # Sort configuration
     record {
@@ -1024,4 +1124,150 @@ public type ConversationStats record {|
     int abandonedCount?;
     # Active chats count
     int activeCount?;
+|};
+
+# Change request data.
+public type ChangeRequest record {|
+    # ID
+    entity:IdString id;
+    # Change request number
+    string number;
+    # Change request title
+    string? title;
+    # Project
+    ReferenceItem? project;
+    # Service request information (case)
+    ReferenceItem? case;
+    # Deployment information
+    ReferenceItem? deployment;
+    # Deployed product information
+    ReferenceItem? deployedProduct;
+    # Product information
+    ReferenceItem? product;
+    # Planned start date and time
+    entity:Date? startDate;
+    # Planned end date and time
+    entity:Date? endDate;
+    # Duration
+    string? duration;
+    # Indicates if the change request has a service outage
+    boolean hasServiceOutage = false;
+    # Impact information
+    ReferenceItem? impact;
+    # State information
+    ReferenceItem? state;
+    # Type information
+    ReferenceItem? 'type;
+    # Assigned engineer
+    ReferenceItem? assignedEngineer;
+    # Assigned team
+    ReferenceItem? assignedTeam;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    json...;
+|};
+
+# Change requests response.
+public type ChangeRequestSearchResponse record {|
+    # List of change requests
+    ChangeRequest[] changeRequests;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};
+
+# Catalog data.
+public type Catalog record {|
+    # ID
+    entity:IdString id;
+    # Name of the catalog
+    string name;
+    # List of catalog items
+    ReferenceItem[] catalogItems;
+    json...;
+|};
+
+# Catalog search response.
+public type CatalogSearchResponse record {|
+    # List of catalogs
+    Catalog[] catalogs;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+|};
+
+# Request payload for searching change requests.
+public type ChangeRequestSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Search query for change request number and title
+        string searchQuery?;
+        # List of change request state keys
+        int[] stateKeys?;
+        # Change request impact key
+        int impactKey?;
+    |} filters?;
+    # Pagination details
+    entity:Pagination pagination?;
+|};
+
+# Request payload for searching catalogs.
+public type CatalogSearchPayload record {|
+    # Pagination details
+    entity:Pagination pagination?;
+|};
+
+# Change request details information.
+public type ChangeRequestResponse record {|
+    *ChangeRequest;
+    # Change request description
+    string? description;
+    # User who created the change request
+    string createdBy;
+    # Justification for the change request
+    string? justification;
+    # Impact description
+    string? impactDescription;
+    # Service outage details
+    string? serviceOutage;
+    # Communication plan
+    string? communicationPlan;
+    # Rollback plan
+    string? rollbackPlan;
+    # Test plan
+    string? testPlan;
+    # Indicates if the customer has approved
+    boolean hasCustomerApproved;
+    # Indicates if the customer has reviewed
+    boolean hasCustomerReviewed;
+    # Internal approval details
+    ReferenceItem? approvedBy;
+    # Internal approval date and time
+    string? approvedOn;
+|};
+
+# Change request statistics.
+public type ProjectChangeRequestStatsResponse record {|
+    # Total change request count
+    int totalCount;
+    # Count of change requests by state
+    ReferenceItem[] stateCount;
+|};
+
+# Registry token creation payload.
+public type RegistryTokenCreatePayload record {|
+    # Registry token name (provided by the user)
+    @constraint:String {
+        pattern: {
+            value: re `^[a-zA-Z0-9\-]+$`,
+            message: "Name can only contain alphanumeric characters and dashes"
+        }
+    }
+    string robotName;
+    # Token Type
+    registry:TokenType tokenType;
+    # Created for user email
+    string createdFor?;
 |};

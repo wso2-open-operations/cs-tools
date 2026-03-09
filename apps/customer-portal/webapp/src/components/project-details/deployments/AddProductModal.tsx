@@ -30,7 +30,6 @@ import {
 import { X } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ChangeEvent,
@@ -54,7 +53,18 @@ const INITIAL_FORM = {
   versionId: "",
   cores: "",
   tps: "",
+  description: "",
 };
+
+/**
+ * Helper to parse and validate a numeric string value.
+ * Returns a valid number or undefined if invalid.
+ */
+function parseValidNumber(value: string): number | undefined {
+  if (!value || !value.trim()) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+}
 
 /**
  * Modal for adding a WSO2 product to a deployment environment.
@@ -104,12 +114,6 @@ export default function AddProductModal({
     onClose();
   }, [onClose]);
 
-  useEffect(() => {
-    if (!open) {
-      setForm(INITIAL_FORM);
-    }
-  }, [open]);
-
   const handleProductChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       const productId = event.target.value;
@@ -130,7 +134,8 @@ export default function AddProductModal({
   );
 
   const handleTextChange =
-    (field: "cores" | "tps") => (event: ChangeEvent<HTMLInputElement>) => {
+    (field: "cores" | "tps" | "description") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
       setForm((prev) => ({ ...prev, [field]: event.target.value }));
     };
 
@@ -144,8 +149,9 @@ export default function AddProductModal({
           productId: form.productId,
           versionId: form.versionId,
           projectId,
-          cores: form.cores ? Number(form.cores) : undefined,
-          tps: form.tps ? Number(form.tps) : undefined,
+          cores: parseValidNumber(form.cores),
+          tps: parseValidNumber(form.tps),
+          description: form.description || undefined,
         },
       });
       handleClose();
@@ -161,6 +167,7 @@ export default function AddProductModal({
     form.versionId,
     form.cores,
     form.tps,
+    form.description,
     deploymentId,
     projectId,
     postProduct,
@@ -302,13 +309,15 @@ export default function AddProductModal({
         <TextField
           id="product-description"
           label="Description"
-          placeholder="Optional description..."
+          placeholder="Enter Description..."
           fullWidth
           size="small"
           multiline
           rows={2}
           sx={{ mb: 2 }}
-          disabled
+          value={form.description}
+          onChange={handleTextChange("description")}
+          disabled={isSubmitting}
         />
 
         <Box sx={{ borderTop: 1, borderColor: "divider", pt: 2, mt: 2 }}>

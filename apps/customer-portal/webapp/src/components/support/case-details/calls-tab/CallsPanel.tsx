@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Button, Stack } from "@wso2/oxygen-ui";
+import { Box, Button, Stack } from "@wso2/oxygen-ui";
 import { PhoneCall } from "@wso2/oxygen-ui-icons-react";
 import { useState, useCallback, useEffect, type JSX } from "react";
 import type { CallRequest } from "@models/responses";
@@ -34,6 +34,7 @@ import { ERROR_BANNER_TIMEOUT_MS } from "@constants/errorBannerConstants";
 export interface CallsPanelProps {
   projectId: string;
   caseId: string;
+  isCaseClosed?: boolean;
 }
 
 /**
@@ -45,6 +46,7 @@ export interface CallsPanelProps {
 export default function CallsPanel({
   projectId,
   caseId,
+  isCaseClosed = false,
 }: CallsPanelProps): JSX.Element {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editCall, setEditCall] = useState<CallRequest | null>(null);
@@ -130,6 +132,18 @@ export default function CallsPanel({
     return () => clearTimeout(t);
   }, [errorMessage]);
 
+  const requestCallButton = (
+    <Button
+      variant="contained"
+      color="primary"
+      startIcon={<PhoneCall size={16} />}
+      onClick={handleOpenModal}
+      disabled={isCaseClosed}
+    >
+      Request Call
+    </Button>
+  );
+
   return (
     <Stack spacing={3}>
       {successMessage && (
@@ -145,22 +159,16 @@ export default function CallsPanel({
         />
       )}
 
-      <Button
-        variant="contained"
-        color="primary"
-        startIcon={<PhoneCall size={16} />}
-        sx={{ alignSelf: "flex-start" }}
-        onClick={handleOpenModal}
-      >
-        Request Call
-      </Button>
+      {!(callRequests.length === 0 && !isPending && !isError) && (
+        <Box sx={{ alignSelf: "flex-start" }}>{requestCallButton}</Box>
+      )}
 
       {isPending ? (
         <CallsListSkeleton />
       ) : isError ? (
         <CallsErrorState />
       ) : callRequests.length === 0 ? (
-        <CallsEmptyState />
+        <CallsEmptyState action={requestCallButton} />
       ) : (
         <>
           <CallRequestList

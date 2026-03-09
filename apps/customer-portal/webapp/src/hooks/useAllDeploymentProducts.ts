@@ -16,13 +16,14 @@
 
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { useAuthApiClient } from "@context/AuthApiContext";
+import { useAsgardeo } from "@asgardeo/react";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import {
   fetchDeploymentProducts,
   type FetchFn,
 } from "@api/useGetDeploymentsProducts";
 import type { DeploymentProductItem } from "@models/responses";
+import { addApiHeaders } from "@utils/apiUtils";
 
 interface DeploymentForProducts {
   id: string;
@@ -42,15 +43,20 @@ export function useAllDeploymentProducts(
   productsByDeploymentId: Record<string, DeploymentProductItem[]>;
   isLoading: boolean;
 } {
-  const fetchFn: FetchFn = useAuthApiClient();
+  const { getIdToken } = useAsgardeo();
   const deploymentIds =
     projectDeployments?.map((d) => d.id).filter(Boolean) ?? [];
 
   const results = useQueries({
     queries: deploymentIds.map((deploymentId) => ({
       queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
-      queryFn: () => fetchDeploymentProducts(deploymentId, { fetchFn }),
-      enabled: !!deploymentId && !!fetchFn,
+      queryFn: async () => {
+        const token = await getIdToken();
+        const fetchFn: FetchFn = (url, init) =>
+          fetch(url, { ...init, headers: addApiHeaders(token) });
+        return fetchDeploymentProducts(deploymentId, { fetchFn });
+      },
+      enabled: !!deploymentId,
       staleTime: 5 * 60 * 1000,
     })),
   });

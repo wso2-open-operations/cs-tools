@@ -25,10 +25,12 @@ import {
 } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
+import { useGetConversationMessages } from "@api/useGetConversationMessages";
 import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
 import { usePostConversations } from "@api/usePostConversations";
 import { usePostConversationMessages } from "@api/usePostConversationMessages";
 import type { ChatNavState } from "@models/chatNavState";
+import type { SlotState } from "@models/responses";
 import { useAllDeploymentProducts } from "@hooks/useAllDeploymentProducts";
 import {
   DEFAULT_CONVERSATION_REGION,
@@ -42,6 +44,13 @@ import { htmlToPlainText } from "@utils/richTextEditor";
 import ChatHeader from "@components/support/novera-ai-assistant/novera-chat-page/ChatHeader";
 import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageList";
+import ChatSkeleton from "@components/support/novera-ai-assistant/novera-chat-page/ChatSkeleton";
+
+export interface Recommendation {
+  title: string;
+  articleId: string;
+  score: number;
+}
 
 export interface Message {
   id: string;
@@ -51,6 +60,8 @@ export interface Message {
   showCreateCaseAction?: boolean;
   isLoading?: boolean;
   isError?: boolean;
+  slotState?: SlotState;
+  recommendations?: Recommendation[];
 }
 
 /**
@@ -60,7 +71,10 @@ export interface Message {
  */
 export default function NoveraChatPage(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId, conversationId: urlConversationId } = useParams<{
+    projectId: string;
+    conversationId?: string;
+  }>();
   const location = useLocation();
   const navState = location.state as ChatNavState | null;
   const initialUserMessage = navState?.initialUserMessage;
@@ -85,14 +99,23 @@ export default function NoveraChatPage(): JSX.Element {
   );
   const { mutateAsync: classifyCase } = usePostCaseClassifications();
   const { mutateAsync: postConversation } = usePostConversations();
-  const { mutateAsync: postConversationMessages } = usePostConversationMessages();
+  const { mutateAsync: postConversationMessages } =
+    usePostConversationMessages();
   const [conversationId, setConversationId] = useState<string | null>(
-    () => conversationResponse?.conversationId ?? null,
+    () => urlConversationId ?? conversationResponse?.conversationId ?? null,
   );
+
+  const { data: conversationHistory, isLoading: isLoadingHistory } =
+    useGetConversationMessages(urlConversationId || "", { pageSize: 50 });
   const [isCreateCaseLoading, setIsCreateCaseLoading] = useState(false);
   const [isWaitingForClassification, setIsWaitingForClassification] =
     useState(false);
   const [messages, setMessages] = useState<Message[]>(() => {
+    
+    if (urlConversationId) {
+      return [];
+    }
+
     const botWelcome: Message = {
       id: "1",
       text: "Hi! I'm Novera, your AI support assistant. I'm here to help you resolve your issue quickly. Can you describe the problem you're experiencing?",
@@ -109,6 +132,9 @@ export default function NoveraChatPage(): JSX.Element {
           sender: "bot",
           timestamp: new Date(),
           showCreateCaseAction: conversationResponse.actions != null,
+          slotState: conversationResponse.slotState,
+          recommendations:
+            conversationResponse.recommendations?.recommendations,
         },
       ];
       if (userMsg) {
@@ -135,6 +161,46 @@ export default function NoveraChatPage(): JSX.Element {
     return [botWelcome];
   });
 
+  // Load and convert conversation history when resuming
+  useEffect(() => {
+    if (urlConversationId && conversationHistory?.pages) {
+      const allMessages = conversationHistory.pages.flatMap(
+        (page) => page.comments,
+      );
+
+      const convertedMessages: Message[] = allMessages.map((msg, index) => {
+        // Determine if message is from bot (same logic as ConversationDetailsPage)
+        const isBot =
+          msg.type?.toLowerCase() === "bot" ||
+          msg.createdBy?.toLowerCase() === "novera";
+
+        return {
+          id: msg.id || `msg-${index}`,
+          text: msg.content || "",
+          sender: isBot ? "bot" : "user",
+          timestamp: msg.createdOn ? new Date(msg.createdOn) : new Date(),
+          showCreateCaseAction: false,
+        };
+      });
+
+      setMessages(convertedMessages);
+    }
+  }, [urlConversationId, conversationHistory]);
+
+  // Update URL with conversationId from describe-issue flow
+  useEffect(() => {
+    if (
+      !urlConversationId &&
+      conversationResponse?.conversationId &&
+      projectId
+    ) {
+      navigate(
+        `/${projectId}/support/chat/${conversationResponse.conversationId}`,
+        { replace: true },
+      );
+    }
+  }, [urlConversationId, conversationResponse, projectId, navigate]);
+
   const performClassification = useCallback(async () => {
     if (!projectId) {
       navigate("/");
@@ -156,23 +222,30 @@ export default function NoveraChatPage(): JSX.Element {
             tier: DEFAULT_CONVERSATION_TIER,
           });
           navigate(`/${projectId}/support/chat/create-case`, {
-            state: { messages, classificationResponse },
+            state: { messages, classificationResponse, conversationId },
           });
         } catch {
           navigate(`/${projectId}/support/chat/create-case`, {
-            state: { messages },
+            state: { messages, conversationId },
           });
         }
       } else {
         navigate(`/${projectId}/support/chat/create-case`, {
-          state: { messages },
+          state: { messages, conversationId },
         });
       }
     } finally {
       setIsCreateCaseLoading(false);
       setIsWaitingForClassification(false);
     }
-  }, [projectId, navigate, messages, envProducts, classifyCase]);
+  }, [
+    projectId,
+    navigate,
+    messages,
+    envProducts,
+    classifyCase,
+    conversationId,
+  ]);
 
   const handleCreateCase = useCallback(() => {
     setIsCreateCaseLoading(true);
@@ -233,9 +306,9 @@ export default function NoveraChatPage(): JSX.Element {
     ],
   );
 
-  const handleSendMessage = useCallback(async () => {
+  const handleSendMessage = useCallback(async (): Promise<boolean> => {
     const text = htmlToPlainText(inputValueRef.current).trim();
-    if (!text || isSending || !projectId) return;
+    if (!text || isSending || !projectId) return false;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -261,6 +334,12 @@ export default function NoveraChatPage(): JSX.Element {
       const response = await sendToApi(text);
       if (response?.conversationId) {
         setConversationId(response.conversationId);
+        // Update URL with conversationId so it persists on refresh
+        if (!urlConversationId && projectId) {
+          navigate(`/${projectId}/support/chat/${response.conversationId}`, {
+            replace: true,
+          });
+        }
       }
       setMessages((prev) =>
         prev.map((m) =>
@@ -271,10 +350,13 @@ export default function NoveraChatPage(): JSX.Element {
                 isLoading: false,
                 isError: false,
                 showCreateCaseAction: response?.actions != null,
+                slotState: response?.slotState,
+                recommendations: response?.recommendations?.recommendations,
               }
             : m,
         ),
       );
+      return true;
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
@@ -288,10 +370,18 @@ export default function NoveraChatPage(): JSX.Element {
             : m,
         ),
       );
+      return false;
     } finally {
       setIsSending(false);
     }
-  }, [isSending, projectId, sendToApi, setInputValueAndRef]);
+  }, [
+    isSending,
+    projectId,
+    sendToApi,
+    setInputValueAndRef,
+    urlConversationId,
+    navigate,
+  ]);
 
   return (
     <Box
@@ -306,10 +396,12 @@ export default function NoveraChatPage(): JSX.Element {
           display: "flex",
           flexDirection: "column",
           width: "100%",
-          overflow: "hidden",
+          overflow: "visible",
         }}
       >
-        <ChatHeader onBack={handleBack} />
+        <Box sx={{ mt: -3, mx: -3 }}>
+          <ChatHeader onBack={handleBack} />
+        </Box>
 
         {/* Chat window */}
         <Paper
@@ -320,12 +412,16 @@ export default function NoveraChatPage(): JSX.Element {
             overflow: "hidden",
           }}
         >
-          <ChatMessageList
-            messages={messages}
-            messagesEndRef={messagesEndRef}
-            onCreateCase={handleCreateCase}
-            isCreateCaseLoading={isCreateCaseLoading}
-          />
+          {isLoadingHistory && urlConversationId ? (
+            <ChatSkeleton />
+          ) : (
+            <ChatMessageList
+              messages={messages}
+              messagesEndRef={messagesEndRef}
+              onCreateCase={handleCreateCase}
+              isCreateCaseLoading={isCreateCaseLoading}
+            />
+          )}
 
           <Divider />
 
@@ -333,7 +429,7 @@ export default function NoveraChatPage(): JSX.Element {
             onSend={handleSendMessage}
             inputValue={inputValue}
             setInputValue={setInputValueAndRef}
-            isSending={isSending}
+            isSending={isSending || isLoadingHistory}
             resetTrigger={resetTrigger}
           />
         </Paper>

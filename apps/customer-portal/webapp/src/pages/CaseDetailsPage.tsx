@@ -15,11 +15,13 @@
 // under the License.
 
 import { useEffect, useRef, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@api/useGetCaseDetails";
 import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
+import { isSecurityReportAnalysisType } from "@utils/support";
+import { SecurityTab } from "@constants/securityConstants";
 
 /**
  * CaseDetailsPage displays details for a single support case.
@@ -28,6 +30,7 @@ import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
  */
 export default function CaseDetailsPage(): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const { projectId, caseId } = useParams<{
     projectId: string;
     caseId: string;
@@ -71,7 +74,24 @@ export default function CaseDetailsPage(): JSX.Element {
   }, [isError, showError]);
 
   const handleBack = () => {
-    navigate(`/${projectId}/support/cases`);
+    const queryTab = new URLSearchParams(location.search).get("tab");
+    const caseDetailsWithFlag = data as
+      | ({ isSecurityReport?: boolean } & typeof data)
+      | undefined;
+
+    const isSecurityReport =
+      caseDetailsWithFlag?.isSecurityReport === true ||
+      isSecurityReportAnalysisType(data?.type) ||
+      location.pathname.includes("security-report-analysis") ||
+      queryTab === SecurityTab.VULNERABILITIES;
+
+    if (isSecurityReport) {
+      navigate(
+        `/${projectId}/security-center?tab=${SecurityTab.VULNERABILITIES}`,
+      );
+    } else {
+      navigate(`/${projectId}/support/cases`);
+    }
   };
 
   const handleOpenRelatedCase = () => {

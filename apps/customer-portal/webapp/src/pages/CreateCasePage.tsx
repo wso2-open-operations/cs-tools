@@ -26,15 +26,16 @@ import {
   type JSX,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import { useQueryClient } from "@tanstack/react-query";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
 import { useGetDeploymentsProducts } from "@api/useGetDeploymentsProducts";
 import { usePostCase } from "@api/usePostCase";
-import { usePostAttachments } from "@api/usePostAttachments";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import { useLogger } from "@hooks/useLogger";
 import type { CreateCaseRequest } from "@models/requests";
 import { BasicInformationSection } from "@components/support/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseCreationHeader } from "@components/support/case-creation-layout/header/CaseCreationHeader";
@@ -48,16 +49,21 @@ import {
   getBaseDeploymentOptions,
   getBaseProductOptions,
   getDeploymentDisplayLabelForEnvironment,
+  getDeploymentProductDisplayLabel,
   resolveDeploymentMatch,
   resolveIssueTypeKey,
   resolveProductId,
   shouldAddClassificationProductToOptions,
 } from "@utils/caseCreation";
+import { isCreatedCaseSecurityReport } from "@utils/support";
 import {
   CaseSeverity,
   CaseSeverityLevel,
   CaseType,
 } from "@constants/supportConstants";
+import { SecurityTab } from "@constants/securityConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { escapeHtml, htmlToPlainText } from "@utils/richTextEditor";
 import UploadAttachmentModal from "@components/support/case-details/attachments-tab/UploadAttachmentModal";
 
@@ -97,7 +103,6 @@ export interface RelatedCaseState {
   number: string;
   title: string;
   description: string;
-  /** Parent case deployment (development type); shown disabled in form. */
   deploymentId?: string;
   deploymentLabel?: string;
 }
@@ -111,11 +116,19 @@ export default function CreateCasePage(): JSX.Element {
     skipChat?: boolean;
   } | null;
   const relatedCase = locationStateRaw?.relatedCase;
-  const skipChat = !!locationStateRaw?.skipChat;
+
+  // Check if creating a security report analysis case
+  const searchParams = new URLSearchParams(location.search);
+  const caseType = searchParams.get("type");
+  const isSecurityReport = caseType === CaseType.SECURITY_REPORT_ANALYSIS;
+  const skipChat = !!locationStateRaw?.skipChat || isSecurityReport;
   const { showLoader, hideLoader } = useLoader();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
-  const { data: filters, isLoading: isFiltersLoading } = useGetCasesFilters(
+  const isManagedCloudSubscription =
+    projectDetails?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+  const excludeS0 = projectDetails ? !isManagedCloudSubscription : false;
+  const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
   );
   const [title, setTitle] = useState(() => relatedCase?.title ?? "");
@@ -132,7 +145,7 @@ export default function CreateCasePage(): JSX.Element {
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
-  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const { data: projectDeployments, isLoading: isDeploymentsLoading } =
     useGetProjectDeployments(projectId || "");
@@ -169,7 +182,7 @@ export default function CreateCasePage(): JSX.Element {
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
-  const postAttachments = usePostAttachments();
+  const logger = useLogger();
 
   useEffect(() => {
     if (deploymentProductsError) {
@@ -184,6 +197,7 @@ export default function CreateCasePage(): JSX.Element {
 
   const skipChatMode = skipChat;
   const noAiMode = !!relatedCase || skipChatMode;
+  const queryClient = useQueryClient();
 
   const locationState = location.state as {
     messages?: ChatMessageForClassification[];
@@ -198,9 +212,11 @@ export default function CreateCasePage(): JSX.Element {
         environment?: string;
       };
     };
+    conversationId?: string;
   } | null;
 
   const STORAGE_KEY = `case_classification_data_${projectId}`;
+  const CONVERSATION_ID_STORAGE_KEY = `case_conversation_id_${projectId}`;
 
   const [classificationResponse, setClassificationResponse] = useState<
     | {
@@ -224,7 +240,7 @@ export default function CreateCasePage(): JSX.Element {
       const stored = sessionStorage.getItem(STORAGE_KEY);
       return stored ? JSON.parse(stored) : undefined;
     } catch (e) {
-      console.error("Failed to parse stored classification data", e);
+      logger.error("Failed to parse stored classification data", e);
       return undefined;
     }
   });
@@ -237,14 +253,64 @@ export default function CreateCasePage(): JSX.Element {
           JSON.stringify(locationState.classificationResponse),
         );
       } catch (e) {
-        console.error(
+        logger.error(
           "Failed to store classification data in sessionStorage",
           e,
         );
       }
       setClassificationResponse(locationState.classificationResponse);
     }
-  }, [locationState?.classificationResponse, STORAGE_KEY]);
+  }, [locationState?.classificationResponse, STORAGE_KEY, logger]);
+
+  // Persist conversationId to survive page refresh
+  const [conversationId, setConversationId] = useState<string | undefined>(
+    () => {
+      if (locationState?.conversationId) {
+        return locationState.conversationId;
+      }
+      try {
+        const stored = sessionStorage.getItem(CONVERSATION_ID_STORAGE_KEY);
+        return stored || undefined;
+      } catch (e) {
+        logger.error("Failed to retrieve conversationId from sessionStorage", e);
+        return undefined;
+      }
+    },
+  );
+
+  useEffect(() => {
+    if (locationState?.conversationId) {
+      try {
+        sessionStorage.setItem(
+          CONVERSATION_ID_STORAGE_KEY,
+          locationState.conversationId,
+        );
+      } catch (e) {
+        logger.error(
+          "Failed to store conversationId in sessionStorage",
+          e,
+        );
+      }
+      setConversationId(locationState.conversationId);
+    }
+  }, [locationState?.conversationId, CONVERSATION_ID_STORAGE_KEY, logger]);
+
+  // Persist conversationId whenever it changes
+  useEffect(() => {
+    try {
+      if (conversationId) {
+        sessionStorage.setItem(CONVERSATION_ID_STORAGE_KEY, conversationId);
+      } else {
+        sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
+      }
+    } catch (e) {
+      logger.error(
+        "Failed to persist conversationId to sessionStorage",
+        e,
+      );
+    }
+  }, [conversationId, CONVERSATION_ID_STORAGE_KEY, logger]);
+
   const projectDisplay = projectDetails?.name ?? "";
 
   const issueTypesList = (filters?.issueTypes || []) as {
@@ -273,6 +339,52 @@ export default function CreateCasePage(): JSX.Element {
   const handleProductChange = useCallback((value: string) => {
     setProduct(value);
   }, []);
+
+  // Auto-fill title for security reports when deployment and product are selected
+  // This will overwrite any manually entered title
+  useEffect(() => {
+    if (!isSecurityReport || !deployment || !product) return;
+
+    // Get deployment type label
+    const deploymentMatch = resolveDeploymentMatch(
+      deployment,
+      projectDeployments,
+      undefined,
+    );
+    const deploymentId = deploymentMatch?.id;
+    const deploymentObj = projectDeployments?.find(
+      (d) => d.id === deploymentId,
+    );
+    const deploymentLabel =
+      deploymentObj?.name || deploymentObj?.type?.label || deployment;
+
+    // Get product name without version
+    const selectedProduct = allDeploymentProducts.find(
+      (item) =>
+        item.id === product ||
+        getDeploymentProductDisplayLabel(item) === product,
+    );
+    const productName = selectedProduct?.product?.label?.trim() || "";
+
+    // Format today's date as YYYY-MM-DD
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    const dateStr = `${year}-${month}-${day}`;
+
+    // Generate title: "Deployment Type - Product Name - Date"
+    if (productName) {
+      const generatedTitle = `${deploymentLabel} - ${productName} - ${dateStr}`;
+      setTitle(generatedTitle);
+    }
+  }, [
+    isSecurityReport,
+    deployment,
+    product,
+    projectDeployments,
+    allDeploymentProducts,
+  ]);
 
   useEffect(() => {
     if (hasInitializedRef.current) return;
@@ -492,7 +604,20 @@ export default function CreateCasePage(): JSX.Element {
     });
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const fileToBase64Content = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = typeof reader.result === "string" ? reader.result : "";
+        const commaIndex = base64.indexOf(",");
+        resolve(commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64);
+      };
+      reader.onerror = () =>
+        reject(new Error(`Failed to read file: ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!projectId) return;
 
@@ -504,6 +629,11 @@ export default function CreateCasePage(): JSX.Element {
     }
     if (!descriptionPlain) {
       showError("Please enter a description.");
+      return;
+    }
+
+    if (isSecurityReport && attachments.length === 0) {
+      showError("Please attach at least one security report file.");
       return;
     }
 
@@ -523,20 +653,54 @@ export default function CreateCasePage(): JSX.Element {
       return;
     }
 
-    const issueTypeKey = resolveIssueTypeKey(issueType, filters?.issueTypes);
-    if (!issueTypeKey) {
-      showError("Please select an issue type.");
-      return;
+    // Skip issue type and severity validation for security reports
+    let issueTypeKey: number | undefined;
+    let severityKey: number | undefined;
+
+    if (!isSecurityReport) {
+      issueTypeKey = resolveIssueTypeKey(issueType, filters?.issueTypes);
+      if (!issueTypeKey) {
+        showError("Please select an issue type.");
+        return;
+      }
+      const parsedSeverity = parseInt(severity, 10);
+      if (Number.isNaN(parsedSeverity)) {
+        showError("Please select a severity.");
+        return;
+      }
+      severityKey = parsedSeverity;
     }
-    const parsedSeverity = parseInt(severity, 10);
-    if (Number.isNaN(parsedSeverity)) {
-      showError("Please select a severity.");
-      return;
+
+    const encodedAttachments: Array<{ file: string; name: string }> = [];
+    if (attachments.length > 0) {
+      setIsPreparingAttachments(true);
+      try {
+        for (const item of attachments) {
+          const encodedAttachment = await fileToBase64Content(item.file);
+          const attachmentName =
+            attachmentNamesRef.current.get(item.id) || item.file.name;
+          encodedAttachments.push({
+            file: encodedAttachment,
+            name: attachmentName,
+          });
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "Failed to process attachments. Please try again.";
+        showError(message);
+        return;
+      } finally {
+        setIsPreparingAttachments(false);
+      }
     }
-    const severityKey = parsedSeverity;
 
     const payload: CreateCaseRequest = {
-      caseType: CaseType.DEFAULT_CASE,
+      ...(encodedAttachments.length > 0 && { attachments: encodedAttachments }),
+      type: isSecurityReport
+        ? CaseType.SECURITY_REPORT_ANALYSIS
+        : CaseType.DEFAULT_CASE,
       deploymentId: String(deploymentMatch.id),
       description: descriptionPlain,
       issueTypeKey,
@@ -547,75 +711,43 @@ export default function CreateCasePage(): JSX.Element {
       ...(relatedCase?.parentCaseId && {
         parentCaseId: relatedCase.parentCaseId,
       }),
+      ...(conversationId && {
+        conversationId,
+      }),
     };
 
     postCase(payload, {
       onSuccess: async (data) => {
         const caseId = data.id;
+        const createdCase = data as {
+          isSecurityReport?: boolean;
+          reportType?: string;
+          type?: string | { id?: string | null; label?: string | null } | null;
+        };
+        const isCreatedSecurityReport = isCreatedCaseSecurityReport(
+          createdCase,
+          isSecurityReport,
+        );
 
-        if (attachments.length > 0) {
-          setIsUploadingAttachments(true);
-          try {
-            const uploadPromises = attachments.map((item) => {
-              const displayName =
-                attachmentNamesRef.current.get(item.id) || item.file.name;
-              return new Promise<void>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = async () => {
-                  try {
-                    const base64 =
-                      typeof reader.result === "string" ? reader.result : "";
-                    const commaIndex = base64.indexOf(",");
-                    const content =
-                      commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
-
-                    await postAttachments.mutateAsync({
-                      caseId,
-                      body: {
-                        referenceType: "case",
-                        name: displayName,
-                        type: item.file.type || "application/octet-stream",
-                        content,
-                      },
-                    });
-                    resolve();
-                  } catch (err) {
-                    reject(err);
-                  }
-                };
-                reader.onerror = () =>
-                  reject(new Error(`Failed to read file: ${item.file.name}`));
-                reader.readAsDataURL(item.file);
-              });
-            });
-
-            const results = await Promise.allSettled(uploadPromises);
-            const fulfilled = results.filter(
-              (r) => r.status === "fulfilled",
-            ).length;
-            const rejected = results.filter(
-              (r) => r.status === "rejected",
-            ).length;
-
-            if (rejected === 0) {
-              showSuccess("Case created and attachments uploaded successfully");
-            } else if (fulfilled === 0) {
-              showError(
-                "Case created, but all attachment uploads failed. Please try again.",
-              );
-            } else {
-              showError(
-                `Case created, but ${rejected} of ${results.length} attachment(s) failed to upload.`,
-              );
-            }
-          } finally {
-            setIsUploadingAttachments(false);
-          }
+        showSuccess("Case created successfully");
+        
+        // Clean up sessionStorage safely
+        try {
           sessionStorage.removeItem(STORAGE_KEY);
-          navigate(`/${projectId}/support/cases/${caseId}`);
+          sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
+        } catch (e) {
+          logger.error("Failed to cleanup sessionStorage after case creation", e);
+        }
+
+        // Refetch security vulnerabilities if this was a security report
+        if (isCreatedSecurityReport) {
+          await queryClient.invalidateQueries({
+            queryKey: [ApiQueryKeys.PROJECT_CASES, projectId],
+          });
+          navigate(
+            `/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTab.VULNERABILITIES}`,
+          );
         } else {
-          showSuccess("Case created successfully");
-          sessionStorage.removeItem(STORAGE_KEY);
           navigate(`/${projectId}/support/cases/${caseId}`);
         }
       },
@@ -708,6 +840,8 @@ export default function CreateCasePage(): JSX.Element {
             isRelatedCaseMode={noAiMode}
             isTitleDisabled={!!relatedCase}
             relatedCaseNumber={relatedCase?.number ?? ""}
+            isSecurityReport={isSecurityReport}
+            excludeS0={excludeS0}
           />
 
           {/* form actions container */}
@@ -722,20 +856,24 @@ export default function CreateCasePage(): JSX.Element {
                 isProjectLoading ||
                 isFiltersLoading ||
                 isCreatePending ||
-                isUploadingAttachments ||
+                isPreparingAttachments ||
                 !projectId ||
                 !selectedDeploymentId ||
                 deploymentProductsLoading ||
                 deploymentProductsError
               }
             >
-              {isCreatePending || isUploadingAttachments
-                ? isUploadingAttachments
-                  ? "Uploading Attachments..."
-                  : "Creating..."
-                : relatedCase
-                  ? "Create Related Case"
-                  : "Create Support Case"}
+              {isPreparingAttachments
+                ? "Preparing Attachments..."
+                : isCreatePending
+                  ? isSecurityReport
+                    ? "Submitting..."
+                    : "Creating..."
+                  : isSecurityReport
+                    ? "Submit Security Report"
+                    : relatedCase
+                      ? "Create Related Case"
+                      : "Create Support Case"}
             </Button>
           </Box>
         </Box>
@@ -763,13 +901,21 @@ export default function CreateCasePage(): JSX.Element {
       {/* header section */}
       <CaseCreationHeader
         onBack={handleBack}
-        hideAiChip={noAiMode}
+        hideAiChip={noAiMode || isSecurityReport}
         backLabel="Back"
-        title={relatedCase ? "Create Related Case" : undefined}
+        title={
+          isSecurityReport
+            ? "Submit Security Vulnerability Report for Analysis"
+            : relatedCase
+              ? "Create Related Case"
+              : undefined
+        }
         subtitle={
-          skipChatMode || relatedCase
-            ? "Fill in the case details below and submit"
-            : "Please review and edit the auto-populated information before submitting"
+          isSecurityReport
+            ? "Upload your security vulnerability report and provide details for analysis"
+            : skipChatMode || relatedCase
+              ? "Fill in the case details below and submit"
+              : "Please review and edit the auto-populated information before submitting"
         }
       />
 

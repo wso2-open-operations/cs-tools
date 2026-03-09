@@ -16,10 +16,13 @@
 
 import { Box, Typography, Grid } from "@wso2/oxygen-ui";
 import { useParams, useOutletContext } from "react-router";
-import { useState, useEffect, type JSX } from "react";
+import { useState, useEffect, useMemo, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@components/common/tab-bar/TabBar";
-import { PROJECT_DETAILS_TABS } from "@constants/projectDetailsConstants";
+import {
+  PROJECT_DETAILS_TABS,
+  PROJECT_TYPE_LABELS,
+} from "@constants/projectDetailsConstants";
 import ProjectInformationCard from "@components/project-details/project-overview/project-information/ProjectInformationCard";
 import ProjectStatisticsCard from "@components/project-details/project-overview/project-statistics/ProjectStatisticsCard";
 import ContactInfoCard from "@components/project-details/project-overview/contact-info/ContactInfoCard";
@@ -41,6 +44,8 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 export default function ProjectDetails(): JSX.Element {
   const [activeTab, setActiveTab] = useState<string>("overview");
 
+  const { projectId } = useParams<{ projectId: string }>();
+
   const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
@@ -48,8 +53,6 @@ export default function ProjectDetails(): JSX.Element {
   const { sidebarCollapsed } = useOutletContext<{
     sidebarCollapsed: boolean;
   }>() || { sidebarCollapsed: false };
-
-  const { projectId } = useParams<{ projectId: string }>();
 
   const {
     data: project,
@@ -88,6 +91,29 @@ export default function ProjectDetails(): JSX.Element {
     }
   }, [projectError, statsError, logger]);
 
+  const projectTypeLabel = project?.type?.label;
+  const hideDeploymentsAndTimeTracking =
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
+
+  const visibleTabs = useMemo(
+    () =>
+      PROJECT_DETAILS_TABS.filter((tab) => {
+        if (hideDeploymentsAndTimeTracking) {
+          return tab.id !== "deployments" && tab.id !== "time-tracking";
+        }
+        return true;
+      }),
+    [hideDeploymentsAndTimeTracking],
+  );
+
+  useEffect(() => {
+    const tabIds = visibleTabs.map((t) => t.id);
+    if (activeTab && !tabIds.includes(activeTab)) {
+      setActiveTab("overview");
+    }
+  }, [visibleTabs, activeTab]);
+
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
@@ -121,11 +147,16 @@ export default function ProjectDetails(): JSX.Element {
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
-                <ContactInfoCard />
+                <ContactInfoCard
+                  project={project}
+                  isLoading={(isDetailsLoading || !project) && !projectError}
+                  isError={!!projectError}
+                />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
                 <RecentActivityCard
                   activity={stats?.recentActivity}
+                  projectTypeLabel={projectTypeLabel}
                   isLoading={(isDetailsLoading || !stats) && !statsError}
                   isError={!!statsError}
                 />
@@ -150,7 +181,7 @@ export default function ProjectDetails(): JSX.Element {
     <>
       {/* project page tabs */}
       <TabBar
-        tabs={PROJECT_DETAILS_TABS}
+        tabs={visibleTabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />

@@ -38,8 +38,7 @@ public enum ReferenceType {
 
 # Valid comment type values.
 public enum CommentType {
-    COMMENTS = "comments",
-    WORK_NOTE = "work_note"
+    COMMENTS = "comments"
 }
 
 # Valid conversation sort field values.
@@ -54,4 +53,9 @@ public enum CaseType {
     SERVICE_REQUEST = "service_request",
     SECURITY_REPORT_ANALYSIS = "security_report_analysis",
     ANNOUNCEMENT = "announcement"
+}
+
+# Time card state enum
+public enum TimeCardState {
+    APPROVED = "Approved"
 }

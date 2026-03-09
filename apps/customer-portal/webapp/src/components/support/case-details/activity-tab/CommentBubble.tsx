@@ -26,8 +26,11 @@ import { useMemo, useState } from "react";
 import type { CaseComment } from "@models/responses";
 import {
   getInitials,
+  hasSingleCodeWrapper,
   stripCodeWrapper,
+  stripAllCodeBlocks,
   convertCodeTagsToHtml,
+  trimLeadingBr,
   stripCustomerCommentAddedLabel,
   replaceInlineImageSources,
   formatCommentDate,
@@ -63,13 +66,15 @@ export default function CommentBubble({
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const rawContent = comment.content ?? "";
-  const trimmed = rawContent.trim();
-  const isFullCodeWrap =
-    trimmed.startsWith("[code]") && trimmed.endsWith("[/code]");
+  const isFullCodeWrap = hasSingleCodeWrapper(rawContent);
+  const codeBlockCount = rawContent.match(/\[code\]/gi)?.length ?? 0;
   const afterCode = isFullCodeWrap
     ? stripCodeWrapper(rawContent)
-    : convertCodeTagsToHtml(rawContent);
-  const withoutLabel = stripCustomerCommentAddedLabel(afterCode);
+    : codeBlockCount > 1
+      ? stripAllCodeBlocks(rawContent)
+      : convertCodeTagsToHtml(rawContent);
+  const trimmedBr = trimLeadingBr(afterCode);
+  const withoutLabel = stripCustomerCommentAddedLabel(trimmedBr);
   const withImages = replaceInlineImageSources(
     withoutLabel,
     comment.inlineAttachments,

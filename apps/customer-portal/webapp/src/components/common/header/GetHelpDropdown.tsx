@@ -79,18 +79,19 @@ export default function GetHelpDropdown(): JSX.Element {
   const handleServiceRequest = () => {
     handleClose();
     if (projectId) {
-      navigate(`/${projectId}/support/chat/create-case`, {
-        state: { caseType: "Service Request" },
-      });
+      navigate(`/${projectId}/support/service-requests/create`);
     }
   };
 
   const handleSecurityReport = () => {
     handleClose();
     if (projectId) {
-      navigate(`/${projectId}/support/chat/create-case`, {
-        state: { caseType: "Security Report Analysis" },
-      });
+      navigate(
+        `/${projectId}/support/chat/create-case?type=security_report_analysis`,
+        {
+          state: { skipChat: true },
+        },
+      );
     }
   };
 
@@ -158,7 +159,13 @@ export default function GetHelpDropdown(): JSX.Element {
       >
         {menuItems.map((item, index) => (
           <Box key={item.id}>
-            {index > 0 && <Divider variant="middle" component="li" sx={{ listStyle: "none" }} />}
+            {index > 0 && (
+              <Divider
+                variant="middle"
+                component="li"
+                sx={{ listStyle: "none" }}
+              />
+            )}
             <MenuItem
               onClick={item.onClick}
               sx={{
@@ -169,14 +176,28 @@ export default function GetHelpDropdown(): JSX.Element {
                 gap: 1.5,
               }}
             >
-              <Box component="span" sx={{ display: "flex", flexShrink: 0, alignItems: "center" }}>
+              <Box
+                component="span"
+                sx={{ display: "flex", flexShrink: 0, alignItems: "center" }}
+              >
                 {item.icon}
               </Box>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.25,
+                  minWidth: 0,
+                }}
+              >
                 <Typography fontWeight={500} variant="body2" component="div">
                   {item.label}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" component="div">
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  component="div"
+                >
                   {item.description}
                 </Typography>
               </Box>

@@ -29,7 +29,6 @@ import {
   TablePagination,
   alpha,
 } from "@wso2/oxygen-ui";
-import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
 import type { CaseSearchResponse, CaseListItem } from "@models/responses";
 import {
@@ -55,6 +54,8 @@ interface CasesListProps {
   onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
   /** When provided, case title is clickable and navigates to case details. */
   onCaseClick?: (caseItem: CaseListItem) => void;
+  /** When false, hide pagination controls (e.g. when showing all). */
+  showPagination?: boolean;
 }
 
 const CasesList = ({
@@ -66,6 +67,7 @@ const CasesList = ({
   onPageChange,
   onRowsPerPageChange,
   onCaseClick,
+  showPagination = true,
 }: CasesListProps): JSX.Element => {
   return (
     <>
@@ -160,7 +162,6 @@ const CasesList = ({
                         }}
                       >
                         {row.title || "--"}
-                        <ExternalLink size={12} style={{ opacity: 0.5 }} />
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         ID: {row.number}
@@ -269,15 +270,17 @@ const CasesList = ({
           </TableBody>
         </Table>
       </TableContainer>
-      <TablePagination
-        component="div"
-        count={data?.totalRecords || 0}
-        page={page}
-        onPageChange={onPageChange}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={onRowsPerPageChange}
-        rowsPerPageOptions={[5, 10, 25, 50]}
-      />
+      {showPagination && (
+        <TablePagination
+          component="div"
+          count={data?.totalRecords || 0}
+          page={page}
+          onPageChange={onPageChange}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={onRowsPerPageChange}
+          rowsPerPageOptions={[5, 10, 25, 50]}
+        />
+      )}
     </>
   );
 };

@@ -2,7 +2,8 @@
 //
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
+// in compliance with the License.
+// You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,20 +14,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, useCallback, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useCallback, useMemo, type JSX } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
-import { Siren, ShieldAlert, Package } from "@wso2/oxygen-ui-icons-react";
-import SecurityStats from "@components/security/SecurityStats";
+import { Siren, Package } from "@wso2/oxygen-ui-icons-react";
+//import SecurityStats from "@components/security/SecurityStats";
 import TabBar from "@components/common/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@components/security/ProductVulnerabilitiesTable";
-import SecurityAdvisoriesTable from "@components/security/SecurityAdvisoriesTable";
-import ComponentAnalysis from "@components/security/ComponentAnalysis";
+import SecurityReportAnalysis from "@/components/security/SecurityReportAnalysis";
+import {
+  SecurityTab,
+  type SecurityTabType,
+} from "@constants/securityConstants";
 
 const SecurityPage = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState("vulnerabilities");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const tabParam = searchParams.get("tab");
+  const isValidTab = Object.values(SecurityTab).includes(
+    tabParam as SecurityTabType,
+  );
+  const activeTab = isValidTab
+    ? (tabParam as SecurityTabType)
+    : SecurityTab.COMPONENTS;
+
+  const handleTabChange = useCallback(
+    (tabId: string) => {
+      const nextParams = new URLSearchParams(window.location.search);
+      nextParams.set("tab", tabId);
+      setSearchParams(nextParams, { replace: true });
+    },
+    [setSearchParams],
+  );
 
   const handleVulnerabilityClick = useCallback(
     (vulnerability: { id: string }) => {
@@ -34,53 +55,59 @@ const SecurityPage = (): JSX.Element => {
     },
     [navigate, projectId],
   );
-  const [vulnerabilityTotalRecords, setVulnerabilityTotalRecords] = useState<
-    number | undefined
-  >(undefined);
-  const [vulnerabilitiesError, setVulnerabilitiesError] = useState(false);
 
-  const tabs = [
-    {
-      id: "vulnerabilities",
-      label: "Product Vulnerabilities",
-      icon: Siren,
-    },
-    {
-      id: "advisories",
-      label: "Security Advisories",
-      icon: ShieldAlert,
-    },
-    {
-      id: "components",
-      label: "Component Analysis",
-      icon: Package,
-    },
-  ];
+  // 3. Define tabs using Enum values
+  const tabs = useMemo(
+    () => [
+      {
+        id: SecurityTab.COMPONENTS,
+        label: "Component Analysis",
+        icon: Package,
+      },
+      {
+        id: SecurityTab.VULNERABILITIES,
+        label: "Security Report Analysis",
+        icon: Siren,
+      },
+    ],
+    [],
+  );
+
+  // 4. Content Switcher function
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case SecurityTab.COMPONENTS:
+        return (
+          <ProductVulnerabilitiesTable
+            onVulnerabilityClick={handleVulnerabilityClick}
+          />
+        );
+      case SecurityTab.VULNERABILITIES:
+        return <SecurityReportAnalysis />;
+      default:
+        // Optional: Default to first tab if URL is messy
+        return (
+          <ProductVulnerabilitiesTable
+            onVulnerabilityClick={handleVulnerabilityClick}
+          />
+        );
+    }
+  };
 
   return (
     <Box>
-      <SecurityStats
-        totalRecords={vulnerabilityTotalRecords}
-        isError={vulnerabilitiesError}
-      />
+      {/* <SecurityStats /> */}
 
       <Box>
         <TabBar
           tabs={tabs}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={handleTabChange}
         />
 
         <Box>
-          {activeTab === "vulnerabilities" && (
-            <ProductVulnerabilitiesTable
-              onTotalRecordsChange={setVulnerabilityTotalRecords}
-              onError={setVulnerabilitiesError}
-              onVulnerabilityClick={handleVulnerabilityClick}
-            />
-          )}
-          {activeTab === "advisories" && <SecurityAdvisoriesTable />}
-          {activeTab === "components" && <ComponentAnalysis />}
+          {/* Using the switch case result here */}
+          {renderTabContent()}
         </Box>
       </Box>
     </Box>

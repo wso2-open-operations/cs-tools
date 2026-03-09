@@ -17,11 +17,11 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EditDeploymentModal from "@components/project-details/deployments/EditDeploymentModal";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchDeployment } from "@api/usePatchDeployment";
 import type { ProjectDeploymentItem } from "@models/responses";
 
-vi.mock("@api/useGetCasesFilters");
+vi.mock("@api/useGetProjectFilters");
 vi.mock("@api/usePatchDeployment");
 
 const mockDeployment: ProjectDeploymentItem = {
@@ -56,11 +56,11 @@ const defaultProps = {
 describe("EditDeploymentModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: mockFiltersData,
       isLoading: false,
       isError: false,
-    } as ReturnType<typeof useGetCasesFilters>);
+    } as ReturnType<typeof useGetProjectFilters>);
     vi.mocked(usePatchDeployment).mockReturnValue({
       mutateAsync: vi.fn().mockResolvedValue(undefined),
       isPending: false,

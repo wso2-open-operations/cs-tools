@@ -14,17 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Typography } from "@wso2/oxygen-ui";
-import { useEffect, useMemo, type JSX } from "react";
+import { Box, TextField, Typography } from "@wso2/oxygen-ui";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
-import useGetProjects from "@api/useGetProjects";
+import useInfiniteProjects, {
+  flattenProjectPages,
+  getTotalRecords,
+} from "@api/useGetProjects";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import ProjectCard from "@components/project-hub/project-card/ProjectCard";
 import ProjectCardSkeleton from "@components/project-hub/project-card/ProjectCardSkeleton";
-import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
+import { FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
+import SearchNoResultsIcon from "@components/common/empty-state/SearchNoResultsIcon";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
 
 /**
@@ -37,16 +42,46 @@ export default function ProjectHub(): JSX.Element {
   const navigate = useNavigate();
   const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Use debounce hook
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
+
+  // Fetch projects with infinite query
   const {
-    data: projectsResponse,
+    data,
     isLoading,
     isError,
-  } = useGetProjects({}, true);
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteProjects({
+    searchQuery: debouncedSearchQuery || undefined,
+    pageSize: 20,
+  });
 
-  const projects = useMemo(
-    () => projectsResponse?.projects || [],
-    [projectsResponse?.projects],
-  );
+  const projects = useMemo(() => flattenProjectPages(data), [data]);
+  const totalRecords = getTotalRecords(data);
+
+  // Auto-fetch all pages when searching to show all results
+  useEffect(() => {
+    if (
+      debouncedSearchQuery &&
+      hasNextPage &&
+      !isFetchingNextPage &&
+      !isLoading &&
+      !isError
+    ) {
+      fetchNextPage();
+    }
+  }, [
+    debouncedSearchQuery,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+    fetchNextPage,
+  ]);
 
   useEffect(() => {
     if (isLoading || isAuthLoading) {
@@ -57,10 +92,16 @@ export default function ProjectHub(): JSX.Element {
 
   // Navigate to dashboard if there is only one project
   useEffect(() => {
-    if (!isLoading && !isAuthLoading && !isError && projects.length === 1) {
+    if (
+      !isLoading &&
+      !isAuthLoading &&
+      !isError &&
+      projects.length === 1 &&
+      !searchQuery
+    ) {
       navigate(`/${projects[0].id}/dashboard`, { replace: true });
     }
-  }, [projects, isLoading, isAuthLoading, isError, navigate]);
+  }, [projects, isLoading, isAuthLoading, isError, navigate, searchQuery]);
 
   useEffect(() => {
     if (isError) {
@@ -128,13 +169,19 @@ export default function ProjectHub(): JSX.Element {
           <ErrorStateIcon />
           <Typography variant="h4">Something Went Wrong</Typography>
           <Typography variant="subtitle2" color="text.secondary">
-            We couldn&apos;t load the data right now. Please try again or refresh
-            the page.
+            We couldn&apos;t load the data right now. Please try again or
+            refresh the page.
           </Typography>
         </Box>
       );
     }
 
+    // If totalRecords > 4 and no search query, don't show anything (search bar is above)
+    if (totalRecords > 4 && !searchQuery) {
+      return null;
+    }
+
+    // If no projects found (either from search or initially)
     if (projects.length === 0) {
       return (
         <Box
@@ -147,15 +194,24 @@ export default function ProjectHub(): JSX.Element {
             py: 10,
           }}
         >
-          <EmptyIcon />
-          <Typography variant="h4">No Projects Yet</Typography>
-          <Typography variant="subtitle2" color="text.secondary">
-            Projects will appear here once they are created or assigned to you
+          {searchQuery ? (
+            <SearchNoResultsIcon style={{ width: 200, height: "auto" }} />
+          ) : (
+            <EmptyIcon />
+          )}
+          <Typography variant={searchQuery ? "subtitle2" : "h4"}>
+            {searchQuery ? "No Projects Found" : "No Projects Yet"}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {searchQuery
+              ? "Try adjusting your search query"
+              : "Projects will appear here once they are created or assigned to you"}
           </Typography>
         </Box>
       );
     }
 
+    // Show project cards (when totalRecords <= 2 or when searching)
     return (
       <Box
         sx={{
@@ -200,6 +256,25 @@ export default function ProjectHub(): JSX.Element {
     );
   };
 
+  // Determine whether to show the search bar
+  const showSearchBar = totalRecords > 4 || searchQuery;
+  const showOnlySearchBar =
+    totalRecords > 4 &&
+    !searchQuery &&
+    !isLoading &&
+    !isAuthLoading &&
+    !isError;
+
+  // Center content when displaying projects (not search-only view) or loading
+  const shouldCenterContent =
+    showOnlySearchBar ||
+    isLoading ||
+    isAuthLoading ||
+    (!isLoading &&
+      !isAuthLoading &&
+      projects.length > 0 &&
+      projects.length <= 3);
+
   return (
     <Box
       sx={{
@@ -215,13 +290,21 @@ export default function ProjectHub(): JSX.Element {
           display: "flex",
           flexDirection: "column",
           flex: 1,
-          justifyContent: "center",
+          justifyContent: shouldCenterContent ? "center" : "flex-start",
+          pt: 0,
         }}
       >
-        {!(isError || (!isLoading && !isAuthLoading && projects.length === 0)) && (
+        {!(
+          isError ||
+          (!isLoading &&
+            !isAuthLoading &&
+            projects.length === 0 &&
+            !searchQuery)
+        ) && (
           <Box
             sx={{
-              mb: 3,
+              mb: showOnlySearchBar ? 0 : 3,
+              mt: showOnlySearchBar ? -15 : 3,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -238,17 +321,52 @@ export default function ProjectHub(): JSX.Element {
               }}
             >
               <FolderOpen size={28} />
-              <Typography variant="h4">Select Your Project</Typography>
+              <Typography variant="h4">
+                {totalRecords > 4 && !searchQuery
+                  ? `You have ${totalRecords} projects`
+                  : "Select Your Project"}
+              </Typography>
             </Box>
 
             {/* project hub subtitle */}
-            <Typography variant="subtitle2" color="text.secondary">
-              Choose a project to access your support cases, chat history, and
-              dashboard
+            <Typography
+              variant="subtitle2"
+              color="text.secondary"
+              sx={{ maxWidth: 600 }}
+            >
+              {totalRecords > 4 && !searchQuery
+                ? "Please use the search bar below to find your project"
+                : "Choose a project to access your support cases, chat history, and dashboard"}
             </Typography>
+
+            {/* Search bar - show when totalRecords > 4 */}
+            {showSearchBar && (
+              <Box
+                sx={{
+                  mt: 2,
+                  width: "100%",
+                  maxWidth: 500,
+                }}
+              >
+                <TextField
+                  fullWidth
+                  placeholder="Search projects..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <Search size={20} style={{ marginRight: 8 }} />
+                    ),
+                  }}
+                  size="small"
+                />
+              </Box>
+            )}
           </Box>
         )}
-        <Box sx={{ width: "100%" }}>{renderContent()}</Box>
+        {!showOnlySearchBar && (
+          <Box sx={{ width: "100%" }}>{renderContent()}</Box>
+        )}
       </Box>
     </Box>
   );

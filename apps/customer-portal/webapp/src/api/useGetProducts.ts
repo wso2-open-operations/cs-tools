@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProductItem } from "@models/responses";
 
 function normalizeProducts(raw: unknown): ProductItem[] {
@@ -44,7 +44,7 @@ export function useGetProducts(params?: {
   const { offset = 0, limit = 10 } = params ?? {};
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProductItem[], Error>({
     queryKey: [ApiQueryKeys.PRODUCTS, offset, limit],
@@ -61,7 +61,9 @@ export function useGetProducts(params?: {
         searchParams.set("offset", String(offset));
         searchParams.set("limit", String(limit));
         const requestUrl = `${baseUrl}/products?${searchParams.toString()}`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(`[useGetProducts] Response status: ${response.status}`);
 

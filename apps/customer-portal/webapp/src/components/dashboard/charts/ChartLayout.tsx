@@ -52,6 +52,7 @@ interface ChartLayoutProps {
   isErrorOutstanding?: boolean;
   isErrorActiveCases?: boolean;
   isErrorTrend?: boolean;
+  excludeS0?: boolean;
 }
 
 /**
@@ -73,6 +74,7 @@ const ChartLayout = ({
   isErrorOutstanding,
   isErrorActiveCases,
   isErrorTrend,
+  excludeS0 = false,
 }: ChartLayoutProps): JSX.Element => {
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -82,6 +84,7 @@ const ChartLayout = ({
           data={outstandingCases}
           isLoading={isLoading}
           isError={isErrorOutstanding}
+          excludeS0={excludeS0}
         />
       </Grid>
 
@@ -100,6 +103,7 @@ const ChartLayout = ({
           data={casesTrend}
           isLoading={isLoading}
           isError={isErrorTrend}
+          excludeS0={excludeS0}
         />
       </Grid>
     </Grid>

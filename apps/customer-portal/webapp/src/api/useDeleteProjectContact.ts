@@ -20,9 +20,9 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 
 /**
  * Hook to delete a project contact (DELETE /projects/:projectId/contacts/:email).
@@ -36,7 +36,7 @@ export function useDeleteProjectContact(
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, string>({
     mutationFn: async (contactEmail): Promise<void> => {
@@ -54,7 +54,7 @@ export function useDeleteProjectContact(
 
         const encodedEmail = encodeURIComponent(contactEmail);
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts/${encodedEmail}`;
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "DELETE",
         });
 

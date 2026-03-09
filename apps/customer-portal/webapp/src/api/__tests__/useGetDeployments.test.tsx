@@ -57,10 +57,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
-
 describe("useGetDeployments", () => {
   let queryClient: QueryClient;
 
@@ -74,7 +70,11 @@ describe("useGetDeployments", () => {
       json: () => Promise.resolve(mockDeploymentsResponse),
       status: 200,
     } as Response);
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });

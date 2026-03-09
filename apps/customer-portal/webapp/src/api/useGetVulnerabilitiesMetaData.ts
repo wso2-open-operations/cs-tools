@@ -15,9 +15,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { VulnerabilitiesMetaResponse } from "@models/responses";
 
 /**
@@ -31,7 +31,7 @@ export function useGetVulnerabilitiesMetaData(): UseQueryResult<
 > {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<VulnerabilitiesMetaResponse, Error>({
     queryKey: [ApiQueryKeys.PRODUCT_VULNERABILITIES_META],
@@ -40,13 +40,13 @@ export function useGetVulnerabilitiesMetaData(): UseQueryResult<
 
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
       if (!baseUrl) {
-        throw new Error(
-          "CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured",
-        );
+        throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
       }
 
       const requestUrl = `${baseUrl}/products/vulnerabilities/meta`;
-      const response = await fetchFn(requestUrl, { method: "GET" });
+      const response = await authFetch(requestUrl, {
+        method: "GET",
+      });
 
       if (!response.ok) {
         throw new Error(

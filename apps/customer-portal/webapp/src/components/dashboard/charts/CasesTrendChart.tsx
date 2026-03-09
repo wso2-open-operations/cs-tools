@@ -36,6 +36,7 @@ interface CasesTrendChartProps {
   }>;
   isLoading?: boolean;
   isError?: boolean;
+  excludeS0?: boolean;
 }
 
 /**
@@ -47,8 +48,12 @@ export const CasesTrendChart = ({
   data,
   isLoading,
   isError,
+  excludeS0 = false,
 }: CasesTrendChartProps): JSX.Element => {
   const chartData = isError ? [] : (data ?? []);
+  const trendChartItems = excludeS0
+    ? CASES_TREND_CHART_DATA.filter((item) => item.key !== "catastrophic")
+    : CASES_TREND_CHART_DATA;
 
   return (
     <Card sx={{ p: 2, height: "100%" }}>
@@ -85,6 +90,7 @@ export const CasesTrendChart = ({
               height: "100%",
               opacity: isError ? 0.3 : 1,
               filter: isError ? "grayscale(1)" : "none",
+              "& *:focus": { outline: "none" },
             }}
           >
             <ResponsiveContainer width="100%" height="100%">
@@ -98,7 +104,7 @@ export const CasesTrendChart = ({
                 legend={{ show: false }}
                 margin={{ top: 10, right: 0, left: -20, bottom: 0 }}
               >
-                {CASES_TREND_CHART_DATA.map((item) => (
+                {trendChartItems.map((item) => (
                   <Bar
                     key={item.key}
                     dataKey={item.key}
@@ -122,13 +128,13 @@ export const CasesTrendChart = ({
             mt: 2,
           }}
         >
-          {CASES_TREND_CHART_DATA.map((_, i) => (
+          {trendChartItems.map((_, i) => (
             <Skeleton key={i} variant="rounded" width={60} height={20} />
           ))}
         </Box>
       ) : (
         <ChartLegend
-          data={CASES_TREND_CHART_DATA.map((item) => ({
+          data={trendChartItems.map((item) => ({
             name: item.name,
             value: 0,
             color: item.color,

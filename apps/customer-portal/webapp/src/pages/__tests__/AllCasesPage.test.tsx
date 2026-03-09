@@ -65,7 +65,7 @@ const mockCases = [
 vi.mock("@api/useGetProjectCasesStats", () => ({
   useGetProjectCasesStats: vi.fn(),
 }));
-vi.mock("@api/useGetCasesFilters", () => ({
+vi.mock("@api/useGetProjectFilters", () => ({
   default: vi.fn(),
 }));
 vi.mock("@api/useGetProjectCases", () => ({
@@ -73,7 +73,7 @@ vi.mock("@api/useGetProjectCases", () => ({
 }));
 
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 
 // Mock Child Components to test props passing and interactions
@@ -141,7 +141,7 @@ describe("AllCasesPage", () => {
       isFetching: false,
       isError: false,
     });
-    (useGetCasesFilters as any).mockReturnValue({
+    (useGetProjectFilters as any).mockReturnValue({
       data: mockCaseMetadata,
       isFetching: false,
     });

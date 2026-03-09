@@ -14,13 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  useMutation,
-  type UseMutationResult,
-} from "@tanstack/react-query";
+import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ValidateContactRequest } from "@models/requests";
 import type { ValidateContactResponse } from "@models/responses";
 
@@ -38,7 +35,7 @@ export function useValidateProjectContact(
 ): UseMutationResult<ValidateContactResponse, Error, ValidateContactRequest> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<ValidateContactResponse, Error, ValidateContactRequest>({
     mutationFn: async (body): Promise<ValidateContactResponse> => {
@@ -55,9 +52,9 @@ export function useValidateProjectContact(
         }
 
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts/validate`;
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
         });
 

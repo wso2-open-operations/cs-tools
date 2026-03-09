@@ -20,9 +20,9 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { PatchCallRequest } from "@models/requests";
 import type { CallRequestResponse } from "@models/responses";
 
@@ -44,7 +44,7 @@ export function usePatchCallRequest(
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<
     CallRequestResponse,
@@ -76,9 +76,9 @@ export function usePatchCallRequest(
 
         const requestUrl = `${baseUrl}/cases/${caseId}/call-requests/${callRequestId}`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
         });
 

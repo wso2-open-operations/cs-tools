@@ -18,9 +18,9 @@ import { Box, Button, Pagination, Stack, Typography } from "@wso2/oxygen-ui";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import {
-  useInfiniteCaseAttachments,
+  useGetCaseAttachments,
   flattenCaseAttachments,
-} from "@api/useInfiniteCaseAttachments";
+} from "@api/useGetCaseAttachments";
 import type { CaseAttachment } from "@models/responses";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
@@ -31,6 +31,7 @@ const ITEMS_PER_PAGE = 10;
 
 export interface CaseDetailsAttachmentsPanelProps {
   caseId: string;
+  isCaseClosed?: boolean;
 }
 
 /**
@@ -42,6 +43,7 @@ export interface CaseDetailsAttachmentsPanelProps {
  */
 export default function CaseDetailsAttachmentsPanel({
   caseId,
+  isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -54,7 +56,7 @@ export default function CaseDetailsAttachmentsPanel({
     hasNextPage,
     fetchNextPage,
     isFetchNextPageError,
-  } = useInfiniteCaseAttachments(caseId);
+  } = useGetCaseAttachments(caseId);
 
   const allAttachments = useMemo(() => flattenCaseAttachments(data), [data]);
 
@@ -116,18 +118,24 @@ export default function CaseDetailsAttachmentsPanel({
     );
   }
 
+  const uploadButton = (
+    <Button
+      variant="contained"
+      color="primary"
+      startIcon={<Paperclip size={16} aria-hidden />}
+      onClick={() => setUploadOpen(true)}
+      disabled={isCaseClosed}
+    >
+      Upload Attachment
+    </Button>
+  );
+
   return (
     <>
       <Stack spacing={3}>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<Paperclip size={16} aria-hidden />}
-          sx={{ alignSelf: "flex-start" }}
-          onClick={() => setUploadOpen(true)}
-        >
-          Upload Attachment
-        </Button>
+        {!(allAttachments.length === 0 && !isLoading && !isError) && (
+          <Box sx={{ alignSelf: "flex-start" }}>{uploadButton}</Box>
+        )}
 
         {isLoading ? (
           <AttachmentsListSkeleton />
@@ -155,6 +163,9 @@ export default function CaseDetailsAttachmentsPanel({
             <Typography variant="body2" color="text.secondary">
               No attachments found.
             </Typography>
+            <Box sx={{ display: "flex", justifyContent: "center", mt: 1 }}>
+              {uploadButton}
+            </Box>
           </Stack>
         ) : (
           <Stack spacing={2}>

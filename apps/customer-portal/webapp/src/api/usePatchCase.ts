@@ -20,9 +20,9 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { PatchCaseRequest } from "@models/requests";
 
 /** Minimal response from PATCH /cases/:caseId. */
@@ -48,7 +48,7 @@ export function usePatchCase(
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<PatchCaseResponse, Error, PatchCaseRequest>({
     mutationFn: async (body: PatchCaseRequest): Promise<PatchCaseResponse> => {
@@ -63,9 +63,9 @@ export function usePatchCase(
         throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
       }
 
-      const response = await fetchFn(`${baseUrl}/cases/${caseId}`, {
+      const response = await authFetch(`${baseUrl}/cases/${caseId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+
         body: JSON.stringify(body),
       });
 

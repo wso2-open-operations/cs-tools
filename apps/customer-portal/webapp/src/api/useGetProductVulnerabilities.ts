@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProductVulnerability } from "@models/responses";
 
 /**
@@ -32,7 +32,7 @@ export function useGetProductVulnerabilities(
 ): UseQueryResult<ProductVulnerability, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProductVulnerability, Error>({
     queryKey: [ApiQueryKeys.PRODUCT_VULNERABILITY, vulnerabilityId],
@@ -44,13 +44,13 @@ export function useGetProductVulnerabilities(
       try {
         const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
         if (!baseUrl) {
-          throw new Error(
-            "CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured",
-          );
+          throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
         }
 
         const requestUrl = `${baseUrl}/products/vulnerabilities/${encodeURIComponent(vulnerabilityId)}`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetProductVulnerabilities] Response status: ${response.status}`,
@@ -70,8 +70,7 @@ export function useGetProductVulnerabilities(
         throw error;
       }
     },
-    enabled:
-      !!vulnerabilityId && isSignedIn && !isAuthLoading,
+    enabled: !!vulnerabilityId && isSignedIn && !isAuthLoading,
     staleTime: 5 * 60 * 1000,
   });
 }

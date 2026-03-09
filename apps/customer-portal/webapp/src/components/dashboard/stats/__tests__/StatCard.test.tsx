@@ -116,7 +116,7 @@ describe("StatCard", () => {
 
     expect(screen.getByText("12%")).toBeInTheDocument();
     expect(screen.getByTestId("icon-trending-up")).toBeInTheDocument();
-    expect(screen.getByText("vs last month")).toBeInTheDocument();
+    expect(screen.getByText("vs Previous 30 Days")).toBeInTheDocument();
   });
 
   it("should display 'N/A' when value is undefined", () => {
@@ -133,6 +133,6 @@ describe("StatCard", () => {
     render(<StatCard {...defaultProps} trend={trend} showTrend={false} />);
 
     expect(screen.queryByText("12%")).not.toBeInTheDocument();
-    expect(screen.queryByText("vs last month")).not.toBeInTheDocument();
+    expect(screen.queryByText("vs Previous 30 Days")).not.toBeInTheDocument();
   });
 });

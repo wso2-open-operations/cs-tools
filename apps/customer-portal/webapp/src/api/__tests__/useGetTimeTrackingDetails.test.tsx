@@ -20,34 +20,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import useGetTimeTrackingDetails from "@api/useGetTimeTrackingDetails";
 import type { ReactNode } from "react";
 
-const mockTimeTrackingDetailsResponse = {
-  timeLogs: [
-    {
-      id: "1",
-      badges: [{ text: "Case #123", type: "CASE" }],
-      description: "Working on case #123",
-      user: "John Doe",
-      role: "Software Engineer",
-      date: "2026-02-18",
-      hours: 2,
-    },
-  ],
-};
-
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isSignedIn: true,
     isLoading: false,
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockTimeTrackingDetailsResponse),
-    }),
 }));
 
 vi.mock("@hooks/useLogger", () => ({

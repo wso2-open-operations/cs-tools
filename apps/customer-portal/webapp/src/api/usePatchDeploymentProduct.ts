@@ -20,8 +20,8 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchDeploymentProductRequest } from "@models/requests";
 
@@ -45,7 +45,7 @@ export function usePatchDeploymentProduct(): UseMutationResult<
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, PatchDeploymentProductVariables>({
     mutationFn: async ({
@@ -73,9 +73,9 @@ export function usePatchDeploymentProduct(): UseMutationResult<
         }
 
         const requestUrl = `${baseUrl}/deployments/${deploymentId}/products/${productId}`;
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
         });
 

@@ -20,35 +20,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useGetProjectStat } from "@api/useGetProjectStat";
 import type { ReactNode } from "react";
 
-const mockProjectStatResponse = {
-  projectStats: { slaStatus: "Good", openCases: 5, activeChats: 2 },
-  recentActivity: [],
-};
-
-const mockAuthFetch = vi.fn().mockImplementation((url: string) => {
-  if (url.includes("invalid-id")) {
-    return Promise.resolve({
-      ok: false,
-      status: 404,
-      statusText: "Project stats not found for ID: invalid-id",
-    } as Response);
-  }
-  return Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve(mockProjectStatResponse),
-  } as Response);
-});
-
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isSignedIn: true,
     isLoading: false,
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
 }));
 
 vi.mock("@/hooks/useLogger", () => ({
@@ -76,7 +53,11 @@ const createWrapper = () => {
 describe("useGetProjectStat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });

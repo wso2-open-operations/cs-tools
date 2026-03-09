@@ -14,11 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Helper function to check if user has roles.
+# Helper function to user has roles.
 #
 # + requiredRoles - Required Role list
 # + userRoles - Roles list, The user has
 # + return - Allow or not
-# TODO: Use this function after roles and groups are finalized.
-public isolated function checkRoles(string[] requiredRoles, readonly & string[] userRoles) returns boolean =>
-    requiredRoles.every(reqRole => userRoles.indexOf(reqRole) !is ());
+public isolated function checkRoles(string[] requiredRoles, string[] userRoles) returns boolean {
+    if userRoles.length() == 0 && requiredRoles.length() > 0 {
+        return false;
+    }
+
+    final string[] & readonly userRolesReadOnly = userRoles.cloneReadOnly();
+    return requiredRoles.every(role => userRolesReadOnly.indexOf(role) !is ());
+}

@@ -18,18 +18,14 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ProjectCardBadges from "@components/project-hub/project-card/ProjectCardBadges";
 
-// Mock @wso2/oxygen-ui (include IconButton, Tooltip for ErrorIndicator)
+// Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children, display, justifyContent, alignItems }: any) => (
     <div data-testid="box" style={{ display, justifyContent, alignItems }}>
       {children}
     </div>
   ),
-  Chip: ({ label, color }: any) => (
-    <div data-testid="chip" data-color={color}>
-      {label}
-    </div>
-  ),
+  Chip: ({ label }: any) => <div data-testid="chip">{label}</div>,
   Form: {
     CardContent: ({ children, sx }: any) => (
       <div data-testid="card-content" style={sx}>
@@ -37,75 +33,28 @@ vi.mock("@wso2/oxygen-ui", () => ({
       </div>
     ),
   },
-  Skeleton: () => <div data-testid="skeleton" />,
-  IconButton: ({ children }: any) => <button>{children}</button>,
-  Tooltip: ({ children }: any) => <span>{children}</span>,
-}));
-
-// Mock utils
-vi.mock("@/utils/projectCard", () => ({
-  getStatusColor: vi.fn((status) => {
-    if (status === "All Good") return "success";
-    if (status === "Need Attention") return "warning";
-    return "default";
-  }),
-}));
-
-// Mock ErrorIndicator (path must match: @components/common/error-indicator)
-vi.mock("@components/common/error-indicator/ErrorIndicator", () => ({
-  default: ({ entityName }: any) => (
-    <div data-testid="error-indicator">Error: {entityName}</div>
-  ),
 }));
 
 describe("ProjectCardBadges", () => {
-  it("should render project key and status", () => {
+  it("should render project key chip", () => {
     const props = {
       projectKey: "PROJ-1",
-      status: "All Good",
     };
 
     render(<ProjectCardBadges {...props} />);
 
     expect(screen.getByText(props.projectKey)).toBeInTheDocument();
-    expect(screen.getByText(props.status)).toBeInTheDocument();
   });
 
-  it("should apply correct color to status chip", () => {
+  it("should render only one chip", () => {
     const props = {
-      projectKey: "PROJ-1",
-      status: "Need Attention",
+      projectKey: "PROJ-123",
     };
 
     render(<ProjectCardBadges {...props} />);
 
     const chips = screen.getAllByTestId("chip");
-    const statusChip = chips.find((chip) => chip.textContent === props.status);
-    expect(statusChip?.getAttribute("data-color")).toBe("warning");
-  });
-
-  it("should render error indicator for status when isError is true", () => {
-    const props = {
-      projectKey: "PROJ-1",
-      status: "All Good",
-      isError: true,
-    };
-
-    render(<ProjectCardBadges {...props} />);
-
-    expect(screen.getByText("Error: Status")).toBeInTheDocument();
-    expect(screen.queryByText(props.status)).not.toBeInTheDocument();
-  });
-
-  it("should render skeleton when isLoading is true", () => {
-    const props = {
-      projectKey: "PROJ-1",
-      status: "All Good",
-      isLoading: true,
-    };
-
-    render(<ProjectCardBadges {...props} />);
-
-    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+    expect(chips).toHaveLength(1);
+    expect(chips[0].textContent).toBe(props.projectKey);
   });
 });

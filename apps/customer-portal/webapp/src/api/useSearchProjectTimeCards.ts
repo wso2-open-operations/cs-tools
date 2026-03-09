@@ -14,11 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  type UseInfiniteQueryResult,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { TimeCardSearchResponse } from "@models/responses";
 import type { TimeCardSearchRequest } from "@models/requests";
 
@@ -26,42 +30,44 @@ export interface UseSearchProjectTimeCardsParams {
   projectId: string;
   startDate?: string;
   endDate?: string;
-  limit?: number;
-  offset?: number;
+  states?: string[];
+  enabled?: boolean;
 }
 
 /**
- * Custom hook to search project time cards with date range filters.
+ * Custom hook to search project time cards with date range filters using infinite query.
  *
  * @param {UseSearchProjectTimeCardsParams} params - Project ID and filters.
- * @returns {UseQueryResult<TimeCardSearchResponse, Error>} The query result object.
+ * @returns {UseInfiniteQueryResult<InfiniteData<TimeCardSearchResponse>, Error>} The infinite query result object.
  */
 export default function useSearchProjectTimeCards({
   projectId,
   startDate,
   endDate,
-  limit = 10,
-  offset = 0,
-}: UseSearchProjectTimeCardsParams): UseQueryResult<
-  TimeCardSearchResponse,
+  states,
+  enabled,
+}: UseSearchProjectTimeCardsParams): UseInfiniteQueryResult<
+  InfiniteData<TimeCardSearchResponse>,
   Error
 > {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
-  return useQuery<TimeCardSearchResponse, Error>({
+  return useInfiniteQuery<TimeCardSearchResponse, Error>({
     queryKey: [
       ApiQueryKeys.TIME_CARDS_SEARCH,
       projectId,
       startDate,
       endDate,
-      limit,
-      offset,
+      states,
     ],
-    queryFn: async (): Promise<TimeCardSearchResponse> => {
+    queryFn: async ({
+      pageParam = 0,
+      signal,
+    }): Promise<TimeCardSearchResponse> => {
       logger.debug(
-        `Searching time cards for project ID: ${projectId}, start: ${startDate}, end: ${endDate}`,
+        `Searching time cards for project ID: ${projectId}, start: ${startDate}, end: ${endDate}, offset: ${pageParam}`,
       );
 
       try {
@@ -76,14 +82,16 @@ export default function useSearchProjectTimeCards({
           filters: {
             startDate,
             endDate,
+            ...(states && states.length > 0 && { states }),
           },
-          pagination: { limit, offset },
+          pagination: { limit: 10, offset: pageParam as number },
         };
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
+          signal,
         });
 
         logger.debug(
@@ -91,9 +99,7 @@ export default function useSearchProjectTimeCards({
         );
 
         if (!response.ok) {
-          throw new Error(
-            `Error searching time cards: ${response.statusText}`,
-          );
+          throw new Error(`Error searching time cards: ${response.statusText}`);
         }
 
         const data: TimeCardSearchResponse = await response.json();
@@ -104,8 +110,18 @@ export default function useSearchProjectTimeCards({
         throw error;
       }
     },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.offset + lastPage.limit;
+      return nextOffset < lastPage.totalRecords ? nextOffset : undefined;
+    },
     enabled:
-      !!projectId && !!startDate && !!endDate && isSignedIn && !isAuthLoading,
+      enabled !== false &&
+      !!projectId &&
+      !!startDate &&
+      !!endDate &&
+      isSignedIn &&
+      !isAuthLoading,
     staleTime: 5 * 60 * 1000,
   });
 }

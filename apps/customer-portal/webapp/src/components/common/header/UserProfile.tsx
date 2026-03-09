@@ -16,11 +16,13 @@
 
 import { Skeleton, UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
-import { LogOut } from "@wso2/oxygen-ui-icons-react";
+import { LogOut, User } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@api/useGetUserDetails";
 import { useLogger } from "@/hooks/useLogger";
+import UserProfileModal from "@components/common/header/UserProfileModal";
 
 /**
  * User profile component.
@@ -29,6 +31,7 @@ import { useLogger } from "@/hooks/useLogger";
  */
 export default function UserProfile(): JSX.Element {
   const navigate = useNavigate();
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const { signOut, isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const { data: userDetails, isLoading, isError } = useGetUserDetails();
   const logger = useLogger();
@@ -60,16 +63,26 @@ export default function UserProfile(): JSX.Element {
   const email = isError ? "--" : userDetails?.email || "--";
 
   return (
-    <UserMenu>
-      <UserMenu.Trigger name={name} />
-      <UserMenu.Header name={name} email={email} />
-
-      <UserMenu.Divider />
-      <UserMenu.Logout
-        icon={<LogOut size={18} />}
-        label="Log out"
-        onClick={handleLogout}
+    <>
+      <UserMenu>
+        <UserMenu.Trigger name={name} />
+        <UserMenu.Header name={name} email={email} />
+        <UserMenu.Divider />
+        <UserMenu.Item
+          icon={<User size={18} />}
+          label="Profile"
+          onClick={() => setProfileModalOpen(true)}
+        />
+        <UserMenu.Logout
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={handleLogout}
+        />
+      </UserMenu>
+      <UserProfileModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
       />
-    </UserMenu>
+    </>
   );
 }

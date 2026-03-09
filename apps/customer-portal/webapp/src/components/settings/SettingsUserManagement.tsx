@@ -64,6 +64,8 @@ import type { ProjectContact } from "@models/responses";
 
 export interface SettingsUserManagementProps {
   projectId: string;
+  /** When false, hide Add User and Delete user buttons. Default true for backward compatibility. */
+  canAddOrRemoveUsers?: boolean;
 }
 
 /**
@@ -74,13 +76,14 @@ export interface SettingsUserManagementProps {
  */
 export default function SettingsUserManagement({
   projectId,
+  canAddOrRemoveUsers = true,
 }: SettingsUserManagementProps): JSX.Element {
   const theme = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ProjectContact | null>(null);
 
-  const { data: contacts = [], isLoading, error } = useGetProjectContacts(projectId);
+  const { data: contacts = [], isLoading, isFetching, error } = useGetProjectContacts(projectId);
   const postContact = usePostProjectContact(projectId);
   const deleteContact = useDeleteProjectContact(projectId);
   const { showError } = useErrorBanner();
@@ -138,7 +141,7 @@ export default function SettingsUserManagement({
     });
   }, [removeTarget, deleteContact, showSuccess, showError]);
 
-  const isEffectiveLoading = isLoading;
+  const isEffectiveLoading = isLoading || isFetching;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -282,15 +285,17 @@ export default function SettingsUserManagement({
             ),
           }}
         />
-        <Button
-          variant="contained"
-          color="warning"
-          startIcon={<Plus size={18} />}
-          onClick={() => setIsAddModalOpen(true)}
-          sx={{ whiteSpace: "nowrap" }}
-        >
-          Add User
-        </Button>
+        {canAddOrRemoveUsers && (
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<Plus size={18} />}
+            onClick={() => setIsAddModalOpen(true)}
+            sx={{ whiteSpace: "nowrap" }}
+          >
+            Add User
+          </Button>
+        )}
       </Box>
 
       {/* Users table */}
@@ -301,7 +306,9 @@ export default function SettingsUserManagement({
               <TableCell>User</TableCell>
               <TableCell>Role</TableCell>
               <TableCell>Status</TableCell>
-              <TableCell align="right">Actions</TableCell>
+              {canAddOrRemoveUsers && (
+                <TableCell align="right">Actions</TableCell>
+              )}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -319,22 +326,32 @@ export default function SettingsUserManagement({
                   </TableCell>
                   <TableCell><Skeleton variant="rounded" width={70} height={24} /></TableCell>
                   <TableCell><Skeleton variant="rounded" width={60} height={24} /></TableCell>
-                  <TableCell>
-                    <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
-                      <Skeleton variant="circular" width={32} height={32} />
-                    </Box>
-                  </TableCell>
+                  {canAddOrRemoveUsers && (
+                    <TableCell>
+                      <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
+                        <Skeleton variant="circular" width={32} height={32} />
+                      </Box>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                <TableCell
+                  colSpan={canAddOrRemoveUsers ? 4 : 3}
+                  align="center"
+                  sx={{ py: 3 }}
+                >
                   <ErrorIndicator entityName="users" size="medium" />
                 </TableCell>
               </TableRow>
             ) : filteredContacts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                <TableCell
+                  colSpan={canAddOrRemoveUsers ? 4 : 3}
+                  align="center"
+                  sx={{ py: 3 }}
+                >
                   <Typography variant="body2" color="text.secondary">
                     No users found.
                   </Typography>
@@ -397,20 +414,22 @@ export default function SettingsUserManagement({
                       sx={{ typography: "caption" }}
                     />
                   </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="Remove user">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          aria-label="Remove user"
-                          onClick={() => setRemoveTarget(contact)}
-                        >
-                          <Trash2 size={16} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  </TableCell>
+                  {canAddOrRemoveUsers && (
+                    <TableCell align="right">
+                      <Tooltip title="Remove user">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            aria-label="Remove user"
+                            onClick={() => setRemoveTarget(contact)}
+                          >
+                            <Trash2 size={16} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

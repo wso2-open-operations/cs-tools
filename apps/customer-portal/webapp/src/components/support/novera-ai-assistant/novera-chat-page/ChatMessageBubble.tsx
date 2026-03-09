@@ -25,6 +25,7 @@ import { Bot, FileText, User } from "@wso2/oxygen-ui-icons-react";
 import ReactMarkdown from "react-markdown";
 import { type JSX } from "react";
 import type { Message } from "@pages/NoveraChatPage";
+import RecommendationsCard from "@components/support/novera-ai-assistant/novera-chat-page/RecommendationsCard";
 import { AVATAR_ICON_COLOR } from "./chatConstants";
 
 /** Safe URL protocols for markdown links. Blocks javascript:, data:, etc. */
@@ -272,6 +273,13 @@ export default function ChatMessageBubble({
               </Box>
             ))}
         </Paper>
+
+        {!isUser &&
+          message.recommendations &&
+          message.recommendations.length > 0 && (
+            <RecommendationsCard recommendations={message.recommendations} />
+          )}
+
         <Box
           sx={{
             mt: 0.5,

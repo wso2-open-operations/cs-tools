@@ -22,6 +22,9 @@ export interface PaginationRequest {
 
 // Request body for searching projects.
 export interface SearchProjectsRequest {
+  filters?: {
+    searchQuery?: string;
+  };
   pagination?: PaginationRequest;
 }
 
@@ -32,10 +35,10 @@ export interface CaseSearchRequest {
     deploymentId?: string;
     severityId?: number;
     statusId?: number;
-    /** Multiple status IDs for filtering (e.g. outstanding engagements: 1,10,18,1003,1006). */
     statusIds?: number[];
     searchQuery?: string;
-    caseTypeIds?: string[];
+    caseTypes?: string[];
+    createdByMe?: boolean;
   };
   pagination: PaginationRequest;
   sortBy?: {
@@ -49,6 +52,7 @@ export interface ConversationSearchRequest {
   filters?: {
     searchQuery?: string;
     stateKeys?: number[];
+    createdByMe?: boolean;
   };
   pagination: PaginationRequest;
   sortBy?: {
@@ -57,11 +61,29 @@ export interface ConversationSearchRequest {
   };
 }
 
+// Request body for searching change requests (POST /projects/:projectId/change-requests/search).
+export interface ChangeRequestSearchRequest {
+  filters?: {
+    impactKey?: number;
+    searchQuery?: string;
+    stateKeys?: number[];
+  };
+  pagination: PaginationRequest;
+}
+
 /** Shared env context for conversations and case classification APIs. */
 export interface SharedEnvContext {
   envProducts: Record<string, string[]>;
   region: string;
   tier: string;
+}
+
+// Request body for PATCH /users/me (partial update, only changed fields).
+export interface PatchUserMeRequest {
+  phoneNumber?: string;
+  timeZone?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 // Request body for case classification.
@@ -81,16 +103,29 @@ export interface PatchCaseRequest {
 
 // Request body for creating a support case (POST /cases).
 export interface CreateCaseRequest {
-  caseType?: string;
+  attachments?: Array<{ file: string; name: string }>;
+  type?: string;
   deploymentId: string;
   description: string;
-  issueTypeKey: number;
+  issueTypeKey?: number;
   deployedProductId: string;
   projectId: string;
-  severityKey: number;
+  severityKey?: number;
   title: string;
-  /** Parent case ID when creating a related case from closed state. */
   parentCaseId?: string;
+  conversationId?: string;
+}
+
+// Request body for creating a service request (POST /cases with type: "service_request").
+export interface CreateServiceRequestPayload {
+  type: "service_request";
+  projectId: string;
+  deploymentId: string;
+  deployedProductId: string;
+  catalogId: string;
+  catalogItemId: string;
+  variables: { id: string; value: string }[];
+  attachments?: Array<{ name: string; file: string }>;
 }
 
 // Request body for product vulnerabilities search.
@@ -126,6 +161,8 @@ export interface PostDeploymentAttachmentRequest {
 export interface PatchDeploymentProductRequest {
   cores?: number;
   tps?: number;
+  description?: string;
+  active?: boolean;
 }
 
 // Request body for POST /deployments/:deploymentId/products.
@@ -135,6 +172,7 @@ export interface PostDeploymentProductRequest {
   projectId: string;
   cores?: number;
   tps?: number;
+  description?: string;
 }
 
 // Request body for POST /products/:productId/versions/search.
@@ -171,6 +209,12 @@ export interface PatchCallRequest {
   utcTimes?: string[];
 }
 
+// Request body for updating current user profile (PATCH /users/me).
+export interface PatchUserMeRequest {
+  phoneNumber?: string;
+  timeZone?: string;
+}
+
 // Request body for creating a project contact (POST /projects/:projectId/contacts).
 export interface CreateProjectContactRequest {
   contactEmail: string;
@@ -193,6 +237,7 @@ export interface TimeCardSearchRequest {
   filters?: {
     startDate?: string;
     endDate?: string;
+    states?: string[];
   };
   pagination?: {
     limit?: number;
@@ -203,4 +248,9 @@ export interface TimeCardSearchRequest {
 // Request body for validating a project contact (POST /projects/:projectId/contacts/validate).
 export interface ValidateContactRequest {
   contactEmail: string;
+}
+
+// Request body for PATCH /change-requests/:id (update planned start).
+export interface PatchChangeRequestRequest {
+  plannedStartOn: string;
 }

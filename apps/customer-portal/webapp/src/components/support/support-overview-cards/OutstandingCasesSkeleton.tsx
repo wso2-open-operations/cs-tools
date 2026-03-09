@@ -39,10 +39,27 @@ export default function OutstandingCasesSkeleton(): JSX.Element {
             gap: 1.5,
           }}
         >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              flexWrap: "wrap",
+            }}
+          >
             <Skeleton variant="text" width={60} height={20} />
-            <Skeleton variant="circular" width={8} height={8} />
-            <Skeleton variant="text" width={40} height={16} />
+            <Skeleton
+              variant="rounded"
+              width={56}
+              height={20}
+              sx={{ borderRadius: "10px" }}
+            />
+            <Skeleton
+              variant="rounded"
+              width={70}
+              height={20}
+              sx={{ borderRadius: "10px" }}
+            />
           </Box>
           <Skeleton variant="text" width="90%" height={24} />
           <Box

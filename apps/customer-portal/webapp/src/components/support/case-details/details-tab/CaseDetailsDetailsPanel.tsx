@@ -23,9 +23,11 @@ import {
   Tag,
   Building2,
   Info,
+  Mail,
 } from "@wso2/oxygen-ui-icons-react";
 import { type ReactElement, type JSX } from "react";
 import type { CaseDetails } from "@models/responses";
+import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
@@ -35,11 +37,11 @@ import {
   formatUtcToLocal,
   formatDateOnly,
   getAssignedEngineerLabel,
-  getSeverityColor,
   getStatusColor,
   getStatusIconElement,
   mapSeverityToDisplay,
   resolveColorFromTheme,
+  isSecurityReportAnalysisType,
 } from "@utils/support";
 
 export interface CaseDetailsDetailsPanelProps {
@@ -59,6 +61,8 @@ export default function CaseDetailsDetailsPanel({
   isError,
 }: CaseDetailsDetailsPanelProps): JSX.Element {
   const theme = useTheme();
+
+  const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
 
   if (isError) {
     return (
@@ -139,25 +143,30 @@ export default function CaseDetailsDetailsPanel({
           </Box>
           <Box>
             <Typography {...labelSx}>Severity</Typography>
-            <Box
+            <Chip
+              label={mapSeverityToDisplay(severityLabel ?? undefined)}
+              size="small"
+              variant="outlined"
               sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 0.5,
+                bgcolor: alpha(
+                  getSeverityLegendColor(severityLabel ?? undefined),
+                  0.1,
+                ),
+                color: getSeverityLegendColor(severityLabel ?? undefined),
+                borderColor: alpha(
+                  getSeverityLegendColor(severityLabel ?? undefined),
+                  0.3,
+                ),
+                fontWeight: 500,
+                px: 0,
+                height: 20,
+                fontSize: "0.75rem",
+                "& .MuiChip-label": {
+                  pl: "6px",
+                  pr: "6px",
+                },
               }}
-            >
-              <Box
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  bgcolor: getSeverityColor(severityLabel ?? undefined),
-                }}
-              />
-              <Typography variant="caption" color="text.secondary">
-                {mapSeverityToDisplay(severityLabel ?? undefined)}
-              </Typography>
-            </Box>
+            />
           </Box>
           <Box>
             <Typography {...labelSx}>Category</Typography>
@@ -200,11 +209,41 @@ export default function CaseDetailsDetailsPanel({
               {formatSlaResponseTime(data?.slaResponseTime)}
             </Typography>
           </Box>
-          {getAssignedEngineerLabel(assignedEngineer) && (
-            <Box>
-              <Typography {...labelSx}>Assigned Engineer</Typography>
-              <AssignedEngineerDisplay assignedEngineer={assignedEngineer} />
-            </Box>
+          {isSecurityReportAnalysis ? (
+            <>
+              <Box>
+                <Typography {...labelSx}>Assigned Engineer</Typography>
+                {getAssignedEngineerLabel(assignedEngineer) ? (
+                  <AssignedEngineerDisplay
+                    assignedEngineer={assignedEngineer}
+                  />
+                ) : (
+                  <Typography {...valueSx}>Not available</Typography>
+                )}
+              </Box>
+              <Box>
+                <Typography {...labelSx}>Engineer Email</Typography>
+                {data?.engineerEmail ? (
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Mail
+                      size={16}
+                      color={theme.palette.text.secondary}
+                      aria-hidden
+                    />
+                    <Typography {...valueSx}>{data.engineerEmail}</Typography>
+                  </Stack>
+                ) : (
+                  <Typography {...valueSx}>Not available</Typography>
+                )}
+              </Box>
+            </>
+          ) : (
+            getAssignedEngineerLabel(assignedEngineer) && (
+              <Box>
+                <Typography {...labelSx}>Assigned Engineer</Typography>
+                <AssignedEngineerDisplay assignedEngineer={assignedEngineer} />
+              </Box>
+            )
           )}
         </Box>
       </CaseDetailsCard>
@@ -215,6 +254,18 @@ export default function CaseDetailsDetailsPanel({
         icon={<Package size={20} aria-hidden />}
       >
         <Box sx={twoColumnGridSx}>
+          {isSecurityReportAnalysis && (
+            <Box>
+              <Typography {...labelSx}>Report Type</Typography>
+              {typeof data?.type === "object" && data?.type?.label ? (
+                <Typography {...valueSx}>{data.type.label}</Typography>
+              ) : typeof data?.type === "string" ? (
+                <Typography {...valueSx}>{data.type}</Typography>
+              ) : (
+                <Typography {...valueSx}>Not available</Typography>
+              )}
+            </Box>
+          )}
           <Box>
             <Typography {...labelSx}>Product Name</Typography>
             <Typography {...valueSx}>
@@ -304,22 +355,30 @@ export default function CaseDetailsDetailsPanel({
               }}
             />
           </Box>
-          <Box>
-            <Typography {...labelSx}>Project</Typography>
-            <Typography {...valueSx}>
-              {formatValue(data?.project?.label)}
-            </Typography>
-          </Box>
-          {getAssignedEngineerLabel(assignedEngineer) && (
-            <Box>
-              <Typography {...labelSx}>Assigned Engineer</Typography>
-              <AssignedEngineerDisplay assignedEngineer={assignedEngineer} />
-            </Box>
+          {!isSecurityReportAnalysis && (
+            <>
+              <Box>
+                <Typography {...labelSx}>Project</Typography>
+                <Typography {...valueSx}>
+                  {formatValue(data?.project?.label)}
+                </Typography>
+              </Box>
+              {getAssignedEngineerLabel(assignedEngineer) && (
+                <Box>
+                  <Typography {...labelSx}>Assigned Engineer</Typography>
+                  <AssignedEngineerDisplay
+                    assignedEngineer={assignedEngineer}
+                  />
+                </Box>
+              )}
+              <Box>
+                <Typography {...labelSx}>CS Manager</Typography>
+                <Typography {...valueSx}>
+                  {formatValue(data?.csManager)}
+                </Typography>
+              </Box>
+            </>
           )}
-          <Box>
-            <Typography {...labelSx}>CS Manager</Typography>
-            <Typography {...valueSx}>{formatValue(data?.csManager)}</Typography>
-          </Box>
         </Box>
       </CaseDetailsCard>
     </Stack>

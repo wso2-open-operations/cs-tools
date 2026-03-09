@@ -20,9 +20,9 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
-import { ApiQueryKeys } from "@constants/apiConstants";
+import { ApiQueryKeys, ApiMutationKeys } from "@constants/apiConstants";
 import { CommentType } from "@constants/supportConstants";
 
 export interface PostCommentRequest {
@@ -49,14 +49,18 @@ export function usePostComment(): UseMutationResult<
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, PostCommentVariables>({
+    mutationKey: ApiMutationKeys.POST_COMMENT,
     mutationFn: async ({
       caseId,
       body,
     }: PostCommentVariables): Promise<void> => {
-      logger.debug("[usePostComment] Request:", { caseId, contentLength: body.content?.length ?? 0 });
+      logger.debug("[usePostComment] Request:", {
+        caseId,
+        contentLength: body.content?.length ?? 0,
+      });
 
       if (!isSignedIn || isAuthLoading) {
         throw new Error("User must be signed in to post a comment");
@@ -68,9 +72,13 @@ export function usePostComment(): UseMutationResult<
       }
 
       const requestUrl = `${baseUrl}/cases/${caseId}/comments`;
-      const response = await fetchFn(requestUrl, {
+      const response = await authFetch(requestUrl, {
         method: "POST",
-        body: JSON.stringify({ content: body.content, type: CommentType.COMMENT }),
+
+        body: JSON.stringify({
+          content: body.content,
+          type: body.type,
+        }),
       });
 
       logger.debug("[usePostComment] Response status:", response.status);

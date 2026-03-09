@@ -29,10 +29,10 @@ import type { JSX } from "react";
 import type { CaseListItem } from "@models/responses";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import OutstandingCasesSkeleton from "./OutstandingCasesSkeleton";
+import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import {
   formatRelativeTime,
   getAssignedEngineerLabel,
-  getSeverityColor,
   getStatusColor,
   mapSeverityToDisplay,
   resolveColorFromTheme,
@@ -108,18 +108,30 @@ export default function OutstandingCasesList({
                   >
                     {c.number}
                   </Typography>
-                  <Box
+                  <Chip
+                    label={mapSeverityToDisplay(c.severity?.label)}
+                    size="small"
+                    variant="outlined"
                     sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      bgcolor: getSeverityColor(c.severity?.label),
+                      bgcolor: alpha(
+                        getSeverityLegendColor(c.severity?.label),
+                        0.1,
+                      ),
+                      color: getSeverityLegendColor(c.severity?.label),
+                      borderColor: alpha(
+                        getSeverityLegendColor(c.severity?.label),
+                        0.3,
+                      ),
+                      fontWeight: 500,
+                      px: 0,
+                      height: 20,
+                      fontSize: "0.75rem",
+                      "& .MuiChip-label": {
+                        pl: "6px",
+                        pr: "6px",
+                      },
                     }}
                   />
-                  <Typography variant="caption" color="text.secondary">
-                    {mapSeverityToDisplay(c.severity?.label)}
-                  </Typography>
                 </Stack>
               }
             />

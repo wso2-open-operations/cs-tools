@@ -23,29 +23,40 @@ export interface ProjectListItem {
   key: string;
   createdOn: string;
   description: string;
+  type?: {
+    id: string;
+    label: string;
+  };
 }
 
 /** Account nested in project details response. */
 export interface ProjectDetailsAccount {
   id: string;
   name: string;
-  activationDate: string;
-  deactivationDate: string;
-  supportTier: string;
-  region: string;
+  activationDate?: string | null;
+  deactivationDate?: string | null;
+  supportTier?: string;
+  region?: string | null;
+  ownerEmail?: string | null;
+  technicalOwnerEmail?: string | null;
 }
 
 /** Detailed project information including account/subscription details. */
 export interface ProjectDetails {
-  type: string;
-  sfId?: string;
-  account: ProjectDetailsAccount;
   id: string;
-  name: string;
   key: string;
-  createdOn: string;
+  name: string;
   description: string;
-  hasSR: boolean;
+  createdOn: string;
+  type: {
+    id: string;
+    label: string;
+  };
+  sfId?: string;
+  hasSr: boolean;
+  startDate?: string;
+  endDate?: string;
+  account?: ProjectDetailsAccount;
 }
 
 // Project Search Response.
@@ -70,6 +81,9 @@ export interface UserDetails {
   lastName: string;
   firstName: string;
   timeZone: string;
+  phoneNumber?: string | null;
+  avatar?: string | null;
+  roles?: string[];
 }
 
 // Project user (invited/registered) for project users list.
@@ -233,9 +247,9 @@ export interface CaseListItem {
   internalId: string;
   number: string;
   createdOn: string;
+  createdBy?: string;
   title: string;
   description: string;
-  /** API may return string or { id, label? } or { id, name? } object. */
   assignedEngineer:
     | string
     | { id: string; label?: string; name?: string }
@@ -270,6 +284,116 @@ export interface CaseListItem {
     id: string;
     label: string;
   } | null;
+}
+
+// Change Request Item
+export interface ChangeRequestItem {
+  id: string;
+  number: string;
+  title: string;
+  project: {
+    id: string;
+    label: string;
+    number: string | null;
+  } | null;
+  case: {
+    id: string;
+    label: string;
+    number: string | null;
+  } | null;
+  deployment: {
+    id: string;
+    label: string;
+    number?: string | null;
+  } | null;
+  deployedProduct: {
+    id: string;
+    label: string;
+    number?: string | null;
+  } | null;
+  product: {
+    id: string;
+    label: string;
+    number?: string | null;
+  } | null;
+  assignedEngineer: {
+    id: string;
+    label: string;
+  } | null;
+  assignedTeam: {
+    id: string;
+    label: string;
+  } | null;
+  startDate: string;
+  endDate: string;
+  duration: string | null;
+  hasServiceOutage: boolean;
+  impact: {
+    id: string;
+    label: string;
+  } | null;
+  state: {
+    id: string;
+    label: string;
+  } | null;
+  type: {
+    id: string;
+    label: string;
+  } | null;
+  createdOn: string;
+  updatedOn: string;
+}
+
+// Change Request Details
+export interface ChangeRequestDetails extends ChangeRequestItem {
+  description: string | null;
+  createdBy: string;
+  justification: string | null;
+  impactDescription: string | null;
+  serviceOutage: string | null;
+  communicationPlan: string | null;
+  rollbackPlan: string | null;
+  testPlan: string | null;
+  hasCustomerApproved: boolean;
+  hasCustomerReviewed: boolean;
+  approvedBy: {
+    id: string;
+    label: string;
+  } | null;
+  approvedOn: string | null;
+}
+
+// Change Request Search Response
+export interface ChangeRequestSearchResponse {
+  changeRequests: ChangeRequestItem[];
+  totalRecords: number;
+  offset: number;
+  limit: number;
+}
+
+// Change Request Stats
+export interface ChangeRequestStats {
+  totalRequests: number;
+  scheduled: number;
+  inProgress: number;
+  completed: number;
+}
+
+// Response from PATCH /change-requests/:id (update planned start).
+export interface PatchChangeRequestResponse {
+  id: string;
+  updatedBy: string;
+  updatedOn: string;
+}
+
+// Change Request Stats API Response
+export interface ChangeRequestStatsResponse {
+  totalCount: number;
+  stateCount: Array<{
+    id: string;
+    label: string;
+    count: number;
+  }>;
 }
 
 // Case Search Response
@@ -336,6 +460,10 @@ export interface CaseDetails {
   parentCase: IdLabelRef | null;
   conversation: unknown;
   issueType: IdLabelRef | null;
+  catalog?: IdLabelRef | null;
+  catalogItem?: IdLabelRef | null;
+  /** Filled variables for service requests (from backend). */
+  variables?: { name: string; value: string }[];
   deployment: IdLabelRef | null;
   severity: IdLabelRef | null;
   status: IdLabelRef | null;
@@ -343,6 +471,9 @@ export interface CaseDetails {
   closedBy: CaseDetailsClosedBy | null;
   closeNotes: string | null;
   hasAutoClosed: boolean | null;
+  engineerEmail: string | null;
+  findingsResolved: number | null;
+  findingsTotal: number | null;
 }
 
 // Inline attachment for comment images (API shape).
@@ -390,7 +521,7 @@ export interface ProjectStatsResponse {
     slaStatus: string;
   };
   recentActivity: {
-    totalTimeLogged: number;
+    totalHours: number;
     billableHours: number;
     lastDeploymentOn: string;
     systemHealth?: string;
@@ -415,6 +546,7 @@ export interface CaseMetadataResponse {
   changeRequestImpacts?: MetadataItem[];
   caseTypes?: MetadataItem[];
   conversationStates?: MetadataItem[];
+  timeCardStates?: MetadataItem[];
   severityBasedAllocationTime?: Record<string, number>;
 }
 
@@ -511,7 +643,7 @@ export interface TimeCard {
   totalTime: number;
   createdOn: string;
   hasBillable: boolean;
-  state: string;
+  state: { id: string; label: string } | null;
   approvedBy: { id: string; label: string } | null;
   project: { id: string; label: string };
   case: {
@@ -537,6 +669,12 @@ export interface AllCasesFilterValues {
   deploymentId?: string;
   /** Single case type ID when user selects one; when empty, default Incident+Query IDs are used. */
   caseTypeId?: string;
+}
+
+// Interface for change requests filters state
+export interface ChangeRequestFilterValues {
+  stateId?: string;
+  impactId?: string;
 }
 
 // Product deployed in an environment.
@@ -743,13 +881,50 @@ export interface CaseClassificationResponse {
   };
 }
 
+/** Slot option definition for select-type user input collection. */
+export interface SelectSlotOption {
+  slot: string;
+  label: string;
+  options: string[];
+  type: "select";
+}
+
+/** Slot option definition for free-text user input collection. */
+export interface TextSlotOption {
+  slot: string;
+  label: string;
+  type: "text";
+  freeText?: true;
+}
+
+/** Slot option union for user input collection. */
+export type SlotOption = SelectSlotOption | TextSlotOption;
+
+/** Slot state containing filled/missing slots and available options. */
+export interface SlotState {
+  intentId?: string;
+  filledSlots?: Record<string, string>;
+  missingSlots?: string[];
+  isComplete?: boolean;
+  slotOptions?: SlotOption[];
+}
+
+/** Intent information from conversation response. */
+export interface ConversationIntent {
+  intentId?: string;
+  intentLabel?: string;
+  confidence?: number;
+  severity?: string;
+  caseType?: string;
+}
+
 /** Response from POST /projects/:projectId/conversations (Novera chat). */
 export interface ConversationResponse {
   message: string;
   sessionId: string;
   conversationId: string;
-  intent: unknown;
-  slotState: unknown;
+  intent?: ConversationIntent;
+  slotState?: SlotState;
   actions: unknown;
   recommendations?: {
     query: string;
@@ -759,8 +934,15 @@ export interface ConversationResponse {
 }
 
 // Response for creating a support case. Used to navigate to case details.
+// Backend returns additional fields that can be used to populate SR display.
 export interface CreateCaseResponse {
   id: string;
+  internalId?: string;
+  number?: string;
+  createdBy?: string;
+  createdOn?: string;
+  state?: { id: string; label: string };
+  type?: { id: string; label: string };
 }
 
 // Product vulnerability item from search response.
@@ -870,3 +1052,37 @@ export interface UpdateLevelEntry {
 
 // Response for POST /updates/levels/search (map keyed by update level string).
 export type UpdateLevelsSearchResponse = Record<string, UpdateLevelEntry>;
+
+// Catalog item within a catalog (from POST /deployments/products/:id/catalogs/search).
+export interface CatalogItem {
+  id: string;
+  label: string;
+}
+
+// Catalog with its items (from POST /deployments/products/:id/catalogs/search).
+export interface Catalog {
+  id: string;
+  name: string;
+  catalogItems: CatalogItem[];
+}
+
+// Response for POST /deployments/products/:id/catalogs/search.
+export interface CatalogSearchResponse {
+  catalogs: Catalog[];
+  totalRecords: number;
+  limit?: number;
+  offset?: number;
+}
+
+// Variable definition for a catalog item (from GET /catalogs/:catalogId/items/:itemId).
+export interface CatalogItemVariable {
+  id: string;
+  questionText: string;
+  order: number;
+  type: string;
+}
+
+// Response for GET /catalogs/:catalogId/items/:itemId.
+export interface CatalogItemVariablesResponse {
+  variables: CatalogItemVariable[];
+}

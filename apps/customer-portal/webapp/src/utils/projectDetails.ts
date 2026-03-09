@@ -17,13 +17,13 @@
 import {
   SUBSCRIPTION_STATUS,
   type SubscriptionStatus,
-  SLA_STATUS,
   SUPPORT_TIER,
   PROJECT_TYPE,
   SYSTEM_HEALTH,
   PROJECT_USER_STATUSES,
   TIME_TRACKING_BADGE_TYPES,
   type TimeTrackingBadgeType,
+  TIME_CARD_STATE,
   DEPLOYMENT_STATUS,
   PRODUCT_SUPPORT_STATUS,
   type ProjectStatusChipColor,
@@ -33,18 +33,33 @@ import {
  * Get the theme color path for a time card state chip (e.g. Approved, Submitted).
  * Use with resolveColorFromTheme for SupportOverviewCard-style chips.
  *
- * @param {string} state - The time card state.
+ * @param {Object | null | undefined} state - The time card state object with id and label.
  * @returns {string} Theme palette path (e.g. "success.main", "info.main").
  */
 export const getTimeCardStateColorPath = (
-  state: string | null | undefined,
+  state: { id: string; label: string } | null | undefined,
 ): string => {
-  const normalized = state?.toLowerCase();
-  if (normalized === "approved") return "success.main";
-  if (normalized === "submitted") return "info.main";
-  if (normalized === "rejected" || normalized === "draft")
-    return "warning.main";
-  return "text.secondary";
+  if (!state?.id) return "text.secondary";
+
+  // Normalize state ID to match TIME_CARD_STATE constants (title case)
+  const normalizedId = state.id.charAt(0).toUpperCase() + state.id.slice(1).toLowerCase();
+
+  switch (normalizedId) {
+    case TIME_CARD_STATE.APPROVED:
+      return "success.main";
+    case TIME_CARD_STATE.SUBMITTED:
+      return "info.main";
+    case TIME_CARD_STATE.REJECTED:
+      return "error.main";
+    case TIME_CARD_STATE.RECALLED:
+      return "warning.main";
+    case TIME_CARD_STATE.PENDING:
+      return "info.main";
+    case TIME_CARD_STATE.PROCESSED:
+      return "success.main";
+    default:
+      return "text.secondary";
+  }
 };
 
 /**
@@ -158,6 +173,7 @@ export const formatProjectDateTime = (dateString: string): string => {
     });
     return `${dateStr} at ${timeStr}`;
   } catch (error) {
+    console.error(`Error formatting date string: ${dateString}`, error);
     return "";
   }
 };
@@ -175,22 +191,21 @@ export const convertMinutesToHours = (minutes: number): number => {
 /**
  * Determines the color of the SLA status chip based on the status string.
  *
- * @param {string} status - The SLA status string (e.g., "Good", "Bad", "Met", "Breached").
+ * @param {string} status - The SLA status string (e.g., "All Good", "Needs attention").
  * @returns {"success" | "error" | "default" | "warning"} The color for the Chip component.
  */
 export const getSLAStatusColor = (status: string): ProjectStatusChipColor => {
   const normalizedStatus = status?.toLowerCase();
-  const goodValue = SLA_STATUS.GOOD.toLowerCase();
 
-  switch (normalizedStatus) {
-    case goodValue:
-    case "good":
-      return "success";
-    case SLA_STATUS.BAD.toLowerCase():
-      return "error";
-    default:
-      return "default";
+  if (normalizedStatus === "all good") {
+    return "success";
   }
+
+  if (normalizedStatus === "needs attention") {
+    return "error";
+  }
+
+  return "default";
 };
 
 /**
@@ -253,13 +268,16 @@ export const getSystemHealthColor = (
 };
 
 /**
- * Determines the subscription status based on the end date.
+ * Determines the subscription status based on start/end dates.
+ * Expiring Soon when progress >= 75% of subscription period.
  *
  * @param {string} endDateString - The subscription end date string.
+ * @param {string} [startDateString] - Optional start date for progress-based Expiring Soon.
  * @returns {SubscriptionStatus} The status string.
  */
 export const getSubscriptionStatus = (
   endDateString: string,
+  startDateString?: string,
 ): SubscriptionStatus => {
   if (!endDateString) {
     return SUBSCRIPTION_STATUS.ACTIVE;
@@ -268,16 +286,19 @@ export const getSubscriptionStatus = (
   const today = new Date();
   const endDate = new Date(endDateString);
 
-  // Calculate difference in milliseconds
   const diffTime = endDate.getTime() - today.getTime();
-  // Convert to days
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
     return SUBSCRIPTION_STATUS.EXPIRED;
   }
 
-  if (diffDays <= 30) {
+  if (startDateString) {
+    const progress = calculateProgress(startDateString, endDateString);
+    if (progress >= 75) {
+      return SUBSCRIPTION_STATUS.EXPIRING_SOON;
+    }
+  } else if (diffDays <= 30) {
     return SUBSCRIPTION_STATUS.EXPIRING_SOON;
   }
 
@@ -332,6 +353,21 @@ export const calculateProgress = (start: string, end: string): number => {
 
   if (total <= 0) return 100;
   return Math.min(100, Math.max(0, (elapsed / total) * 100));
+};
+
+/**
+ * Returns the number of days remaining until the end date.
+ *
+ * @param {string} endDateString - The subscription end date string.
+ * @returns {number} Days remaining (0 if expired).
+ */
+export const getRemainingDays = (endDateString: string): number => {
+  if (!endDateString) return 0;
+  const today = new Date();
+  const endDate = new Date(endDateString);
+  const diffTime = endDate.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return Math.max(0, diffDays);
 };
 
 /**

@@ -20,9 +20,9 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CreateProjectContactRequest } from "@models/requests";
 
 /**
@@ -37,7 +37,7 @@ export function usePostProjectContact(
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, CreateProjectContactRequest>({
     mutationFn: async (body): Promise<void> => {
@@ -54,9 +54,9 @@ export function usePostProjectContact(
         }
 
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts`;
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+
           body: JSON.stringify(body),
         });
 

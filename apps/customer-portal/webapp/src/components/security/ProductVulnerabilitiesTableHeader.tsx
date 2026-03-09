@@ -80,9 +80,9 @@ const ProductVulnerabilitiesTableHeader = ({
           }}
         >
           <Box>
-            <Typography variant="h6">Product Vulnerabilities</Typography>
+            <Typography variant="h6">Component Analysis</Typography>
             <Typography variant="body2" color="text.secondary">
-              CVEs and known vulnerabilities affecting your product
+              Third-party components with known vulnerabilities and remediation status
             </Typography>
           </Box>
         </Box>
@@ -132,11 +132,7 @@ const ProductVulnerabilitiesTableHeader = ({
                       height: "100%",
                     }}
                   >
-                    <Divider
-                      orientation="vertical"
-                      flexItem
-                      sx={{ mx: 0.5 }}
-                    />
+                    <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
                     <IconButton
                       aria-label="Open advanced search"
                       onClick={onFilterIconClick}

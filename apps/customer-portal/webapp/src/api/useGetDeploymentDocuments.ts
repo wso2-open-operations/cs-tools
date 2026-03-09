@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { DeploymentDocument } from "@models/responses";
 
 function normalizeDocuments(raw: unknown): DeploymentDocument[] {
@@ -45,7 +45,7 @@ export function useGetDeploymentDocuments(
 ): UseQueryResult<DeploymentDocument[], Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<DeploymentDocument[], Error>({
     queryKey: [ApiQueryKeys.DEPLOYMENT_ATTACHMENTS, deploymentId],
@@ -61,7 +61,9 @@ export function useGetDeploymentDocuments(
         }
 
         const requestUrl = `${baseUrl}/deployments/${deploymentId}/attachments`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetDeploymentDocuments] Response status: ${response.status}`,

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import {
   useState,
   useMemo,
@@ -36,12 +36,13 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
-import {
-  getIncidentAndQueryCaseTypeIds,
-  getIncidentAndQueryIds,
-} from "@utils/support";
+import { useGetDeployments } from "@api/useGetDeployments";
+import { getIncidentAndQueryIds, isS0Case } from "@utils/support";
+import { CaseType } from "@constants/supportConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
 import type { AllCasesFilterValues } from "@models/responses";
 import AllCasesStatCards from "@components/support/all-cases/AllCasesStatCards";
 import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
@@ -55,6 +56,8 @@ import AllCasesList from "@components/support/all-cases/AllCasesList";
 export default function AllCasesPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  const createdByMe = searchParams.get("createdByMe") === "true";
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -63,16 +66,23 @@ export default function AllCasesPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
+  const {
+    data: project,
+    isLoading: isProjectLoading,
+  } = useGetProjectDetails(projectId || "");
+  const projectReady = !isProjectLoading && project !== undefined;
+  const isManagedCloudSubscription =
+    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+  const excludeS0 = projectReady ? !isManagedCloudSubscription : false;
+
   // Fetch filter metadata first to get Incident and Query IDs for stats API
-  const { data: filterMetadata } = useGetCasesFilters(projectId || "");
+  const { data: filterMetadata } = useGetProjectFilters(projectId || "");
+
+  // Fetch deployments for the deployment filter
+  const { data: deploymentsData } = useGetDeployments(projectId || "");
 
   const { incidentId, queryId } = useMemo(
     () => getIncidentAndQueryIds(filterMetadata?.caseTypes),
-    [filterMetadata?.caseTypes],
-  );
-
-  const defaultCaseTypeIds = useMemo(
-    () => getIncidentAndQueryCaseTypeIds(filterMetadata?.caseTypes),
     [filterMetadata?.caseTypes],
   );
 
@@ -89,29 +99,29 @@ export default function AllCasesPage(): JSX.Element {
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
-        caseTypeIds: filters.caseTypeId
+        caseTypes: filters.caseTypeId
           ? [filters.caseTypeId]
-          : defaultCaseTypeIds.length > 0
-            ? defaultCaseTypeIds
-            : undefined,
+          : [CaseType.DEFAULT_CASE],
         statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
+        createdByMe: createdByMe || undefined,
       },
       sortBy: {
         field: "createdOn",
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortOrder, defaultCaseTypeIds],
+    [filters, searchTerm, sortOrder, createdByMe],
   );
 
   // Fetch all cases using infinite query (runs in parallel with stats when projectId and auth are ready)
   const {
     data,
     isLoading: isCasesQueryLoading,
+    isError: isCasesError,
     hasNextPage,
     fetchNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest, {
@@ -149,16 +159,20 @@ export default function AllCasesPage(): JSX.Element {
     void fetchNextPage();
   }, [data, hasNextPage, fetchNextPage]);
 
-  const allCases = useMemo(
+  const rawCases = useMemo(
     () => data?.pages.flatMap((page) => page.cases) ?? [],
     [data],
   );
   const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
-  // API returns filtered/sorted results; no frontend filtering/sorting needed
-  const filteredAndSearchedCases = allCases;
+  const filteredAndSearchedCases = useMemo(
+    () => (excludeS0 ? rawCases.filter((c) => !isS0Case(c)) : rawCases),
+    [rawCases, excludeS0],
+  );
 
-  const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
+  const totalItems = excludeS0
+    ? filteredAndSearchedCases.length
+    : (apiTotalRecords || filteredAndSearchedCases.length);
 
   // Pagination logic
   const paginatedCases = useMemo(() => {
@@ -209,10 +223,12 @@ export default function AllCasesPage(): JSX.Element {
         </Button>
         <Box>
           <Typography variant="h4" color="text.primary" sx={{ mb: 1 }}>
-            All Cases
+            {createdByMe ? "My Cases" : "All Cases"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Manage and track all your support cases
+            {createdByMe
+              ? "Manage and track your support cases"
+              : "Manage and track all your support cases"}
           </Typography>
         </Box>
       </Box>
@@ -231,8 +247,10 @@ export default function AllCasesPage(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
         filters={filters}
         filterMetadata={filterMetadata}
+        deployments={deploymentsData?.deployments}
         onFilterChange={handleFilterChange}
         onClearFilters={handleClearFilters}
+        excludeS0={excludeS0}
       />
 
       {/* Sort and results count */}
@@ -272,7 +290,8 @@ export default function AllCasesPage(): JSX.Element {
       {/* Cases list */}
       <AllCasesList
         cases={paginatedCases}
-        isLoading={isCasesAreaLoading}
+        isLoading={isCasesAreaLoading && !isCasesError}
+        isError={isCasesError}
         onCaseClick={(c) => navigate(`/${projectId}/support/cases/${c.id}`)}
       />
 

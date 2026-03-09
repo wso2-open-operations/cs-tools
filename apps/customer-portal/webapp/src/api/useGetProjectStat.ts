@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ProjectStatsResponse } from "@models/responses";
 
 /**
@@ -32,7 +32,7 @@ export function useGetProjectStat(
 ): UseQueryResult<ProjectStatsResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProjectStatsResponse, Error>({
     queryKey: [ApiQueryKeys.PROJECT_STATS, projectId],
@@ -48,7 +48,9 @@ export function useGetProjectStat(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/stats`;
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(
           `[useGetProjectStat] Response status for ${projectId}: ${response.status}`,

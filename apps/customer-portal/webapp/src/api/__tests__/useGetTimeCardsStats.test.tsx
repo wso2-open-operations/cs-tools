@@ -20,26 +20,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import useGetTimeCardsStats from "@api/useGetTimeCardsStats";
 import type { ReactNode } from "react";
 
-const mockTimeCardsStatsResponse = {
-  totalHours: 400,
-  billableHours: 400,
-  nonBillableHours: 0,
-};
-
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isSignedIn: true,
     isLoading: false,
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockTimeCardsStatsResponse),
-    }),
 }));
 
 vi.mock("@hooks/useLogger", () => ({

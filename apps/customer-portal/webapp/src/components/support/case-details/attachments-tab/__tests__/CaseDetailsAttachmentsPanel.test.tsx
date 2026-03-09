@@ -18,13 +18,36 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
-import useGetCaseAttachments from "@api/useGetCaseAttachments";
 import type { CaseAttachment } from "@models/responses";
 
 const mockCaseAttachments: CaseAttachment[] = [
-  { id: "a1", name: "screenshot-error.png", type: "image/png", size: 240 * 1024, downloadUrl: "/a1", createdOn: "2026-02-01", createdBy: "admin@test.com" },
-  { id: "a2", name: "logs-debug.txt", type: "text/plain", size: 1024, downloadUrl: "/a2", createdOn: "2026-02-01", createdBy: "admin@test.com" },
-  { id: "a3", name: "config-backup.zip", type: "application/zip", size: 512, downloadUrl: "/a3", createdOn: "2026-02-01", createdBy: "admin@test.com" },
+  {
+    id: "a1",
+    name: "screenshot-error.png",
+    type: "image/png",
+    size: 240 * 1024,
+    downloadUrl: "/a1",
+    createdOn: "2026-02-01",
+    createdBy: "admin@test.com",
+  },
+  {
+    id: "a2",
+    name: "logs-debug.txt",
+    type: "text/plain",
+    size: 1024,
+    downloadUrl: "/a2",
+    createdOn: "2026-02-01",
+    createdBy: "admin@test.com",
+  },
+  {
+    id: "a3",
+    name: "config-backup.zip",
+    type: "application/zip",
+    size: 512,
+    downloadUrl: "/a3",
+    createdOn: "2026-02-01",
+    createdBy: "admin@test.com",
+  },
 ];
 
 vi.mock("../UploadAttachmentModal", () => ({
@@ -33,22 +56,27 @@ vi.mock("../UploadAttachmentModal", () => ({
 }));
 
 vi.mock("@api/useGetCaseAttachments", () => ({
-  __esModule: true,
-  default: vi.fn((_caseId: string, opts?: { enabled?: boolean }) => {
-    const enabled = opts?.enabled !== false;
-    return {
-      data: enabled
-        ? {
-            attachments: mockCaseAttachments,
-            totalRecords: mockCaseAttachments.length,
-            limit: 50,
-            offset: 0,
-          }
-        : undefined,
-      isLoading: false,
-      isError: false,
-    };
-  }),
+  useGetCaseAttachments: vi.fn(() => ({
+    data: {
+      pages: [
+        {
+          attachments: mockCaseAttachments,
+          totalRecords: mockCaseAttachments.length,
+          limit: 10,
+          offset: 0,
+        },
+      ],
+      pageParams: [0],
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+    isFetchNextPageError: false,
+  })),
+  flattenCaseAttachments: (data: any) =>
+    data?.pages?.flatMap((p: any) => p.attachments ?? []) ?? [],
 }));
 
 function renderPanel(caseId = "case-1") {
@@ -72,7 +100,9 @@ describe("CaseDetailsAttachmentsPanel", () => {
     expect(screen.getByText("screenshot-error.png")).toBeInTheDocument();
     expect(screen.getByText("logs-debug.txt")).toBeInTheDocument();
     expect(screen.getByText("config-backup.zip")).toBeInTheDocument();
-    const downloadButtons = screen.getAllByRole("button", { name: /download/i });
+    const downloadButtons = screen.getAllByRole("button", {
+      name: /download/i,
+    });
     expect(downloadButtons).toHaveLength(mockCaseAttachments.length);
   });
 
@@ -89,39 +119,31 @@ describe("CaseDetailsAttachmentsPanel", () => {
     expect(screen.getByText(/no case selected/i)).toBeInTheDocument();
   });
 
-  it("should show EmptyIcon and no attachments found when attachments list is empty", () => {
+  it("should show EmptyIcon and no attachments found when attachments list is empty", async () => {
+    const { useGetCaseAttachments } = await import("@api/useGetCaseAttachments");
     vi.mocked(useGetCaseAttachments).mockReturnValueOnce({
       data: {
-        attachments: [],
-        totalRecords: 0,
-        limit: 50,
-        offset: 0,
+        pages: [
+          {
+            attachments: [],
+            totalRecords: 0,
+            limit: 10,
+            offset: 0,
+          },
+        ],
+        pageParams: [0],
       },
-      error: null,
       isLoading: false,
       isError: false,
-      isPending: false,
-      isSuccess: true,
-      status: "success",
-      fetchStatus: "idle",
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isFetching: false,
-      isRefetching: false,
-      isLoadingError: false,
-      isPaused: false,
-      isPlaceholderData: false,
-      isRefetchError: false,
-      isStale: false,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useGetCaseAttachments>);
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchNextPageError: false,
+    } as any);
     renderPanel("case-1");
     expect(screen.getByText("No attachments found.")).toBeInTheDocument();
-    expect(document.querySelector("svg[aria-hidden='true']")).toBeInTheDocument();
+    expect(
+      document.querySelector("svg[aria-hidden='true']"),
+    ).toBeInTheDocument();
   });
 });

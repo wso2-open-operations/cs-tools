@@ -46,9 +46,10 @@ const ProductVulnerabilitiesTable = ({
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const { data: metaData } = useGetVulnerabilitiesMetaData();
+  const { data: metaData, isError: isMetaDataError } =
+    useGetVulnerabilitiesMetaData();
   const severityOptions = useMemo(
     () =>
       metaData?.severities?.map((s) => ({ value: s.id, label: s.label })) ?? [],
@@ -73,9 +74,7 @@ const ProductVulnerabilitiesTable = ({
         searchQuery: (debouncedSearch?.trim() || undefined) as
           | string
           | undefined,
-        severityId: filters.severityId
-          ? Number(filters.severityId)
-          : undefined,
+        severityId: filters.severityId ? Number(filters.severityId) : undefined,
       },
       pagination: {
         offset: page * rowsPerPage,
@@ -167,10 +166,7 @@ const ProductVulnerabilitiesTable = ({
     return result;
   }, [filters, severityOptions]);
 
-  const displayFiltersForPopover = useMemo(
-    () => ({ ...filters }),
-    [filters],
-  );
+  const displayFiltersForPopover = useMemo(() => ({ ...filters }), [filters]);
 
   return (
     <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
@@ -181,7 +177,9 @@ const ProductVulnerabilitiesTable = ({
           setPage(0);
         }}
         onFilterIconClick={() => setIsFilterOpen(true)}
-        activeFiltersCount={activeFilterFields.filter((f) => appliedFilters[f.id]).length}
+        activeFiltersCount={
+          activeFilterFields.filter((f) => appliedFilters[f.id]).length
+        }
         appliedFilters={appliedFilters}
         filterFields={activeFilterFields}
         onRemoveFilter={handleRemoveFilter}
@@ -208,6 +206,7 @@ const ProductVulnerabilitiesTable = ({
         fields={dynamicFilterFields}
         title="Filter Vulnerabilities"
         isLoading={!metaData}
+        isError={isMetaDataError}
       />
     </ListingTable.Container>
   );

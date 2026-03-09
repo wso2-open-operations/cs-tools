@@ -99,7 +99,7 @@ const mockCasesStats = {
   isError: false,
 };
 
-vi.mock("@api/useGetCasesFilters", () => ({
+vi.mock("@api/useGetProjectFilters", () => ({
   default: vi.fn(() => mockFilters),
 }));
 

@@ -39,10 +39,12 @@ import {
   resolveColorFromTheme,
 } from "@utils/support";
 import AllConversationsListSkeleton from "./AllConversationsListSkeleton";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 export interface AllConversationsListProps {
   conversations: Conversation[];
   isLoading: boolean;
+  isError?: boolean;
   onConversationClick?: (conversation: Conversation) => void;
 }
 
@@ -55,12 +57,24 @@ export interface AllConversationsListProps {
 export default function AllConversationsList({
   conversations,
   isLoading,
+  isError = false,
   onConversationClick,
 }: AllConversationsListProps): JSX.Element {
   const theme = useTheme();
 
   if (isLoading) {
     return <AllConversationsListSkeleton />;
+  }
+
+  if (isError) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <ErrorIndicator entityName="conversations" size="medium" />
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Failed to load conversations. Please try again.
+        </Typography>
+      </Box>
+    );
   }
 
   if (conversations.length === 0) {
@@ -79,10 +93,9 @@ export default function AllConversationsList({
         const StatusIcon = getStatusIcon(conv.state?.label);
         const colorPath = getStatusColor(conv.state?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
-        const action =
-          (conv.state?.label?.toLowerCase().includes("open")
-            ? "resume"
-            : "view") as "resume" | "view";
+        const action = (
+          conv.state?.label?.toLowerCase().includes("open") ? "resume" : "view"
+        ) as "resume" | "view";
 
         return (
           <Form.CardButton
@@ -194,7 +207,7 @@ export default function AllConversationsList({
                     color="text.secondary"
                     sx={{ lineHeight: 1 }}
                   >
-                    by {conv.createdBy}
+                    Created by {conv.createdBy}
                   </Typography>
                 )}
               </Stack>

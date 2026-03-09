@@ -23,13 +23,11 @@ const mockLogger = { debug: vi.fn() };
 vi.mock("@hooks/useLogger", () => ({ useLogger: () => mockLogger }));
 
 const mockAuthFetch = vi.fn();
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
 
 const mockUseAsgardeo = vi.fn(() => ({
   isSignedIn: true,
   isLoading: false,
+  getIdToken: vi.fn().mockResolvedValue("mock-token"),
 }));
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => mockUseAsgardeo(),
@@ -61,9 +59,12 @@ describe("usePostConversationMessages", () => {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.example.com",
     } as typeof window.config;
     mockAuthFetch.mockResolvedValue(
-      new Response(JSON.stringify({ message: "AI response", conversationId: "conv-1" }), {
-        status: 200,
-      }),
+      new Response(
+        JSON.stringify({ message: "AI response", conversationId: "conv-1" }),
+        {
+          status: 200,
+        },
+      ),
     );
   });
 
@@ -111,6 +112,7 @@ describe("usePostConversationMessages", () => {
     mockUseAsgardeo.mockReturnValueOnce({
       isSignedIn: false,
       isLoading: false,
+      getIdToken: vi.fn(),
     });
     const { result } = renderHook(() => usePostConversationMessages(), {
       wrapper,
@@ -125,6 +127,7 @@ describe("usePostConversationMessages", () => {
     mockUseAsgardeo.mockReturnValueOnce({
       isSignedIn: false,
       isLoading: true,
+      getIdToken: vi.fn(),
     });
     const { result } = renderHook(() => usePostConversationMessages(), {
       wrapper,

@@ -51,7 +51,7 @@ describe("TrendIndicator", () => {
     render(<TrendIndicator isLoading={true} />);
     const skeleton = screen.getByTestId("skeleton");
     expect(skeleton).toHaveAttribute("data-variant", "rounded");
-    expect(screen.getByText("vs last month")).toBeInTheDocument();
+    expect(screen.getByText("vs Previous 30 Days")).toBeInTheDocument();
   });
 
   it("should render up trend correctly", () => {
@@ -64,7 +64,7 @@ describe("TrendIndicator", () => {
 
     expect(screen.getByText("12%")).toBeInTheDocument();
     expect(screen.getByTestId("icon-trending-up")).toBeInTheDocument();
-    expect(screen.getByText("vs last month")).toBeInTheDocument();
+    expect(screen.getByText("vs Previous 30 Days")).toBeInTheDocument();
   });
 
   it("should render down trend in error color", () => {

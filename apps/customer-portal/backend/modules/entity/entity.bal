@@ -23,6 +23,15 @@ public isolated function getUserBasicInfo(string email, string idToken) returns 
     return csEntityClient->/users/me.get(generateHeaders(idToken));
 }
 
+# Update logged-in user information.
+#
+# + idToken - ID token for authorization
+# + payload - User update payload containing details to be updated in the user profile
+# + return - User update response containing details of the updated user profile or error
+public isolated function updateUser(string idToken, UserUpdatePayload payload) returns UserUpdateResponse|error {
+    return csEntityClient->/users/me.patch(payload, generateHeaders(idToken));
+}
+
 # Get project by ID.
 #
 # + idToken - ID token for authorization
@@ -39,6 +48,18 @@ public isolated function getProject(string idToken, string projectId) returns Pr
 # + return - Projects response or error
 public isolated function searchProjects(string idToken, ProjectSearchPayload payload) returns ProjectsResponse|error {
     return csEntityClient->/projects/search.post(payload, generateHeaders(idToken));
+}
+
+# Update a project.
+#
+# + idToken - ID token for authorization
+# + projectId - Unique ID of the project to be updated
+# + payload - Project update payload containing details to be updated in the project
+# + return - Project update response containing details of the updated project or error
+public isolated function updateProject(string idToken, string projectId, ProjectUpdatePayload payload)
+    returns ProjectUpdateResponse|error {
+
+    return csEntityClient->/projects/[projectId].patch(payload, generateHeaders(idToken));
 }
 
 # Get project activity statistics by ID.
@@ -160,10 +181,33 @@ public isolated function searchAttachments(string idToken, ReferenceSearchPayloa
 # + idToken - ID token for authorization
 # + payload - Attachment creation payload
 # + return - Attachment creation response or error
-public isolated function createAttachment(string idToken, AttachmentPayload payload)
+public isolated function createAttachment(string idToken, AttachmentCreatePayload payload)
     returns AttachmentCreateResponse|error {
 
     return csEntityClient->/attachments.post(payload, generateHeaders(idToken));
+}
+
+# Update an attachment.
+#
+# + idToken - ID token for authorization
+# + attachmentId - Unique ID of the attachment to be updated
+# + payload - Attachment update payload containing details to be updated in the attachment
+# + return - Attachment update response containing details of the updated attachment or error
+public isolated function updateAttachment(string idToken, IdString attachmentId, AttachmentUpdatePayload payload)
+    returns AttachmentUpdateResponse|error {
+
+    return csEntityClient->/attachments/[attachmentId].patch(payload, generateHeaders(idToken));
+}
+
+# Delete an attachment.
+#
+# + idToken - ID token for authorization
+# + attachmentId - Unique ID of the attachment to be deleted
+# + return - Attachment delete response containing success message or error
+public isolated function deleteAttachment(string idToken, IdString attachmentId)
+    returns AttachmentDeleteResponse|error {
+
+    return csEntityClient->/attachments/[attachmentId].delete(generateHeaders(idToken));
 }
 
 # Get products of a deployment.
@@ -409,4 +453,69 @@ public isolated function getProjectTimeCardStats(string idToken, string projectI
     }
 
     return csEntityClient->/projects/[projectId]/time\-cards/stats.get(generateHeaders(idToken));
+}
+
+# Get change request by ID.
+# 
+# + idToken - ID token for authorization
+# + changeRequestId - Unique ID of the change request to be retrieved
+# + return - Change request response containing details of the retrieved change request or error
+public isolated function getChangeRequestDetails(string idToken, string changeRequestId) returns ChangeRequestResponse|error {
+    return csEntityClient->/change\-requests/[changeRequestId].get(generateHeaders(idToken));
+}
+
+# Search change requests of a project.
+#
+# + idToken - ID token for authorization
+# + payload - Change request search payload containing search criteria for change requests
+# + return - Change request search response containing matching change requests or error
+public isolated function searchChangeRequests(string idToken, ChangeRequestSearchPayload payload)
+    returns ChangeRequestSearchResponse|error {
+
+    return csEntityClient->/change\-requests/search.post(payload, generateHeaders(idToken));
+}
+
+# Update a change request.
+# 
+# + idToken - ID token for authorization
+# + changeRequestId - Unique ID of the change request to be updated
+# + payload - Change request update payload containing details to be updated in the change request
+# + return - Change request update response containing details of the updated change request or error
+public isolated function updateChangeRequest(string idToken, string changeRequestId, ChangeRequestUpdatePayload payload)
+    returns ChangeRequestUpdateResponse|error {
+
+    return csEntityClient->/change\-requests/[changeRequestId].patch(payload, generateHeaders(idToken));
+}
+# Search catalogs.
+#
+# + idToken - ID token for authorization
+# + payload - Catalog search payload containing search criteria for catalogs
+# + return - Catalog search response containing matching catalogs or error
+public isolated function searchCatalogs(string idToken, CatalogSearchPayload payload)
+    returns CatalogSearchResponse|error {
+
+    return csEntityClient->/catalogs/search.post(payload, generateHeaders(idToken));
+}
+
+# Get catalog item variables.
+#
+# + idToken - ID token for authorization
+# + catalogId - Unique ID of the catalog to which the catalog item belongs
+# + catalogItemId - Unique ID of the catalog item for which variables are to be retrieved
+# + return - Catalog item variables response containing variables of the specified catalog item or error
+public isolated function getCatalogItemVariable(string idToken, string catalogId, string catalogItemId)
+    returns CatalogItemVariablesResponse|error {
+
+    return csEntityClient->/catalogs/[catalogId]/items/[catalogItemId]/variables.get(generateHeaders(idToken));
+}
+
+# Get project change request statistics.
+#
+# + idToken - ID token for authorization
+# + projectId - Unique ID of the project for which change request statistics are to be retrieved
+# + return - Project change request statistics response or error
+public isolated function getProjectChangeRequestStats(string idToken, string projectId)
+    returns ProjectChangeRequestStatsResponse|error {
+
+    return csEntityClient->/projects/[projectId]/change\-requests/stats.get(generateHeaders(idToken));
 }

@@ -33,6 +33,7 @@ vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     isSignedIn: true,
     isLoading: false,
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
   }),
 }));
 
@@ -73,10 +74,9 @@ describe("useGetProjectDeploymentDetails", () => {
   });
 
   it("should not be enabled when projectId is empty", () => {
-    const { result } = renderHook(
-      () => useGetProjectDeploymentDetails(""),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useGetProjectDeploymentDetails(""), {
+      wrapper: createWrapper(),
+    });
 
     expect(result.current.isPending).toBe(true);
     expect(result.current.fetchStatus).toBe("idle");

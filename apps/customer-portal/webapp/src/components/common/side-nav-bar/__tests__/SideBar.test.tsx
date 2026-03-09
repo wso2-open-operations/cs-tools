@@ -56,9 +56,17 @@ vi.mock("@wso2/oxygen-ui", () => {
     Typography,
     Paper,
     Button,
-    Link: ({ children, to }: { children: any; to: string }) => (
-      <a href={to}>{children}</a>
-    ),
+    Link: ({
+      children,
+      to,
+    }: {
+      children: any;
+      to: string;
+      component?: any;
+    }) => {
+      // Avoid nesting buttons/links. Render a simple `a` tag directly enclosing children.
+      return <a href={to}>{children}</a>;
+    },
     colors: {
       blue: { 700: "#1D4ED8" },
       purple: { 400: "#A78BFA" },
@@ -101,10 +109,12 @@ vi.mock("react-router", () => ({
   ),
 }));
 
-// Mock SubscriptionWidget (path must match: @components/common/side-nav-bar/SubscriptionWidget)
-vi.mock("@components/common/side-nav-bar/SubscriptionWidget", () => ({
-  default: () => <div data-testid="subscription-widget" />,
-}));
+vi.mock("@components/common/side-nav-bar/SubscriptionWidget", () => {
+  return {
+    __esModule: true,
+    default: () => <div data-testid="subscription-widget" />,
+  };
+});
 
 describe("SideBar", () => {
   beforeEach(() => {
@@ -119,11 +129,6 @@ describe("SideBar", () => {
     APP_SHELL_NAV_ITEMS.forEach((item) => {
       expect(screen.getByText(item.label)).toBeInTheDocument();
     });
-  });
-
-  it("should render the subscription widget", () => {
-    render(<SideBar collapsed={false} />);
-    expect(screen.getByTestId("subscription-widget")).toBeInTheDocument();
   });
 
   it("should render the settings item", () => {

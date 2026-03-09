@@ -26,6 +26,7 @@ import {
   getSubscriptionStatus,
   getSubscriptionColor,
   calculateProgress,
+  getRemainingDays,
 } from "@utils/projectDetails";
 import { SUBSCRIPTION_STATUS } from "@constants/projectDetailsConstants";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
@@ -43,11 +44,16 @@ const SubscriptionDetails = ({
   isLoading,
   isError,
 }: SubscriptionDetailsProps): JSX.Element => {
-  const isDateInvalid =
-    isError || !startDate || startDate === "--" || !endDate || endDate === "--";
+  const isDateMissing =
+    !startDate || startDate === "--" || !endDate || endDate === "--";
+  const isDateInvalid = isError || isDateMissing;
 
-  const subscriptionStatus = getSubscriptionStatus(endDate || "");
+  const subscriptionStatus = getSubscriptionStatus(
+    endDate || "",
+    startDate || undefined,
+  );
   const subscriptionColor = getSubscriptionColor(subscriptionStatus);
+  const remainingDays = getRemainingDays(endDate || "");
 
   const progress = isDateInvalid
     ? 0
@@ -69,16 +75,20 @@ const SubscriptionDetails = ({
 
         {isLoading ? (
           <Skeleton variant="rounded" width={70} height={24} />
-        ) : isDateInvalid ? (
+        ) : isError ? (
           <ErrorIndicator entityName="subscription status" />
-        ) : (
+        ) : isDateMissing ? (
+          <Typography variant="caption" color="text.secondary">
+            Not available
+          </Typography>
+        ) : subscriptionStatus !== SUBSCRIPTION_STATUS.ACTIVE ? (
           <Chip
             label={subscriptionStatus}
             size="small"
             color={subscriptionColor}
             variant="outlined"
           />
-        )}
+        ) : null}
       </Box>
 
       {/* Progress bar */}
@@ -114,28 +124,37 @@ const SubscriptionDetails = ({
           </Typography>
           {isLoading ? (
             <Skeleton variant="text" width="60%" />
-          ) : isDateInvalid ? (
+          ) : isError ? (
             <ErrorIndicator entityName="subscription details" />
+          ) : isDateMissing ? (
+            <Typography variant="body2" color="text.secondary">
+              Not available
+            </Typography>
           ) : (
             <Typography variant="body2">{startDate}</Typography>
           )}
         </Box>
 
-        {/* Status */}
+        {/* Remaining (hidden when expired) */}
         <Box sx={{ textAlign: "center" }}>
           <Typography variant="body2" sx={{ display: "block" }}>
-            Status
+            Remaining
           </Typography>
           {isLoading ? (
             <Skeleton variant="text" width={100} />
-          ) : isDateInvalid ? (
+          ) : isError ? (
             <ErrorIndicator entityName="subscription status" />
+          ) : isDateMissing ? (
+            <Typography variant="body2" color="text.secondary">
+              Not available
+            </Typography>
+          ) : subscriptionStatus === SUBSCRIPTION_STATUS.EXPIRED ? (
+            <Typography variant="body2">
+              Expired on {endDate}
+            </Typography>
           ) : (
             <Typography variant="body2">
-              {subscriptionStatus === SUBSCRIPTION_STATUS.EXPIRED
-                ? "Expired on"
-                : "Expires on"}{" "}
-              {endDate}
+              {remainingDays} {remainingDays === 1 ? "day" : "days"}
             </Typography>
           )}
         </Box>
@@ -147,8 +166,12 @@ const SubscriptionDetails = ({
           </Typography>
           {isLoading ? (
             <Skeleton variant="text" width={80} />
-          ) : isDateInvalid ? (
+          ) : isError ? (
             <ErrorIndicator entityName="subscription details" />
+          ) : isDateMissing ? (
+            <Typography variant="body2" color="text.secondary">
+              Not available
+            </Typography>
           ) : (
             <Typography variant="body2">{endDate}</Typography>
           )}

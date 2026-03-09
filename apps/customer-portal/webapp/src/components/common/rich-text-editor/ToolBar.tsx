@@ -433,30 +433,34 @@ const Toolbar = ({
           }}
         >
           <Tooltip title="Undo">
-            <ToggleButton
-              size="small"
-              value="undo"
-              disabled={!canUndo}
-              onClick={() => {
-                focusEditor();
-                editor.dispatchCommand(UNDO_COMMAND, undefined);
-              }}
-            >
-              <UndoIcon size={16} />
-            </ToggleButton>
+            <span>
+              <ToggleButton
+                size="small"
+                value="undo"
+                disabled={!canUndo}
+                onClick={() => {
+                  focusEditor();
+                  editor.dispatchCommand(UNDO_COMMAND, undefined);
+                }}
+              >
+                <UndoIcon size={16} />
+              </ToggleButton>
+            </span>
           </Tooltip>
           <Tooltip title="Redo">
-            <ToggleButton
-              size="small"
-              value="redo"
-              disabled={!canRedo}
-              onClick={() => {
-                focusEditor();
-                editor.dispatchCommand(REDO_COMMAND, undefined);
-              }}
-            >
-              <RedoIcon size={16} />
-            </ToggleButton>
+            <span>
+              <ToggleButton
+                size="small"
+                value="redo"
+                disabled={!canRedo}
+                onClick={() => {
+                  focusEditor();
+                  editor.dispatchCommand(REDO_COMMAND, undefined);
+                }}
+              >
+                <RedoIcon size={16} />
+              </ToggleButton>
+            </span>
           </Tooltip>
 
           {!isDescribeIssue && (
@@ -755,19 +759,20 @@ const Toolbar = ({
                 </ToggleButton>
               </Tooltip>
 
-              <Tooltip title="Attach File">
-                <ToggleButton
-                  size="small"
-                  value="attachment"
-                  disabled={!onAttachmentClick}
-                  onClick={() => {
-                    focusEditor();
-                    onAttachmentClick?.();
-                  }}
-                >
-                  <Paperclip size={16} />
-                </ToggleButton>
-              </Tooltip>
+              {onAttachmentClick && (
+                <Tooltip title="Attach File">
+                  <ToggleButton
+                    size="small"
+                    value="attachment"
+                    onClick={() => {
+                      focusEditor();
+                      onAttachmentClick();
+                    }}
+                  >
+                    <Paperclip size={16} />
+                  </ToggleButton>
+                </Tooltip>
+              )}
             </>
           )}
         </Stack>

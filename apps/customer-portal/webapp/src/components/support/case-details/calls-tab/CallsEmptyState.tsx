@@ -18,12 +18,19 @@ import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 
+export interface CallsEmptyStateProps {
+  action?: React.ReactNode;
+}
+
 /**
  * Renders the empty state for the calls panel.
  *
+ * @param {CallsEmptyStateProps} props - Optional action to render below the message.
  * @returns {JSX.Element} The rendered empty state.
  */
-export default function CallsEmptyState(): JSX.Element {
+export default function CallsEmptyState({
+  action,
+}: CallsEmptyStateProps): JSX.Element {
   return (
     <Stack
       spacing={2}
@@ -44,6 +51,11 @@ export default function CallsEmptyState(): JSX.Element {
       <Typography variant="body2" color="text.secondary">
         No call requests found for this case.
       </Typography>
+      {action && (
+        <Box sx={{ display: "flex", justifyContent: "center", mt: 1 }}>
+          {action}
+        </Box>
+      )}
     </Stack>
   );
 }

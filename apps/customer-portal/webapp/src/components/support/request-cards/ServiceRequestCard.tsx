@@ -40,11 +40,19 @@ export default function ServiceRequestCard(): JSX.Element {
       infoBoxTitle="What are Service Requests?"
       infoBoxDescription="Request operational changes to your managed cloud deployment:"
       bulletItems={SERVICE_REQUEST_BULLET_ITEMS}
-      secondaryButtonLabel="View All Service Requests"
-      onSecondaryClick={() => navigate("../dashboard")}
+      footerButtons={[
+        {
+          label: "View my requests",
+          onClick: () => navigate("service-requests?createdByMe=true"),
+        },
+        {
+          label: "View all requests",
+          onClick: () => navigate("service-requests"),
+        },
+      ]}
       primaryButton={{
         label: "New Service Request",
-        onClick: () => navigate("../create-case"),
+        onClick: () => navigate("service-requests/create"),
         icon: Server,
       }}
     />

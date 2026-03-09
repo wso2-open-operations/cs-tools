@@ -18,7 +18,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import CasesTable from "@components/dashboard/cases-table/CasesTable";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 const mockNavigate = vi.fn();
@@ -29,7 +29,7 @@ vi.mock("react-router", () => ({
 }));
 
 vi.mock("@api/useGetProjectCasesPage");
-vi.mock("@api/useGetCasesFilters");
+vi.mock("@api/useGetProjectFilters");
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
@@ -128,7 +128,7 @@ describe("CasesTable", () => {
   const theme = createTheme();
   const mockProjectId = "proj-123";
   const mockUseGetProjectCasesPage = vi.mocked(useGetProjectCasesPage);
-  const mockUseGetCasesFilters = vi.mocked(useGetCasesFilters);
+  const mockUseGetCasesFilters = vi.mocked(useGetProjectFilters);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,7 +141,7 @@ describe("CasesTable", () => {
       data: undefined,
       isFetching: false,
       isError: false,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
   });
 
   it("should render correctly", () => {
@@ -326,7 +326,7 @@ describe("CasesTable", () => {
     mockUseGetCasesFilters.mockReturnValue({
       isFetching: true,
       isError: true,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(
       <ThemeProvider theme={theme}>

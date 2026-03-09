@@ -40,12 +40,14 @@ import AllCasesList from "@components/support/all-cases/AllCasesList";
 import AllCasesListSkeleton from "@components/support/all-cases/AllCasesListSkeleton";
 import SearchNoResultsIcon from "@components/common/empty-state/SearchNoResultsIcon";
 import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
+import { isS0Case } from "@utils/support";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
 export interface SearchBarProps {
   /** Project ID for case search. When absent, search is disabled. */
   projectId?: string;
+  excludeS0?: boolean;
 }
 
 /**
@@ -54,7 +56,10 @@ export interface SearchBarProps {
  * @param {SearchBarProps} props - Component props.
  * @returns {JSX.Element} The SearchBar component.
  */
-export default function SearchBar({ projectId }: SearchBarProps): JSX.Element {
+export default function SearchBar({
+  projectId,
+  excludeS0 = false,
+}: SearchBarProps): JSX.Element {
   const navigate = useNavigate();
   const { projectId: urlProjectId } = useParams<{ projectId?: string }>();
   const effectiveProjectId = projectId ?? urlProjectId ?? "";
@@ -84,7 +89,14 @@ export default function SearchBar({ projectId }: SearchBarProps): JSX.Element {
     },
   );
 
-  const cases: CaseListItem[] = data?.pages?.[0]?.cases ?? [];
+  const rawCases = useMemo(
+    () => (data?.pages?.flatMap((p) => p.cases ?? []) ?? []) as CaseListItem[],
+    [data?.pages],
+  );
+  const cases = useMemo(
+    () => (excludeS0 ? rawCases.filter((c) => !isS0Case(c)) : rawCases),
+    [rawCases, excludeS0],
+  );
 
   const handleCaseClick = useCallback(
     (caseItem: CaseListItem) => {

@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CaseCommentsResponse } from "@models/responses";
 
 export interface UseGetCaseCommentsOptions {
@@ -41,7 +41,7 @@ export default function useGetCaseComments(
 ): UseQueryResult<CaseCommentsResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
   const { offset = 0, limit = 20 } = options ?? {};
 
   return useQuery<CaseCommentsResponse, Error>({
@@ -62,7 +62,9 @@ export default function useGetCaseComments(
         if (limit !== undefined) params.set("limit", String(limit));
         const query = params.toString();
         const requestUrl = `${baseUrl}/cases/${caseId}/comments${query ? `?${query}` : ""}`;
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         if (!response.ok) {
           throw new Error(

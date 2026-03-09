@@ -42,6 +42,12 @@ vi.mock("@api/usePostProjectContact", () => ({
   }),
 }));
 
+vi.mock("@api/useGetUserDetails", () => ({
+  default: () => ({
+    data: { roles: ["sn_customerservice.customer_admin"] },
+  }),
+}));
+
 
 function createTestQueryClient() {
   return new QueryClient({

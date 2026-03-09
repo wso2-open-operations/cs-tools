@@ -43,14 +43,14 @@ const ProjectInformationCard = ({
   const getDescription = () => project?.description || "--";
   const getCreatedDate = () =>
     project?.createdOn ? formatProjectDate(project.createdOn) : "--";
-  const getType = () => project?.type || "--";
+  const getType = () => project?.type || { id: "--", label: "--" };
   const getSupportTier = () => project?.account?.supportTier || "--";
   const getStartDate = () => {
-    const val = project?.account?.activationDate;
+    const val = project?.startDate;
     return val?.trim() ? formatProjectDate(val.trim()) : "--";
   };
   const getEndDate = () => {
-    const val = project?.account?.deactivationDate;
+    const val = project?.endDate;
     return val?.trim() ? formatProjectDate(val.trim()) : "--";
   };
 
@@ -75,7 +75,7 @@ const ProjectInformationCard = ({
 
           <ProjectMetadata
             createdDate={getCreatedDate()}
-            projectType={getType()}
+            type={getType()}
             supportTier={getSupportTier()}
             slaStatus={slaStatus}
             isLoading={isLoading}

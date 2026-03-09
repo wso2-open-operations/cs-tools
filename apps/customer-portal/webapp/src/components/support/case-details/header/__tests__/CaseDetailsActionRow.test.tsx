@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
-vi.mock("@api/useGetCasesFilters", () => ({
+vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({
     data: {
       caseStates: [

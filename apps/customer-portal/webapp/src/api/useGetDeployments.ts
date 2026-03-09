@@ -16,9 +16,9 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type {
   ProjectDeploymentItem,
   ProjectDeploymentsListResponse,
@@ -35,7 +35,7 @@ export function useGetDeployments(
 ): UseQueryResult<ProjectDeploymentsListResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useQuery<ProjectDeploymentsListResponse, Error>({
     queryKey: [ApiQueryKeys.DEPLOYMENTS, projectId],
@@ -51,7 +51,9 @@ export function useGetDeployments(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/deployments`;
 
-        const response = await fetchFn(requestUrl, { method: "GET" });
+        const response = await authFetch(requestUrl, {
+          method: "GET",
+        });
 
         logger.debug(`[useGetDeployments] Response status: ${response.status}`);
 

@@ -15,8 +15,8 @@
 
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { ConversationRequest } from "@models/requests";
 import type { ConversationResponse } from "@models/responses";
 
@@ -33,7 +33,7 @@ export function usePostConversationMessages(): UseMutationResult<
 > {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useMutation<
     ConversationResponse,
@@ -41,7 +41,10 @@ export function usePostConversationMessages(): UseMutationResult<
     { projectId: string; conversationId: string } & ConversationRequest
   >({
     mutationFn: async (
-      params: { projectId: string; conversationId: string } & ConversationRequest,
+      params: {
+        projectId: string;
+        conversationId: string;
+      } & ConversationRequest,
     ): Promise<ConversationResponse> => {
       const { projectId, conversationId, message, envProducts, region, tier } =
         params;
@@ -58,14 +61,13 @@ export function usePostConversationMessages(): UseMutationResult<
 
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
       if (!baseUrl) {
-        throw new Error(
-          "CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured",
-        );
+        throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
       }
 
       const requestUrl = `${baseUrl}/projects/${projectId}/conversations/${conversationId}/messages`;
-      const response = await fetchFn(requestUrl, {
+      const response = await authFetch(requestUrl, {
         method: "POST",
+
         body: JSON.stringify({ message, envProducts, region, tier }),
       });
 

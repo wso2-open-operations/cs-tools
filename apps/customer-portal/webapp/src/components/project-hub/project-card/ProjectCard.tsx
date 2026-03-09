@@ -74,7 +74,6 @@ export default function ProjectCard({
     }
   }, [isStatsLoading, showLoader, hideLoader]);
 
-  const resolvedStatus = statsData?.projectStats?.slaStatus ?? "—";
   const resolvedOpenCases = statsData?.projectStats?.openCases;
   const resolvedActiveChats = statsData?.projectStats?.activeChats;
 
@@ -91,12 +90,7 @@ export default function ProjectCard({
       }}
     >
       {/* project card badges */}
-      <ProjectCardBadges
-        projectKey={projectKey}
-        status={resolvedStatus}
-        isError={resolvedIsStatsError}
-        isLoading={isStatsLoading}
-      />
+      <ProjectCardBadges projectKey={projectKey} />
       {/* project card info */}
       <ProjectCardInfo subtitle={subtitle} title={title} />
       {/* project card stats */}

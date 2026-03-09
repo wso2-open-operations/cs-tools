@@ -23,7 +23,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Send } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Send, PlusCircle } from "@wso2/oxygen-ui-icons-react";
 import { useState, useRef, useCallback, useMemo, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import Editor from "@components/common/rich-text-editor/Editor";
@@ -55,6 +55,7 @@ export default function DescribeIssuePage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const { showError } = useErrorBanner();
   const [value, setValue] = useState("");
+  const [hasApiFailed, setHasApiFailed] = useState(false);
 
   const { data: projectDeployments } = useGetProjectDeployments(
     projectId || "",
@@ -103,6 +104,7 @@ export default function DescribeIssuePage(): JSX.Element {
       };
       navigate(`/${projectId}/support/chat`, { state });
     } catch {
+      setHasApiFailed(true);
       showError("Could not get help. Please try again or create a support case.");
     } finally {
       submittingRef.current = false;
@@ -115,6 +117,13 @@ export default function DescribeIssuePage(): JSX.Element {
     navigate,
     showError,
   ]);
+
+  const handleCreateCase = useCallback(() => {
+    if (!projectId) return;
+    navigate(`/${projectId}/support/chat/create-case`, {
+      state: { skipChat: true },
+    });
+  }, [projectId, navigate]);
 
   const isSubmitDisabled =
     !projectId || !plainText.trim() || isSubmitting || isProductsLoading;
@@ -183,7 +192,18 @@ export default function DescribeIssuePage(): JSX.Element {
               </Typography>
             </Box>
 
-            <Box sx={{ display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2, flexShrink: 0 }}>
+              {hasApiFailed && (
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<PlusCircle size={18} />}
+                  onClick={handleCreateCase}
+                  disabled={!projectId}
+                >
+                  Create Case
+                </Button>
+              )}
               <Button
                 variant="contained"
                 color="warning"

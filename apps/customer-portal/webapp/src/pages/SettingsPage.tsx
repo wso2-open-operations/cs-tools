@@ -17,7 +17,8 @@
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { Bot, Users } from "@wso2/oxygen-ui-icons-react";
 import { useParams } from "react-router";
-import { useState, type JSX } from "react";
+import { useState, useMemo, type JSX } from "react";
+import useGetUserDetails from "@api/useGetUserDetails";
 import TabBar from "@components/common/tab-bar/TabBar";
 import SettingsAiAssistant from "@components/settings/SettingsAiAssistant";
 import SettingsUserManagement from "@components/settings/SettingsUserManagement";
@@ -27,6 +28,9 @@ const SETTINGS_TABS = [
   { id: "ai", label: "AI Assistant", icon: Bot },
 ] as const;
 
+/** Role that can see AI Assistant tab and User Management Add/Delete. */
+const CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
+
 /**
  * Settings page with User Management and AI Assistant tabs.
  *
@@ -35,6 +39,27 @@ const SETTINGS_TABS = [
 export default function SettingsPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState<string>("users");
+  const { data: userDetails } = useGetUserDetails();
+
+  const isCustomerAdmin = useMemo(
+    () => (userDetails?.roles ?? []).includes(CUSTOMER_ADMIN_ROLE),
+    [userDetails?.roles],
+  );
+
+  const tabs = useMemo(
+    () =>
+      SETTINGS_TABS.filter((t) => {
+        if (t.id === "ai" && !isCustomerAdmin) return false;
+        return true;
+      }),
+    [isCustomerAdmin],
+  );
+
+  const displayTab = useMemo(
+    () =>
+      tabs.some((t) => t.id === activeTab) ? activeTab : (tabs[0]?.id ?? "users"),
+    [tabs, activeTab],
+  );
 
   if (!projectId) {
     return (
@@ -49,18 +74,23 @@ export default function SettingsPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <TabBar
-        tabs={SETTINGS_TABS.map((t) => ({
+        tabs={tabs.map((t) => ({
           id: t.id,
           label: t.label,
           icon: t.icon,
         }))}
-        activeTab={activeTab}
+        activeTab={displayTab}
         onTabChange={setActiveTab}
         sx={{ mb: 0 }}
       />
 
-      {activeTab === "users" && <SettingsUserManagement projectId={projectId} />}
-      {activeTab === "ai" && <SettingsAiAssistant />}
+      {displayTab === "users" && (
+        <SettingsUserManagement
+          projectId={projectId}
+          canAddOrRemoveUsers={isCustomerAdmin}
+        />
+      )}
+      {displayTab === "ai" && <SettingsAiAssistant />}
     </Box>
   );
 }

@@ -17,18 +17,23 @@
 import {
   Box,
   Button,
+  Chip,
   Paper,
   Skeleton,
   Stack,
   Typography,
+  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import type { JSX, ReactElement } from "react";
 import type { CaseDetails } from "@models/responses";
 import {
   formatUtcToLocalNoTimezone,
   stripHtml,
+  getStatusColor,
+  getStatusIconElement,
+  resolveColorFromTheme,
 } from "@utils/support";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
@@ -100,6 +105,11 @@ export default function AnnouncementDetailsPanel({
     );
   }
 
+  const statusLabel = data.status?.label;
+  const statusColorPath = getStatusColor(statusLabel ?? undefined);
+  const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
+  const statusChipIcon = getStatusIconElement(statusLabel, 12);
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Button
@@ -122,9 +132,43 @@ export default function AnnouncementDetailsPanel({
         }}
       >
         {data.number && (
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-            {data.number}
-          </Typography>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              mb: 0.5,
+              flexWrap: "wrap",
+            }}
+          >
+            <Typography variant="caption" color="text.secondary">
+              {data.number}
+            </Typography>
+            {statusLabel && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={statusLabel}
+                icon={statusChipIcon as ReactElement}
+                sx={{
+                  bgcolor: alpha(resolvedStatusColor, 0.1),
+                  color: resolvedStatusColor,
+                  height: 20,
+                  fontSize: "0.75rem",
+                  px: 0,
+                  "& .MuiChip-icon": {
+                    color: "inherit",
+                    ml: "6px",
+                    mr: "6px",
+                  },
+                  "& .MuiChip-label": {
+                    pl: 0,
+                    pr: "6px",
+                  },
+                }}
+              />
+            )}
+          </Box>
         )}
 
         <Typography

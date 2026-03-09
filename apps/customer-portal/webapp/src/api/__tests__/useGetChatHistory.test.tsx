@@ -54,10 +54,6 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
-
 describe("useGetChatHistory", () => {
   let queryClient: QueryClient;
 
@@ -72,7 +68,11 @@ describe("useGetChatHistory", () => {
       json: () => Promise.resolve(mockChatResponse),
       status: 200,
     } as Response);
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
     vi.clearAllMocks();
@@ -83,19 +83,17 @@ describe("useGetChatHistory", () => {
   );
 
   it("should return loading state initially", async () => {
-    const { result } = renderHook(
-      () => useGetChatHistory("project-1"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useGetChatHistory("project-1"), {
+      wrapper,
+    });
 
     expect(result.current.isLoading).toBe(true);
   });
 
   it("should return data from API", async () => {
-    const { result } = renderHook(
-      () => useGetChatHistory("project-1"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useGetChatHistory("project-1"), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
@@ -132,10 +130,9 @@ describe("useGetChatHistory", () => {
       status: 500,
     } as Response);
 
-    const { result } = renderHook(
-      () => useGetChatHistory("project-1"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useGetChatHistory("project-1"), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toContain(

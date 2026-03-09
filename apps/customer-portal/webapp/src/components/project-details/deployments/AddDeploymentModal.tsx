@@ -41,7 +41,7 @@ import {
 } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { usePostCreateDeployment } from "@api/usePostCreateDeployment";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import ErrorBanner from "@components/common/error-banner/ErrorBanner";
 
@@ -78,7 +78,7 @@ export default function AddDeploymentModal({
     data: filtersData,
     isLoading: isFiltersLoading,
     isError: isFiltersError,
-  } = useGetCasesFilters(projectId);
+  } = useGetProjectFilters(projectId);
 
   const deploymentTypes = filtersData?.deploymentTypes ?? [];
 

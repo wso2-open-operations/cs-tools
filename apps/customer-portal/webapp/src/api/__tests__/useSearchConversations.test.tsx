@@ -24,21 +24,8 @@ vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     isSignedIn: true,
     isLoading: false,
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          conversations: [],
-          totalRecords: 0,
-          offset: 0,
-          limit: 10,
-        }),
-    }),
 }));
 
 vi.mock("@hooks/useLogger", () => ({
@@ -60,7 +47,9 @@ describe("useSearchConversations", () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
     (
-      window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
     ).config = { CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test" };
     vi.clearAllMocks();
   });

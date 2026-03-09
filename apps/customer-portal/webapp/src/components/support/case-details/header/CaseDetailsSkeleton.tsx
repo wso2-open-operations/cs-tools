@@ -17,6 +17,11 @@
 import { Box, Divider, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
+export interface CaseDetailsSkeletonProps {
+  /** When true, hides the action row (manage status section). */
+  hideActionRow?: boolean;
+}
+
 /**
  * Header-only skeleton: case ID, severity, status chip, and title.
  * Used by CaseDetailsHeader when loading and by CaseDetailsSkeleton.
@@ -33,18 +38,15 @@ export function CaseDetailsHeaderSkeleton(): JSX.Element {
         sx={{ mb: 0.5, flexWrap: "wrap" }}
       >
         <Skeleton variant="text" width={100} height={20} />
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Skeleton variant="circular" width={8} height={8} />
-          <Skeleton variant="text" width={28} height={16} />
-        </Box>
+        <Skeleton
+          variant="rounded"
+          width={56}
+          height={20}
+          sx={{ borderRadius: "10px" }}
+        />
         <Skeleton variant="rounded" width={72} height={20} />
       </Stack>
-      <Skeleton
-        variant="text"
-        width="70%"
-        height={28}
-        sx={{ maxWidth: 400 }}
-      />
+      <Skeleton variant="text" width="70%" height={28} sx={{ maxWidth: 400 }} />
     </Box>
   );
 }
@@ -53,45 +55,75 @@ export function CaseDetailsHeaderSkeleton(): JSX.Element {
  * Skeleton placeholder for case details loading: header and action row only.
  * Sub nav tab items (tabs and tab panel content) are not shown as skeleton.
  *
+ * @param {CaseDetailsSkeletonProps} props - Optional configuration.
  * @returns {JSX.Element} The rendered skeleton.
  */
-export default function CaseDetailsSkeleton(): JSX.Element {
+export default function CaseDetailsSkeleton({
+  hideActionRow = false,
+}: CaseDetailsSkeletonProps = {}): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <CaseDetailsHeaderSkeleton />
 
       {/* Action row: avatar, engineer, manage status, buttons */}
-      <Paper
-        variant="outlined"
-        sx={{
-          mt: 2,
-          mb: 1,
-          py: 0.5,
-          px: 2,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 1,
-          bgcolor: "background.default",
-          minHeight: 0,
-        }}
-      >
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Skeleton variant="circular" width={18} height={18} />
-          <Box>
-            <Skeleton variant="text" width={90} height={14} sx={{ mb: 0.25 }} />
-            <Box sx={{ fontSize: "0.7rem", color: "text.secondary" }}>
-              Support Engineer
-            </Box>
-          </Box>
-          <Divider orientation="vertical" flexItem />
+      {!hideActionRow && (
+        <Paper
+          variant="outlined"
+          sx={{
+            mt: 2,
+            mb: 1,
+            py: 0.5,
+            px: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 1,
+            bgcolor: "background.default",
+            minHeight: 0,
+          }}
+        >
           <Stack direction="row" spacing={1.5} alignItems="center">
-            <Skeleton variant="circular" width={12} height={12} />
-            <Skeleton variant="text" width={100} height={14} />
+            <Skeleton variant="circular" width={18} height={18} />
+            <Box>
+              <Skeleton
+                variant="text"
+                width={90}
+                height={14}
+                sx={{ mb: 0.25 }}
+              />
+              <Box sx={{ fontSize: "0.7rem", color: "text.secondary" }}>
+                Support Engineer
+              </Box>
+            </Box>
+            <Divider orientation="vertical" flexItem />
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Skeleton variant="circular" width={12} height={12} />
+              <Skeleton variant="text" width={100} height={14} />
+            </Stack>
           </Stack>
-        </Stack>
-      </Paper>
+        </Paper>
+      )}
+
+      {/* Security Report Analysis Progress Skeleton */}
+      {hideActionRow && (
+        <Paper
+          variant="outlined"
+          sx={{
+            mt: 2,
+            mb: 1,
+            py: 1.5,
+            px: 2,
+            bgcolor: "background.default",
+          }}
+        >
+          <Box sx={{ mb: 1 }}>
+            <Skeleton variant="text" width="40%" height={20} sx={{ mb: 0.5 }} />
+            <Skeleton variant="text" width="20%" height={16} />
+          </Box>
+          <Skeleton variant="rounded" width="100%" height={8} />
+        </Paper>
+      )}
     </Box>
   );
 }

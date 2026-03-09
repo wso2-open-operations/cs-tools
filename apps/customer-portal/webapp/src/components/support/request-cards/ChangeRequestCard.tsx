@@ -41,7 +41,7 @@ export default function ChangeRequestCard(): JSX.Element {
       infoBoxDescription="Structured workflow for planned infrastructure changes:"
       bulletItems={CHANGE_REQUEST_BULLET_ITEMS}
       secondaryButtonLabel="View All Change Requests"
-      onSecondaryClick={() => navigate("../dashboard")}
+      onSecondaryClick={() => navigate("change-requests")}
     />
   );
 }

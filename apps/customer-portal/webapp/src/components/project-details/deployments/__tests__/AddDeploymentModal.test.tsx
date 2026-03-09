@@ -18,10 +18,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AddDeploymentModal from "@components/project-details/deployments/AddDeploymentModal";
 import { usePostCreateDeployment } from "@api/usePostCreateDeployment";
-import useGetCasesFilters from "@api/useGetCasesFilters";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 
 vi.mock("@api/usePostCreateDeployment");
-vi.mock("@api/useGetCasesFilters");
+vi.mock("@api/useGetProjectFilters");
 
 let mockMutate: any;
 let defaultModalProps: any;
@@ -62,11 +62,11 @@ describe("AddDeploymentModal", () => {
       isPending: false,
     } as unknown as ReturnType<typeof usePostCreateDeployment>);
 
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: mockFiltersData,
       isLoading: false,
       isError: false,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
   });
 
   it("should render the modal with title and description", () => {
@@ -92,11 +92,11 @@ describe("AddDeploymentModal", () => {
   });
 
   it("should show skeleton while deployment types are loading", () => {
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(<AddDeploymentModal {...defaultModalProps} />);
 
@@ -105,11 +105,11 @@ describe("AddDeploymentModal", () => {
   });
 
   it("should show ErrorIndicator inside modal when deployment types fail to load", () => {
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(<AddDeploymentModal {...defaultModalProps} />);
 
@@ -117,11 +117,11 @@ describe("AddDeploymentModal", () => {
   });
 
   it("should show ErrorBanner outside modal when deployment types fail to load", () => {
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(<AddDeploymentModal {...defaultModalProps} />);
 
@@ -134,11 +134,11 @@ describe("AddDeploymentModal", () => {
   });
 
   it("should dismiss ErrorBanner when dismiss button is clicked", () => {
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(<AddDeploymentModal {...defaultModalProps} />);
 
@@ -157,11 +157,11 @@ describe("AddDeploymentModal", () => {
   });
 
   it("should disable Add Deployment button when filters failed to load", () => {
-    vi.mocked(useGetCasesFilters).mockReturnValue({
+    vi.mocked(useGetProjectFilters).mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
-    } as unknown as ReturnType<typeof useGetCasesFilters>);
+    } as unknown as ReturnType<typeof useGetProjectFilters>);
 
     render(<AddDeploymentModal {...defaultModalProps} />);
 

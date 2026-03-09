@@ -21,7 +21,14 @@ import useGetCaseComments from "@api/useGetCaseComments";
 
 const mockCommentsResponse = {
   comments: [
-    { id: "c1", content: "Comment one", type: "comments", createdOn: "", createdBy: "", isEscalated: false },
+    {
+      id: "c1",
+      content: "Comment one",
+      type: "comments",
+      createdOn: "",
+      createdBy: "",
+      isEscalated: false,
+    },
   ],
   totalRecords: 1,
   offset: 0,
@@ -37,10 +44,6 @@ vi.mock("@asgardeo/react", () => ({
 }));
 
 const mockAuthFetch = vi.fn();
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () => mockAuthFetch,
-}));
 
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({ debug: vi.fn(), error: vi.fn() }),
@@ -62,7 +65,11 @@ describe("useGetCaseComments", () => {
       ok: true,
       json: () => Promise.resolve(mockCommentsResponse),
     });
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });
@@ -81,8 +88,12 @@ describe("useGetCaseComments", () => {
 
     expect(result.current.data).toBeDefined();
     expect(result.current.data?.comments).toBeDefined();
-    expect(result.current.data?.comments.length).toBe(mockCommentsResponse.comments.length);
-    expect(result.current.data?.totalRecords).toBe(mockCommentsResponse.totalRecords);
+    expect(result.current.data?.comments.length).toBe(
+      mockCommentsResponse.comments.length,
+    );
+    expect(result.current.data?.totalRecords).toBe(
+      mockCommentsResponse.totalRecords,
+    );
     expect(result.current.data?.offset).toBe(0);
     expect(result.current.data?.limit).toBe(20);
   });

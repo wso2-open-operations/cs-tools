@@ -26,32 +26,11 @@ describe("TimeCardsDateFilter", () => {
         endDate="2025-12-31"
         onStartDateChange={() => {}}
         onEndDateChange={() => {}}
-        shownCount={5}
-        totalCount={5}
       />,
     );
 
-    expect(
-      screen.getByText("Filter by Date Range:"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Showing 5 of 5 time logs"),
-    ).toBeInTheDocument();
-  });
-
-  it("should show Loading when isLoading is true", () => {
-    render(
-      <TimeCardsDateFilter
-        startDate="2025-01-01"
-        endDate="2025-12-31"
-        onStartDateChange={() => {}}
-        onEndDateChange={() => {}}
-        shownCount={0}
-        totalCount={0}
-        isLoading
-      />,
-    );
-
-    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(screen.getByText("Filter by Date Range:")).toBeInTheDocument();
+    expect(screen.getByLabelText("From:")).toBeInTheDocument();
+    expect(screen.getByLabelText("To:")).toBeInTheDocument();
   });
 });

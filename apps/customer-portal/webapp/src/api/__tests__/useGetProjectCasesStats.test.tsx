@@ -29,40 +29,12 @@ vi.mock("@/hooks/useLogger", () => ({
   useLogger: () => mockLogger,
 }));
 
-const mockCasesStatsResponse = {
-  totalCases: 50,
-  averageResponseTime: 3600,
-  resolvedCases: { total: 44, currentMonth: 5 },
-  stateCount: [
-    { id: "1", label: "Work In Progress", count: 1 },
-    { id: "2", label: "Awaiting Info", count: 2 },
-    { id: "3", label: "Waiting On WSO2", count: 3 },
-    { id: "4", label: "Closed", count: 40 },
-  ],
-  severityCount: [],
-  outstandingSeverityCount: [
-    { id: 1, label: "Medium (P3)", count: 1 },
-    { id: 2, label: "High (P2)", count: 0 },
-    { id: 3, label: "Critical (P1)", count: 0 },
-  ],
-  caseTypeCount: [],
-  casesTrend: [],
-};
-
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("mock-token"),
     isSignedIn: true,
     isLoading: false,
   }),
-}));
-
-vi.mock("@context/AuthApiContext", () => ({
-  useAuthApiClient: () =>
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockCasesStatsResponse),
-    }),
 }));
 
 describe("useGetProjectCasesStats", () => {
@@ -74,7 +46,11 @@ describe("useGetProjectCasesStats", () => {
     });
     mockLogger.debug.mockClear();
     mockLogger.error.mockClear();
-    (window as unknown as { config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string } }).config = {
+    (
+      window as unknown as {
+        config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
+      }
+    ).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
     };
   });
@@ -117,9 +93,9 @@ describe("useGetProjectCasesStats", () => {
     expect((query?.options as Record<string, unknown>).staleTime).toBe(
       5 * 60 * 1000,
     );
-    expect((query?.options as Record<string, unknown>).refetchOnWindowFocus).toBe(
-      false,
-    );
+    expect(
+      (query?.options as Record<string, unknown>).refetchOnWindowFocus,
+    ).toBe(false);
   });
 
   it("should not fetch if id is missing", () => {

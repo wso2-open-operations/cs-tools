@@ -29,9 +29,25 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useEffect, useState, type ChangeEvent, type JSX } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type JSX,
+} from "react";
 import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
 import type { DeploymentProductItem } from "@models/responses";
+
+/**
+ * Validates and parses a string to a finite non-negative number.
+ * Returns undefined for empty, whitespace, negative, NaN, or Infinity values.
+ */
+function validateFiniteNonNegative(value: string): number | undefined {
+  if (!value || !value.trim()) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : undefined;
+}
 
 export interface ManageProductModalProps {
   open: boolean;
@@ -44,7 +60,7 @@ export interface ManageProductModalProps {
 
 /**
  * Modal for managing (editing) a deployment product.
- * Product Details tab: Core Count and TPS editable; Description disabled.
+ * Product Details tab: Core Count, TPS, and Description are editable.
  * Update History tab disabled.
  *
  * @param {ManageProductModalProps} props - open, deploymentId, product, onClose, optional onSuccess/onError.
@@ -61,16 +77,16 @@ export default function ManageProductModal({
   const [tabValue, setTabValue] = useState(0);
   const [cores, setCores] = useState("");
   const [tps, setTps] = useState("");
+  const [description, setDescription] = useState("");
 
   const patchProduct = usePatchDeploymentProduct();
   const isSubmitting = patchProduct.isPending;
 
   useEffect(() => {
     if (open && product) {
-      setCores(
-        typeof product.cores === "number" ? String(product.cores) : "",
-      );
+      setCores(typeof product.cores === "number" ? String(product.cores) : "");
       setTps(typeof product.tps === "number" ? String(product.tps) : "");
+      setDescription(product.description ?? "");
       setTabValue(0);
     }
   }, [open, product]);
@@ -92,17 +108,50 @@ export default function ManageProductModal({
     setTps(e.target.value);
   }, []);
 
+  const handleDescriptionChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      setDescription(e.target.value);
+    },
+    [],
+  );
+
   const handleSave = useCallback(async () => {
     if (!product?.id) return;
+
+    // Only send changed fields (PATCH behavior)
+    const body: Record<string, number | string | undefined> = {};
+
+    const newCores = validateFiniteNonNegative(cores);
+    const originalCores =
+      typeof product.cores === "number" ? product.cores : undefined;
+    if (newCores !== originalCores) {
+      body.cores = newCores;
+    }
+
+    const newTps = validateFiniteNonNegative(tps);
+    const originalTps =
+      typeof product.tps === "number" ? product.tps : undefined;
+    if (newTps !== originalTps) {
+      body.tps = newTps;
+    }
+
+    const newDescription = description.trim();
+    const originalDescription = (product.description ?? "").trim();
+    if (newDescription !== originalDescription) {
+      body.description = newDescription || undefined;
+    }
+
+    // If nothing changed, just close
+    if (Object.keys(body).length === 0) {
+      handleClose();
+      return;
+    }
 
     try {
       await patchProduct.mutateAsync({
         deploymentId,
         productId: product.id,
-        body: {
-          cores: cores.trim() ? Number(cores) : undefined,
-          tps: tps.trim() ? Number(tps) : undefined,
-        },
+        body,
       });
       handleClose();
       onSuccess?.();
@@ -113,9 +162,13 @@ export default function ManageProductModal({
     }
   }, [
     product?.id,
+    product?.cores,
+    product?.tps,
+    product?.description,
     deploymentId,
     cores,
     tps,
+    description,
     patchProduct,
     handleClose,
     onSuccess,
@@ -123,8 +176,6 @@ export default function ManageProductModal({
   ]);
 
   if (!product) return null;
-
-  const description = product.description ?? "";
 
   return (
     <Dialog
@@ -179,11 +230,12 @@ export default function ManageProductModal({
               label="Description"
               placeholder="Brief description about the product..."
               value={description}
+              onChange={handleDescriptionChange}
               fullWidth
               size="small"
               multiline
               rows={3}
-              disabled
+              disabled={isSubmitting}
             />
             <Box
               sx={{
@@ -224,7 +276,11 @@ export default function ManageProductModal({
       <DialogActions
         sx={{ px: 3, pb: 3, pt: 1, justifyContent: "flex-end", gap: 1 }}
       >
-        <Button variant="outlined" onClick={handleClose} disabled={isSubmitting}>
+        <Button
+          variant="outlined"
+          onClick={handleClose}
+          disabled={isSubmitting}
+        >
           Close
         </Button>
         {isSubmitting ? (

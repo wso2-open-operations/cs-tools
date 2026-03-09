@@ -8,6 +8,7 @@ csEntityBaseUrl = "<base_url>"
 
 [customer_portal.authorization.authorizedRoles]
     userRole  = "<authorized_role>"
+    adminRole  = "<authorized_role>"
 
 [customer_portal.scim]
 scimOperationsServiceUrl = "<base_url>"
@@ -36,6 +37,14 @@ aiChatAgentBaseUrl = "<base_url>"
 [customer_portal.user_management]
 userManagementServiceUrl = "<base_url>"
 [customer_portal.user_management.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]
+
+[customer_portal.registry]
+registryBaseUrl = "<base_url>"
+[customer_portal.registry.clientCredentialsOauth2Config]
     tokenUrl = "<token_url>"
     clientId = "<client_id>"
     clientSecret = "<client_secret>"

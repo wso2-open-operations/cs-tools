@@ -156,8 +156,8 @@ describe("CreateCasePage", () => {
       })),
     }));
 
-    // Mock useGetCasesFilters hook
-    vi.mock("../../api/useGetCasesFilters", () => ({
+    // Mock useGetProjectFilters hook
+    vi.mock("../../api/useGetProjectFilters", () => ({
       default: vi.fn(() => ({
         data: {
           statuses: [{ id: "1", label: "Open" }],

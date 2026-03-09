@@ -15,7 +15,11 @@
 // under the License.
 
 import type { DeploymentDocument } from "@models/responses";
-import { displayValue, formatProjectDate, formatBytes } from "@utils/projectDetails";
+import {
+  displayValue,
+  formatProjectDate,
+  formatBytes,
+} from "@utils/projectDetails";
 import {
   Box,
   Button,
@@ -33,17 +37,11 @@ import {
   Trash2,
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useState, useMemo, type JSX } from "react";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 const ARCHIVE_EXT = /\.(zip|tar|gz|7z|rar|bz2)$/i;
 
-function getFileTypeIcon(name: string) {
-  const ext = name.split(".").pop() ?? "";
-  if (IMAGE_EXT.test(`.${ext}`)) return FileImage;
-  if (ARCHIVE_EXT.test(`.${ext}`)) return FileArchive;
-  return FileText;
-}
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import {
@@ -101,7 +99,12 @@ export default function DeploymentDocumentList({
             Documents
           </Typography>
           {isLoading ? (
-            <Skeleton variant="rounded" width={32} height={20} sx={{ flexShrink: 0 }} />
+            <Skeleton
+              variant="rounded"
+              width={32}
+              height={20}
+              sx={{ flexShrink: 0 }}
+            />
           ) : hasError ? (
             <Typography variant="body2" color="text.secondary">
               (?)
@@ -113,7 +116,7 @@ export default function DeploymentDocumentList({
           )}
         </Box>
         <Button
-          variant="outlined"
+          variant="contained"
           size="small"
           startIcon={<Upload size={16} aria-hidden />}
           sx={{ height: 32, fontSize: "0.75rem" }}
@@ -187,11 +190,26 @@ function DocumentsSkeleton(): JSX.Element {
               <Skeleton variant="rounded" width={20} height={20} />
             </Box>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5, flexWrap: "wrap" }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  mb: 0.5,
+                  flexWrap: "wrap",
+                }}
+              >
                 <Skeleton variant="text" width="50%" height={20} />
                 <Skeleton variant="rounded" width={70} height={20} />
               </Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.5,
+                  flexWrap: "wrap",
+                }}
+              >
                 <Skeleton variant="text" width={50} height={16} />
                 <Skeleton variant="text" width={90} height={16} />
                 <Skeleton variant="text" width={60} height={16} />
@@ -220,7 +238,13 @@ function DocumentRow({ doc }: DocumentRowProps): JSX.Element {
   const uploadedBy = displayValue(doc.uploadedBy ?? doc.createdBy, emptyVal);
   const sizeStr = formatBytes(sizeBytes);
   const category = doc.category;
-  const FileIcon = getFileTypeIcon(name);
+
+  const fileType = useMemo(() => {
+    const ext = name.split(".").pop() ?? "";
+    if (IMAGE_EXT.test(`.${ext}`)) return "image";
+    if (ARCHIVE_EXT.test(`.${ext}`)) return "archive";
+    return "text";
+  }, [name]);
 
   return (
     <Box
@@ -234,10 +258,24 @@ function DocumentRow({ doc }: DocumentRowProps): JSX.Element {
     >
       <Box sx={{ display: "flex", gap: 2, flex: 1, minWidth: 0 }}>
         <Box sx={{ mt: 0.5, flexShrink: 0, color: "text.secondary" }}>
-          <FileIcon size={20} aria-hidden />
+          {fileType === "image" ? (
+            <FileImage size={20} aria-hidden />
+          ) : fileType === "archive" ? (
+            <FileArchive size={20} aria-hidden />
+          ) : (
+            <FileText size={20} aria-hidden />
+          )}
         </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5, flexWrap: "wrap" }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              mb: 0.5,
+              flexWrap: "wrap",
+            }}
+          >
             <Typography
               variant="body2"
               sx={{

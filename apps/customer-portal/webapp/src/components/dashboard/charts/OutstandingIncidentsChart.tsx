@@ -39,6 +39,7 @@ interface OutstandingIncidentsChartProps {
   };
   isLoading?: boolean;
   isError?: boolean;
+  excludeS0?: boolean;
 }
 
 /**
@@ -53,6 +54,7 @@ export const OutstandingIncidentsChart = ({
   data,
   isLoading,
   isError,
+  excludeS0 = false,
 }: OutstandingIncidentsChartProps): JSX.Element => {
   const safeData = data ?? {
     low: 0,
@@ -65,15 +67,21 @@ export const OutstandingIncidentsChart = ({
     total: 0,
   };
 
+  const chartSource = excludeS0
+    ? OUTSTANDING_ENGAGEMENTS_CHART_DATA.filter(
+        (item) => item.key !== "catastrophic",
+      )
+    : OUTSTANDING_ENGAGEMENTS_CHART_DATA;
+
   const chartData = isError
-    ? OUTSTANDING_ENGAGEMENTS_CHART_DATA.map((item) => ({
+    ? chartSource.map((item) => ({
         name: item.displayName,
         value: 1,
         color: colors.grey?.[300] ?? "#D1D5DB",
       }))
     : isLoading
       ? []
-      : OUTSTANDING_ENGAGEMENTS_CHART_DATA.map((item) => ({
+      : chartSource.map((item) => ({
           name: item.displayName,
           value: safeData[item.key as keyof typeof safeData] ?? 0,
           color: item.color,
@@ -104,6 +112,7 @@ export const OutstandingIncidentsChart = ({
             position: "relative",
             opacity: isError ? 0.3 : 1,
             filter: isError ? "grayscale(1)" : "none",
+            "& *:focus": { outline: "none" },
           }}
         >
           <ResponsiveContainer width="100%" height="100%">
@@ -176,13 +185,13 @@ export const OutstandingIncidentsChart = ({
             mt: 2,
           }}
         >
-          {OUTSTANDING_ENGAGEMENTS_CHART_DATA.map((_, i) => (
+          {chartSource.map((_, i) => (
             <Skeleton key={i} variant="rounded" width={60} height={20} />
           ))}
         </Box>
       ) : (
         <ChartLegend
-          data={OUTSTANDING_ENGAGEMENTS_CHART_DATA.map((item) => ({
+          data={chartSource.map((item) => ({
             name: item.displayName,
             value: safeData[item.key as keyof typeof safeData] ?? 0,
             color: item.color,

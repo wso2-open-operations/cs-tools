@@ -15,23 +15,23 @@
 // under the License.
 
 import type { ProjectDeploymentItem } from "@models/responses";
-import { displayValue, formatProjectDate } from "@utils/projectDetails";
+import { displayValue, formatProjectDateTime } from "@utils/projectDetails";
 import {
   Box,
   Card,
   CardContent,
+  Chip,
   Divider,
   IconButton,
   Link,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Activity, Calendar, PencilLine, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, PencilLine, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
-import DeploymentDocumentList from "./DeploymentDocumentList";
-import DeploymentProductList from "./DeploymentProductList";
-import EditDeploymentModal from "./EditDeploymentModal";
-import DeleteDeploymentModal from "./DeleteDeploymentModal";
+import DeploymentDocumentList from "@deployments/DeploymentDocumentList";
+import DeploymentProductList from "@deployments/DeploymentProductList";
+import EditDeploymentModal from "@deployments/EditDeploymentModal";
+import DeleteDeploymentModal from "@deployments/DeleteDeploymentModal";
 import { usePatchDeployment } from "@api/usePatchDeployment";
 
 export interface DeploymentCardProps {
@@ -47,18 +47,29 @@ export interface DeploymentCardProps {
 export default function DeploymentCard({
   deployment,
 }: DeploymentCardProps): JSX.Element {
-  const { name, url, description, createdOn } = deployment;
+  const { name, url, description, createdOn, updatedOn } = deployment;
   const projectId = deployment.project?.id ?? "";
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const patchDeployment = usePatchDeployment();
 
-  const deployedAtStr = formatProjectDate(createdOn);
+  const createdAtStr = formatProjectDateTime(createdOn);
+  const updatedAtStr = formatProjectDateTime(updatedOn);
 
   return (
     <Card>
-      <CardContent sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}>
-        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 3, flex: 1 }}>
+      <CardContent
+        sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 3,
+            flex: 1,
+          }}
+        >
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Box
               sx={{
@@ -72,7 +83,14 @@ export default function DeploymentCard({
               <Typography variant="h6" sx={{ fontWeight: 600 }}>
                 {displayValue(name, "Not Available")}
               </Typography>
-              <ErrorIndicator entityName="status and version" size="small" />
+              {deployment.type?.label && (
+                <Chip
+                  label={deployment.type.label}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: "0.75rem" }}
+                />
+              )}
             </Box>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               {url ? (
@@ -141,42 +159,27 @@ export default function DeploymentCard({
         <DeploymentDocumentList deploymentId={deployment.id} />
 
         <Divider />
-        <Box sx={{ display: "flex", gap: 3 }}>
-          <Box
-            sx={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0.5,
-              color: "text.secondary",
-              flexShrink: 0,
-              fontSize: "0.75rem",
+        <Box
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.5,
+            color: "text.secondary",
+            flexShrink: 0,
+            fontSize: "0.75rem",
+          }}
+        >
+          <Calendar
+            size={14}
+            style={{
+              verticalAlign: "middle",
+              display: "inline-block",
+              marginTop: "-2px",
             }}
-          >
-            <Calendar
-              size={14}
-              style={{ verticalAlign: "middle", display: "inline-block" }}
-            />
-            <span style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
-              Deployed on {deployedAtStr} •{" "}
-              <ErrorIndicator entityName="version" size="small" />
-            </span>
-          </Box>
-          <Box
-            sx={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0.5,
-              color: "text.secondary",
-              fontSize: "0.75rem",
-            }}
-          >
-            <Activity
-              size={14}
-              style={{ verticalAlign: "middle", display: "inline-block" }}
-            />
-            <span style={{ verticalAlign: "middle" }}>Uptime: </span>
-            <ErrorIndicator entityName="uptime" size="small" />
-          </Box>
+          />
+          <span style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
+            Created on {createdAtStr} • Updated on {updatedAtStr}
+          </span>
         </Box>
       </CardContent>
 

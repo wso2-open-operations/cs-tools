@@ -20,9 +20,9 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useAuthApiClient } from "@context/AuthApiContext";
 import type { CaseSearchRequest } from "@models/requests";
 import type { CaseSearchResponse } from "@models/responses";
 
@@ -46,7 +46,7 @@ export default function useGetProjectCases(
   const logger = useLogger();
 
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  const fetchFn = useAuthApiClient();
+  const authFetch = useAuthApiClient();
 
   return useInfiniteQuery<CaseSearchResponse, Error>({
     queryKey: [ApiQueryKeys.PROJECT_CASES, projectId, baseRequest],
@@ -73,8 +73,9 @@ export default function useGetProjectCases(
 
         const requestUrl = `${baseUrl}/projects/${projectId}/cases/search`;
 
-        const response = await fetchFn(requestUrl, {
+        const response = await authFetch(requestUrl, {
           method: "POST",
+
           body: JSON.stringify(requestBody),
         });
 
@@ -102,10 +103,7 @@ export default function useGetProjectCases(
       return nextOffset < lastPage.totalRecords ? nextOffset : undefined;
     },
     enabled:
-      (options?.enabled ?? true) &&
-      !!projectId &&
-      isSignedIn &&
-      !isAuthLoading,
+      (options?.enabled ?? true) && !!projectId && isSignedIn && !isAuthLoading,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });

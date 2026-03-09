@@ -26,7 +26,7 @@ import {
   alpha,
   type Theme,
 } from "@wso2/oxygen-ui";
-import { Bot, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
+import { Bot, Clock, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import type { ChatHistoryItem } from "@models/responses";
 import { ChatAction } from "@constants/supportConstants";
@@ -34,8 +34,8 @@ import {
   getChatActionColor,
   getChatStatusAction,
   getStatusColor,
-  getStatusIcon,
   resolveColorFromTheme,
+  formatDateTime,
 } from "@utils/support";
 import ChatHistorySkeleton from "@components/support/support-overview-cards/ChatHistorySkeleton";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
@@ -81,13 +81,12 @@ export default function ChatHistoryList({
     >
       {items.map((item) => {
         const action = getChatStatusAction(item.status);
-        const StatusIcon = getStatusIcon(item.status);
         const chipColorPath = getStatusColor(item.status);
 
         return (
           <Form.CardButton
             key={item.chatId}
-            onClick={() => onItemAction?.(item.chatId, action)}
+            onClick={() => onItemAction?.(item.chatId, ChatAction.VIEW)}
             sx={{
               p: 2,
               display: "flex",
@@ -105,7 +104,7 @@ export default function ChatHistoryList({
                 p: 0,
                 display: "flex",
                 flexDirection: "column",
-                gap: 0.5,
+                gap: 1,
               }}
             >
               <Box sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
@@ -132,7 +131,7 @@ export default function ChatHistoryList({
               <Box sx={{ pl: 4 }}>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Typography variant="caption" color="text.secondary">
-                    {item.startedTime}
+                    {formatDateTime(item.startedTime, "short") ?? "--"}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     •
@@ -157,16 +156,25 @@ export default function ChatHistoryList({
                 size="small"
                 variant="outlined"
                 label={item.status}
+                icon={<Clock size={12} />}
                 sx={{
-                  px: 0.5,
                   bgcolor: (theme: Theme) =>
                     alpha(resolveColorFromTheme(chipColorPath, theme), 0.1),
                   color: chipColorPath,
+                  px: 0,
+                  height: 20,
+                  fontSize: "0.75rem",
                   "& .MuiChip-icon": {
                     color: "inherit",
+                    ml: "6px",
+                    mr: "6px",
+                    marginTop: "-1px",
+                  },
+                  "& .MuiChip-label": {
+                    pl: 0,
+                    pr: "6px",
                   },
                 }}
-                icon={<StatusIcon size={12} />}
               />
               <Button
                 size="small"

@@ -90,9 +90,10 @@ export default function AllCasesListSkeleton({
               />
               <Skeleton
                 data-testid="Skeleton"
-                variant="text"
-                width={60}
+                variant="rounded"
+                width={56}
                 height={20}
+                sx={{ borderRadius: "10px" }}
               />
               <Skeleton
                 data-testid="Skeleton"

@@ -17,6 +17,7 @@
 import customer_portal.ai_chat_agent;
 import customer_portal.authorization;
 import customer_portal.entity;
+import customer_portal.registry;
 import customer_portal.scim;
 import customer_portal.types;
 import customer_portal.updates;
@@ -82,7 +83,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     #
     # + return - User info object or error response
     resource function get users/me(http:RequestContext ctx)
-        returns types:User|http:Unauthorized|http:InternalServerError {
+        returns types:User|http:Unauthorized|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -109,6 +110,14 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 return <http:Unauthorized>{
                     body: {
                         message: "Unauthorized access to the customer portal."
+                    }
+                };
+            }
+            if getStatusCode(userDetails) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `User details not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "User information not found."
                     }
                 };
             }
@@ -140,6 +149,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             firstName: userDetails.firstName,
             lastName: userDetails.lastName,
             timeZone: userDetails.timeZone,
+            roles: userDetails.roles,
             phoneNumber
         };
 
@@ -181,31 +191,35 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             scim:User|error updatedUser = scim:updateUser({phoneNumber}, userInfo.email, userInfo.userId);
             if updatedUser is error {
                 if getStatusCode(updatedUser) == http:STATUS_BAD_REQUEST {
-                    return <http:BadRequest>{
-                        body: {
-                            message: extractErrorMessage(updatedUser)
-                        }
-                    };
+                    log:printWarn(extractErrorMessage(updatedUser));
+                } else {
+                    log:printError("Failed to update phone number.", updatedUser);
                 }
-
-                string customError = "Failed to update phone number.";
-                log:printError(customError, updatedUser);
-                return <http:InternalServerError>{
-                    body: {
-                        message: customError
-                    }
-                };
+            } else {
+                error? cacheInvalidate = userCache.invalidate(string `${userInfo.email}:userinfo`);
+                if cacheInvalidate is error {
+                    log:printWarn("Error invalidating user information from cache", cacheInvalidate);
+                }
+                updatedUserResponse.phoneNumber = scim:processPhoneNumber(updatedUser);
             }
-
-            error? cacheInvalidate = userCache.invalidate(string `${userInfo.email}:userinfo`);
-            if cacheInvalidate is error {
-                log:printWarn("Error invalidating user information from cache", cacheInvalidate);
-            }
-            updatedUserResponse.phoneNumber = scim:processPhoneNumber(updatedUser);
         }
 
-        if payload.timeZone is string {
-            // TODO: Update timezone
+        string? timeZone = payload.timeZone;
+        if timeZone is string {
+            entity:UserUpdateResponse|error response = entity:updateUser(userInfo.idToken, {timeZone});
+            if response is error {
+                if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                    log:printWarn("Invalid timezone key provided.");
+                } else {
+                    log:printError("Failed to update user timezone.", response);
+                }
+            } else {
+                error? cacheInvalidate = userCache.invalidate(string `${userInfo.email}:userinfo`);
+                if cacheInvalidate is error {
+                    log:printWarn("Error invalidating user information from cache", cacheInvalidate);
+                }
+                updatedUserResponse.timeZone = timeZone;
+            }
         }
 
         return updatedUserResponse;
@@ -256,7 +270,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
         return <http:Ok>{
-            body: projectsList
+            body: mapProjectsResponse(projectsList)
         };
     }
 
@@ -265,7 +279,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + return - Project details or error response
     resource function get projects/[entity:IdString id](http:RequestContext ctx)
-        returns entity:ProjectResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns types:ProjectResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|
+        http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -286,12 +301,19 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     }
                 };
             }
-
             if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
                 logForbiddenProjectAccess(id, userInfo.userId);
                 return <http:Forbidden>{
                     body: {
                         message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
                     }
                 };
             }
@@ -304,7 +326,62 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 }
             };
         }
-        return projectResponse;
+        return mapProjectResponse(projectResponse);
+    }
+
+    # Update project details by ID.
+    #
+    # + id - ID of the project
+    # + payload - Project update payload
+    # + return - Updated project details or error response
+    resource function patch projects/[entity:IdString id](http:RequestContext ctx, entity:ProjectUpdatePayload payload)
+        returns entity:UpdatedProject|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ProjectUpdateResponse|error response = entity:updateProject(userInfo.idToken, id, payload);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid input provided for project update. Please check the payload and try again."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            string customError = "Failed to update the project.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return response.project;
     }
 
     # Get deployments of a project by ID.
@@ -406,9 +483,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + deploymentId - ID of the deployment to be updated
     # + payload - Deployment update payload
     # + return - Updated deployment or error response
-    resource function patch projects/[string projectId]/deployments/[string deploymentId](http:RequestContext ctx,
-            entity:DeploymentUpdatePayload payload)
-            returns entity:UpdatedDeployment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+    resource function patch projects/[entity:IdString projectId]/deployments/[entity:IdString deploymentId](
+            http:RequestContext ctx, entity:DeploymentUpdatePayload payload)
+        returns entity:UpdatedDeployment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -517,7 +594,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + payload - Attachment creation payload
     # + return - Created attachment or error response
     resource function post deployments/[entity:IdString id]/attachments(http:RequestContext ctx,
-            types:AttachmentPayload payload)
+            types:AttachmentCreatePayload payload)
         returns types:CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -535,7 +612,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     referenceType: entity:DEPLOYMENT,
                     name: payload.name,
                     'type: payload.'type,
-                    file: payload.content
+                    file: payload.content,
+                    description: payload?.description
                 });
         if createdAttachmentResponse is error {
             if getStatusCode(createdAttachmentResponse) == http:STATUS_UNAUTHORIZED {
@@ -574,6 +652,82 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             createdBy: createdAttachmentResponse.attachment.createdBy,
             downloadUrl: createdAttachmentResponse.attachment.downloadUrl
         };
+    }
+
+    # Update an attachment of a deployment.
+    #
+    # + deploymentId - ID of the deployment
+    # + attachmentId - ID of the attachment to be updated
+    # + payload - Attachment update payload
+    # + return - Updated attachment or error response
+    resource function patch deployments/[entity:IdString deploymentId]/attachments/[entity:IdString attachmentId](
+            http:RequestContext ctx, types:AttachmentUpdatePayload payload)
+        returns entity:UpdatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:AttachmentUpdatePayload updatePayload = {
+            referenceId: deploymentId,
+            referenceType: entity:DEPLOYMENT,
+            name: payload?.name,
+            description: payload?.description
+        };
+        string? validateAttachmentUpdatePayload = entity:validateAttachmentUpdatePayload(updatePayload);
+        if validateAttachmentUpdatePayload is string {
+            return <http:BadRequest>{
+                body: {
+                    message: validateAttachmentUpdatePayload
+                }
+            };
+        }
+
+        entity:AttachmentUpdateResponse|error response = entity:updateAttachment(userInfo.idToken, attachmentId,
+                updatePayload);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to update attachment with ID: ${
+                        attachmentId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to update attachments for the requested deployment. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                string customError = "Invalid request parameters for updating the attachment.";
+                log:printWarn(customError);
+                return <http:BadRequest>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+
+            string customError = "Failed to update the attachment.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response.attachment;
     }
 
     # Get overall project statistics by ID.
@@ -633,8 +787,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 slaStatus: projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.slaStatus : ()
             },
             recentActivity: {
-                totalTimeLogged:
-                    projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.totalTimeLogged : (),
+                totalHours:
+                    projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.totalHours : (),
                 billableHours:
                     projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.billableHours : (),
                 lastDeploymentOn:
@@ -718,10 +872,10 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        types:OverallConversationStats { openCount, resolvedCount, activeCount, abandonedCount} =
+        types:OverallConversationStats {openCount, resolvedCount, activeCount, abandonedCount} =
             getConversationStats(conversationStats);
 
-        return { openCount, resolvedCount, activeCount, abandonedCount };
+        return {openCount, resolvedCount, activeCount, abandonedCount};
     }
 
     # Get project support statistics by ID.
@@ -850,7 +1004,6 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     }
                 };
             }
-
             if getStatusCode(createdCaseResponse) == http:STATUS_FORBIDDEN {
                 log:printWarn(string `User: ${userInfo.userId} is forbidden to create a case for project: ${
                         payload.projectId}!`);
@@ -1096,7 +1249,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         projectIds: [id],
                         stateKeys: payload.filters?.stateKeys,
-                        searchQuery: payload.filters?.searchQuery
+                        searchQuery: payload.filters?.searchQuery,
+                        createdByMe: payload.filters?.createdByMe
                     },
                     sortBy: payload.sortBy,
                     pagination: payload.pagination
@@ -1440,7 +1594,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + offset - Offset for pagination
     # + return - Comments response or error
     resource function get cases/[entity:IdString id]/comments(http:RequestContext ctx, int? 'limit, int? offset)
-        returns types:CommentsResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns types:CommentsResponse|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|
+        http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -1470,6 +1625,24 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     }
                 };
             }
+            if getStatusCode(commentsResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access comments for case with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the comments for the requested case. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The case for which you're trying to retrieve comments does not exist. " +
+                        "Please check and try again."
+                    }
+                };
+            }
+
             string customError = "Failed to retrieve comments.";
             log:printError(customError, commentsResponse);
             return <http:InternalServerError>{
@@ -1640,7 +1813,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     #
     # + id - ID of the case
     # + return - Created attachment or error response
-    resource function post cases/[entity:IdString id]/attachments(http:RequestContext ctx, types:AttachmentPayload payload)
+    resource function post cases/[entity:IdString id]/attachments(http:RequestContext ctx,
+            types:AttachmentCreatePayload payload)
         returns types:CreatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -1695,6 +1869,143 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             createdOn: createdAttachmentResponse.attachment.createdOn,
             createdBy: createdAttachmentResponse.attachment.createdBy,
             downloadUrl: createdAttachmentResponse.attachment.downloadUrl
+        };
+    }
+
+    # Update an attachment for a specific case.
+    #
+    # + caseId - ID of the case
+    # + attachmentId - ID of the attachment
+    # + payload - Attachment update payload
+    # + return - Updated attachment or error response
+    resource function patch cases/[entity:IdString caseId]/attachments/[entity:IdString attachmentId](
+            http:RequestContext ctx, types:AttachmentUpdatePayload payload)
+        returns entity:UpdatedAttachment|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:AttachmentUpdatePayload updatePayload = {
+            referenceId: caseId,
+            referenceType: entity:CASE,
+            name: payload?.name
+        };
+        string? validateAttachmentUpdatePayload = entity:validateAttachmentUpdatePayload(updatePayload);
+        if validateAttachmentUpdatePayload is string {
+            return <http:BadRequest>{
+                body: {
+                    message: validateAttachmentUpdatePayload
+                }
+            };
+        }
+
+        entity:AttachmentUpdateResponse|error response = entity:updateAttachment(userInfo.idToken, attachmentId,
+                updatePayload);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to update attachment with ID: ${
+                        attachmentId} for case with ID: ${caseId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to update attachments for the requested case. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                string customError = "Invalid request parameters for updating the attachment.";
+                log:printWarn(customError);
+                return <http:BadRequest>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+
+            string customError = "Failed to update the attachment.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return response.attachment;
+    }
+
+    # Delete an attachment.
+    #
+    # + id - ID of the attachment
+    # + return - Success message or error response
+    resource function delete attachments/[entity:IdString id](http:RequestContext ctx)
+        returns http:Ok|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:AttachmentDeleteResponse|error response = entity:deleteAttachment(userInfo.idToken, id);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to delete attachment with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to delete the requested attachment. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Attachment with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The attachment you're trying to delete does not exist. " +
+                        "Please check and try again."
+                    }
+                };
+            }
+
+            string customError = "Failed to delete the attachment.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return <http:Ok>{
+            body: {
+                message: "Attachment deleted successfully."
+            }
         };
     }
 
@@ -1762,7 +2073,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     projectId: payload.projectId,
                     versionId: payload.versionId,
                     cores: payload?.cores,
-                    tps: payload?.tps
+                    tps: payload?.tps,
+                    description: payload?.description
                 });
         if response is error {
             if getStatusCode(response) == http:STATUS_FORBIDDEN {
@@ -1811,8 +2123,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + productId - ID of the product to be updated
     # + payload - Deployed product update payload
     # + return - Updated deployed product or error response
-    resource function patch deployments/[string deploymentId]/products/[string productId](http:RequestContext ctx,
-            entity:DeployedProductUpdatePayload payload) returns
+    resource function patch deployments/[entity:IdString deploymentId]/products/[entity:IdString productId](
+            http:RequestContext ctx, entity:DeployedProductUpdatePayload payload) returns
         entity:UpdatedDeployedProduct|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -1820,6 +2132,15 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             return <http:InternalServerError>{
                 body: {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        string? validateDeployedProductUpdatePayload = entity:validateDeployedProductUpdatePayload(payload);
+        if validateDeployedProductUpdatePayload is string {
+            return <http:BadRequest>{
+                body: {
+                    message: validateDeployedProductUpdatePayload
                 }
             };
         }
@@ -1866,6 +2187,108 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
         return response.deployedProduct;
+    }
+
+    # Search catalogs for a specific deployed product with filters and pagination.
+    #
+    # + id - ID of the deployed product
+    # + payload - Catalog search request body
+    # + return - Paginated catalogs or error
+    resource function post deployments/products/[entity:IdString id]/catalogs/search(http:RequestContext ctx,
+            types:CatalogSearchPayload payload)
+        returns http:Ok|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CatalogSearchResponse|error searchResponse = entity:searchCatalogs(userInfo.idToken,
+                {
+                    deployedProductId: id,
+                    pagination: payload.pagination
+                });
+        if searchResponse is error {
+            if getStatusCode(searchResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is forbidden to search catalogs for deployed product with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to search catalogs for the deployed product. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(searchResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            string customError = "Failed to search catalogs for the deployed product.";
+            log:printError(customError, searchResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: mapCatalogSearchResponse(searchResponse)};
+    }
+
+    # Get catalog item variables by catalog ID and item ID.
+    #
+    # + catalogId - ID of the catalog
+    # + itemId - ID of the catalog item
+    # + return - Catalog item details or error
+    resource function get catalogs/[entity:IdString catalogId]/items/[entity:IdString itemId](http:RequestContext ctx)
+        returns http:Ok|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CatalogItemVariablesResponse|error itemResponse =
+            entity:getCatalogItemVariable(userInfo.idToken, catalogId, itemId);
+        if itemResponse is error {
+            if getStatusCode(itemResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access catalog item with ID: ${
+                        itemId} in catalog with ID: ${catalogId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the catalog item. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(itemResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            string customError = "Failed to retrieve catalog item details.";
+            log:printError(customError, itemResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: itemResponse};
     }
 
     # Get recommended update levels.
@@ -2121,7 +2544,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     #
     # + id - ID of the project
     # + return - List of project contacts or error
-    resource function get projects/[string id]/contacts(http:RequestContext ctx)
+    resource function get projects/[entity:IdString id]/contacts(http:RequestContext ctx)
         returns user_management:Contact[]|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -2190,7 +2613,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + payload - Contact information to be added
     # + return - Membership information or error response
-    resource function post projects/[string id]/contacts(http:RequestContext ctx,
+    resource function post projects/[entity:IdString id]/contacts(http:RequestContext ctx,
             types:ContactOnboardPayload payload)
         returns user_management:Membership|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -2269,7 +2692,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + email - Email of the contact to be removed
     # + return - Membership information or error response
-    resource function delete projects/[string id]/contacts/[string email](http:RequestContext ctx)
+    resource function delete projects/[entity:IdString id]/contacts/[string email](http:RequestContext ctx)
         returns http:Ok|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -2343,7 +2766,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + email - Email of the contact whose role is to be updated
     # + payload - Updated role information
     # + return - Membership information or error response
-    resource function patch projects/[string id]/contacts/[string email](http:RequestContext ctx,
+    resource function patch projects/[entity:IdString id]/contacts/[string email](http:RequestContext ctx,
             types:MembershipSecurityPayload payload)
         returns user_management:Membership|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -2417,7 +2840,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + payload - Contact information to be validated
     # + return - Contact information if valid or error response
-    resource function post projects/[string id]/contacts/validate(http:RequestContext ctx,
+    resource function post projects/[entity:IdString id]/contacts/validate(http:RequestContext ctx,
             types:ValidationPayload payload)
         returns http:Ok|http:Conflict|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -2467,7 +2890,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 });
         if validationResponse is user_management:CONFLICT_ERROR {
             log:printWarn(string `Contact with email: ${payload.contactEmail} already exists in project with ID: ${
-                id}`);
+                    id}`);
             return <http:Conflict>{
                 body: {
                     message: "Contact with the provided email already exists in the project!"
@@ -2644,8 +3067,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + callRequestId - ID of the call request
     # + payload - Call request update payload
     # + return - Updated call request details or an error
-    resource function patch cases/[string caseId]/call\-requests/[string callRequestId](http:RequestContext ctx,
-            types:CallRequestUpdatePayload payload)
+    resource function patch cases/[entity:IdString caseId]/call\-requests/[entity:IdString callRequestId](
+            http:RequestContext ctx, types:CallRequestUpdatePayload payload)
         returns entity:UpdatedCallRequest|http:BadRequest|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -2809,7 +3232,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         projectIds: [id],
                         startDate: payload.filters?.startDate,
-                        endDate: payload.filters?.endDate
+                        endDate: payload.filters?.endDate,
+                        states: payload.filters?.states
                     },
                     pagination: payload.pagination
                 });
@@ -2859,8 +3283,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + startDate - Start date for the statistics (optional)
     # + endDate - End date for the statistics (optional)
     # + return - Time card statistics for the project or an error
-    resource function get projects/[string id]/stats/time\-cards(http:RequestContext ctx, entity:Date? startDate,
-            entity:Date? endDate)
+    resource function get projects/[entity:IdString id]/stats/time\-cards(http:RequestContext ctx,
+            entity:Date? startDate, entity:Date? endDate)
         returns entity:ProjectTimeCardStatsResponse|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -2902,6 +3326,922 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        return response;
+    }
+
+    # Search change requests for a project based on provided filters and pagination.
+    #
+    # + id - ID of the project
+    # + payload - Change request search payload containing filters and pagination info
+    # + return - List of change requests matching the criteria or an error
+    resource function post projects/[entity:IdString id]/change\-requests/search(http:RequestContext ctx,
+            types:ChangeRequestSearchPayload payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ChangeRequestSearchResponse|error response = entity:searchChangeRequests(userInfo.idToken,
+                {
+                    filters: {
+                        projectIds: [id],
+                        searchQuery: payload.filters?.searchQuery,
+                        stateKeys: payload.filters?.stateKeys,
+                        impactKey: payload.filters?.impactKey
+                    },
+                    pagination: payload.pagination
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is not authorized to access change request information!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `Access to change request information is forbidden for user: ${userInfo.userId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to change request information is forbidden for the user!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching change requests."
+                    }
+                };
+            }
+
+            string customError = "Failed to search change requests.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{
+            body: mapChangeRequestSearchResponse(response)
+        };
+    }
+
+    # Get change request details by change request ID.
+    #
+    # + id - ID of the change request
+    # + return - Change request details or an error
+    resource function get change\-requests/[entity:IdString id](http:RequestContext ctx)
+        returns types:ChangeRequestResponse|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ChangeRequestResponse|error response = entity:getChangeRequestDetails(userInfo.idToken, id);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is not authorized to access change request information!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `Access to change request information is forbidden for user: ${userInfo.userId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to change request information is forbidden for the user!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested change request is not found!"
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve change request details.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return mapChangeRequestResponse(response);
+    }
+
+    # Update a change request by change request ID.
+    #
+    # + id - ID of the change request
+    # + payload - Change request update payload containing fields to be updated
+    # + return - Updated change request details or an error
+    resource function patch change\-requests/[entity:IdString id](http:RequestContext ctx,
+            entity:ChangeRequestUpdatePayload payload) returns entity:UpdatedChangeRequest|http:BadRequest|
+        http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ChangeRequestUpdateResponse|error response = entity:updateChangeRequest(userInfo.idToken, id, payload);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is not authorized to update change request information!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `Access to update change request information is forbidden for user: ${
+                        userInfo.userId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to update change request information is forbidden for the user!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for updating change request."
+                    }
+                };
+            }
+
+            string customError = "Failed to update change request.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response.changeRequest;
+    }
+
+    # Get change request statistics for a project.
+    #
+    # + id - ID of the project
+    # + return - Change request statistics for the project or an error
+    resource function get projects/[entity:IdString id]/stats/change\-requests(http:RequestContext ctx)
+        returns types:ProjectChangeRequestStatsResponse|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ProjectChangeRequestStatsResponse|error response = entity:getProjectChangeRequestStats(userInfo.idToken,
+                id);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is not authorized to access change request information!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `Access to change request information is forbidden for user: ${userInfo.userId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "Access to change request information is forbidden for the user!"
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve change request stats.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return mapProjectChangeRequestStatsResponse(response);
+    }
+
+    # Get comments for a specific change request.
+    #
+    # + id - ID of the change request
+    # + limit - Number of comments to retrieve
+    # + offset - Offset for pagination
+    # + return - Comments response or error
+    resource function get change\-requests/[entity:IdString id]/comments(http:RequestContext ctx, int? 'limit,
+            int? offset) returns types:CommentsResponse|http:BadRequest|http:Unauthorized|
+        http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        if isInvalidLimitOffset('limit, offset) {
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_LIMIT_OFFSET_INVALID
+                }
+            };
+        }
+
+        entity:CommentsResponse|error commentsResponse = entity:getComments(userInfo.idToken, entity:CHANGE_REQUEST, id,
+                'limit, offset);
+        if commentsResponse is error {
+            if getStatusCode(commentsResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User : ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${
+                        userInfo.userId} is forbidden to access comments for change request with ID: ${id}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the comments for the requested change request."
+                    }
+                };
+            }
+            if getStatusCode(commentsResponse) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested change request or its comments are not found!"
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve comments for change request.";
+            log:printError(customError, commentsResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return mapCommentsResponse(commentsResponse);
+    }
+
+    # Create a registry token.
+    #
+    # + id - ID of the project for which the registry token is to be created
+    # + payload - Registry token creation payload containing project ID and token details
+    # + return - Created registry token details or an error response
+    resource function post projects/[entity:IdString id]/registry\-tokens(http:RequestContext ctx,
+            types:RegistryTokenCreatePayload payload) returns registry:TokenCreationResponse|http:BadRequest|
+                http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
+        if userDetails is error {
+            if getStatusCode(userDetails) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `Access denied for user: ${userInfo.userId} to Customer Portal`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: "Unauthorized access to the customer portal."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve user data.";
+            log:printError(customError, userDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        boolean isAdmin = authorization:checkRoles([authorization:authorizedRoles.adminRole], userDetails.roles);
+
+        // Only allow admins to create service tokens
+        if !isAdmin && payload.tokenType == registry:SERVICE_TOKEN {
+            log:printWarn(string `User: ${
+                    userInfo.userId} attempted to create a service token without admin privileges.`);
+            return <http:Forbidden>{
+                body: {
+                    message: "Only admins can create service tokens."
+                }
+            };
+        }
+
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project details.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        string? accountName = projectResponse.account.name;
+        if accountName is () {
+            log:printError("Failed to retrieve account name for the project. Account name is missing.");
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to retrieve account name for the project."
+                }
+            };
+        }
+
+        // Default 'createdFor' to the requesting user's email for user tokens before any ownership checks.
+        string? createdFor = payload.tokenType == registry:USER_TOKEN ? userInfo.email : payload.createdFor;
+
+        // Enforce 'createdFor' email for service tokens.
+        if payload.tokenType == registry:SERVICE_TOKEN && createdFor is () {
+            log:printWarn(string `User: ${
+                    userInfo.userId} attempted to create a service token without specifying 'createdFor' email.`);
+            return <http:BadRequest>{
+                body: {
+                    message: "Service tokens are created on behalf of an integration user. Please specify the" +
+                        " 'createdFor' email of the integration user this token is intended for."
+                }
+            };
+        }
+
+        // Enforce non-admins only to create tokens for themselves.
+        if !isAdmin && createdFor != userInfo.email {
+            log:printWarn(string `User: ${
+                    userInfo.userId} attempted to create a token for another user without admin privileges.`);
+            return <http:Forbidden>{
+                body: {
+                    message: "Only admins can create tokens for other users."
+                }
+            };
+        }
+
+        registry:TokenCreationResponse|error response = registry:createToken(
+                {
+                    snProjectId: id,
+                    accountName,
+                    projectKey: projectResponse.key,
+                    robotName: payload.robotName,
+                    snAccountId: projectResponse.account.id,
+                    tokenType: payload.tokenType,
+                    createdBy: userInfo.email,
+                    createdFor: createdFor.toString()
+                }
+        );
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for creating registry token."
+                    }
+                };
+            }
+
+            string customError = "Failed to create registry token.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response;
+    }
+
+    # Search registry tokens for a project based on provided filters.
+    #
+    # + id - ID of the project for which registry tokens are to be searched
+    # + return - List of registry tokens matching the criteria or an error response
+    resource function post projects/[entity:IdString id]/registry\-tokens/search(http:RequestContext ctx)
+        returns http:Ok|http:BadRequest|http:Forbidden|http:NotFound|http:Unauthorized|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
+        if userDetails is error {
+            if getStatusCode(userDetails) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `Access denied for user: ${userInfo.userId} to Customer Portal`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: "Unauthorized access to the customer portal."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve user data.";
+            log:printError(customError, userDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project details.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        boolean isAdmin = authorization:checkRoles([authorization:authorizedRoles.adminRole], userDetails.roles);
+
+        registry:Token[]|error response = registry:searchTokens(
+                {
+                    snProjectId: id,
+                    snAccountId: projectResponse.account.id,
+                    isAdmin,
+                    userEmail: isAdmin ? () : userInfo.email
+                }
+        );
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching registry tokens."
+                    }
+                };
+            }
+
+            string customError = "Failed to search registry tokens.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{
+            body: response
+        };
+    }
+
+    # Delete a registry token by token ID.
+    #
+    # + id - ID of the registry token to be deleted
+    # + return - Success message or an error response
+    resource function delete registry\-tokens/[string id](http:RequestContext ctx)
+        returns http:Ok|http:NotFound|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        string deletionCustomErr = "Failed to delete token";
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
+        if userDetails is error {
+            if getStatusCode(userDetails) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `Access denied for user: ${userInfo.userId} to Customer Portal`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: "Unauthorized access to the customer portal."
+                    }
+                };
+            }
+
+            log:printError("Failed to retrieve user data.", userDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: deletionCustomErr
+                }
+            };
+        }
+
+        registry:Token|error token = registry:getTokenById(id);
+        if token is error {
+            if getStatusCode(token) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Registry token with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The registry token is not found!"
+                    }
+                };
+            }
+            log:printError("Failed to retrieve registry token details for authorization.", token);
+            return <http:InternalServerError>{
+                body: {
+                    message: deletionCustomErr
+                }
+            };
+        }
+
+        registry:TokenDescriptionInfo|error tokenInformation
+            = registry:deriveTokenInfoFromDescription(token.description);
+        if tokenInformation is error {
+            log:printError("Failed to derive token information.", tokenInformation);
+            return <http:InternalServerError>{
+                body: {
+                    message: deletionCustomErr
+                }
+            };
+        }
+
+        entity:ProjectResponse|error projectResponse
+            = entity:getProject(userInfo.idToken, tokenInformation.snProjectId);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(tokenInformation.snProjectId, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${tokenInformation.snProjectId} not found for user: ${
+                    userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested token does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            log:printError("Failed to retrieve project details.", projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: deletionCustomErr
+                }
+            };
+        }
+
+        boolean isAdmin = authorization:checkRoles([authorization:authorizedRoles.adminRole], userDetails.roles);
+
+        // Enforce that only admins can delete service tokens, and users can only delete their own tokens.
+        if !isAdmin &&
+            (tokenInformation.tokenType == registry:SERVICE_TOKEN || tokenInformation.createdFor != userInfo.email) {
+
+            log:printWarn(string `User: ${
+                    userInfo.userId} attempted to delete a service token without proper privileges`);
+            return <http:Forbidden>{
+                body: {
+                    message: "You don't have the necessary permissions to delete this registry token."
+                }
+            };
+        }
+
+        error? response = registry:deleteToken(id);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The registry token is not found!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to delete registry token with ID: ${
+                        id}.`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You are not authorized to delete this registry token."
+                    }
+                };
+            }
+
+            log:printError(deletionCustomErr, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: deletionCustomErr
+                }
+            };
+        }
+        return <http:Ok>{
+            body: {
+                message: "Registry token deleted successfully!"
+            }
+        };
+    }
+
+    # Regenerate the secret of a registry token by token ID.
+    #
+    # + id - ID of the registry token to be regenerated
+    # + return - Regenerated registry token details or an error response
+    resource function post registry\-tokens/[string id]/regenerate(http:RequestContext ctx)
+        returns registry:TokenCreationResponse|http:NotFound|http:Unauthorized|http:Forbidden
+            |http:InternalServerError {
+
+        string reGenerateCustomErr = "Failed to re-generate token";
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
+        if userDetails is error {
+            if getStatusCode(userDetails) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `Access denied for user: ${userInfo.userId} to Customer Portal`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: "Unauthorized access to the customer portal."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve user data.";
+            log:printError(customError, userDetails);
+            return <http:InternalServerError>{
+                body: {
+                    message: reGenerateCustomErr
+                }
+            };
+        }
+
+        registry:Token|error token = registry:getTokenById(id);
+        if token is error {
+            if getStatusCode(token) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Registry token with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The registry token is not found!"
+                    }
+                };
+            }
+            log:printError("Failed to retrieve registry token details for authorization.", token);
+            return <http:InternalServerError>{
+                body: {
+                    message: reGenerateCustomErr
+                }
+            };
+        }
+
+        registry:TokenDescriptionInfo|error tokenInformation 
+            = registry:deriveTokenInfoFromDescription(token.description);
+        if tokenInformation is error {
+            log:printError("Failed to derive token information.", tokenInformation);
+            return <http:InternalServerError>{
+                body: {
+                    message: reGenerateCustomErr
+                }
+            };
+        }
+
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken,
+            tokenInformation.snProjectId);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested token does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            log:printError("Failed to retrieve project details.", projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: reGenerateCustomErr
+                }
+            };
+        }
+
+        boolean isAdmin = authorization:checkRoles([authorization:authorizedRoles.adminRole], userDetails.roles);
+
+        // Enforce that only admins can delete service tokens, and users can only delete their own tokens.
+        if !isAdmin &&
+            (tokenInformation.tokenType == registry:SERVICE_TOKEN || tokenInformation.createdFor != userInfo.email) {
+
+            log:printWarn(string `User: ${
+                    userInfo.userId} attempted to delete a service token without proper privileges`);
+            return <http:Forbidden>{
+                body: {
+                    message: "You don't have the necessary permissions to delete this registry token."
+                }
+            };
+        }
+
+        registry:TokenCreationResponse|error response = registry:regenerateToken(id);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "The registry token to be regenerated is not found!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to regenerate registry token with ID: ${id}.`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You are not authorized to regenerate this registry token."
+                    }
+                };
+            }
+
+            log:printError(reGenerateCustomErr, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: reGenerateCustomErr
+                }
+            };
+        }
+        return response;
+    }
+
+    # Get integration users of a project by project ID.
+    #
+    # + id - ID of the project
+    # + return - List of integration users or error
+    isolated resource function get projects/[entity:IdString id]/integration\-users(http:RequestContext ctx)
+        returns registry:IntegrationUser[]|http:Unauthorized|http:Forbidden|http:NotFound|
+            http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, id);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(id, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_PROJECT_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project details.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        registry:IntegrationUser[]|error response = registry:getIntegrationUsersByProjectId(projectResponse.sfId);
+        if response is error {
+            string customError = "Failed to retrieve integration users.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
         return response;
     }
 }
