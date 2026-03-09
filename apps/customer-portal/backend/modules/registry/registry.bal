@@ -19,7 +19,6 @@
 # + payload - Token creation payload
 # + return - Created registry token or an error
 public isolated function createToken(TokenCreatePayload payload) returns TokenCreationResponse|error {
-
     return registryClient->/robot\-accounts.post(payload);
 }
 
