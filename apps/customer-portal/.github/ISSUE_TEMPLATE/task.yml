@@ -1,0 +1,9 @@
+name: "✍️ Create a Task"
+description: Create a new development task.
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: Task description
