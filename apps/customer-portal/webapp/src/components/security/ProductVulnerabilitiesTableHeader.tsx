@@ -19,25 +19,23 @@ import {
   Typography,
   TextField,
   InputAdornment,
-  Divider,
-  IconButton,
+  Button,
 } from "@wso2/oxygen-ui";
-import { Search, ListFilter } from "@wso2/oxygen-ui-icons-react";
+import {
+  Search,
+  ListFilter,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+} from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
-import ActiveFilters, {
-  type ActiveFilterConfig,
-} from "@components/common/filter-panel/ActiveFilters";
 
 interface ProductVulnerabilitiesTableHeaderProps {
   searchValue: string;
   onSearchChange: (value: string) => void;
-  onFilterIconClick?: () => void;
+  onFilterToggle?: () => void;
+  isFiltersOpen: boolean;
   activeFiltersCount: number;
-  appliedFilters: Record<string, string>;
-  filterFields: ActiveFilterConfig[];
-  onRemoveFilter: (field: string) => void;
-  onClearAll: () => void;
-  onUpdateFilter: (field: string, value: string) => void;
 }
 
 /**
@@ -47,105 +45,92 @@ interface ProductVulnerabilitiesTableHeaderProps {
 const ProductVulnerabilitiesTableHeader = ({
   searchValue,
   onSearchChange,
-  onFilterIconClick,
+  onFilterToggle,
+  isFiltersOpen,
   activeFiltersCount,
-  appliedFilters,
-  filterFields,
-  onRemoveFilter,
-  onClearAll,
-  onUpdateFilter,
 }: ProductVulnerabilitiesTableHeaderProps): JSX.Element => {
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(e.target.value);
   };
 
+  const hasActiveFilters = activeFiltersCount > 0;
+
   return (
-    <Box
-      sx={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        mb: 3,
-        flexWrap: "wrap",
-        gap: 2,
-      }}
-    >
-      <Box sx={{ flexGrow: 1 }}>
+    <Box>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          mb: 3,
+          flexWrap: "wrap",
+          gap: 2,
+        }}
+      >
+        <Box>
+          <Typography variant="h6">Component Analysis</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Third-party components with known vulnerabilities and remediation
+            status
+          </Typography>
+        </Box>
         <Box
           sx={{
             display: "flex",
-            flexDirection: "column",
-            width: "100%",
-            mb: activeFiltersCount > 0 ? 2 : 0,
+            gap: 2,
+            alignItems: "center",
+            width: { xs: "100%", lg: "auto" },
           }}
         >
-          <Box>
-            <Typography variant="h6">Component Analysis</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Third-party components with known vulnerabilities and remediation status
-            </Typography>
+          <Box sx={{ width: "100%", flexGrow: 1 }}>
+            <TextField
+              sx={{
+                width: "100%",
+              }}
+              value={searchValue}
+              onChange={handleSearchChange}
+              placeholder="Search CVE or component"
+              size="small"
+              fullWidth
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search size={16} />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
           </Box>
-        </Box>
-        <ActiveFilters
-          appliedFilters={appliedFilters}
-          filterFields={filterFields}
-          onRemoveFilter={onRemoveFilter}
-          onClearAll={onClearAll}
-          onUpdateFilter={onUpdateFilter}
-        />
-      </Box>
-      <Box
-        sx={{
-          flexGrow: 1,
-          display: "flex",
-          gap: 2,
-          alignItems: "center",
-          width: { xs: "100%", lg: 410 },
-          maxWidth: { lg: 410 },
-        }}
-      >
-        <Box sx={{ width: "100%" }}>
-          <TextField
-            sx={{
-              width: "100%",
-              "& .MuiInputBase-root": {
-                pr: 0.5,
-              },
-            }}
-            value={searchValue}
-            onChange={handleSearchChange}
-            placeholder="Search CVE or component"
+
+          <Button
+            variant="outlined"
+            color="warning"
             size="small"
-            fullWidth
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} />
-                  </InputAdornment>
-                ),
-                endAdornment: onFilterIconClick ? (
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      height: "100%",
-                    }}
-                  >
-                    <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-                    <IconButton
-                      aria-label="Open advanced search"
-                      onClick={onFilterIconClick}
-                      size="small"
-                      sx={{ mx: 0.5 }}
-                    >
-                      <ListFilter size={16} />
-                    </IconButton>
-                  </Box>
-                ) : null,
-              },
+            onClick={onFilterToggle}
+            sx={{
+              whiteSpace: "nowrap",
+              minWidth: "fit-content",
             }}
-          />
+            startIcon={
+              hasActiveFilters ? (
+                <RotateCcw size={16} />
+              ) : (
+                <ListFilter size={16} />
+              )
+            }
+            endIcon={
+              !hasActiveFilters &&
+              (isFiltersOpen ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              ))
+            }
+          >
+            {hasActiveFilters ? "Reset Filters" : "Filters"}
+          </Button>
         </Box>
       </Box>
     </Box>
