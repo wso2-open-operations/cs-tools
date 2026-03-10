@@ -105,7 +105,9 @@ export default function DescribeIssuePage(): JSX.Element {
       navigate(`/${projectId}/support/chat`, { state });
     } catch {
       setHasApiFailed(true);
-      showError("Could not get help. Please try again or create a support case.");
+      showError(
+        "Could not get help. Please try again or create a support case.",
+      );
     } finally {
       submittingRef.current = false;
     }
@@ -136,19 +138,36 @@ export default function DescribeIssuePage(): JSX.Element {
         flexDirection: "column",
         width: "100%",
         minHeight: 0,
+        mt: -1.5,
       }}
     >
       <Button
         startIcon={<ArrowLeft size={18} />}
         onClick={handleBack}
-        sx={{ mb: 3, textTransform: "none", alignSelf: "flex-start", flexShrink: 0 }}
+        sx={{
+          mb: 1.5,
+          textTransform: "none",
+          alignSelf: "flex-start",
+          flexShrink: 0,
+        }}
         variant="text"
       >
         Back
       </Button>
 
-      <Card variant="outlined" sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <CardContent sx={{ p: 3, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Card
+        variant="outlined"
+        sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
+        <CardContent
+          sx={{
+            p: 3,
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           <Stack spacing={3} sx={{ flex: 1, minHeight: 0 }}>
             <Box>
               <Typography variant="h5" sx={{ mb: 1 }} component="h1">
@@ -187,12 +206,19 @@ export default function DescribeIssuePage(): JSX.Element {
                 color="text.secondary"
                 sx={{ display: "block", mt: 1, flexShrink: 0 }}
               >
-                Tip: Include details like error messages, when the issue started,
-                affected systems, and what you&apos;ve already tried.
+                Tip: Include details like error messages, when the issue
+                started, affected systems, and what you&apos;ve already tried.
               </Typography>
             </Box>
 
-            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2, flexShrink: 0 }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 2,
+                flexShrink: 0,
+              }}
+            >
               {hasApiFailed && (
                 <Button
                   variant="contained"
