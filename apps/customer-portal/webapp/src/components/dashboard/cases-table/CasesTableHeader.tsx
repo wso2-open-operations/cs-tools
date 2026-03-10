@@ -15,101 +15,84 @@
 // under the License.
 
 import { Box, Typography, Button } from "@wso2/oxygen-ui";
-import { ListFilter, Plus } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
-import ActiveFilters, {
-  type ActiveFilterConfig,
-} from "@components/common/filter-panel/ActiveFilters";
+import { ListFilter, RotateCcw, ChevronDown, ChevronUp, Plus } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, useCallback } from "react";
+import { useNavigate, useParams } from "react-router";
+import { getNoveraChatEnabled } from "@utils/settingsStorage";
 
 interface CasesTableHeaderProps {
   activeFiltersCount: number;
-  appliedFilters: Record<string, string>;
-  filterFields: ActiveFilterConfig[];
-  onRemoveFilter: (field: string) => void;
-  onClearAll: () => void;
-  onUpdateFilter: (field: string, value: unknown) => void;
-  onFilterClick: () => void;
-  onAllCases: () => void;
-  onCreateCase: () => void;
+  isFiltersOpen: boolean;
+  onFilterToggle: () => void;
 }
 
 const CasesTableHeader = ({
   activeFiltersCount,
-  appliedFilters,
-  filterFields,
-  onRemoveFilter,
-  onClearAll,
-  onUpdateFilter,
-  onFilterClick,
-  onAllCases,
-  onCreateCase,
+  isFiltersOpen,
+  onFilterToggle,
 }: CasesTableHeaderProps): JSX.Element => {
-  return (
-    <Box
-      sx={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        mb: 3,
-        flexWrap: "wrap",
-        gap: 2,
-      }}
-    >
-      {/* Title and description */}
-      <Box sx={{ flexGrow: 1 }}>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            width: "100%",
-            mb: activeFiltersCount > 0 ? 2 : 0,
-          }}
-        >
-          <Box>
-            <Typography variant="h6">Outstanding Engagements</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Manage and track all your open engagements
-            </Typography>
-          </Box>
-        </Box>
+  const navigate = useNavigate();
+  const { projectId } = useParams<{ projectId: string }>();
+  const hasActiveFilters = activeFiltersCount > 0;
 
-        {/* Active filters */}
-        <ActiveFilters
-          appliedFilters={appliedFilters}
-          filterFields={filterFields}
-          onRemoveFilter={onRemoveFilter}
-          onClearAll={onClearAll}
-          onUpdateFilter={onUpdateFilter}
-        />
-      </Box>
-      {/* Buttons */}
-      <Box sx={{ display: "flex", gap: 1, pt: 0.5 }}>
-        <Button
-          variant="outlined"
-          color="warning"
-          size="small"
-          startIcon={<ListFilter size={16} />}
-          onClick={onFilterClick}
-        >
-          Filters
-        </Button>
-        <Button
-          variant="outlined"
-          size="small"
-          color="warning"
-          onClick={onAllCases}
-        >
-          All
-        </Button>
-        <Button
-          variant="contained"
-          color="warning"
-          startIcon={<Plus size={16} />}
-          size="small"
-          onClick={onCreateCase}
-        >
-          Create
-        </Button>
+  const handleCreateCase = useCallback(() => {
+    if (getNoveraChatEnabled()) {
+      navigate(`/${projectId}/support/chat/describe-issue`);
+    } else {
+      navigate(`/${projectId}/support/chat/create-case`, {
+        state: { skipChat: true },
+      });
+    }
+  }, [navigate, projectId]);
+
+  return (
+    <Box>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          mb: 3,
+          flexWrap: "wrap",
+          gap: 2,
+        }}
+      >
+        {/* Title and description */}
+        <Box>
+          <Typography variant="h6">Outstanding Engagements</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Manage and track all your open engagements
+          </Typography>
+        </Box>
+        {/* Filter and Create buttons */}
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Button
+            variant="outlined"
+            color="warning"
+            size="small"
+            onClick={onFilterToggle}
+            startIcon={hasActiveFilters ? <RotateCcw size={16} /> : <ListFilter size={16} />}
+            endIcon={
+              !hasActiveFilters &&
+              (isFiltersOpen ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              ))
+            }
+          >
+            {hasActiveFilters ? "Reset Filters" : "Filters"}
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<Plus size={16} />}
+            size="small"
+            onClick={handleCreateCase}
+          >
+            Create
+          </Button>
+        </Box>
       </Box>
     </Box>
   );
