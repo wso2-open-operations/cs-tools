@@ -1,6 +1,5 @@
 name: "✍️ Create a Task"
 description: Create a task for an app, module, or shared operation in the monorepo.
-title: ""
 labels: ["Type/Task"]
 body:
   - type: markdown
