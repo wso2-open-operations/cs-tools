@@ -73,7 +73,7 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   }, [isError, showError]);
 
   const handleBack = () => {
-    navigate(`/${projectId}/support/service-requests`);
+    navigate(`/projects/${projectId}/support/service-requests`);
   };
 
   return (

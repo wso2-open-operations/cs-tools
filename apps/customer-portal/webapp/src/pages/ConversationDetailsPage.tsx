@@ -115,7 +115,7 @@ export default function ConversationDetailsPage(): JSX.Element {
     if (window.history.length > 1) {
       navigate(-1);
     } else if (projectId) {
-      navigate(`/${projectId}/support/conversations`);
+      navigate(`/projects/${projectId}/support/conversations`);
     } else {
       navigate("/");
     }

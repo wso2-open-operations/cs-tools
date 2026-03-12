@@ -224,7 +224,7 @@ export default function ChangeRequestsPage(): JSX.Element {
   };
 
   const handleChangeRequestClick = (item: ChangeRequestItem): void => {
-    navigate(`/${projectId}/support/change-requests/${item.id}`);
+    navigate(`/projects/${projectId}/support/change-requests/${item.id}`);
   };
 
   const handleExportSchedule = () => {
