@@ -218,7 +218,7 @@ export default function DeploymentProductList({
             )}
           </Box>
           <Button
-            variant="contained"
+            variant="outlined"
             size="small"
             startIcon={<Plus />}
             sx={{ height: 32, fontSize: "0.75rem" }}

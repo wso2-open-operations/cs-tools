@@ -58,7 +58,7 @@ export default function DeploymentHeader({
       )}
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <Button
-          variant="contained"
+          variant="outlined"
           color="primary"
           startIcon={<Plus />}
           size="small"
