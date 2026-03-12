@@ -41,7 +41,7 @@ export type StatCardColor =
 export interface StatConfigItem {
   id: Exclude<keyof DashboardMockStats, "casesTrend">;
   label: string;
-  icon: any;
+  icon: ComponentType<{ size?: number }>;
   iconColor: StatCardColor;
   tooltipText: string;
 }
@@ -58,21 +58,21 @@ export const DASHBOARD_CASE_TYPE_LABELS = [
 export const DASHBOARD_STATS: StatConfigItem[] = [
   {
     id: "totalCases",
-    label: "Total Engagements",
+    label: "Total Interactions",
     icon: Clock,
     iconColor: "primary",
     tooltipText: "Total number of cases reported for this project",
   },
   {
     id: "openCases",
-    label: "Active Engagements",
+    label: "Active Interactions",
     icon: AlertCircle,
     iconColor: "warning",
     tooltipText: "Currently active and unresolved cases",
   },
   {
     id: "resolvedCases",
-    label: "Resolved This Month",
+    label: "Resolved support cases",
     icon: CheckCircle,
     iconColor: "success",
     tooltipText: "Successfully closed and resolved cases",
@@ -86,14 +86,18 @@ export const DASHBOARD_STATS: StatConfigItem[] = [
   },
 ];
 
-// Configuration for Active Cases Chart data mapping (stateCount labels, exclude Closed).
+// Configuration for Outstanding Operations Chart data mapping (Service Requests vs Change Requests).
 export const ACTIVE_CASES_CHART_DATA = [
-  { name: "Open", key: "open", color: colors.blue[500] },
-  { name: "Work In Progress", key: "workInProgress", color: colors.teal?.[600] ?? "#0D9488" },
-  { name: "Awaiting Info", key: "awaitingInfo", color: colors.green[500] },
-  { name: "Waiting On WSO2", key: "waitingOnWso2", color: colors.orange[500] },
-  { name: "Solution Proposed", key: "solutionProposed", color: colors.grey?.[500] ?? "#9CA3AF" },
-  { name: "Reopened", key: "reopened", color: colors.purple[500] },
+  {
+    name: "Service Requests (SR)",
+    key: "serviceRequests",
+    color: colors.orange[500],
+  },
+  {
+    name: "Change Requests (CR)",
+    key: "changeRequests",
+    color: colors.blue[500],
+  },
 ] as const;
 
 /** Maps severity API label to display name (S0-S4) for charts and table. */
@@ -198,17 +202,16 @@ export function getSeverityLegendColor(label?: string): string {
   return entry?.color ?? colors.grey?.[500] ?? "#6B7280";
 }
 
-/** Case type entries for Outstanding Engagements chart (from caseTypeCount). */
-export const OUTSTANDING_CASE_TYPE_ENTRIES = [
-  { key: "serviceRequest", label: "Service Request", displayName: "Service Request", color: colors.yellow[500] },
-  { key: "securityReportAnalysis", label: "Security Report Analysis", displayName: "Security Report Analysis", color: colors.purple[500] },
+/**
+ * Static configuration for Outstanding Engagements category chart.
+ * Used for the Outstanding Engagements donut (Onboarding, Migration, Services, Improvements).
+ */
+export const OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA = [
+  { key: "onboarding", name: "Onboarding", color: colors.blue[500] },
+  { key: "migration", name: "Migration", color: colors.orange[500] },
+  { key: "services", name: "Services", color: colors.green[500] },
+  { key: "improvements", name: "Improvements", color: colors.purple[500] },
 ] as const;
-
-/** Combined chart data: severities + Service Request + Security Report Analysis. */
-export const OUTSTANDING_ENGAGEMENTS_CHART_DATA = [
-  ...OUTSTANDING_INCIDENTS_CHART_DATA,
-  ...OUTSTANDING_CASE_TYPE_ENTRIES,
-];
 
 /**
  * Type definition for Cases Trend Chart data item.

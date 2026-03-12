@@ -154,9 +154,9 @@ export interface CaseCreationMetadata {
 // Project support statistics.
 export interface ProjectSupportStats {
   ongoingCases: number;
-  activeChats: number;
-  sessionChats: number;
+  resolvedRecently: number;
   resolvedChats: number;
+  activeChats: number;
 }
 
 export interface CaseSeverity {

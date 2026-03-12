@@ -17,7 +17,6 @@
 import { notificationBannerConfig } from "@config/notificationBannerConfig";
 import { AppShell, Box, useAppShell, LinearProgress } from "@wso2/oxygen-ui";
 import { type JSX, type ReactNode, useRef, useEffect } from "react";
-import { useOldUrlRedirect } from "@hooks/useOldUrlRedirect";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
@@ -41,8 +40,6 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
   const mainContentRef = useRef<HTMLDivElement>(null);
-
-  useOldUrlRedirect();
 
   useEffect(() => {
     if (mainContentRef.current) {

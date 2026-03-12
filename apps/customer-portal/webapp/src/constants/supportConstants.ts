@@ -45,6 +45,7 @@ import {
   ShieldCheck,
   UserCheck,
   CalendarCheck,
+  FileCheck,
 } from "@wso2/oxygen-ui-icons-react";
 import { colors, alpha } from "@wso2/oxygen-ui";
 import { type ComponentType } from "react";
@@ -275,10 +276,10 @@ export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
     secondaryIcon: TrendingUp,
   },
   {
-    icon: MessageSquare,
+    icon: FileCheck,
     iconColor: "success",
-    key: "sessionChats",
-    label: "Chat Sessions",
+    key: "resolvedRecently",
+    label: "Resolved Recently",
     secondaryIcon: Bot,
   },
   {
