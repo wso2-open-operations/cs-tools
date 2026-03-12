@@ -145,13 +145,13 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const handleCreateReport = () => {
     // Navigate to create case page with security report analysis type
     navigate(
-      `/${projectId}/support/security-report/create`,
+      `/projects/${projectId}/support/security-report/create`,
     );
   };
 
   const handleCaseClick = (caseItem: CaseListItem) => {
     navigate(
-      `/${projectId}/security-center/security-report-analysis/${caseItem.id}`,
+      `/projects/${projectId}/security-center/security-report-analysis/${caseItem.id}`,
     );
   };
 

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useNavigate } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import type { JSX } from "react";
 import { colors } from "@wso2/oxygen-ui";
 import { CalendarDays } from "@wso2/oxygen-ui-icons-react";
@@ -29,6 +29,8 @@ import { CHANGE_REQUEST_BULLET_ITEMS } from "@constants/supportConstants";
  */
 export default function ChangeRequestCard(): JSX.Element {
   const navigate = useNavigate();
+  const { projectId } = useParams<{ projectId: string }>();
+  const base = projectId ? `/projects/${projectId}/support` : "support";
 
   return (
     <RequestCard
@@ -41,7 +43,9 @@ export default function ChangeRequestCard(): JSX.Element {
       infoBoxDescription="Structured workflow for planned infrastructure changes:"
       bulletItems={CHANGE_REQUEST_BULLET_ITEMS}
       secondaryButtonLabel="View All Change Requests"
-      onSecondaryClick={() => navigate("change-requests")}
+      onSecondaryClick={() =>
+        navigate(projectId ? `${base}/change-requests` : "change-requests")
+      }
     />
   );
 }

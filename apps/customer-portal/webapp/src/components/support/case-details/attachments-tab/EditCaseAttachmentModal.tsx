@@ -131,7 +131,13 @@ export default function EditCaseAttachmentModal({
     >
       <DialogTitle
         id="edit-case-attachment-dialog-title"
-        sx={{ pr: 6, position: "relative" }}
+        sx={{
+          pr: 6,
+          position: "relative",
+          textTransform: "capitalize",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
       >
         Edit Attachment
         <IconButton
@@ -141,11 +147,11 @@ export default function EditCaseAttachmentModal({
           disabled={isSubmitting}
           sx={{ position: "absolute", right: 12, top: 12 }}
         >
-          <X size={20} aria-hidden />
+          <X size={23} aria-hidden />
         </IconButton>
       </DialogTitle>
-      <DialogContent sx={{ pt: 1 }}>
-        <Box sx={{ mt: 0, mb: 2 }}>
+      <DialogContent sx={{ pt: 2, pb: 1 }}>
+        <Box sx={{ mt: 2, mb: 2 }}>
           <TextField
             id="edit-attachment-name"
             label="Attachment Name"
@@ -158,7 +164,7 @@ export default function EditCaseAttachmentModal({
           />
         </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2, pt: 1 }}>
+      <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
         <Button onClick={handleClose} disabled={isSubmitting}>
           Cancel
         </Button>
