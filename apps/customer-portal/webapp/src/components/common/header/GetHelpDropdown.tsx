@@ -67,9 +67,9 @@ export default function GetHelpDropdown(): JSX.Element {
     if (projectId) {
       const noveraEnabled = getNoveraChatEnabled();
       if (noveraEnabled) {
-        navigate(`/${projectId}/support/chat/describe-issue`);
+        navigate(`/projects/${projectId}/support/chat/describe-issue`);
       } else {
-        navigate(`/${projectId}/support/chat/create-case`, {
+        navigate(`/projects/${projectId}/support/chat/create-case`, {
           state: { skipChat: true },
         });
       }
@@ -79,7 +79,7 @@ export default function GetHelpDropdown(): JSX.Element {
   const handleServiceRequest = () => {
     handleClose();
     if (projectId) {
-      navigate(`/${projectId}/support/service-requests/create`);
+      navigate(`/projects/${projectId}/support/service-requests/create`);
     }
   };
 
