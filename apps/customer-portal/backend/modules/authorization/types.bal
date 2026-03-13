@@ -14,6 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
+# [Configurable] Asgardeo JWT configuration.
+public type AuthorizationConfig record {|
+    # JWKS EndPoint 
+    string jwksEndPoint;
+    # JWT Audience  
+    string jwtAudience;
+    # JWT Issuer
+    string jwtIssuer;
+|};
+
 # JWT payload data structure from decoded token.
 type CustomJwtPayload record {|
     # User email

@@ -17,8 +17,17 @@ import ballerina/http;
 import ballerina/jwt;
 import ballerina/log;
 
-// TODO: This variable is currently unused. It will be used when the authorization logic (see lines 54-60) is restored.
 public configurable AppRoles authorizedRoles = ?;
+configurable AuthorizationConfig authorizationConfig = ?;
+
+final jwt:ValidatorConfig & readonly jwtConfig = {
+    issuer: authorizationConfig.jwtIssuer,
+    audience: authorizationConfig.jwtAudience,
+    clockSkew: 60,
+    signatureConfig: {
+        jwksConfig: {url: authorizationConfig.jwksEndPoint}
+    }
+};
 
 # To handle authorization for each resource function invocation.
 public isolated service class JwtInterceptor {
@@ -26,7 +35,7 @@ public isolated service class JwtInterceptor {
     *http:RequestInterceptor;
 
     isolated resource function default [string... path](http:RequestContext ctx, http:Request req)
-        returns http:NextService|http:Forbidden|http:InternalServerError|error? {
+        returns http:NextService|http:Unauthorized|http:Forbidden|http:InternalServerError|error? {
 
         string|error idToken = req.getHeader(JWT_ASSERTION_HEADER);
         if idToken is error {
@@ -58,6 +67,13 @@ public isolated service class JwtInterceptor {
             return <http:InternalServerError>{body: {message: errorMsg}};
         }
 
+        jwt:Payload|error payload = jwt:validate(idToken, jwtConfig.cloneReadOnly());
+        if payload is error {
+            string errorMsg = "Invalid JWT";
+            log:printError(errorMsg, payload);
+            return <http:Unauthorized>{body: {message: errorMsg}};
+        }
+
         jwt:Payload jwtPayload = result[1];
         CustomJwtPayload|error payloadData = jwtPayload.cloneWithType(CustomJwtPayload);
         if payloadData is error {
@@ -73,32 +89,7 @@ public isolated service class JwtInterceptor {
             idToken: userIdToken
         };
 
-        // TODO: Restore below logic after roles & groups are finalized.
-        // foreach anydata role in authorizedRoles.toArray() {
-        //     if userInfo.groups.some(r => r === role) {
-        //         ctx.set(HEADER_USER_INFO, userInfo);
-        //         return ctx.next();
-        //     }
-        // }
-
-        // TODO: Temporarily handle case where groups might be null or empty.
-        // Remove this after the groups are finalized.
-        
-
-        // TODO: Temporarily handle users without groups by skipping authorization and allowing access. 
-        // Remove this logic once groups are finalized.
         ctx.set(HEADER_USER_INFO, userInfo);
         return ctx.next();
-        // string[]? userGroups = userInfo.groups;
-        // if userGroups is () {
-        //     log:printDebug(string `User ${userInfo.email} has no groups, allowing access`);
-        //     ctx.set(HEADER_USER_INFO, userInfo);
-        //     return ctx.next();
-        // }
-
-        // log:printError(string `${userInfo.email} is missing required permissions, only has ${
-        //         userInfo.groups.toBalString()}`);
-
-        // return <http:Forbidden>{body: {message: "Insufficient privileges!"}};
     }
 }
