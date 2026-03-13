@@ -68,11 +68,6 @@ vi.mock("@api/useGetProjectStat", () => ({
   useGetProjectStat: () => mockUseGetProjectStat(),
 }));
 
-const mockUseGetTimeCardsStats = vi.fn();
-vi.mock("@api/useGetTimeCardsStats", () => ({
-  default: () => mockUseGetTimeCardsStats(),
-}));
-
 // Mock Child Components
 vi.mock("@components/common/tab-bar/TabBar", () => ({
   default: () => <div data-testid="tab-bar" />,
@@ -100,9 +95,9 @@ vi.mock(
 );
 
 vi.mock(
-  "@components/project-details/project-overview/recent-activity/RecentActivityCard",
+  "@components/project-details/project-overview/service-hours-allocations/ServiceHoursAllocationsCard",
   () => ({
-    default: () => <div data-testid="recent-activity-card" />,
+    default: () => <div data-testid="service-hours-allocations-card" />,
   }),
 );
 
@@ -133,11 +128,6 @@ describe("ProjectDetails", () => {
       error: null,
     });
     mockUseGetProjectStat.mockReturnValue({
-      data: null,
-      isLoading: false,
-      error: null,
-    });
-    mockUseGetTimeCardsStats.mockReturnValue({
       data: null,
       isLoading: false,
       error: null,
