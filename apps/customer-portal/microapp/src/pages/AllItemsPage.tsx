@@ -29,6 +29,7 @@ import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
 import { chats } from "@src/services/chats";
+import { changeRequests } from "@src/services/changes";
 
 import { ITEM_DETAIL_PATHS } from "@pages/SupportPage";
 
@@ -51,8 +52,7 @@ export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] | "noti
   const SEARCH_PLACEHOLDER_CONFIG: Record<typeof type, string> = {
     case: "Search cases by ID, title, or description...",
     chat: "Search chats by ID, title, or message...",
-    service: "",
-    change: "",
+    change: "Search Change Requests by ID, title, or description...",
     notifications: "Search Notifications",
   };
 
@@ -70,6 +70,8 @@ function ItemsListContent({ type, filter, search }: { type: ItemCardProps["type"
       return <CaseListContent filter={filter} />;
     case "chat":
       return <ChatListContent filter={filter} />;
+    case "change":
+      return <ChangeRequestsListContent filter={filter} />;
     default:
       return null;
   }
@@ -133,6 +135,39 @@ function ChatListContent({ filter }: { filter: string }) {
             data.pages.map((page) =>
               page.map((item) => (
                 <ItemCardExtended key={item.id} type="chat" to={ITEM_DETAIL_PATHS.chat(item.id)} {...item} />
+              )),
+            )}
+        </>
+      )}
+    </InfiniteScroll>
+  );
+}
+
+function ChangeRequestsListContent({ filter }: { filter: string }) {
+  const { projectId } = useProject();
+  const query = useInfiniteQuery(
+    changeRequests.paginated(projectId!, filter !== "all" ? { filters: { stateKeys: [Number(filter)] } } : undefined),
+  );
+  const total = query.data?.pages[0].pagination.totalRecords;
+
+  useSubtitleOverride(total, total);
+
+  return (
+    <InfiniteScroll
+      {...query}
+      sentinel={<ItemsListContentSkeleton />}
+      tail={
+        <Typography variant="subtitle2" textAlign="center">
+          You're all caught up!
+        </Typography>
+      }
+    >
+      {(data) => (
+        <>
+          {data &&
+            data.pages.map((page) =>
+              page.map((item) => (
+                <ItemCardExtended key={item.id} type="change" to={ITEM_DETAIL_PATHS.chat(item.id)} {...item} />
               )),
             )}
         </>

@@ -27,6 +27,7 @@ import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
 import { ErrorBoundary } from "@components/core";
 import { chats } from "../services/chats";
+import { changeRequests } from "../services/changes";
 
 export const TAB_CONFIG = {
   case: { title: "Open Cases", subtitle: "Active support tickets" },
@@ -38,7 +39,7 @@ export const TAB_CONFIG = {
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
   case: (id) => `/cases/${id}`,
   chat: (id) => `/chats/${id}`,
-  service: (id) => `/services/${id}`,
+  // service: (id) => `/services/${id}`,
   change: (id) => `/changes/${id}`,
 };
 
@@ -100,16 +101,12 @@ export default function SupportPage() {
       <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => setTab(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
-        <Tab label="Services Requests" value="service" disableRipple />
+        {/* <Tab label="Services Requests" value="service" disableRipple /> */}
         <Tab label="Change Requests" value="change" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
-          <ErrorBoundary fallback={<ItemsListContentSkeleton tab={tab} />}>
-            <Suspense fallback={<ItemsListContentSkeleton tab={tab} />}>
-              <ItemsListContent tab={tab} />
-            </Suspense>
-          </ErrorBoundary>
+          <ItemsListContent tab={tab} />
         </ItemListView>
       </Card>
     </>
@@ -117,21 +114,70 @@ export default function SupportPage() {
 }
 
 function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
-  const { projectId } = useProject();
-  const caseQuery = tab === "case" ? useSuspenseQuery(cases.all(projectId!, { pagination: { limit: 3 } })) : null;
-  const chatQuery = tab === "chat" ? useSuspenseQuery(chats.all(projectId!, { pagination: { limit: 3 } })) : null;
+  switch (tab) {
+    case "case":
+      return (
+        <ErrorBoundary fallback={<ItemsListContentSkeleton tab="case" />}>
+          <Suspense fallback={<ItemsListContentSkeleton tab="case" />}>
+            <CaseItemListContent />
+          </Suspense>
+        </ErrorBoundary>
+      );
 
-  const items = {
-    case: caseQuery?.data,
-    chat: chatQuery?.data,
-    service: [],
-    change: [],
-  };
+    case "chat":
+      return (
+        <ErrorBoundary fallback={<ItemsListContentSkeleton tab="chat" />}>
+          <Suspense fallback={<ItemsListContentSkeleton tab="chat" />}>
+            <ChatItemListContent />
+          </Suspense>
+        </ErrorBoundary>
+      );
+
+    case "change":
+      return (
+        <ErrorBoundary fallback={<ItemsListContentSkeleton tab="change" />}>
+          <Suspense fallback={<ItemsListContentSkeleton tab="change" />}>
+            <ChangeRequestItemListContent />
+          </Suspense>
+        </ErrorBoundary>
+      );
+  }
+}
+
+function CaseItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(cases.all(projectId!, { pagination: { limit: 3 } }));
 
   return (
     <>
-      {items[tab]?.map((item) => (
-        <ItemCard key={item.id} type={tab} to={ITEM_DETAIL_PATHS[tab](item.id)} {...item} />
+      {data.map((item) => (
+        <ItemCard key={item.id} type="case" to={ITEM_DETAIL_PATHS["case"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ChatItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(chats.all(projectId!, { pagination: { limit: 3 } }));
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="chat" to={ITEM_DETAIL_PATHS["chat"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ChangeRequestItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(changeRequests.all(projectId!, { pagination: { limit: 3 } }));
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="change" to={ITEM_DETAIL_PATHS["change"](item.id)} {...item} />
       ))}
     </>
   );

@@ -17,13 +17,13 @@
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { Card, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
-import { ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Circle } from "@mui/icons-material";
 import { PriorityChip, StatusChip } from "@components/features/support";
 import { Link } from "react-router-dom";
 
 import { TYPE_CONFIG } from "./config";
-import type { CaseSummary } from "@src/types";
+import type { CaseSummary, ChangeRequestSummary } from "@src/types";
 import type { Chat } from "@src/types/chat.model";
 
 dayjs.extend(relativeTime);
@@ -59,24 +59,15 @@ interface ChatItemCardProps extends BaseItemCardProps, Chat {
   type: "chat";
 }
 
-interface ServiceItemCardProps extends BaseItemCardProps {
-  type: "service";
-  priority: Priority;
-  status: Status;
-  category: ServiceCategory;
-}
-
-interface ChangeItemCardProps extends BaseItemCardProps {
+interface ChangeItemCardProps extends BaseItemCardProps, ChangeRequestSummary {
   type: "change";
-  impact: Priority;
-  status: Status;
-  category: ServiceCategory;
-  scheduled: string;
 }
 
-export type ItemCardProps = CaseItemCardProps | ChatItemCardProps | ServiceItemCardProps | ChangeItemCardProps;
+export type ItemCardProps = CaseItemCardProps | ChatItemCardProps | ChangeItemCardProps;
 
 export function ItemCard(props: ItemCardProps) {
+  console.log("props passed: ", props);
+
   const theme = useTheme();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
@@ -88,24 +79,28 @@ export function ItemCard(props: ItemCardProps) {
           <Stack direction="row" alignItems="center" gap={1}>
             <Icon size={pxToRem(18)} color={color} />
             <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-              {(type === "case" || type === "chat") && props.number}
+              {(type === "case" || type === "chat" || type === "change") && props.number}
             </Typography>
             {type === "case" && <PriorityChip size="small" id={props.severityId ?? "N/A"} />}
+            {type === "change" && <PriorityChip size="small" prefix="Impact" id={props.impactId ?? "N/A"} />}
           </Stack>
           <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary">
-          {type === "case" && props.title}
+          {type === "case" || (type === "change" && props.title)}
           {type === "chat" && props.description}
         </Typography>
 
         <Stack direction="row" alignItems="center" gap={1}>
-          {(type === "case" || type === "chat") && <StatusChip size="small" id={props.statusId ?? "N/A"} />}
+          {(type === "case" || type === "chat" || type === "change") && (
+            <StatusChip size="small" id={props.statusId ?? "N/A"} />
+          )}
           <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
           <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
             {type === "case" && (props.assigned ?? "N/A")}
             {type === "chat" && `${props.count} messages`}
+            {type === "change" && (props.requestType ?? "N/A")}
           </Typography>
           {type === "chat" && (
             <>
@@ -117,8 +112,22 @@ export function ItemCard(props: ItemCardProps) {
           )}
         </Stack>
 
+        {type === "change" && (
+          <Stack direction="row" alignItems="center" gap={1}>
+            <Calendar size={pxToRem(16)} color={theme.palette.text.secondary} />
+            <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+              Scheduled:{" "}
+              {props.scheduledOn?.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              }) ?? "N/A"}
+            </Typography>
+          </Stack>
+        )}
+
         <Stack gap={0.5} mt={1}>
-          {(type === "case" || type === "chat") && (
+          {(type === "case" || type === "chat" || type === "change") && (
             <Stack direction="row" alignItems="center" gap={1}>
               <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
               <Typography

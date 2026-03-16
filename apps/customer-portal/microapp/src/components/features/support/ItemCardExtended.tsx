@@ -1,13 +1,14 @@
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { Box, Card, Divider, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
-import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import { Box, Card, Chip, Divider, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
+import { Calendar, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
 import { PriorityChip, StatusChip } from "./Chip";
-import { TYPE_CONFIG } from "./config";
-import type { CaseSummary } from "@src/types";
+import type { CaseSummary, ChangeRequestSummary } from "@src/types";
 import type { Chat } from "@root/src/types/chat.model";
 import { stripHtmlTags } from "@root/src/utils/others";
+
+import { TYPE_CONFIG } from "./config";
 
 dayjs.extend(relativeTime);
 
@@ -25,21 +26,10 @@ interface ChatItemCardExtendedProps extends BaseItemCardExtendedProps, Chat {
 
 interface ServiceItemCardExtendedProps extends BaseItemCardExtendedProps {
   type: "service";
-  // priority: Priority;
-  // status: Status;
-  // category: ServiceCategory;
-  // requestedBy: string;
-  // assignee: string;
 }
 
-interface ChangeItemCardExtendedProps extends BaseItemCardExtendedProps {
+interface ChangeItemCardExtendedProps extends BaseItemCardExtendedProps, ChangeRequestSummary {
   type: "change";
-  // impact: Priority;
-  // priority: Priority;
-  // status: Status;
-  // category: ServiceCategory;
-  // scheduled: string;
-  // owner: string;
 }
 
 export type ItemCardExtendedProps =
@@ -49,6 +39,7 @@ export type ItemCardExtendedProps =
   | ChangeItemCardExtendedProps;
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
+  const theme = useTheme();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
@@ -60,12 +51,20 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
             <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
               <Icon size={pxToRem(19)} color={color} />
               <Typography variant="subtitle2" color="text.secondary">
-                {(type === "case" || type === "chat") && props.number}
+                {(type === "case" || type === "chat" || type === "change") && props.number}
               </Typography>
               {type === "case" && <PriorityChip size="small" id={props.severityId ?? "N/A"} />}
+              {type === "change" && (
+                <>
+                  <PriorityChip size="small" prefix="Impact" id={props.impactId ?? "N/A"} />
+                  <Chip size="small" label={props.requestType ?? "N/A"} />
+                </>
+              )}
             </Stack>
             <Stack direction="row" gap={2}>
-              {(type === "case" || type === "chat") && <StatusChip size="small" id={props.statusId ?? "N/A"} />}
+              {(type === "case" || type === "chat" || type === "change") && (
+                <StatusChip size="small" id={props.statusId ?? "N/A"} />
+              )}
               <Box color="text.secondary">
                 <ChevronRight size={pxToRem(18)} />
               </Box>
@@ -74,15 +73,29 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
 
           <Stack gap={0.2}>
             <Typography variant="body1" color="text.primary">
-              {type === "case" && props.title}
+              {(type === "case" || type === "change") && props.title}
               {type === "chat" && props.description}
             </Typography>
-            {type === "case" && (
+            {(type === "case" || type === "change") && (
               <Typography variant="subtitle2" color="text.secondary">
                 {stripHtmlTags(props.description)}
               </Typography>
             )}
           </Stack>
+
+          {type === "change" && (
+            <Stack direction="row" alignItems="center" gap={1}>
+              <Calendar size={pxToRem(16)} color={theme.palette.text.secondary} />
+              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+                Scheduled:{" "}
+                {props.scheduledOn?.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                }) ?? "N/A"}
+              </Typography>
+            </Stack>
+          )}
         </Stack>
 
         <Divider />
@@ -97,6 +110,8 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return "Assigned";
                     case "chat":
                       return "Messages";
+                    case "change":
+                      return "Owner";
                   }
                 })()}
               </Typography>
@@ -107,6 +122,8 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return props.assigned ?? "N/A";
                     case "chat":
                       return props.count;
+                    case "change":
+                      return props.owner ?? "N/A";
                   }
                 })()}
               </Typography>
@@ -119,6 +136,8 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return "Created";
                     case "chat":
                       return "Started";
+                    case "change":
+                      return "Priority";
                   }
                 })()}
               </Typography>
@@ -129,16 +148,25 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return dayjs(props.createdOn).fromNow();
                     case "chat":
                       return dayjs(props.createdOn).fromNow();
+                    case "change":
+                      return <PriorityChip size="small" id={props.impactId} />;
                   }
                 })()}
               </Typography>
             </Stack>
           </Stack>
-          {(type === "case" || type === "chat") && (
-            <Typography variant="caption" color="text.secondary">
-              Updated {dayjs(props.createdOn).fromNow()}
-            </Typography>
-          )}
+          <Typography variant="caption" color="text.secondary">
+            Updated &nbsp;
+            {(() => {
+              switch (type) {
+                case "case":
+                case "chat":
+                  return dayjs(props.createdOn).fromNow();
+                case "change":
+                  return dayjs(props.updatedOn).fromNow();
+              }
+            })()}
+          </Typography>
         </Stack>
       </Stack>
     </Card>

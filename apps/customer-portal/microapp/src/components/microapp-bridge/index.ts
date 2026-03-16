@@ -245,24 +245,18 @@ export const goToMyAppsScreen = (): void => {
   triggerSuperAppAction(Topic.navigateToMyApps);
 };
 
-
 /**
  * Request the device safe area insets from the native app
  * @param callback - The callback to receive the device safe area insets
  */
-export const requestDeviceSafeAreaInsets = (
-  callback: Callback<{ insets: EdgeInsets }>,
-): void => {
+export const requestDeviceSafeAreaInsets = (callback: Callback<{ insets: EdgeInsets }>): void => {
   if (window.nativebridge) {
     triggerSuperAppAction(Topic.deviceSafeAreaInsets);
     window.nativebridge.resolveDeviceSafeAreaInsets = (data) => {
       callback(data);
     };
   } else {
-    Logger.error(
-      ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE +
-        " to fetch device safe area insets",
-    );
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE + " to fetch device safe area insets");
     callback();
   }
 };
