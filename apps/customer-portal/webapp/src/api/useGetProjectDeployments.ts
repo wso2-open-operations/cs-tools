@@ -18,11 +18,15 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type { ProjectDeploymentItem } from "@models/responses";
+import type {
+  ProjectDeploymentItem,
+  ProjectDeploymentsListResponse,
+} from "@models/responses";
 
 /**
  * Fetches project deployments (array with id, name, project, type.label).
  * Use type.label for case classification API environments.
+ * Backend returns paginated shape { deployments, totalRecords?, offset?, limit? }; this hook returns the deployments array.
  *
  * @param {string} projectId - The project ID.
  * @returns {UseQueryResult<ProjectDeploymentItem[], Error>} The query result.
@@ -62,9 +66,13 @@ export function useGetProjectDeployments(
           );
         }
 
-        const data: ProjectDeploymentItem[] = await response.json();
-        logger.debug("[useGetProjectDeployments] Data received:", data);
-        return data;
+        const raw = await response.json();
+        const data: ProjectDeploymentsListResponse = Array.isArray(raw)
+          ? { deployments: raw as ProjectDeploymentItem[] }
+          : (raw as ProjectDeploymentsListResponse);
+        const deployments = data?.deployments ?? [];
+        logger.debug("[useGetProjectDeployments] Data received:", deployments);
+        return deployments;
       } catch (error) {
         logger.error("[useGetProjectDeployments] Error:", error);
         throw error;

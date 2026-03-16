@@ -20,19 +20,19 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ProjectSupportStats } from "@models/responses";
+import { CaseType } from "@constants/supportConstants";
 
 export interface UseGetProjectSupportStatsOptions {
-  incidentId?: string;
-  queryId?: string;
   caseTypes?: string[];
   query?: string;
 }
 
 /**
  * Custom hook to fetch project support statistics by ID.
+ * Uses default_case for case types when not specified.
  *
  * @param {string} id - The ID of the project.
- * @param {UseGetProjectSupportStatsOptions} options - Optional filters (incidentId, queryId, query).
+ * @param {UseGetProjectSupportStatsOptions} options - Optional filters (caseTypes, query).
  * @param {boolean} enabled - Whether to execute the query (default: true).
  * @returns {UseQueryResult<ProjectSupportStats, Error>} The query result object.
  */
@@ -45,10 +45,10 @@ export function useGetProjectSupportStats(
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  const { incidentId, queryId, query } = options ?? {};
+  const { caseTypes = [CaseType.DEFAULT_CASE], query } = options ?? {};
 
   return useQuery<ProjectSupportStats, Error>({
-    queryKey: [ApiQueryKeys.SUPPORT_STATS, id, incidentId, queryId, query],
+    queryKey: [ApiQueryKeys.SUPPORT_STATS, id, caseTypes, query],
     queryFn: async (): Promise<ProjectSupportStats> => {
       logger.debug(`Fetching support stats for project ID: ${id}`, options);
 
@@ -60,8 +60,9 @@ export function useGetProjectSupportStats(
         }
 
         const params = new URLSearchParams();
-        if (incidentId) params.append("caseTypes", incidentId);
-        if (queryId) params.append("caseTypes", queryId);
+        caseTypes.forEach((t) => {
+          if (t) params.append("caseTypes", t);
+        });
         if (query) params.set("query", query);
 
         const queryString = params.toString();
