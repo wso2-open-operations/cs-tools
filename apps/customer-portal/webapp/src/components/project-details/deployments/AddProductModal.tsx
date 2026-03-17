@@ -24,6 +24,7 @@ import {
   DialogTitle,
   IconButton,
   MenuItem,
+  Skeleton,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -39,12 +40,7 @@ import {
 import { useGetProducts } from "@api/useGetProducts";
 import { useSearchProductVersions } from "@api/useSearchProductVersions";
 import { usePostDeploymentProduct } from "@api/usePostDeploymentProduct";
-import type {
-  ProductItem,
-  ProductVersionItem,
-  ProductsResponse,
-  ProductVersionsSearchResponse,
-} from "@models/responses";
+import type { ProductItem, ProductVersionItem } from "@models/responses";
 
 export interface AddProductModalProps {
   open: boolean;
@@ -112,35 +108,29 @@ export default function AddProductModal({
     offset: versionOffset,
   });
 
-  // Merge product pages into a single list for the dropdown; replace when offset 0 (initial or reset).
   useEffect(() => {
     if (!productsPage) return;
     const pageItems = productsPage.products ?? [];
     const offset = productsPage.offset ?? 0;
-    if (offset === 0) {
-      setProducts(pageItems);
-      return;
-    }
-    setProducts((prev) => {
-      const existingIds = new Set(prev.map((p) => p.id));
-      const next = [...prev];
-      pageItems.forEach((item) => {
-        if (!existingIds.has(item.id)) {
-          next.push(item);
-          existingIds.add(item.id);
-        }
+
+    Promise.resolve().then(() => {
+      if (offset === 0) {
+        setProducts(pageItems);
+        return;
+      }
+      setProducts((prev) => {
+        const existingIds = new Set(prev.map((p) => p.id));
+        const next = [...prev];
+        pageItems.forEach((item) => {
+          if (!existingIds.has(item.id)) {
+            next.push(item);
+            existingIds.add(item.id);
+          }
+        });
+        return next;
       });
-      return next;
     });
   }, [productsPage]);
-
-  // Reset products when modal opens or closes.
-  useEffect(() => {
-    if (!open) {
-      setProducts([]);
-      setProductOffset(0);
-    }
-  }, [open]);
 
   const productsTotalRecords = productsPage?.totalRecords ?? products.length;
   const canLoadMoreProducts = products.length < productsTotalRecords;
@@ -158,47 +148,56 @@ export default function AddProductModal({
       }
 
       const threshold = 24; // px from bottom to trigger load
-      if (target.scrollHeight - target.scrollTop - target.clientHeight < threshold) {
+      if (
+        target.scrollHeight - target.scrollTop - target.clientHeight <
+        threshold
+      ) {
         setProductOffset((prev) => prev + 10);
       }
     },
-    [canLoadMoreProducts, isLoadingProducts, isFetchingProducts, products.length],
+    [
+      canLoadMoreProducts,
+      isLoadingProducts,
+      isFetchingProducts,
+      products.length,
+    ],
   );
 
-  // Merge version pages into a single list for the dropdown; replace when offset 0 (product changed or reset).
   useEffect(() => {
     if (!versionsPage) return;
     const pageItems = versionsPage.versions ?? [];
     const offset = versionsPage.offset ?? 0;
-    if (offset === 0) {
-      setVersions(pageItems);
+
+    if (pageItems.length === 0) {
       return;
     }
-    setVersions((prev) => {
-      const existingIds = new Set(prev.map((v) => v.id));
-      const next = [...prev];
-      pageItems.forEach((item) => {
-        if (!existingIds.has(item.id)) {
-          next.push(item);
-          existingIds.add(item.id);
-        }
+
+    Promise.resolve().then(() => {
+      if (offset === 0) {
+        setVersions(pageItems);
+        return;
+      }
+      setVersions((prev) => {
+        const existingIds = new Set(prev.map((v) => v.id));
+        const next = [...prev];
+        pageItems.forEach((item) => {
+          if (!existingIds.has(item.id)) {
+            next.push(item);
+            existingIds.add(item.id);
+          }
+        });
+        return next;
       });
-      return next;
     });
   }, [versionsPage]);
 
-  // Reset versions when product changes or modal closes.
+  // Reset versions when product changes.
   useEffect(() => {
-    setVersions([]);
-    setVersionOffset(0);
-  }, [form.productId]);
-
-  useEffect(() => {
-    if (!open) {
+    Promise.resolve().then(() => {
       setVersions([]);
       setVersionOffset(0);
-    }
-  }, [open]);
+    });
+  }, [form.productId]);
 
   const versionsTotalRecords = versionsPage?.totalRecords ?? versions.length;
   const canLoadMoreVersions = versions.length < versionsTotalRecords;
@@ -216,11 +215,19 @@ export default function AddProductModal({
       }
 
       const threshold = 24;
-      if (target.scrollHeight - target.scrollTop - target.clientHeight < threshold) {
+      if (
+        target.scrollHeight - target.scrollTop - target.clientHeight <
+        threshold
+      ) {
         setVersionOffset((prev) => prev + 10);
       }
     },
-    [canLoadMoreVersions, isLoadingVersions, isFetchingVersions, versions.length],
+    [
+      canLoadMoreVersions,
+      isLoadingVersions,
+      isFetchingVersions,
+      versions.length,
+    ],
   );
 
   // Sort versions in ascending order
@@ -387,13 +394,12 @@ export default function AddProductModal({
                 {p.label ?? p.name ?? p.id}
               </MenuItem>
             ))}
-            {(isLoadingProducts || isFetchingProducts) && products.length > 0 && (
-              <MenuItem disabled>
-                <Box sx={{ display: "flex", justifyContent: "center", width: "100%" }}>
-                  <CircularProgress size={16} />
-                </Box>
-              </MenuItem>
-            )}
+            {(isLoadingProducts || isFetchingProducts) &&
+              products.length === 0 && (
+                <MenuItem disabled>
+                  <Skeleton variant="text" width="100%" />
+                </MenuItem>
+              )}
           </TextField>
           <TextField
             select
@@ -423,13 +429,12 @@ export default function AddProductModal({
                 {v.version}
               </MenuItem>
             ))}
-            {(isLoadingVersions || isFetchingVersions) && versions.length > 0 && (
-              <MenuItem disabled>
-                <Box sx={{ display: "flex", justifyContent: "center", width: "100%" }}>
-                  <CircularProgress size={16} />
-                </Box>
-              </MenuItem>
-            )}
+            {(isLoadingVersions || isFetchingVersions) &&
+              versions.length === 0 && (
+                <MenuItem disabled>
+                  <Skeleton variant="text" width="100%" />
+                </MenuItem>
+              )}
           </TextField>
         </Box>
 

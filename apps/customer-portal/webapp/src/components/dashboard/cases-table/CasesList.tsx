@@ -108,7 +108,14 @@ const CasesList = ({
               </TableRow>
             ) : (
               data?.cases.map((row) => (
-                <TableRow key={row.id} hover>
+                <TableRow
+                  key={row.id}
+                  hover
+                  onClick={onCaseClick ? () => onCaseClick(row) : undefined}
+                  sx={{
+                    cursor: onCaseClick ? "pointer" : "default",
+                  }}
+                >
                   <TableCell>
                     <Box>
                       <Typography variant="body2" color="text.primary">
@@ -127,36 +134,7 @@ const CasesList = ({
                         gap: 0.25,
                       }}
                     >
-                      <Typography
-                        component="span"
-                        variant="body2"
-                        color="text.primary"
-                        role={onCaseClick ? "button" : undefined}
-                        tabIndex={onCaseClick ? 0 : undefined}
-                        onKeyDown={
-                          onCaseClick
-                            ? (e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  onCaseClick(row);
-                                }
-                              }
-                            : undefined
-                        }
-                        onClick={
-                          onCaseClick ? () => onCaseClick(row) : undefined
-                        }
-                        sx={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 0.5,
-                          cursor: onCaseClick ? "pointer" : "default",
-                          fontWeight: 500,
-                          "&:hover": onCaseClick
-                            ? { color: "primary.main" }
-                            : undefined,
-                        }}
-                      >
+                      <Typography variant="body2" color="text.primary">
                         {row.title || "--"}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">

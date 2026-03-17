@@ -1105,11 +1105,14 @@ export function replaceInlineImageSources(
   inlineAttachments?: InlineAttachment[] | null,
 ): string {
   if (!html || typeof html !== "string") return "";
+
+  const normalizedHtml = html.replace(/\\\//g, "/");
+
   if (!inlineAttachments?.length) {
-    return DOMPurify.sanitize(html);
+    return DOMPurify.sanitize(normalizedHtml);
   }
 
-  const replaced = html.replace(
+  const replaced = normalizedHtml.replace(
     /<img([^>]*?)\s+src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))([^>]*)>/gi,
     (_match, before, doubleSrc, singleSrc, bareSrc, after) => {
       const src = (doubleSrc ?? singleSrc ?? bareSrc ?? "") as string;

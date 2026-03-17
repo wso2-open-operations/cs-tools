@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProductItem, ProductsResponse } from "@models/responses";
+import type { ProductsResponse } from "@models/responses";
 
 /**
  * Fetches products list (GET /products).

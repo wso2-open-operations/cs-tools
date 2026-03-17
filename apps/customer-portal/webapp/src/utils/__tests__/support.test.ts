@@ -660,6 +660,12 @@ describe("support utils", () => {
       expect(replaceInlineImageSources(html, null)).toContain("src");
     });
 
+    it("should normalize JSON-escaped forward slashes so images render", () => {
+      const html = '<img src=\"https:\\/\\/example.com\\/img.png\" alt=\"x\">';
+      // The returned HTML should contain a usable URL (without the escaping backslashes)
+      expect(replaceInlineImageSources(html, null)).toContain("https://example.com/img.png");
+    });
+
     it("should replace src by sys_id when attachment matches", () => {
       const html = '<img src="/sys123.iix" alt="x">';
       const attachments = [

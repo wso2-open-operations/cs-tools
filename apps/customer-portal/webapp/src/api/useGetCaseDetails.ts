@@ -35,7 +35,7 @@ export default function useGetCaseDetails(
   caseId: string,
 ): UseQueryResult<CaseDetails, Error> {
   const logger = useLogger();
-  const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const { isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
   return useQuery<CaseDetails, Error>({
@@ -70,7 +70,7 @@ export default function useGetCaseDetails(
         throw error;
       }
     },
-    enabled: !!caseId && isSignedIn && !isAuthLoading,
+    enabled: !!caseId && !isAuthLoading && isSignedIn,
     staleTime: 5 * 60 * 1000,
   });
 }

@@ -176,7 +176,10 @@ export default function App(): JSX.Element {
                   />
                 </Route>
                 {/* Engagements */}
-                <Route path="engagements" element={<EngagementsPage />} />
+                <Route path="engagements">
+                  <Route index element={<EngagementsPage />} />
+                  <Route path=":caseId" element={<CaseDetailsPage />} />
+                </Route>
                 {/* LegalContracts */}
                 <Route
                   path="legal-contracts"

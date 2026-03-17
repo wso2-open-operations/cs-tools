@@ -24,8 +24,9 @@ import {
 } from "@api/useGetDeploymentsProducts";
 import type {
   DeploymentProductItem,
-  DeployedProductsResponse,
+  DeployedProductsResponsePayload,
 } from "@models/responses";
+import { isDeployedProductsResponse } from "@models/responses";
 import { addApiHeaders } from "@utils/apiUtils";
 
 interface DeploymentForProducts {
@@ -54,7 +55,7 @@ export function useAllDeploymentProducts(
 
   const results = useQueries({
     queries: deploymentIds.map((deploymentId) => ({
-      queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId],
+      queryKey: [ApiQueryKeys.DEPLOYMENT_PRODUCTS, deploymentId, "all"],
       queryFn: async () => {
         const token = await getIdToken();
         const fetchFn: FetchFn = (url, init) =>
@@ -70,8 +71,15 @@ export function useAllDeploymentProducts(
     const map: Record<string, DeploymentProductItem[]> = {};
     deploymentIds.forEach((id, i) => {
       const res = results[i];
-      const payload = res?.data as DeployedProductsResponse | undefined;
-      map[id] = payload?.deployedProducts ?? [];
+      const payload = res?.data as DeployedProductsResponsePayload | undefined;
+
+      if (Array.isArray(payload)) {
+        map[id] = payload;
+      } else if (isDeployedProductsResponse(payload)) {
+        map[id] = payload.deployedProducts;
+      } else {
+        map[id] = [];
+      }
     });
     return map;
   }, [results, deploymentIds]);

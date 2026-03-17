@@ -24,7 +24,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import type { JSX, KeyboardEvent } from "react";
 import type { CaseListItem } from "@models/responses";
 import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import {
@@ -96,6 +96,15 @@ export default function AllCasesList({
           <Form.CardButton
             key={caseItem.id}
             onClick={() => onCaseClick?.(caseItem)}
+            tabIndex={onCaseClick ? 0 : undefined}
+            role={onCaseClick ? "button" : undefined}
+            onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+              if (!onCaseClick) return;
+              if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+                event.preventDefault();
+                onCaseClick(caseItem);
+              }
+            }}
             sx={{
               p: 3,
               display: "flex",

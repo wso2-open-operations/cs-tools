@@ -62,6 +62,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const isCaseDetailsPage =
     /\/projects\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname) ||
     /\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname);
+  const isEngagementDetailsPage = location.pathname.includes("/engagements/");
   const isSecurityReportAnalysisDetailsPage =
     /\/projects\/[^/]+\/security-center\/security-report-analysis\/[^/]+$/.test(
       location.pathname,
@@ -82,6 +83,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     ) || /\/[^/]+\/updates\/pending\/level\/[^/]+$/.test(location.pathname);
   const isDetailsStylePage =
     isCaseDetailsPage ||
+    isEngagementDetailsPage ||
     isSecurityReportAnalysisDetailsPage ||
     isVulnerabilityDetailsPage ||
     isPendingUpdatesPage ||

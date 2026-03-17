@@ -29,6 +29,7 @@ export interface CaseDetailsTabPanelsProps {
   isError?: boolean;
   projectId?: string;
   focusMode?: boolean;
+  isEngagement?: boolean;
 }
 
 /**
@@ -44,6 +45,7 @@ export default function CaseDetailsTabPanels({
   isError = false,
   projectId = "",
   focusMode = false,
+  isEngagement = false,
 }: CaseDetailsTabPanelsProps): JSX.Element | null {
   switch (activeTab) {
     case 0: {
@@ -76,7 +78,13 @@ export default function CaseDetailsTabPanels({
       );
     }
     case 1:
-      return <CaseDetailsDetailsPanel data={data} isError={isError} />;
+      return (
+        <CaseDetailsDetailsPanel
+          data={data}
+          isError={isError}
+          isEngagement={isEngagement}
+        />
+      );
     case 2:
       return (
         <CaseDetailsAttachmentsPanel

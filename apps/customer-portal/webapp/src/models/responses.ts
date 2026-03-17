@@ -821,6 +821,27 @@ export interface DeployedProductsResponse {
   limit: number;
 }
 
+/**
+ * Union type for the deployment products endpoint response.
+ * Some backend versions return a paginated object, others return a plain array.
+ */
+export type DeployedProductsResponsePayload =
+  | DeploymentProductItem[]
+  | DeployedProductsResponse;
+
+/**
+ * Type guard for DeployedProductsResponse.
+ */
+export function isDeployedProductsResponse(
+  payload: unknown,
+): payload is DeployedProductsResponse {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    Array.isArray((payload as any).deployedProducts)
+  );
+}
+
 // Single item from GET /deployments/:deploymentId/products (array response).
 export interface DeploymentProductItem {
   id: string;

@@ -84,6 +84,7 @@ export interface CaseDetailsActionRowProps {
   /** Case ID for PATCH case state. */
   caseId?: string;
   isLoading?: boolean;
+  showOnlyEngineer?: boolean;
 }
 
 /**
@@ -122,12 +123,32 @@ export default function CaseDetailsActionRow({
   projectId = "",
   caseId = "",
   isLoading = false,
+  showOnlyEngineer = false,
 }: CaseDetailsActionRowProps): JSX.Element {
   const theme = useTheme();
   const hasEngineer = !!getAssignedEngineerLabel(assignedEngineer);
 
   const { data: filterMetadata } = useGetProjectFilters(projectId);
   const caseStates = filterMetadata?.caseStates;
+
+  if (showOnlyEngineer && !hasEngineer) {
+    return (
+      <Paper
+        variant="outlined"
+        sx={{
+          mt: 2,
+          mb: 1,
+          py: 0.5,
+          px: 2,
+          bgcolor: "background.default",
+        }}
+      >
+        <Typography variant="caption" color="text.secondary">
+          No engineer assigned
+        </Typography>
+      </Paper>
+    );
+  }
 
   const { showSuccess } = useSuccessBanner();
   const { showError } = useErrorBanner();
@@ -163,128 +184,144 @@ export default function CaseDetailsActionRow({
         minHeight: 0,
       }}
     >
-      <Stack direction="row" spacing={1.5} alignItems="center">
-        {hasEngineer && (
-          <>
-            {isLoading ? (
-              <Skeleton variant="circular" width={18} height={18} />
-            ) : (
-              <Avatar
-                sx={{
-                  width: 18,
-                  height: 18,
-                  bgcolor: "primary.light",
-                  color: "primary.contrastText",
-                  fontSize: "0.6rem",
-                }}
-              >
-                {engineerInitials}
-              </Avatar>
-            )}
-            <Box>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
+      >
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          {hasEngineer && (
+            <>
               {isLoading ? (
-                <Skeleton
-                  variant="text"
-                  width={90}
-                  height={14}
-                  sx={{ mb: 0.25 }}
-                />
+                <Skeleton variant="circular" width={18} height={18} />
               ) : (
+                <Avatar
+                  sx={{
+                    width: 18,
+                    height: 18,
+                    bgcolor: "primary.light",
+                    color: "primary.contrastText",
+                    fontSize: "0.6rem",
+                  }}
+                >
+                  {engineerInitials}
+                </Avatar>
+              )}
+
+              <Box>
+                {isLoading ? (
+                  <Skeleton
+                    variant="text"
+                    width={90}
+                    height={14}
+                    sx={{ mb: 0.25 }}
+                  />
+                ) : (
+                  <Typography
+                    variant="caption"
+                    color="text.primary"
+                    sx={{ lineHeight: 1.2 }}
+                  >
+                    {formatValue(assignedEngineer)}
+                  </Typography>
+                )}
                 <Typography
                   variant="caption"
-                  color="text.primary"
-                  sx={{ lineHeight: 1.2 }}
+                  color="text.secondary"
+                  sx={{ fontSize: "0.7rem", lineHeight: 1.2, display: "block" }}
                 >
-                  {formatValue(assignedEngineer)}
+                  Support Engineer
                 </Typography>
-              )}
+              </Box>
+
+              <Divider orientation="vertical" flexItem />
+            </>
+          )}
+
+          {!showOnlyEngineer && (
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <CirclePlay size={12} color={theme.palette.primary.main} />
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ fontSize: "0.7rem", lineHeight: 1.2, display: "block" }}
+                sx={{ fontSize: "0.7rem" }}
               >
-                Support Engineer
+                Manage case status
               </Typography>
-            </Box>
-            <Divider orientation="vertical" flexItem />
-          </>
-        )}
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <CirclePlay size={12} color={theme.palette.primary.main} />
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ fontSize: "0.7rem" }}
-          >
-            Manage case status
-          </Typography>
+            </Stack>
+          )}
         </Stack>
-      </Stack>
 
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        {CASE_STATUS_ACTIONS.filter((action) =>
-          availableActions.includes(action.label),
-        ).map(({ label, Icon, paletteIntent }) => {
-          const stateKey = getStateKeyForAction(label, caseStates);
-          const isOpenRelatedCase = label === "Open Related Case";
-          const canPatch = !isOpenRelatedCase && stateKey != null && !!caseId;
-          const isThisPending =
-            !isOpenRelatedCase && patchCase.isPending && pendingActionLabel === label;
+        {!showOnlyEngineer && (
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            {CASE_STATUS_ACTIONS.filter((action) =>
+              availableActions.includes(action.label),
+            ).map(({ label, Icon, paletteIntent }) => {
+              const stateKey = getStateKeyForAction(label, caseStates);
+              const isOpenRelatedCase = label === "Open Related Case";
+              const canPatch = !isOpenRelatedCase && stateKey != null && !!caseId;
+              const isThisPending =
+                !isOpenRelatedCase && patchCase.isPending && pendingActionLabel === label;
 
-          return (
-            <Button
-              key={label}
-              variant="outlined"
-              size="small"
-              startIcon={
-                isThisPending ? (
-                  <CircularProgress
-                    size={ACTION_BUTTON_ICON_SIZE}
-                    color="inherit"
-                    sx={{ display: "block" }}
-                  />
-                ) : (
-                  <Icon size={ACTION_BUTTON_ICON_SIZE} />
-                )
-              }
-              disabled={!isOpenRelatedCase && (patchCase.isPending || !canPatch)}
-              onClick={
-                isOpenRelatedCase
-                  ? onOpenRelatedCase
-                  : canPatch
-                    ? () => {
-                        setPendingActionLabel(label);
-                        patchCase.mutate(
-                          { stateKey: stateKey! },
-                          {
-                            onSuccess: () => {
-                              showSuccess("Case status updated successfully.");
+              return (
+                <Button
+                  key={label}
+                  variant="outlined"
+                  size="small"
+                  startIcon={
+                    isThisPending ? (
+                      <CircularProgress
+                        size={ACTION_BUTTON_ICON_SIZE}
+                        color="inherit"
+                        sx={{ display: "block" }}
+                      />
+                    ) : (
+                      <Icon size={ACTION_BUTTON_ICON_SIZE} />
+                    )
+                  }
+                  disabled={!isOpenRelatedCase && (patchCase.isPending || !canPatch)}
+                  onClick={
+                    isOpenRelatedCase
+                      ? onOpenRelatedCase
+                      : canPatch
+                      ? () => {
+                          setPendingActionLabel(label);
+                          patchCase.mutate(
+                            { stateKey: stateKey! },
+                            {
+                              onSuccess: () => {
+                                showSuccess("Case status updated successfully.");
+                              },
+                              onError: (err) => {
+                                showError(
+                                  err?.message ??
+                                    "Failed to update case status. Please try again.",
+                                );
+                              },
+                              onSettled: () => {
+                                setPendingActionLabel(null);
+                              },
                             },
-                            onError: (err) => {
-                              showError(
-                                err?.message ??
-                                  "Failed to update case status. Please try again.",
-                              );
-                            },
-                            onSettled: () => {
-                              setPendingActionLabel(null);
-                            },
-                          },
-                        );
-                      }
-                    : undefined
-              }
-              sx={
-                getActionButtonSx(theme, paletteIntent) as Record<string, unknown>
-              }
-            >
-              {isThisPending
-                ? toPresentContinuousActionLabel(label)
-                : toPresentTenseActionLabel(label)}
-            </Button>
-          );
-        })}
-      </Stack>
+                          );
+                        }
+                      : undefined
+                  }
+                  sx={
+                    getActionButtonSx(theme, paletteIntent) as Record<string, unknown>
+                  }
+                >
+                  {isThisPending
+                    ? toPresentContinuousActionLabel(label)
+                    : toPresentTenseActionLabel(label)}
+                </Button>
+              );
+            })}
+          </Stack>
+        )}
+      </Box>
     </Paper>
   );
 }

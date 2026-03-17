@@ -47,6 +47,7 @@ import {
 export interface CaseDetailsDetailsPanelProps {
   data: CaseDetails | undefined;
   isError: boolean;
+  isEngagement?: boolean;
 }
 
 /**
@@ -59,10 +60,21 @@ export interface CaseDetailsDetailsPanelProps {
 export default function CaseDetailsDetailsPanel({
   data,
   isError,
+  isEngagement = false,
 }: CaseDetailsDetailsPanelProps): JSX.Element {
   const theme = useTheme();
 
   const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
+  const overviewTitle = isSecurityReportAnalysis
+    ? "Security Report Analysis Overview"
+    : isEngagement
+    ? "Engagement Overview"
+    : "Case Overview";
+  const overviewIdLabel = isSecurityReportAnalysis
+    ? "Security Report Analysis ID"
+    : isEngagement
+    ? "Engagement ID"
+    : "Case ID";
 
   if (isError) {
     return (
@@ -106,14 +118,11 @@ export default function CaseDetailsDetailsPanel({
 
   return (
     <Stack spacing={3}>
-      {/* Section 1: Case Overview */}
-      <CaseDetailsCard
-        title="Case Overview"
-        icon={<Info size={20} aria-hidden />}
-      >
+      {/* Section 1: Overview */}
+      <CaseDetailsCard title={overviewTitle} icon={<Info size={20} aria-hidden />}>
         <Box sx={twoColumnGridSx}>
           <Box>
-            <Typography {...labelSx}>Case ID</Typography>
+            <Typography {...labelSx}>{overviewIdLabel}</Typography>
             <Typography {...valueSx}>{formatValue(data?.number)}</Typography>
           </Box>
           <Box>
@@ -203,12 +212,14 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Stack>
           </Box>
-          <Box>
-            <Typography {...labelSx}>SLA Response Time</Typography>
-            <Typography {...valueSx}>
-              {formatSlaResponseTime(data?.slaResponseTime)}
-            </Typography>
-          </Box>
+          {!isEngagement && (
+            <Box>
+              <Typography {...labelSx}>SLA Response Time</Typography>
+              <Typography {...valueSx}>
+                {formatSlaResponseTime(data?.slaResponseTime)}
+              </Typography>
+            </Box>
+          )}
           {isSecurityReportAnalysis ? (
             <>
               <Box>
@@ -249,47 +260,49 @@ export default function CaseDetailsDetailsPanel({
       </CaseDetailsCard>
 
       {/* Section 2: Product & Environment */}
-      <CaseDetailsCard
-        title="Product & Environment"
-        icon={<Package size={20} aria-hidden />}
-      >
-        <Box sx={twoColumnGridSx}>
-          {isSecurityReportAnalysis && (
+      {!isEngagement && (
+        <CaseDetailsCard
+          title="Product & Environment"
+          icon={<Package size={20} aria-hidden />}
+        >
+          <Box sx={twoColumnGridSx}>
+            {isSecurityReportAnalysis && (
+              <Box>
+                <Typography {...labelSx}>Report Type</Typography>
+                {typeof data?.type === "object" && data?.type?.label ? (
+                  <Typography {...valueSx}>{data.type.label}</Typography>
+                ) : typeof data?.type === "string" ? (
+                  <Typography {...valueSx}>{data.type}</Typography>
+                ) : (
+                  <Typography {...valueSx}>Not available</Typography>
+                )}
+              </Box>
+            )}
             <Box>
-              <Typography {...labelSx}>Report Type</Typography>
-              {typeof data?.type === "object" && data?.type?.label ? (
-                <Typography {...valueSx}>{data.type.label}</Typography>
-              ) : typeof data?.type === "string" ? (
-                <Typography {...valueSx}>{data.type}</Typography>
-              ) : (
-                <Typography {...valueSx}>Not available</Typography>
-              )}
+              <Typography {...labelSx}>Product Name</Typography>
+              <Typography {...valueSx}>
+                {formatValue(
+                  data?.deployedProduct?.label?.trim?.()?.length
+                    ? data.deployedProduct.label
+                    : null,
+                )}
+              </Typography>
             </Box>
-          )}
-          <Box>
-            <Typography {...labelSx}>Product Name</Typography>
-            <Typography {...valueSx}>
-              {formatValue(
-                data?.deployedProduct?.label?.trim?.()?.length
-                  ? data.deployedProduct.label
-                  : null,
-              )}
-            </Typography>
+            <Box>
+              <Typography {...labelSx}>Product Version</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data?.deployedProduct?.version ?? null)}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography {...labelSx}>Environment Type</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data?.deployment?.label)}
+              </Typography>
+            </Box>
           </Box>
-          <Box>
-            <Typography {...labelSx}>Product Version</Typography>
-            <Typography {...valueSx}>
-              {formatValue(data?.deployedProduct?.version ?? null)}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography {...labelSx}>Environment Type</Typography>
-            <Typography {...valueSx}>
-              {formatValue(data?.deployment?.label)}
-            </Typography>
-          </Box>
-        </Box>
-      </CaseDetailsCard>
+        </CaseDetailsCard>
+      )}
 
       {/* Section 3: Closed Case Details (only when case is closed) */}
       {statusLabel?.toLowerCase() === "closed" && (
@@ -371,12 +384,14 @@ export default function CaseDetailsDetailsPanel({
                   />
                 </Box>
               )}
-              <Box>
-                <Typography {...labelSx}>CS Manager</Typography>
-                <Typography {...valueSx}>
-                  {formatValue(data?.csManager)}
-                </Typography>
-              </Box>
+              {!isEngagement && (
+                <Box>
+                  <Typography {...labelSx}>CS Manager</Typography>
+                  <Typography {...valueSx}>
+                    {formatValue(data?.csManager)}
+                  </Typography>
+                </Box>
+              )}
             </>
           )}
         </Box>

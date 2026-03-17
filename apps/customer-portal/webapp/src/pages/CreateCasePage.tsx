@@ -161,13 +161,11 @@ export default function CreateCasePage(): JSX.Element {
     isLoading: deploymentProductsLoading,
     isError: deploymentProductsError,
   } = useGetDeploymentsProducts(selectedDeploymentId);
-  const allDeploymentProducts = useMemo(
-    () =>
-      (deploymentProductsData ?? []).filter((item) =>
-        item.product?.label?.trim(),
-      ),
-    [deploymentProductsData],
-  );
+  const allDeploymentProducts = useMemo(() => {
+    if (!deploymentProductsData) return [];
+
+    return deploymentProductsData.filter((item) => item.product?.label?.trim());
+  }, [deploymentProductsData]);
   const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
 
   // Sort product options in ascending order by label
