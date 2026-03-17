@@ -52,7 +52,6 @@ export default function CaseDetailsActivityPanel({
   projectId,
   caseId,
   caseCreatedOn,
-  focusMode = false,
   caseStatus,
 }: CaseDetailsActivityPanelProps): JSX.Element {
   const theme = useTheme();
