@@ -47,6 +47,7 @@ import {
 export interface CaseDetailsDetailsPanelProps {
   data: CaseDetails | undefined;
   isError: boolean;
+  isEngagement?: boolean;
 }
 
 /**

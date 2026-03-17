@@ -44,6 +44,8 @@ export interface CaseDetailsContentProps {
   onBack: () => void;
   onOpenRelatedCase?: () => void;
   projectId?: string;
+  hideActionRow?: boolean;
+  showEngineerOnly?: boolean;
 }
 
 /**
@@ -60,11 +62,15 @@ export default function CaseDetailsContent({
   onBack,
   onOpenRelatedCase,
   projectId = "",
+  hideActionRow = false,
+  showEngineerOnly = false,
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
+
+  const isEngagementRoute = location.pathname.includes("/engagements/");
 
   const isSecurityReportAnalysisUrl =
     /(^|\/)security-report-analysis(\/|$)/.test(location.pathname);
@@ -117,7 +123,10 @@ export default function CaseDetailsContent({
             onClick={onBack}
             sx={{ mb: 2, ml: -0.5, alignSelf: "flex-start" }}
           />
-          <CaseDetailsSkeleton hideActionRow={isSecurityReportAnalysisUrl} />
+          <CaseDetailsSkeleton
+            hideActionRow={hideActionRow}
+            showEngineerOnly={showEngineerOnly}
+          />
         </Paper>
       </Box>
     );
@@ -182,16 +191,19 @@ export default function CaseDetailsContent({
               {isSecurityReportAnalysis ? (
                 <SecurityReportAnalysisHeader data={data} />
               ) : (
-                <CaseDetailsActionRow
-                  assignedEngineer={assignedEngineer}
-                  engineerInitials={engineerInitials}
-                  statusLabel={statusLabel}
-                  closedOn={data?.closedOn}
-                  onOpenRelatedCase={onOpenRelatedCase}
-                  projectId={resolvedProjectId}
-                  caseId={caseId}
-                  isLoading={isLoading}
-                />
+                (!hideActionRow || showEngineerOnly) && (
+                  <CaseDetailsActionRow
+                    assignedEngineer={assignedEngineer}
+                    engineerInitials={engineerInitials}
+                    statusLabel={statusLabel}
+                    closedOn={data?.closedOn}
+                    onOpenRelatedCase={onOpenRelatedCase}
+                    projectId={resolvedProjectId}
+                    caseId={caseId}
+                    isLoading={isLoading}
+                    showOnlyEngineer={showEngineerOnly}
+                  />
+                )
               )}
             </>
           )
@@ -228,6 +240,7 @@ export default function CaseDetailsContent({
           isError={isError}
           projectId={projectId}
           focusMode={focusMode}
+          isEngagement={isEngagementRoute}
         />
       </Box>
     </Box>
