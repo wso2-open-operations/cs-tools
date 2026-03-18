@@ -16,9 +16,11 @@
 
 import { Link, Sidebar } from "@wso2/oxygen-ui";
 import { Settings } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
+import { type JSX, useMemo } from "react";
 import { useLocation, useParams, Link as NavigateLink } from "react-router";
+import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import { APP_SHELL_NAV_ITEMS } from "@constants/appLayoutConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
 
 // Props for the SideBar component.
 interface SideBarProps {
@@ -47,6 +49,27 @@ export default function SideBar({
       ? pathSegments[projectIdIndex + 1]
       : "dashboard";
 
+  const projectsQuery = useInfiniteProjects({ enabled: !!projectId });
+  const projects = flattenProjectPages(projectsQuery.data);
+  const selectedProject = projects.find((project) => project.id === projectId);
+
+  const projectTypeLabel = selectedProject?.type?.label;
+
+  const showCR = projectTypeLabel === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+  const showSR =
+    projectTypeLabel === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION ||
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
+    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
+
+  const navItems = useMemo(() => {
+    // Show operations tab only when there is something to show (CR or SR) for the selected project.
+    if (projectTypeLabel && !(showCR || showSR)) {
+      return APP_SHELL_NAV_ITEMS.filter((item) => item.id !== "operations");
+    }
+
+    return APP_SHELL_NAV_ITEMS;
+  }, [projectTypeLabel, showCR, showSR]);
+
   return (
     <Sidebar
       collapsed={collapsed}
@@ -58,7 +81,7 @@ export default function SideBar({
       {/* sidebar navigation items */}
       <Sidebar.Nav>
         <Sidebar.Category>
-          {APP_SHELL_NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.id}
               component={NavigateLink}

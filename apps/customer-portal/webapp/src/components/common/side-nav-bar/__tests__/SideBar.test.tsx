@@ -18,6 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import SideBar from "@components/common/side-nav-bar/SideBar";
 import { APP_SHELL_NAV_ITEMS } from "@constants/appLayoutConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => {
@@ -101,6 +102,13 @@ const mockParams: { projectId: string | undefined } = {
   projectId: "project-1",
 };
 
+let mockProjectTypeLabel: string = "Other";
+
+const createMockProjectsResponse = () => [{
+  id: "project-1",
+  type: { label: mockProjectTypeLabel },
+}];
+
 vi.mock("react-router", () => ({
   useLocation: () => mockLocation,
   useParams: () => mockParams,
@@ -108,6 +116,24 @@ vi.mock("react-router", () => ({
     <a href={to}>{children}</a>
   ),
 }));
+
+vi.mock("@api/useGetProjects", () => {
+  return {
+    __esModule: true,
+    default: () => ({
+      data: {
+        pages: [
+          {
+            projects: createMockProjectsResponse(),
+            totalRecords: 1,
+          },
+        ],
+      },
+    }),
+    flattenProjectPages: (data: any) =>
+      data?.pages?.flatMap((page: any) => page.projects) ?? [],
+  };
+});
 
 vi.mock("@components/common/side-nav-bar/SubscriptionWidget", () => {
   return {
@@ -121,14 +147,25 @@ describe("SideBar", () => {
     vi.clearAllMocks();
     mockLocation.pathname = "/projects/project-1/dashboard";
     mockParams.projectId = "project-1";
+    mockProjectTypeLabel = "Other";
   });
 
-  it("should render all navigation items from APP_SHELL_NAV_ITEMS", () => {
+  it("should render all navigation items except Operations when the project type is not supported", () => {
+    mockProjectTypeLabel = "Other";
     render(<SideBar collapsed={false} />);
 
-    APP_SHELL_NAV_ITEMS.forEach((item) => {
+    APP_SHELL_NAV_ITEMS.filter((item) => item.id !== "operations").forEach((item) => {
       expect(screen.getByText(item.label)).toBeInTheDocument();
     });
+
+    expect(screen.queryByText("Operations")).not.toBeInTheDocument();
+  });
+
+  it("should render the Operations item when the project type supports it", () => {
+    mockProjectTypeLabel = PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+    render(<SideBar collapsed={false} />);
+
+    expect(screen.getByText("Operations")).toBeInTheDocument();
   });
 
   it("should render the settings item", () => {
@@ -141,7 +178,10 @@ describe("SideBar", () => {
     render(<SideBar collapsed={false} />);
 
     const dashboardLink = screen.getByRole("link", { name: /dashboard/i });
-    expect(dashboardLink).toHaveAttribute("href", "/projects/project-1/dashboard");
+    expect(dashboardLink).toHaveAttribute(
+      "href",
+      "/projects/project-1/dashboard",
+    );
   });
 
   describe("activeItem computation", () => {
