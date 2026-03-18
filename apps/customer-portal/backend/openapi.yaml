@@ -1,0 +1,4888 @@
+openapi: 3.0.1
+info:
+  title: Service Openapi Yaml
+  version: 0.1.0
+servers:
+- url: "{server}:{port}/"
+  variables:
+    server:
+      default: http://localhost
+    port:
+      default: "9090"
+paths:
+  /users/me:
+    get:
+      summary: Fetch user information of the logged in user.
+      operationId: getUsersMe
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "404":
+          description: NotFound
+    patch:
+      summary: Update user information of the logged in user.
+      operationId: patchUsersMe
+      requestBody:
+        description: User update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedUser'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+  /projects/search:
+    post:
+      summary: Search projects of the logged-in user.
+      operationId: postProjectsSearch
+      requestBody:
+        description: Project search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}:
+    get:
+      summary: Get project details by ID.
+      operationId: getProjectsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+    patch:
+      summary: Update project details by ID.
+      operationId: patchProjectsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Project update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedProject'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/deployments:
+    get:
+      summary: Get deployments of a project by ID.
+      operationId: getProjectsIdDeployments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deployment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+    post:
+      summary: Create a new deployment for a project.
+      operationId: postProjectsIdDeployments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Deployment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedDeployment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{projectId}/deployments/{deploymentId}:
+    patch:
+      summary: Update an existing deployment for a project.
+      operationId: patchProjectsProjectidDeploymentsDeploymentid
+      parameters:
+      - name: projectId
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: deploymentId
+        in: path
+        description: ID of the deployment to be updated
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Deployment update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedDeployment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/{id}/attachments:
+    get:
+      summary: Get attachments for a specific deployment.
+      operationId: getDeploymentsIdAttachments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: offset
+        in: query
+        description: Offset for pagination
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+    post:
+      summary: Add an attachment to a deployment.
+      operationId: postDeploymentsIdAttachments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Attachment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAttachment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/{deploymentId}/attachments/{attachmentId}:
+    patch:
+      summary: Update an attachment of a deployment.
+      operationId: patchDeploymentsDeploymentidAttachmentsAttachmentid
+      parameters:
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: attachmentId
+        in: path
+        description: ID of the attachment to be updated
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Attachment update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedAttachment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/stats:
+    get:
+      summary: Get overall project statistics by ID.
+      operationId: getProjectsIdStats
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: caseTypes
+        in: query
+        schema:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/CaseType'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectStatsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/stats/cases:
+    get:
+      summary: Get cases statistics for a project by ID.
+      operationId: getProjectsIdStatsCases
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: caseTypes
+        in: query
+        schema:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/CaseType'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCaseStats'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/stats/conversations:
+    get:
+      summary: Get conversation statistics for a project by ID.
+      operationId: getProjectsIdStatsConversations
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationStats'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/stats/support:
+    get:
+      summary: Get project support statistics by ID.
+      operationId: getProjectsIdStatsSupport
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: caseTypes
+        in: query
+        schema:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/CaseType'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSupportStats'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{id}:
+    get:
+      summary: Get case details by ID.
+      operationId: getCasesId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+    patch:
+      summary: Update an existing case.
+      operationId: patchCasesId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case to be updated
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Case update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedCase'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases:
+    post:
+      summary: Create a new case.
+      operationId: postCases
+      requestBody:
+        description: Case creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/cases/search:
+    post:
+      summary: Search cases for a specific project with filters and pagination.
+      operationId: postProjectsIdCasesSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Case search request body
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+  /projects/{id}/filters:
+    get:
+      summary: Get case filters for a project.
+      operationId: getProjectsIdFilters
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectFilterOptions'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/classify:
+    post:
+      summary: Classify the case using AI chat agent.
+      operationId: postCasesClassify
+      requestBody:
+        description: Case classification payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseClassificationPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseClassificationResponse'
+        "500":
+          description: InternalServerError
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/conversations/search:
+    post:
+      summary: Search conversations for a specific project with filters and pagination.
+      operationId: postProjectsIdConversationsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Conversation search request body
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/conversations:
+    post:
+      summary: Create a new conversation for a project and get response using AI chat
+        agent.
+      operationId: postProjectsIdConversations
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Conversation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{projectId}/conversations/{conversationId}/messages:
+    post:
+      summary: Add a message to an existing conversation and get response using AI
+        chat agent.
+      operationId: postProjectsProjectidConversationsConversationidMessages
+      parameters:
+      - name: projectId
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: conversationId
+        in: path
+        description: ID of the conversation
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Conversation message payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /conversations/{id}:
+    get:
+      summary: Get conversation details by ID.
+      operationId: getConversationsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the conversation
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{id}/comments:
+    get:
+      summary: Get comments for a specific case.
+      operationId: getCasesIdComments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: offset
+        in: query
+        description: Offset for pagination
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+    post:
+      summary: Create a new comment for a specific case.
+      operationId: postCasesIdComments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Comment creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedComment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /conversations/{id}/messages:
+    get:
+      summary: Get messages for a specific conversation.
+      operationId: getConversationsIdMessages
+      parameters:
+      - name: id
+        in: path
+        description: ID of the conversation
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: offset
+        in: query
+        description: Offset for pagination
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{id}/attachments:
+    get:
+      summary: Get attachments for a specific case.
+      operationId: getCasesIdAttachments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: offset
+        in: query
+        description: Offset for pagination
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+    post:
+      summary: Create a new attachment for a specific case.
+      operationId: postCasesIdAttachments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAttachment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{caseId}/attachments/{attachmentId}:
+    patch:
+      summary: Update an attachment for a specific case.
+      operationId: patchCasesCaseidAttachmentsAttachmentid
+      parameters:
+      - name: caseId
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: attachmentId
+        in: path
+        description: ID of the attachment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Attachment update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedAttachment'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /attachments/{id}:
+    delete:
+      summary: Delete an attachment.
+      operationId: deleteAttachmentsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the attachment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /deployments/{id}/products:
+    get:
+      summary: Get products of a deployment by deployment ID.
+      operationId: getDeploymentsIdProducts
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeployedProduct'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+    post:
+      summary: Add a product to a deployment by deployment ID.
+      operationId: postDeploymentsIdProducts
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Deployed product creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedDeployedProduct'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/{deploymentId}/products/{productId}:
+    patch:
+      summary: Update a product in a deployment by deployment ID and product ID.
+      operationId: patchDeploymentsDeploymentidProductsProductid
+      parameters:
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: productId
+        in: path
+        description: ID of the product to be updated
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Deployed product update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedDeployedProduct'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/products/{id}/catalogs/search:
+    post:
+      summary: Search catalogs for a specific deployed product with filters and pagination.
+      operationId: postDeploymentsProductsIdCatalogsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Catalog search request body
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /catalogs/{catalogId}/items/{itemId}:
+    get:
+      summary: Get catalog item variables by catalog ID and item ID.
+      operationId: getCatalogsCatalogidItemsItemid
+      parameters:
+      - name: catalogId
+        in: path
+        description: ID of the catalog
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: itemId
+        in: path
+        description: ID of the catalog item
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /updates/recommended-update-levels:
+    get:
+      summary: Get recommended update levels.
+      operationId: getUpdatesRecommendedUpdateLevels
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecommendedUpdateLevel'
+        "500":
+          description: InternalServerError
+  /updates/levels/search:
+    post:
+      summary: Search updates based on provided filters.
+      operationId: postUpdatesLevelsSearch
+      requestBody:
+        description: Update search payload containing filters
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDescriptionPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+  /updates/product-update-levels:
+    get:
+      summary: Get product update levels.
+      operationId: getUpdatesProductUpdateLevels
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductUpdateLevel'
+        "500":
+          description: InternalServerError
+  /products:
+    get:
+      summary: Get products.
+      operationId: getProducts
+      parameters:
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductsResponse'
+        "500":
+          description: InternalServerError
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /products/vulnerabilities/search:
+    post:
+      summary: Search product vulnerabilities based on provided filters.
+      operationId: postProductsVulnerabilitiesSearch
+      requestBody:
+        description: Product vulnerability search payload containing filters
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVulnerabilitySearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /products/vulnerabilities/{id}:
+    get:
+      summary: Get product vulnerability by ID.
+      operationId: getProductsVulnerabilitiesId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the product vulnerability
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilityResponse'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /products/vulnerabilities/meta:
+    get:
+      summary: Get product vulnerability metadata.
+      operationId: getProductsVulnerabilitiesMeta
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVulnerabilityMetaResponse'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/contacts:
+    get:
+      summary: Get contacts of a project by project ID.
+      operationId: getProjectsIdContacts
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contact'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a contact to a project by project ID.
+      operationId: postProjectsIdContacts
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Contact information to be added
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactOnboardPayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Membership'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/contacts/{email}:
+    delete:
+      summary: Remove a contact from a project by project ID and contact email.
+      operationId: deleteProjectsIdContactsEmail
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: email
+        in: path
+        description: Email of the contact to be removed
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update a contact's role in a project by project ID and contact email.
+      operationId: patchProjectsIdContactsEmail
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: email
+        in: path
+        description: Email of the contact whose role is to be updated
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: Updated role information
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MembershipSecurityPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Membership'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/contacts/validate:
+    post:
+      summary: Validate if a contact can be added to a project by project ID.
+      operationId: postProjectsIdContactsValidate
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Contact information to be validated
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidationPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "409":
+          description: Conflict
+  /cases/{id}/call-requests/search:
+    post:
+      summary: Search call requests for a specific case with filters and pagination.
+      operationId: postCasesIdCallRequestsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Call request search payload containing filters and pagination
+          info
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallRequestSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{id}/call-requests:
+    post:
+      summary: Create a call request for a specific case.
+      operationId: postCasesIdCallRequests
+      parameters:
+      - name: id
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Call request creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallRequestCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedCallRequest'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /cases/{caseId}/call-requests/{callRequestId}:
+    patch:
+      summary: Update a call request for a specific case.
+      operationId: patchCasesCaseidCallRequestsCallrequestid
+      parameters:
+      - name: caseId
+        in: path
+        description: ID of the case
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: callRequestId
+        in: path
+        description: ID of the call request
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Call request update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallRequestUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedCallRequest'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+  /products/{id}/versions/search:
+    post:
+      summary: Search product versions based on provided filters.
+      operationId: postProductsIdVersionsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Product version search payload containing filters and pagination
+          info
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/time-cards/search:
+    post:
+      summary: Search time cards based on provided filters.
+      operationId: postProjectsIdTimeCardsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Time card search payload containing filters and pagination info
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeCardSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/stats/time-cards:
+    get:
+      summary: Get time card statistics for a project based on provided date range.
+      operationId: getProjectsIdStatsTimeCards
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: startDate
+        in: query
+        description: Start date for the statistics (optional)
+        schema:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Date'
+      - name: endDate
+        in: query
+        description: End date for the statistics (optional)
+        schema:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Date'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectTimeCardStatsResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/change-requests/search:
+    post:
+      summary: Search change requests for a project based on provided filters and
+        pagination.
+      operationId: postProjectsIdChangeRequestsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Change request search payload containing filters and pagination
+          info
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /change-requests/{id}:
+    get:
+      summary: Get change request details by change request ID.
+      operationId: getChangeRequestsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the change request
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update a change request by change request ID.
+      operationId: patchChangeRequestsId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the change request
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Change request update payload containing fields to be updated
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedChangeRequest'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/stats/change-requests:
+    get:
+      summary: Get change request statistics for a project.
+      operationId: getProjectsIdStatsChangeRequests
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectChangeRequestStatsResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /change-requests/{id}/comments:
+    get:
+      summary: Get comments for a specific change request.
+      operationId: getChangeRequestsIdComments
+      parameters:
+      - name: id
+        in: path
+        description: ID of the change request
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      - name: offset
+        in: query
+        description: Offset for pagination
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+  /projects/{id}/registry-tokens:
+    post:
+      summary: Create a registry token.
+      operationId: postProjectsIdRegistryTokens
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project for which the registry token is to be created
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Registry token creation payload containing project ID and token
+          details
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistryTokenCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenCreationResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+  /projects/{id}/registry-tokens/search:
+    post:
+      summary: Search registry tokens for a project based on provided filters.
+      operationId: postProjectsIdRegistryTokensSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project for which registry tokens are to be searched
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+  /registry-tokens/{id}:
+    delete:
+      summary: Delete a registry token by token ID.
+      operationId: deleteRegistryTokensId
+      parameters:
+      - name: id
+        in: path
+        description: ID of the registry token to be deleted
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Ok
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /registry-tokens/{id}/regenerate:
+    post:
+      summary: Regenerate the secret of a registry token by token ID.
+      operationId: postRegistryTokensIdRegenerate
+      parameters:
+      - name: id
+        in: path
+        description: ID of the registry token to be regenerated
+        required: true
+        schema:
+          type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenCreationResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /projects/{id}/integration-users:
+    get:
+      summary: Get integration users of a project by project ID.
+      operationId: getProjectsIdIntegrationUsers
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IntegrationUser'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+components:
+  schemas:
+    Account:
+      required:
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+          nullable: true
+        domainList:
+          type: string
+          description: Allowed domain list of the account
+          nullable: true
+        classification:
+          type: string
+          description: Account classification
+          nullable: true
+        isPartner:
+          type: boolean
+          description: Whether the account is a partner or not
+          nullable: true
+      description: Account details record
+    Attachment:
+      required:
+      - content
+      - createdBy
+      - createdOn
+      - description
+      - downloadUrl
+      - id
+      - name
+      - size
+      - type
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID of the attachment
+        name:
+          type: string
+          description: File name
+        type:
+          type: string
+          description: MIME type of the file
+        size:
+          type: integer
+          description: File size(in Bytes)
+          format: int64
+        createdBy:
+          type: string
+          description: User who created the attachment
+        createdOn:
+          type: string
+          description: Created date and time
+        downloadUrl:
+          type: string
+          description: Download URL
+          nullable: true
+        content:
+          type: string
+          description: "Base64 encoded file content (data URI format: data:@file/<type>;base64,<content>)"
+        description:
+          type: string
+          description: Description of the attachment
+          nullable: true
+      additionalProperties: false
+      description: Attachment data.
+    AttachmentCreatePayload:
+      required:
+      - content
+      - name
+      - type
+      type: object
+      properties:
+        name:
+          type: string
+          description: File name
+        type:
+          type: string
+          description: MIME type of the file
+        content:
+          type: string
+          description: Base 64 encoded content
+        description:
+          type: string
+          description: Description of the attachment
+          nullable: true
+      additionalProperties: false
+      description: Payload for creating an attachment.
+    AttachmentUpdatePayload:
+      type: object
+      properties:
+        name:
+          type: string
+          description: File name
+          nullable: true
+        description:
+          type: string
+          description: Description of the attachment (only for deployment type)
+          nullable: true
+      additionalProperties: false
+      description: Payload for updating an attachment.
+    AttachmentsResponse:
+      type: object
+      description: Attachments response.
+      allOf:
+      - $ref: '#/components/schemas/Pagination'
+      - required:
+        - attachments
+        - totalRecords
+        type: object
+        properties:
+          attachments:
+            type: array
+            description: List of attachments
+            items:
+              $ref: '#/components/schemas/Attachment'
+          totalRecords:
+            type: integer
+            description: Total records count
+            format: int64
+          offset:
+            type: integer
+            format: int64
+          limit:
+            type: integer
+            format: int64
+    CallRequestCreatePayload:
+      required:
+      - durationInMinutes
+      - reason
+      - utcTimes
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Reason for the call request
+        utcTimes:
+          minItems: 1
+          type: array
+          description: Preferred UTC times for the call
+          items:
+            $ref: '#/components/schemas/DateTime'
+        durationInMinutes:
+          minimum: 1
+          type: integer
+          description: Duration in minutes
+          format: int64
+      additionalProperties: false
+      description: Request payload for creating a call request.
+    CallRequestSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            stateKeys:
+              type: array
+              description: List of state keys to filter
+              items:
+                type: integer
+                format: int64
+          description: Filter criteria
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for searching call requests.
+    CallRequestUpdatePayload:
+      required:
+      - reason
+      - stateKey
+      type: object
+      properties:
+        stateKey:
+          type: integer
+          description: State key
+          format: int64
+        reason:
+          type: string
+          description: Reason for the update
+        utcTimes:
+          type: array
+          description: New preferred UTC times for the call (mandatory when stateKey
+            is 2)
+          items:
+            $ref: '#/components/schemas/DateTime'
+      additionalProperties: false
+      description: Request payload for updating a call request.
+    Case:
+      required:
+      - assignedTeam
+      - createdBy
+      - createdOn
+      - description
+      - duration
+      - id
+      - internalId
+      - issueType
+      - number
+      - product
+      - severity
+      - status
+      - title
+      type: object
+      properties:
+        id:
+          type: string
+          description: Case ID
+        internalId:
+          type: string
+          description: Internal case ID
+        number:
+          type: string
+          description: Case number
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: Created by (User email)
+        title:
+          type: string
+          description: Case title
+          nullable: true
+        description:
+          type: string
+          description: Case description
+          nullable: true
+        duration:
+          type: string
+          description: Duration
+          nullable: true
+        issueType:
+          description: issueType of the case
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        severity:
+          description: Severity of the case
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        status:
+          description: State of the case
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        catalog:
+          description: Catalog information (if the case is a service request)
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        catalogItem:
+          description: Catalog item information (if the case is a service request)
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        assignedTeam:
+          description: Assigned team
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        product:
+          description: Product information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        engagementType:
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Base case.
+    CaseClassificationPayload:
+      required:
+      - chatHistory
+      - envProducts
+      - region
+      - tier
+      type: object
+      properties:
+        chatHistory:
+          type: string
+          description: Chat history
+        envProducts:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Environment products
+        region:
+          type: string
+          description: Region
+        tier:
+          type: string
+          description: Tier
+      description: Case classification payload.
+    CaseClassificationResponse:
+      required:
+      - caseInfo
+      - issueType
+      - severityLevel
+      type: object
+      properties:
+        issueType:
+          type: string
+          description: Issue type
+        severityLevel:
+          type: string
+          description: Severity level
+        caseInfo:
+          $ref: '#/components/schemas/ChatCaseInfo'
+      description: Case classification response.
+    CaseCreateAttachment:
+      required:
+      - file
+      - name
+      type: object
+      properties:
+        name:
+          type: string
+          description: File name
+        file:
+          type: string
+          description: Base64 encoded file content
+      additionalProperties: false
+      description: Attachment for creating a case.
+    CaseCreatePayload:
+      required:
+      - deploymentId
+      - projectId
+      - type
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/CaseType'
+        projectId:
+          $ref: '#/components/schemas/IdString'
+        deploymentId:
+          $ref: '#/components/schemas/IdString'
+        deployedProductId:
+          $ref: '#/components/schemas/IdString'
+        title:
+          type: string
+          description: Case title (required for DEFAULT_CASE and SECURITY_REPORT_ANALYSIS)
+        description:
+          type: string
+          description: Case description (required for DEFAULT_CASE and SECURITY_REPORT_ANALYSIS)
+        issueTypeKey:
+          type: integer
+          description: Issue type ID (required for DEFAULT_CASE)
+          format: int64
+        severityKey:
+          type: integer
+          description: Severity key (required for DEFAULT_CASE)
+          format: int64
+        parentCaseId:
+          $ref: '#/components/schemas/IdString'
+        conversationId:
+          $ref: '#/components/schemas/IdString'
+        catalogId:
+          $ref: '#/components/schemas/IdString'
+        catalogItemId:
+          $ref: '#/components/schemas/IdString'
+        variables:
+          type: array
+          description: Variables for service request (required for SERVICE_REQUEST)
+          items:
+            $ref: '#/components/schemas/Variable'
+        attachments:
+          type: array
+          description: List of attachments
+          items:
+            $ref: '#/components/schemas/CaseCreateAttachment'
+      additionalProperties: false
+      description: Payload for creating a case.
+    CaseResponse:
+      type: object
+      description: Case information.
+      allOf:
+      - $ref: '#/components/schemas/Case'
+      - required:
+        - account
+        - assignedEngineer
+        - conversation
+        - csManager
+        - deployedProduct
+        - deployment
+        - parentCase
+        - project
+        - slaResponseTime
+        - type
+        - updatedOn
+        type: object
+        properties:
+          updatedOn:
+            type: string
+            description: Last updated date and time
+          slaResponseTime:
+            type: string
+            description: SLA response time
+          project:
+            description: Project
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          type:
+            description: "Case type information (eg: incident, service request, etc.)"
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          assignedEngineer:
+            description: Assigned engineer
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          parentCase:
+            description: Related case information (if the case is related to an existing
+              case)
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          conversation:
+            description: Conversation information (if the case is related to a conversation)
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          deployment:
+            type: object
+            description: Deployment information
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+            - required:
+              - type
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: Deployment type
+                  nullable: true
+          deployedProduct:
+            type: object
+            description: Deployed product information
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+            - required:
+              - version
+              type: object
+              properties:
+                version:
+                  type: string
+                  description: Deployed product version
+                  nullable: true
+          account:
+            type: object
+            description: Account information
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+            - required:
+              - type
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: Account type
+                  nullable: true
+          csManager:
+            type: object
+            description: CS Manager information
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+            - required:
+              - email
+              type: object
+              properties:
+                email:
+                  type: string
+                  description: Email address
+                  nullable: true
+          closedOn:
+            type: string
+            description: Case closed date and time
+            nullable: true
+          closedBy:
+            description: User who closed the case
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          closeNotes:
+            type: string
+            description: Close notes for the case closure
+            nullable: true
+          hasAutoClosed:
+            type: boolean
+            description: Indicates if the case is auto closed
+            nullable: true
+          changeRequests:
+            type: array
+            description: Change requests (only for service requests)
+            nullable: true
+            items:
+              $ref: '#/components/schemas/ReferenceItem'
+          variables:
+            type: array
+            description: Variables for service request
+            nullable: true
+            items:
+              $ref: '#/components/schemas/ServiceRequestVariable'
+        additionalProperties: false
+    CaseSearchFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: "Search query for case number, title and description"
+        issueId:
+          type: integer
+          description: Issue ID
+          format: int64
+        statusIds:
+          type: array
+          description: Status IDs
+          items:
+            type: integer
+            format: int64
+        caseTypes:
+          type: array
+          description: List of case types
+          items:
+            $ref: '#/components/schemas/CaseType'
+        severityId:
+          type: integer
+          description: Severity ID
+          format: int64
+        deploymentId:
+          type: string
+          description: Deployment ID
+        createdByMe:
+          type: boolean
+          description: Case created by the logged in user
+      additionalProperties: false
+      description: Case search filters.
+    CaseSearchPayload:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseSearchFilters'
+        sortBy:
+          $ref: '#/components/schemas/SortBy'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Payload for case search.
+    CaseSortField:
+      type: string
+      description: Valid case sort field values.
+      enum:
+      - state
+      - severity
+      - updatedOn
+      - createdOn
+    CaseType:
+      type: string
+      description: Case type enum
+      enum:
+      - engagement
+      - announcement
+      - security_report_analysis
+      - service_request
+      - default_case
+    CaseUpdatePayload:
+      required:
+      - stateKey
+      type: object
+      properties:
+        stateKey:
+          type: integer
+          description: State key to update
+          format: int64
+      additionalProperties: false
+      description: Request payload for updating a case.
+    CasesTrend:
+      required:
+      - period
+      - severities
+      type: object
+      properties:
+        period:
+          type: string
+          description: "Time unit identifier (e.g., \"2025 - Q1\", \"2025 - M1\")"
+        severities:
+          type: array
+          description: Severity breakdown for the time unit
+          items:
+            $ref: '#/components/schemas/ChoiceListItem'
+      description: Cases trend by time unit.
+    CatalogSearchPayload:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for searching catalogs.
+    ChangeRequest:
+      required:
+      - assignedEngineer
+      - assignedTeam
+      - case
+      - createdOn
+      - deployedProduct
+      - deployment
+      - duration
+      - endDate
+      - id
+      - impact
+      - number
+      - product
+      - project
+      - startDate
+      - state
+      - title
+      - type
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        number:
+          type: string
+          description: Change request number
+        title:
+          type: string
+          description: Change request title
+          nullable: true
+        project:
+          description: Project
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        case:
+          description: Service request information (case)
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        deployment:
+          description: Deployment information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        deployedProduct:
+          description: Deployed product information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        product:
+          description: Product information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        startDate:
+          description: Planned start date and time
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Date'
+        endDate:
+          description: Planned end date and time
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Date'
+        duration:
+          type: string
+          description: Duration
+          nullable: true
+        hasServiceOutage:
+          type: boolean
+          description: Indicates if the change request has a service outage
+          default: false
+        impact:
+          description: Impact information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        state:
+          description: State information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        type:
+          description: Type information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        assignedEngineer:
+          description: Assigned engineer
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        assignedTeam:
+          description: Assigned team
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+      description: Change request data.
+    ChangeRequestResponse:
+      type: object
+      description: Change request details information.
+      allOf:
+      - $ref: '#/components/schemas/ChangeRequest'
+      - required:
+        - approvedBy
+        - approvedOn
+        - communicationPlan
+        - createdBy
+        - description
+        - hasCustomerApproved
+        - hasCustomerReviewed
+        - impactDescription
+        - justification
+        - rollbackPlan
+        - serviceOutage
+        - testPlan
+        type: object
+        properties:
+          description:
+            type: string
+            description: Change request description
+            nullable: true
+          createdBy:
+            type: string
+            description: User who created the change request
+          justification:
+            type: string
+            description: Justification for the change request
+            nullable: true
+          impactDescription:
+            type: string
+            description: Impact description
+            nullable: true
+          serviceOutage:
+            type: string
+            description: Service outage details
+            nullable: true
+          communicationPlan:
+            type: string
+            description: Communication plan
+            nullable: true
+          rollbackPlan:
+            type: string
+            description: Rollback plan
+            nullable: true
+          testPlan:
+            type: string
+            description: Test plan
+            nullable: true
+          hasCustomerApproved:
+            type: boolean
+            description: Indicates if the customer has approved
+          hasCustomerReviewed:
+            type: boolean
+            description: Indicates if the customer has reviewed
+          approvedBy:
+            description: Internal approval details
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          approvedOn:
+            type: string
+            description: Internal approval date and time
+            nullable: true
+    ChangeRequestSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Search query for change request number and title
+            stateKeys:
+              type: array
+              description: List of change request state keys
+              items:
+                type: integer
+                format: int64
+            impactKey:
+              type: integer
+              description: Change request impact key
+              format: int64
+          additionalProperties: false
+          description: Filter criteria
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for searching change requests.
+    ChangeRequestUpdatePayload:
+      required:
+      - plannedStartOn
+      type: object
+      properties:
+        plannedStartOn:
+          $ref: '#/components/schemas/DateTimeWithoutTimezone'
+      additionalProperties: false
+      description: Request payload for updating a change request.
+    ChatCaseInfo:
+      required:
+      - description
+      - environment
+      - productName
+      - productVersion
+      - region
+      - shortDescription
+      - tier
+      type: object
+      properties:
+        description:
+          type: string
+          description: Description
+        shortDescription:
+          type: string
+          description: Short description
+        productName:
+          type: string
+          description: Product name
+        productVersion:
+          type: string
+          description: Product version
+        environment:
+          type: string
+          description: Environment
+        tier:
+          type: string
+          description: Tier
+        region:
+          type: string
+          description: Region
+      description: Chat case information.
+    ChoiceListItem:
+      required:
+      - id
+      - label
+      type: object
+      properties:
+        id:
+          description: Choice list item value
+          oneOf:
+          - type: integer
+            format: int64
+          - type: string
+        label:
+          type: string
+          description: Choice list item label
+        count:
+          type: integer
+          description: Count
+          format: int64
+      description: Choice list item information.
+    Comment:
+      required:
+      - content
+      - createdBy
+      - createdOn
+      - hasInlineAttachments
+      - id
+      - inlineAttachments
+      - isEscalated
+      - type
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        content:
+          type: string
+          description: Content of the comment
+        type:
+          type: string
+          description: Type of the comment
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the comment
+        isEscalated:
+          type: boolean
+          description: Indicates if the comment is escalated
+        hasInlineAttachments:
+          type: boolean
+          description: Indicates if the comment has inline attachments
+        inlineAttachments:
+          type: array
+          description: List of inline attachments
+          items:
+            $ref: '#/components/schemas/InlineAttachment'
+      additionalProperties: false
+      description: Comment information.
+    CommentCreatePayload:
+      required:
+      - content
+      - type
+      type: object
+      properties:
+        content:
+          minLength: 1
+          type: string
+          description: Comment content
+        type:
+          $ref: '#/components/schemas/CommentType'
+      additionalProperties: false
+      description: Payload for creating a comment.
+    CommentType:
+      type: string
+      description: Valid comment type values.
+      enum:
+      - comments
+    CommentsResponse:
+      type: object
+      description: Comments response with pagination.
+      allOf:
+      - $ref: '#/components/schemas/Pagination'
+      - required:
+        - comments
+        - totalRecords
+        type: object
+        properties:
+          comments:
+            type: array
+            description: List of comments
+            items:
+              $ref: '#/components/schemas/Comment'
+          totalRecords:
+            type: integer
+            description: Total records count
+            format: int64
+          offset:
+            type: integer
+            format: int64
+          limit:
+            type: integer
+            format: int64
+    Contact:
+      required:
+      - email
+      - firstName
+      - id
+      - isCsAdmin
+      - isCsIntegrationUser
+      - lastName
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        email:
+          type: string
+          description: Email
+        firstName:
+          type: string
+          description: First name
+        lastName:
+          type: string
+          description: Last name
+        isCsAdmin:
+          type: boolean
+          description: Whether the contact is a customer admin or not
+        isCsIntegrationUser:
+          type: boolean
+          description: Whether the contact is an Integration user or not
+        isSecurityContact:
+          type: boolean
+          description: Whether the contact is a Security contact or not
+          nullable: true
+        membershipStatus:
+          type: string
+          description: "Status of the Membership (Invited, Registered)"
+          nullable: true
+        account:
+          description: Account information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/Account'
+      description: Contact details record.
+    ContactMinimal:
+      required:
+      - email
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+          nullable: true
+        email:
+          type: string
+          description: Email of the contact
+          nullable: true
+      description: ContactMinimal Details.
+    ContactOnboardPayload:
+      required:
+      - contactEmail
+      - contactFirstName
+      - contactLastName
+      - isCsIntegrationUser
+      type: object
+      properties:
+        contactEmail:
+          pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+          type: string
+          description: Email address of the Contact
+        contactFirstName:
+          type: string
+          description: First name of the Contact
+        contactLastName:
+          type: string
+          description: Last name of the Contact
+        isCsIntegrationUser:
+          type: boolean
+          description: Whether the contact is System User or not
+        isSecurityContact:
+          type: boolean
+          description: Whether the contact is Security Contact or not
+          default: false
+      additionalProperties: false
+      description: The request payload to be validated.
+    Conversation:
+      required:
+      - case
+      - createdBy
+      - createdOn
+      - id
+      - initialMessage
+      - messageCount
+      - number
+      - project
+      - state
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        number:
+          type: string
+          description: Conversation number
+          nullable: true
+        initialMessage:
+          type: string
+          description: Initial message of the conversation
+          nullable: true
+        messageCount:
+          type: integer
+          description: Message count
+          format: int64
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the conversation
+        project:
+          description: Project information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        case:
+          description: Case information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        state:
+          description: State information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+      description: Conversation data.
+    ConversationPayload:
+      required:
+      - message
+      type: object
+      properties:
+        message:
+          type: string
+          description: User message
+        envProducts:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Deployments with related products
+        region:
+          type: string
+          description: Region (optional context for recommendations)
+          default: ""
+        tier:
+          type: string
+          description: Support tier (optional context for recommendations)
+          default: ""
+      additionalProperties: false
+      description: Conversation payload for creating a conversation thread.
+    ConversationResponse:
+      type: object
+      description: Conversation information.
+      allOf:
+      - $ref: '#/components/schemas/Conversation'
+      - required:
+        - updatedBy
+        - updatedOn
+        type: object
+        properties:
+          updatedOn:
+            type: string
+            description: Updated date and time
+          updatedBy:
+            type: string
+            description: User who updated the conversation
+    ConversationSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            stateKeys:
+              type: array
+              description: List of state keys to filter
+              items:
+                type: integer
+                format: int64
+            searchQuery:
+              type: string
+              description: Search query for conversations
+            createdByMe:
+              type: boolean
+              description: Conversations created by logged in user
+          description: Filter criteria
+        sortBy:
+          required:
+          - field
+          - order
+          type: object
+          properties:
+            field:
+              $ref: '#/components/schemas/ConversationSortField'
+            order:
+              $ref: '#/components/schemas/SortOrder'
+          description: Sort configuration
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Payload for searching conversations.
+    ConversationSortField:
+      type: string
+      description: Valid conversation sort field values.
+      enum:
+      - updatedOn
+      - createdOn
+    ConversationStats:
+      type: object
+      properties:
+        resolvedCount:
+          type: integer
+          description: Resolved chats count
+          format: int64
+        openCount:
+          type: integer
+          description: Open chats count
+          format: int64
+        abandonedCount:
+          type: integer
+          description: Abandoned chats count
+          format: int64
+        activeCount:
+          type: integer
+          description: Active chats count
+          format: int64
+      additionalProperties: false
+      description: Conversation statistics by state for a project.
+    CreatedAttachment:
+      required:
+      - createdBy
+      - createdOn
+      - id
+      - size
+      type: object
+      properties:
+        id:
+          type: string
+          description: System ID of the created attachment
+        size:
+          type: integer
+          description: File size(in Bytes)
+          format: int64
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the attachment
+        downloadUrl:
+          type: string
+          description: Download URL
+      additionalProperties: false
+      description: Created attachment details.
+    CreatedCallRequest:
+      required:
+      - createdBy
+      - createdOn
+      - id
+      - state
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the call request
+        state:
+          $ref: '#/components/schemas/ChoiceListItem'
+      description: Created call request details.
+    CreatedComment:
+      required:
+      - content
+      - createdBy
+      - createdOn
+      - hasInlineAttachments
+      - id
+      - inlineAttachments
+      - inlineImageCount
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the comment
+        content:
+          type: string
+          description: HTML content of the comment
+        hasInlineAttachments:
+          type: boolean
+          description: Indicates if the comment has inline attachments
+        inlineImageCount:
+          type: integer
+          description: Count of inline attachments
+          format: int64
+        inlineAttachments:
+          type: array
+          description: List of inline attachments
+          items:
+            $ref: '#/components/schemas/InlineAttachment'
+      description: Created comment details.
+    CreatedDeployedProduct:
+      required:
+      - createdBy
+      - createdOn
+      - id
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the deployed product
+      description: Created deployed product details.
+    CreatedDeployment:
+      required:
+      - createdBy
+      - createdOn
+      - id
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created the deployment
+      description: Created deployment details.
+    Date:
+      pattern: "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$"
+      type: string
+      description: Date.
+    DateTime:
+      pattern: "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\\
+        d(:[0-5]\\d(\\.\\d{1,9})?)?(Z|[+-]([01]\\d|2[0-3]):?[0-5]\\d)$"
+      type: string
+      description: Date-time (UTC).
+    DateTimeWithoutTimezone:
+      pattern: "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01]) ([01]\\d|2[0-3]):[0-5]\\\
+        d:[0-5]\\d$"
+      type: string
+      description: DateTime string type with YYYY-MM-DD HH:MM:SS format constraint.
+    DeployedProduct:
+      required:
+      - category
+      - cores
+      - createdOn
+      - deployment
+      - description
+      - endOfLifeOn
+      - id
+      - product
+      - releasedOn
+      - tps
+      - updateLevel
+      - updatedOn
+      - version
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+        description:
+          type: string
+          description: Description
+          nullable: true
+        category:
+          description: Category
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        product:
+          description: Product
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        deployment:
+          description: Deployment
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        version:
+          description: Product version
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        cores:
+          type: integer
+          description: Cores allocated for the product
+          format: int64
+          nullable: true
+        tps:
+          type: number
+          description: TPS allocated for the product
+          format: double
+          nullable: true
+        releasedOn:
+          type: string
+          description: Release date of the product
+          nullable: true
+        endOfLifeOn:
+          type: string
+          description: End of life date of the product
+          nullable: true
+        updateLevel:
+          type: string
+          description: Update level of the product
+          nullable: true
+      additionalProperties: false
+      description: Deployed product data.
+    DeployedProductCreatePayload:
+      required:
+      - productId
+      - projectId
+      - versionId
+      type: object
+      properties:
+        projectId:
+          type: string
+          description: Project ID
+        productId:
+          type: string
+          description: Product ID
+        versionId:
+          type: string
+          description: Product version ID
+        cores:
+          type: integer
+          description: Cores allocated for the product
+          format: int64
+          nullable: true
+        tps:
+          type: number
+          description: TPS allocated for the product
+          format: double
+          nullable: true
+        description:
+          type: string
+          description: Description of the deployed product
+          nullable: true
+      additionalProperties: false
+      description: Request payload for creating a deployed product.
+    DeployedProductUpdatePayload:
+      type: object
+      properties:
+        cores:
+          type: integer
+          description: Cores allocated for the product
+          format: int64
+          nullable: true
+        tps:
+          type: number
+          description: TPS allocated for the product
+          format: double
+          nullable: true
+        description:
+          type: string
+          description: Description of the deployed product
+          nullable: true
+        active:
+          type: boolean
+          description: Active status (can only be set to false to deactivate deployed
+            product)
+      additionalProperties: false
+      description: Payload for updating a deployed product.
+    Deployment:
+      required:
+      - createdOn
+      - description
+      - id
+      - name
+      - project
+      - type
+      - updatedOn
+      - url
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        name:
+          type: string
+          description: Name
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+        description:
+          type: string
+          description: Description
+          nullable: true
+        url:
+          type: string
+          description: URL
+          nullable: true
+        project:
+          description: Associated project
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+        type:
+          description: Type
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Deployment information.
+    DeploymentCreatePayload:
+      required:
+      - deploymentTypeKey
+      - description
+      - name
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name
+        deploymentTypeKey:
+          type: integer
+          description: Type key
+          format: int64
+        description:
+          type: string
+          description: Description
+      description: Payload for creating a deployment.
+    DeploymentUpdatePayload:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name
+        typeKey:
+          type: integer
+          description: Type key
+          format: int64
+        description:
+          type: string
+          description: Description of the deployment
+          nullable: true
+        active:
+          type: boolean
+          description: Active status (can only be set to false to deactivate deployment)
+      additionalProperties: false
+      description: Request payload for updating a deployment.
+    ErrorPayload:
+      required:
+      - message
+      - method
+      - path
+      - reason
+      - status
+      - timestamp
+      type: object
+      properties:
+        timestamp:
+          type: string
+        status:
+          type: integer
+          format: int64
+        reason:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        method:
+          type: string
+    IdString:
+      pattern: "^[A-Fa-f0-9]{32}$"
+      type: string
+      description: Common ID string type with length constraint.
+    InlineAttachment:
+      required:
+      - contentType
+      - createdBy
+      - createdOn
+      - downloadUrl
+      - fileName
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID of the inline attachment
+        fileName:
+          type: string
+          description: File name
+        contentType:
+          type: string
+          description: Content type
+        downloadUrl:
+          type: string
+          description: Download URL
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: User who created
+      additionalProperties: false
+      description: Inline attachment.
+    IntegrationUser:
+      required:
+      - email
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+          description: Salesforce ID
+        email:
+          type: string
+          description: Email of the integration user
+      description: Integration user.
+    Membership:
+      required:
+      - id
+      - isSecurityContact
+      - state
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        state:
+          type: string
+          description: State of the Membership
+        isSecurityContact:
+          type: boolean
+          description: Whether the contact is a Security contact or not
+          nullable: true
+        contact:
+          $ref: '#/components/schemas/ContactMinimal'
+      description: Membership details record.
+    MembershipSecurityPayload:
+      required:
+      - isSecurityContact
+      type: object
+      properties:
+        isSecurityContact:
+          type: boolean
+          description: Whether the contact is a security contact or not
+      additionalProperties: false
+      description: Payload for updating membership security flag.
+    Pagination:
+      type: object
+      properties:
+        offset:
+          minimum: 0
+          type: integer
+          description: Offset for pagination
+          format: int64
+        limit:
+          type: integer
+          description: Limit for pagination
+          format: int64
+      description: Pagination information.
+    Product:
+      required:
+      - id
+      - name
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        name:
+          type: string
+          description: Name
+      description: Product data.
+    ProductUpdateLevel:
+      required:
+      - productName
+      - productUpdateLevels
+      type: object
+      properties:
+        productName:
+          type: string
+          description: Product name
+        productUpdateLevels:
+          type: array
+          description: Product update levels
+          items:
+            $ref: '#/components/schemas/UpdateLevel'
+      additionalProperties: false
+      description: Product update level.
+    ProductVersionSearchPayload:
+      type: object
+      properties:
+        pagination:
+          description: Pagination details
+          allOf:
+          - $ref: '#/components/schemas/Pagination'
+          default: {}
+      additionalProperties: false
+      description: Request payload for searching product versions.
+    ProductVulnerability:
+      required:
+      - componentName
+      - cveId
+      - id
+      - justification
+      - resolution
+      - severity
+      - type
+      - useCase
+      - version
+      - vulnerabilityId
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        cveId:
+          type: string
+          description: CVE identifier
+        vulnerabilityId:
+          type: string
+          description: Vulnerability identifier
+        severity:
+          $ref: '#/components/schemas/ReferenceItem'
+        componentName:
+          type: string
+          description: Name of the component
+        version:
+          type: string
+          description: Version of the component
+        type:
+          type: string
+          description: Type
+        useCase:
+          type: string
+          description: Use case description
+          nullable: true
+        justification:
+          type: string
+          description: Justification
+          nullable: true
+        resolution:
+          type: string
+          description: Resolution details
+          nullable: true
+      description: Base product vulnerability.
+    ProductVulnerabilityMetaResponse:
+      required:
+      - severities
+      type: object
+      properties:
+        severities:
+          type: array
+          description: List of vulnerability severities
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+      description: Product vulnerability metadata response.
+    ProductVulnerabilityResponse:
+      type: object
+      description: Product vulnerability information.
+      allOf:
+      - $ref: '#/components/schemas/ProductVulnerability'
+      - type: object
+        properties:
+          componentType:
+            type: string
+            description: Type of the component
+          updateLevel:
+            type: string
+            description: Update level for the vulnerability
+    ProductVulnerabilitySearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: "Search query for CVE ID, Vulnerability ID, Component Name,\
+                \ etc."
+            statusId:
+              type: integer
+              description: Status ID
+              format: int64
+            severityId:
+              type: integer
+              description: Severity ID
+              format: int64
+          description: Filter criteria
+        sortBy:
+          $ref: '#/components/schemas/SortBy'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Payload for searching product vulnerabilities.
+    ProductsResponse:
+      required:
+      - products
+      type: object
+      properties:
+        products:
+          type: array
+          description: List of products
+          items:
+            $ref: '#/components/schemas/Product'
+      description: Products response.
+    Project:
+      required:
+      - createdOn
+      - description
+      - id
+      - key
+      - name
+      - type
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        name:
+          type: string
+          description: Name
+        key:
+          type: string
+          description: Project key
+        createdOn:
+          type: string
+          description: Created date and time
+        description:
+          type: string
+          description: Description
+          nullable: true
+        type:
+          $ref: '#/components/schemas/ReferenceItem'
+      description: Project data.
+    ProjectCaseStats:
+      required:
+      - activeCount
+      - averageResponseTime
+      - caseTypeCount
+      - casesTrend
+      - changeRate
+      - engagementTypeCount
+      - outstandingCount
+      - outstandingEngagementTypeCount
+      - outstandingSeverityCount
+      - resolvedCases
+      - severityCount
+      - stateCount
+      - totalCases
+      - totalInteractions
+      type: object
+      properties:
+        totalInteractions:
+          type: integer
+          description: Total interaction count
+          format: int64
+        totalCases:
+          type: integer
+          description: Total cases count(last 30d)
+          format: int64
+        activeCount:
+          type: integer
+          description: Active case count (cases that are not in closed state)
+          format: int64
+        outstandingCount:
+          type: integer
+          description: Outstanding case count (cases that are not solution proposed
+            or closed)
+          format: int64
+        averageResponseTime:
+          type: number
+          description: Average response time
+          format: double
+        resolvedCases:
+          required:
+          - currentMonth
+          - pastThirtyDays
+          - total
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total resolved count
+              format: int64
+            currentMonth:
+              type: integer
+              description: Current month resolved count
+              format: int64
+            pastThirtyDays:
+              type: integer
+              description: Past thirty days resolved count
+              format: int64
+          description: Resolved case count breakdown
+        changeRate:
+          required:
+          - averageResponseTime
+          - resolvedEngagements
+          type: object
+          properties:
+            resolvedEngagements:
+              type: number
+              description: Change rate of resolved engagements
+              format: double
+            averageResponseTime:
+              type: number
+              description: Change rate of average response time
+              format: double
+          description: Change rate of engagements past thirty days breakdown
+        stateCount:
+          type: array
+          description: Count of cases by state
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        severityCount:
+          type: array
+          description: Count of cases by severity
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        outstandingSeverityCount:
+          type: array
+          description: Outstanding cases count by severity
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        caseTypeCount:
+          type: array
+          description: Count of cases by type
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        casesTrend:
+          type: array
+          description: Cases trend
+          items:
+            $ref: '#/components/schemas/CasesTrend'
+        engagementTypeCount:
+          type: array
+          description: Count of cases by engagement type
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        outstandingEngagementTypeCount:
+          type: array
+          description: Outstanding cases count by engagement type
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Case statistics for a project.
+    ProjectChangeRequestStatsResponse:
+      required:
+      - activeCount
+      - outstandingCount
+      - stateCount
+      - totalCount
+      type: object
+      properties:
+        totalCount:
+          type: integer
+          description: Total change request count
+          format: int64
+        activeCount:
+          type: integer
+          description: Active change request count (change requests that are not in
+            rollback or closed or cancelled state)
+          format: int64
+        outstandingCount:
+          type: integer
+          description: Outstanding change request count
+          format: int64
+        stateCount:
+          type: array
+          description: Count of change requests by state
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Change request statistics.
+    ProjectFilterOptions:
+      required:
+      - callRequestStates
+      - caseStates
+      - caseTypes
+      - changeRequestImpacts
+      - changeRequestStates
+      - conversationStates
+      - deploymentTypes
+      - engagementTypes
+      - issueTypes
+      - severities
+      - severityBasedAllocationTime
+      - timeCardStates
+      - timeZones
+      type: object
+      properties:
+        caseStates:
+          type: array
+          description: List of case states
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        timeZones:
+          type: array
+          description: "List of available time zones (eg: UTC, GMT, etc.)"
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        severities:
+          type: array
+          description: List of case severities
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        issueTypes:
+          type: array
+          description: List of issue types
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        deploymentTypes:
+          type: array
+          description: List of deployment types
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        callRequestStates:
+          type: array
+          description: List of available call request states
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        changeRequestStates:
+          type: array
+          description: List of available change request states
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        changeRequestImpacts:
+          type: array
+          description: List of available change request impacts
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        conversationStates:
+          type: array
+          description: List of available conversation states
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        caseTypes:
+          type: array
+          description: List of available case types
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        timeCardStates:
+          type: array
+          description: List of available time card states
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        engagementTypes:
+          type: array
+          description: List of available engagement types
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        severityBasedAllocationTime:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          description: Severity based allocation time mapping (severity ID to allocation
+            time in minutes)
+      additionalProperties: false
+      description: Project filter options.
+    ProjectResponse:
+      type: object
+      description: Project information.
+      allOf:
+      - $ref: '#/components/schemas/Project'
+      - required:
+        - account
+        - consumedOnboardingHours
+        - consumedQueryHours
+        - endDate
+        - goLiveDate
+        - goLivePlanDate
+        - hasSr
+        - onboardingExpiryDate
+        - onboardingStatus
+        - remainingOnboardingHours
+        - remainingQueryHours
+        - sfId
+        - startDate
+        - totalOnboardingHours
+        - totalQueryHours
+        type: object
+        properties:
+          sfId:
+            type: string
+            description: Salesforce ID
+          hasSr:
+            type: boolean
+            description: Indicates if the project has service requests
+          startDate:
+            description: Project start date
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/Date'
+          endDate:
+            description: Project end date
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/Date'
+          account:
+            required:
+            - activationDate
+            - deactivationDate
+            - hasAgent
+            - id
+            - name
+            - ownerEmail
+            - region
+            - supportTier
+            - technicalOwnerEmail
+            type: object
+            properties:
+              id:
+                $ref: '#/components/schemas/IdString'
+              hasAgent:
+                type: boolean
+                description: Indicates whether the agent is enabled for the account
+              name:
+                type: string
+                description: Name of the account
+                nullable: true
+              activationDate:
+                type: string
+                description: Activation date
+                nullable: true
+              deactivationDate:
+                type: string
+                description: Deactivation date
+                nullable: true
+              supportTier:
+                type: string
+                description: Support tier
+                nullable: true
+              region:
+                type: string
+                description: Region
+                nullable: true
+              ownerEmail:
+                type: string
+                description: Owner email
+                nullable: true
+              technicalOwnerEmail:
+                type: string
+                description: Technical owner email
+                nullable: true
+            additionalProperties: false
+            description: Account information
+          totalQueryHours:
+            type: string
+            description: Query hour information
+            nullable: true
+          consumedQueryHours:
+            type: string
+            description: Consumed query hours
+            nullable: true
+          remainingQueryHours:
+            type: string
+            description: Remaining query hours
+            nullable: true
+          goLiveDate:
+            description: Go-live date
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/Date'
+          goLivePlanDate:
+            description: Go-live plan date
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/Date'
+          totalOnboardingHours:
+            type: string
+            description: Onboarding hour information
+            nullable: true
+          consumedOnboardingHours:
+            type: string
+            description: Consumed onboarding hours
+            nullable: true
+          remainingOnboardingHours:
+            type: string
+            description: Remaining onboarding hours
+            nullable: true
+          onboardingExpiryDate:
+            description: Onboarding expiry date
+            nullable: true
+            allOf:
+            - $ref: '#/components/schemas/Date'
+          onboardingStatus:
+            type: string
+            description: Onboarding status
+            nullable: true
+    ProjectSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Search query for projects
+          description: Filter criteria
+        pagination:
+          description: Pagination details
+          allOf:
+          - $ref: '#/components/schemas/Pagination'
+          default: {}
+      additionalProperties: false
+      description: Payload for searching projects.
+    ProjectStats:
+      type: object
+      properties:
+        openCases:
+          type: integer
+          description: Open cases count
+          format: int64
+        activeChats:
+          type: integer
+          description: Active chats count
+          format: int64
+        deployments:
+          type: integer
+          description: Deployments count
+          format: int64
+        slaStatus:
+          type: string
+          description: SLA status
+      additionalProperties: false
+      description: Project statistics.
+    ProjectStatsResponse:
+      required:
+      - projectStats
+      - recentActivity
+      type: object
+      properties:
+        projectStats:
+          $ref: '#/components/schemas/ProjectStats'
+        recentActivity:
+          $ref: '#/components/schemas/RecentActivity'
+      additionalProperties: false
+      description: Project statistics response.
+    ProjectSupportStats:
+      type: object
+      properties:
+        ongoingCases:
+          type: integer
+          description: Ongoing cases count
+          format: int64
+          nullable: true
+        activeChats:
+          type: integer
+          description: Active chats count
+          format: int64
+        sessionChats:
+          type: integer
+          description: Session chats count
+          format: int64
+        resolvedChats:
+          type: integer
+          description: Resolved chats count
+          format: int64
+      additionalProperties: false
+      description: Project support statistics.
+    ProjectTimeCardStatsResponse:
+      required:
+      - billableHours
+      - nonBillableHours
+      - totalHours
+      type: object
+      properties:
+        totalHours:
+          type: number
+          description: Total hours logged
+          format: double
+        billableHours:
+          type: number
+          description: Billable hours
+          format: double
+        nonBillableHours:
+          type: number
+          description: Non-billable hours
+          format: double
+      description: Project time cards statistics response.
+    ProjectUpdatePayload:
+      required:
+      - hasAgent
+      type: object
+      properties:
+        hasAgent:
+          type: boolean
+          description: Indicates whether the agent is enabled for the project
+      additionalProperties: false
+      description: Payload for updating a project.
+    RecentActivity:
+      type: object
+      properties:
+        totalHours:
+          type: number
+          description: Total hours
+          format: double
+        billableHours:
+          type: number
+          description: Billable hours
+          format: double
+        lastDeploymentOn:
+          type: string
+          description: Last deployment date
+          nullable: true
+      additionalProperties: false
+      description: Recent activity details.
+    RecommendedUpdateLevel:
+      required:
+      - availableSecurityUpdatesCount
+      - availableUpdatesCount
+      - channel
+      - endingUpdateLevel
+      - installedSecurityUpdatesCount
+      - installedUpdatesCount
+      - productBaseVersion
+      - productName
+      - recommendedUpdateLevel
+      - startingUpdateLevel
+      - timestamp
+      type: object
+      properties:
+        productName:
+          type: string
+          description: Product name
+        productBaseVersion:
+          type: string
+          description: Product base version
+        channel:
+          type: string
+          description: Channel
+        startingUpdateLevel:
+          type: integer
+          description: Starting update level
+          format: int64
+        endingUpdateLevel:
+          type: integer
+          description: Ending update level
+          format: int64
+        installedUpdatesCount:
+          type: integer
+          description: Installed updates count
+          format: int64
+        installedSecurityUpdatesCount:
+          type: integer
+          description: Installed security updates count
+          format: int64
+        timestamp:
+          type: integer
+          description: Timestamp
+          format: int64
+        recommendedUpdateLevel:
+          type: integer
+          description: Recommended update level
+          format: int64
+        availableUpdatesCount:
+          type: integer
+          description: Available updates count
+          format: int64
+        availableSecurityUpdatesCount:
+          type: integer
+          description: Available security updates count
+          format: int64
+      additionalProperties: false
+      description: Recommended update level.
+    ReferenceItem:
+      required:
+      - id
+      - label
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        label:
+          type: string
+          description: Label
+        count:
+          type: integer
+          description: Count
+          format: int64
+        number:
+          type: string
+          description: Number
+          nullable: true
+      additionalProperties: false
+      description: Reference item.
+    ReferenceTableItem:
+      required:
+      - id
+      - name
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        name:
+          type: string
+          description: Display name
+        number:
+          type: string
+          description: Number
+          nullable: true
+        count:
+          type: integer
+          description: Count value
+          format: int64
+      description: Basic table information.
+    RegistryTokenCreatePayload:
+      required:
+      - robotName
+      - tokenType
+      type: object
+      properties:
+        robotName:
+          pattern: "^[a-zA-Z0-9\\-]+$"
+          type: string
+          description: Registry token name (provided by the user)
+        tokenType:
+          $ref: '#/components/schemas/TokenType'
+        createdFor:
+          type: string
+          description: Created for user email
+      additionalProperties: false
+      description: Registry token creation payload.
+    ServiceRequestVariable:
+      required:
+      - name
+      - value
+      type: object
+      properties:
+        name:
+          type: string
+          description: Variable name
+        value:
+          type: string
+          description: Variable value
+      additionalProperties: false
+      description: Service request variables.
+    SortBy:
+      required:
+      - field
+      - order
+      type: object
+      properties:
+        field:
+          $ref: '#/components/schemas/CaseSortField'
+        order:
+          $ref: '#/components/schemas/SortOrder'
+      description: Sort configuration.
+    SortOrder:
+      type: string
+      description: Valid sort order values.
+      enum:
+      - desc
+      - asc
+    TimeCardSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            startDate:
+              $ref: '#/components/schemas/Date'
+            endDate:
+              $ref: '#/components/schemas/Date'
+            states:
+              type: array
+              description: "List of time card states to filter (e.g., \"Approved\"\
+                , \"Submitted\", etc.)"
+              items:
+                $ref: '#/components/schemas/TimeCardState'
+          description: Filter criteria
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for searching time cards.
+    TimeCardState:
+      type: string
+      description: Time card state enum
+      enum:
+      - Approved
+    TokenCreationResponse:
+      required:
+      - secret
+      type: object
+      properties:
+        secret:
+          type: string
+          description: Registry token Secret
+      description: Response of the created registry token.
+    TokenType:
+      type: string
+      description: Toke types enum.
+      enum:
+      - User
+      - Service
+    UpdateDescriptionPayload:
+      required:
+      - endingUpdateLevel
+      - productName
+      - productVersion
+      - startingUpdateLevel
+      type: object
+      properties:
+        productName:
+          type: string
+          description: Product name
+        productVersion:
+          type: string
+          description: Product version
+        startingUpdateLevel:
+          type: integer
+          description: Starting update level
+          format: int64
+        endingUpdateLevel:
+          type: integer
+          description: Ending update level
+          format: int64
+      additionalProperties: false
+      description: Payload for searching updates between update levels.
+    UpdateLevel:
+      required:
+      - channel
+      - productBaseVersion
+      - updateLevels
+      type: object
+      properties:
+        productBaseVersion:
+          type: string
+          description: Product base version
+        channel:
+          type: string
+          description: Channel
+        updateLevels:
+          type: array
+          description: Update level
+          items:
+            type: integer
+            format: int64
+      additionalProperties: false
+      description: Update level.
+    UpdatedAttachment:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the attachment
+      description: Updated attachment details.
+    UpdatedCallRequest:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the call request
+      description: Updated call request details.
+    UpdatedCase:
+      required:
+      - id
+      - state
+      - type
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the case
+        state:
+          $ref: '#/components/schemas/ChoiceListItem'
+        type:
+          $ref: '#/components/schemas/ReferenceTableItem'
+      description: Updated case details.
+    UpdatedChangeRequest:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the change request
+      description: Updated change request details.
+    UpdatedDeployedProduct:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the deployed product
+      description: Updated deployed product details.
+    UpdatedDeployment:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedOn:
+          type: string
+          description: Updated date and time
+        updatedBy:
+          type: string
+          description: User who updated the deployment
+      description: Updated deployment details.
+    UpdatedProject:
+      required:
+      - id
+      - updatedBy
+      - updatedOn
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        updatedBy:
+          type: string
+          description: User who updated the project
+        updatedOn:
+          $ref: '#/components/schemas/DateTimeWithoutTimezone'
+      description: Updated project details.
+    UpdatedUser:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          description: Phone number of the user
+        timeZone:
+          type: string
+          description: Timezone of the user
+      additionalProperties: false
+      description: Updated user information.
+    User:
+      type: object
+      description: User.
+      allOf:
+      - $ref: '#/components/schemas/UserResponse'
+      - type: object
+        properties:
+          phoneNumber:
+            type: string
+            description: Phone number of the user
+    UserResponse:
+      required:
+      - email
+      - firstName
+      - id
+      - lastName
+      - timeZone
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        email:
+          type: string
+          description: Email address
+        lastName:
+          type: string
+          description: Last name
+        firstName:
+          type: string
+          description: First name
+          nullable: true
+        timeZone:
+          type: string
+          description: Time zone
+          nullable: true
+        roles:
+          type: array
+          description: User roles
+          items:
+            type: string
+          default: []
+      description: User data.
+    UserUpdatePayload:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          description: Phone number of the user
+        timeZone:
+          type: string
+          description: Timezone of the user
+      additionalProperties: false
+      description: Payload for updating user information.
+    ValidationPayload:
+      required:
+      - contactEmail
+      type: object
+      properties:
+        contactEmail:
+          type: string
+          description: Contact email
+      additionalProperties: false
+      description: The request payload to be validated.
+    Variable:
+      required:
+      - id
+      - value
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        value:
+          type: string
+          description: Variable value
+      additionalProperties: false
+      description: Variable data for service request.
