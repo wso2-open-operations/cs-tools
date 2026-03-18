@@ -60,7 +60,7 @@ service class ErrorInterceptor {
 }
 
 // TODO: Remove after the ballerina header configs setting through choreo issue is fixed
-// configurable int wsPort = 9091;
+configurable int wsPort = 9091;
 
 http:ListenerConfiguration listenerConf = {
     requestLimits: {
@@ -4322,17 +4322,17 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
 }
 
 # WebSocket service to proxy messages between the browser and the upstream Python AI chat agent for real-time communication in chat sessions.
-isolated service / on new websocket:Listener(wsPort) {
+isolated service / on new websocket:Listener(wsPort, listenerConf) {
 
-//     # Upgrade an HTTP request to WebSocket for a given chat session.
-//     #
-//     # + sessionId - Conversation/session ID to route to the upstream Python agent
-//     # + return - WebSocket service or upgrade error
-//     isolated resource function get [string sessionId]() returns websocket:Service|websocket:UpgradeError {
-//         log:printInfo(string `Upgrading to WebSocket for session ID: ${sessionId}`);
-//         return new WsProxyService(sessionId);
-//     }
-// }
+    # Upgrade an HTTP request to WebSocket for a given chat session.
+    #
+    # + sessionId - Conversation/session ID to route to the upstream Python agent
+    # + return - WebSocket service or upgrade error
+    isolated resource function get [string sessionId]() returns websocket:Service|websocket:UpgradeError {
+        log:printInfo(string `Upgrading to WebSocket for session ID: ${sessionId}`);
+        return new WsProxyService(sessionId);
+    }
+}
 
 # AI chat agent related service functions that interact with the upstream AI chat agent through the client module.
 isolated service class WsProxyService {
