@@ -62,7 +62,6 @@ service class ErrorInterceptor {
 // TODO: Remove after the ballerina header configs setting through choreo issue is fixed
 configurable int wsPort = 9091;
 
-
 http:ListenerConfiguration listenerConf = {
     requestLimits: {
         maxHeaderSize: 32768
