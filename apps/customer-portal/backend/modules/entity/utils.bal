@@ -241,10 +241,10 @@ public isolated function validateDeployedProductUpdatePayload(DeployedProductUpd
             return "Invalid value for active field. When updating cores or tps, active field should be set to false.";
         }
         if cores !is () || tps !is () || description !is () || updates !is () {
-            return "When deactivating, cores, tps, description and updates  fields should not be provided.";
+            return "When deactivating, cores, tps, description and updates fields should not be provided.";
         }
     } else if cores is () && tps is () && description is () && updates is () {
-        return "At least one of cores or tps or description or updates should be provided when updating" +
+        return "At least one of cores or tps or description or updates should be provided when updating " +
             "deployed product details.";
     }
     return;
