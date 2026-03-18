@@ -111,6 +111,7 @@ export default function CaseDetailPage() {
       layout.setTitleOverride(undefined);
     };
   }, [data, overlineSlotVariant]);
+
   return (
     <>
       <Stack gap={2} mb={10}>
