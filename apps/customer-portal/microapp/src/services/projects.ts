@@ -60,9 +60,9 @@ const getProject = async (id: string): Promise<ProjectInfo> => {
 };
 
 const getDeploymentsByProject = async (id: string): Promise<Deployment[]> => {
-  const deployments = (await apiClient.get<ProjectDeploymentsDTO>(PROJECT_DEPLOYMENTS_ENDPOINT(id))).data;
+  const response = (await apiClient.get<ProjectDeploymentsDTO>(PROJECT_DEPLOYMENTS_ENDPOINT(id))).data;
 
-  return deployments.map(toDeployment);
+  return response.deployments.map(toDeployment);
 };
 
 const getProductsByDeployment = async (deploymentId: string): Promise<Product[]> => {

@@ -35,6 +35,7 @@ import ServiceDetailPage from "@pages/ServiceDetailPage";
 import ChangeDetailPage from "@pages/ChangeDetailPage";
 import EditUserPage from "@pages/EditUserPage";
 import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
+import UpdateProfileSettingsPage from "./pages/UpdateProfileSettingsPage";
 
 const App: React.FC = () => {
   useLayoutEffect(() => {
@@ -66,7 +67,10 @@ const App: React.FC = () => {
                 <Route path="invite" element={<EditUserPage mode="invite" />} />
                 <Route path="edit" element={<EditUserPage mode="edit" />} />
               </Route>
-              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/profile">
+                <Route element={<ProfilePage />} index />
+                <Route path="update" element={<UpdateProfileSettingsPage />} />
+              </Route>
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/create" element={<CreateCasePage />} />

@@ -15,46 +15,58 @@
 // under the License.
 
 import { useState, type ReactNode } from "react";
-import {
-  Avatar,
-  Box,
-  Button,
-  Card,
-  Chip,
-  colors,
-  FormControlLabel,
-  pxToRem,
-  Radio,
-  RadioGroup,
-  Stack,
-  TextField,
-  Typography,
-  useTheme,
-} from "@wso2/oxygen-ui";
-import { Link, useLocation } from "react-router-dom";
-import { InvitationSummaryContent, RoleSelector, type RoleName } from "@components/features/users";
+import { Avatar, Box, Button, Card, colors, pxToRem, Stack, TextField, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { InvitationSummaryContent, RoleSelector } from "@components/features/users";
 import { useProject } from "@context/project";
-
-import { MOCK_PROJECTS } from "@src/mocks/data/projects";
 import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { stringAvatar } from "@utils/others";
+import type { Role } from "@src/types";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { users } from "../services/users";
+import { projects } from "../services/projects";
 
 export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "edit" }) {
   const location = useLocation();
-  const state = location.state as { email?: string; role?: RoleName; name?: string };
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const state = location.state as { email?: string; role?: Role; firstName?: string; lastName?: string };
 
-  const [role, setRole] = useState<RoleName>(state?.role ?? "Admin");
+  const [role, setRole] = useState<Role>(state?.role ?? "Portal User");
   const [email, setEmail] = useState(state?.email ?? "");
-  const [name, setName] = useState(state?.name ?? "");
-  const [userStatus, setUserStatus] = useState("active");
+  const [firstName, setFirstName] = useState(state?.firstName ?? "");
+  const [lastName, setLastName] = useState(state?.lastName ?? "");
 
   const { projectId } = useProject();
-  const project = MOCK_PROJECTS.find((project) => project.id === projectId);
+  const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
+
+  const createUserMutation = useMutation({
+    ...users.create(projectId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+  });
+
+  const editUserMutation = useMutation({
+    ...users.edit(projectId!, email),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    ...users.delete(projectId!, email),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+  });
 
   return (
     <Stack gap={2}>
-      {/* TODO: Replace hardcoded `lastActive` value with backend-provided data once user activity tracking is integrated. */}
-      {mode === "edit" && <UserSummaryCard name={name} email={email} lastActive="2 hours ago" />}
+      {mode === "edit" && <UserSummaryCard firstName={firstName} lastName={lastName} email={email} />}
       {mode === "invite" && <InvitationNotice />}
       <SectionCard title="User Details">
         <Stack gap={2}>
@@ -68,12 +80,24 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
               htmlInput: { readOnly: mode === "edit" },
             }}
           />
+
           <TextField
             size="small"
-            label="Full Name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            helperText={mode === "edit" ? "Name cannot be edited" : undefined}
+            label="First Name"
+            value={firstName}
+            onChange={(event) => setFirstName(event.target.value)}
+            helperText={mode === "edit" ? "First Name cannot be edited" : undefined}
+            slotProps={{
+              htmlInput: { readOnly: mode === "edit" },
+            }}
+          />
+
+          <TextField
+            size="small"
+            label="Last Name"
+            value={lastName}
+            onChange={(event) => setLastName(event.target.value)}
+            helperText={mode === "edit" ? "Last Name cannot be edited" : undefined}
             slotProps={{
               htmlInput: { readOnly: mode === "edit" },
             }}
@@ -85,16 +109,15 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         <RoleSelector value={role} onChange={setRole} />
       </SectionCard>
 
-      {mode === "edit" && (
-        <SectionCard title="User Status">
-          <UserStatusSelector value={userStatus} onChange={setUserStatus} />
-        </SectionCard>
-      )}
-
       {mode === "invite" && (
         <>
           <SectionCard title="Invitation Summary">
-            <InvitationSummaryContent projectName={project?.name} email={email} name={name} role={role} />
+            <InvitationSummaryContent
+              projectName={project?.name}
+              email={email}
+              name={firstName + " " + lastName}
+              role={role}
+            />
           </SectionCard>
           <ExpirationNotice />
         </>
@@ -103,12 +126,23 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
       {mode === "edit" && (
         <>
           <PermissionDetails />
-          <DangerZone />
+          <DangerZone onDelete={deleteUserMutation.mutate} />
         </>
       )}
 
-      {/* TODO: Implement proper submission handling */}
-      <Button variant="contained" component={Link} to="/users" sx={{ textTransform: "initial" }}>
+      <Button
+        variant="contained"
+        onClick={() => {
+          if (mode === "invite")
+            createUserMutation.mutate({
+              contactEmail: email,
+              contactFirstName: firstName,
+              contactLastName: lastName,
+              isCsIntegrationUser: true,
+              isSecurityContact: false,
+            });
+        }}
+      >
         {mode === "invite" ? "Send Invitation" : "Save Changes"}
       </Button>
 
@@ -211,7 +245,7 @@ function PermissionDetails() {
   );
 }
 
-function UserSummaryCard({ name, email, lastActive }: { name: string; email: string; lastActive: string }) {
+function UserSummaryCard({ firstName, lastName, email }: { firstName: string; lastName: string; email: string }) {
   const theme = useTheme();
 
   return (
@@ -225,11 +259,11 @@ function UserSummaryCard({ name, email, lastActive }: { name: string; email: str
           fontWeight: "medium",
         })}
       >
-        {stringAvatar(name)}
+        {stringAvatar(firstName)}
       </Avatar>
       <Stack textAlign="center" gap={0.5}>
         <Typography variant="h5" fontWeight="medium">
-          {name}
+          {firstName + " " + lastName}
         </Typography>
         <Stack direction="row" justifyContent="center" alignItems="center" gap={1}>
           <Mail size={pxToRem(16)} color={theme.palette.text.secondary} />
@@ -237,15 +271,12 @@ function UserSummaryCard({ name, email, lastActive }: { name: string; email: str
             {email}
           </Typography>
         </Stack>
-        <Typography variant="caption" fontWeight="regular" color="text.secondary">
-          Last Active: {lastActive}
-        </Typography>
       </Stack>
     </Card>
   );
 }
 
-function DangerZone() {
+function DangerZone({ onDelete }: { onDelete: () => void }) {
   return (
     <Card component={Stack} sx={{ bgcolor: colors.red[50], p: 1.5 }}>
       <Typography variant="body2" fontWeight="medium" color="error">
@@ -254,44 +285,9 @@ function DangerZone() {
       <Typography variant="subtitle2" color="text.secondary">
         Send an email invitation directly to a user to join this project. The invitation link will be valid for 7 days.
       </Typography>
-      <Button variant="contained" color="error" startIcon={<Trash2 />} sx={{ mt: 3 }}>
+      <Button variant="contained" color="error" startIcon={<Trash2 />} sx={{ mt: 3 }} onClick={onDelete}>
         Remove User from Project
       </Button>
     </Card>
-  );
-}
-
-function UserStatusSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <RadioGroup value={value} onChange={(event) => onChange(event.target.value)}>
-      <FormControlLabel
-        value="active"
-        control={<Radio />}
-        labelPlacement="start"
-        sx={{
-          m: 0,
-          justifyContent: "space-between",
-        }}
-        label={
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Chip size="small" label="Active" color={value === "active" ? "primary" : "default"} />
-          </Stack>
-        }
-      ></FormControlLabel>
-      <FormControlLabel
-        value="inactive"
-        control={<Radio />}
-        labelPlacement="start"
-        sx={{
-          m: 0,
-          justifyContent: "space-between",
-        }}
-        label={
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Chip size="small" label="Inactive" color={value === "inactive" ? "primary" : "default"} />
-          </Stack>
-        }
-      ></FormControlLabel>
-    </RadioGroup>
   );
 }

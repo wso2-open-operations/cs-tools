@@ -54,7 +54,9 @@ export interface ProjectStatsDTO {
   };
 }
 
-export type ProjectDeploymentsDTO = ProjectDeploymentDTO[];
+export interface ProjectDeploymentsDTO extends Pagination {
+  deployments: ProjectDeploymentDTO[];
+}
 
 export interface ProjectDeploymentDTO {
   id: string;

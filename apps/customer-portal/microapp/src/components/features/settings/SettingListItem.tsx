@@ -17,6 +17,7 @@
 import type { ReactNode } from "react";
 import { pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import { Link } from "react-router-dom";
 
 export function SettingListItem({
   name,
@@ -26,6 +27,7 @@ export function SettingListItem({
   iconBackgroundColor,
   description,
   suffix,
+  to,
 }: {
   name: string;
   icon: LucideIcon;
@@ -34,6 +36,7 @@ export function SettingListItem({
   value?: string | ReactNode;
   description?: string;
   suffix?: "chevron" | ReactNode;
+  to?: string;
 }) {
   const theme = useTheme();
   const Icon = icon;
@@ -44,8 +47,9 @@ export function SettingListItem({
       justifyContent="space-between"
       alignItems="center"
       bgcolor="background.paper"
-      sx={{ cursor: "pointer" }}
+      sx={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}
       p={1.5}
+      {...(to && { component: Link, to })}
     >
       <Stack direction="row" alignItems="center" gap={1.5} width="100%">
         <Stack
@@ -77,7 +81,7 @@ export function SettingListItem({
         </Stack>
       </Stack>
       {suffix && suffix === "chevron" ? (
-        <ChevronRight size={pxToRem(16)} color={theme.palette.text.secondary} />
+        <ChevronRight size={pxToRem(16)} color={theme.palette.text.secondary} style={{ flexShrink: 0 }} />
       ) : (
         suffix
       )}

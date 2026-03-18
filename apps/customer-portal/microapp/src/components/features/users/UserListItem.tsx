@@ -2,7 +2,7 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { Link } from "react-router-dom";
 import { Card, Stack, Avatar as MuiAvatar, Typography, Chip, useTheme, pxToRem, Skeleton } from "@wso2/oxygen-ui";
-import { ShieldUser, ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
+import { ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
 import { capitalize, stringAvatar } from "@utils/others";
 import type { Role, User } from "@src/types";
 
@@ -15,25 +15,35 @@ export interface UserListItemProps {
   lastActive: string;
 }
 
-export function UserListItem({ firstName, lastName, email, roles, lastActive }: User) {
+export function UserListItem({ firstName, lastName, email, roles }: User) {
   const theme = useTheme();
-  const admin = roles.includes("Admin");
 
   return (
     <Card
       component={Link}
       elevation={0}
       to="/users/edit"
-      state={{ email, name: firstName + " " + lastName, role: roles[0] }}
+      state={{ email, firstName, lastName, role: roles[0] }}
       sx={{ textDecoration: "none", p: 1 }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>
-          <Avatar>{`${firstName} ${lastName}`}</Avatar>
+          <Avatar>{firstName}</Avatar>
 
-          <Stack>
+          <Stack minWidth={0}>
             <Stack direction="row" gap={1} alignItems="center">
-              <Typography variant="subtitle1" fontWeight="medium" noWrap>
+              <Typography
+                variant="subtitle1"
+                fontWeight="medium"
+                sx={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 1,
+                  WebkitBoxOrient: "vertical",
+                  wordBreak: "break-word",
+                }}
+              >
                 {`${firstName} ${lastName}`}
               </Typography>
               {roles.length > 0 && <Chip size="small" label={capitalize(roles[0])} />}
@@ -45,17 +55,10 @@ export function UserListItem({ firstName, lastName, email, roles, lastActive }: 
                 {email}
               </Typography>
             </Stack>
-
-            <Typography variant="caption" fontWeight="regular" color="text.secondary" mt={0.5}>
-              Last Active: {dayjs(lastActive).fromNow()}
-            </Typography>
           </Stack>
         </Stack>
 
-        <Stack direction="row" alignItems="center" gap={2}>
-          {admin && <ShieldUser color={theme.palette.primary.main} size={pxToRem(28)} />}
-          <ChevronRight color={theme.palette.text.secondary} size={pxToRem(18)} />
-        </Stack>
+        <ChevronRight color={theme.palette.text.secondary} size={pxToRem(18)} style={{ flexShrink: 0 }} />
       </Stack>
     </Card>
   );
@@ -93,8 +96,6 @@ export function UserListItemSkeleton() {
             <Skeleton variant="circular" width={13} height={13} />
             <Skeleton variant="text" width={180} height={20} />
           </Stack>
-
-          <Skeleton variant="text" width={100} height={16} sx={{ mt: 0.5 }} />
         </Stack>
       </Stack>
     </Card>

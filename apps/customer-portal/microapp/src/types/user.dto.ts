@@ -18,3 +18,11 @@ export interface UserDTO {
   isSecurityContact: boolean;
   membershipStatus: string;
 }
+
+export interface CreateContactRequestDTO {
+  contactEmail: string;
+  contactFirstName: string;
+  contactLastName: string;
+  isCsIntegrationUser: boolean;
+  isSecurityContact: boolean;
+}

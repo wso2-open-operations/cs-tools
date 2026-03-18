@@ -19,18 +19,19 @@ import { Card, Grid, Stack, Typography, Button, Divider, useTheme, SearchBar } f
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
 import { UserListItem, UserListItemSkeleton } from "@components/features/users";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { users } from "@src/services/users";
 import { useProject } from "@context/project";
 import { ErrorBoundary } from "@components/core";
 import { Suspense } from "react";
 
-import { MOCK_METRICS, MOCK_ROLES } from "@src/mocks/data/users";
+import { MOCK_ROLES } from "@src/mocks/data/users";
 
 export default function UsersPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const { projectId } = useProject();
 
   const baseRoute = location.pathname;
   const searchValue = searchParams.get("search") ?? "";
@@ -49,14 +50,27 @@ export default function UsersPage() {
     navigate(`${baseRoute}?${next.toString()}`, { replace: true });
   };
 
+  const { data } = useQuery(users.all(projectId!));
+  const total = data?.length;
+  const registered = data?.filter((user) => user.status === "registered").length;
+  const invited = data?.filter((user) => user.status === "invited").length;
+  const admins = data?.filter((user) => user.roles.includes("Admin")).length;
+
   return (
     <>
       <Grid spacing={1.5} container>
-        {MOCK_METRICS.map((props, index) => (
-          <Grid size={4}>
-            <MetricWidget key={index} {...props} size="small" base />
-          </Grid>
-        ))}
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Total" value={total} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Registered" value={registered} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Invited" value={invited} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Admins" value={admins} />
+        </Grid>
         <Grid size={12}>
           <SearchBar
             size="small"

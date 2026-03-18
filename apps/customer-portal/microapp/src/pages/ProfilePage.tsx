@@ -77,7 +77,7 @@ export default function ProfilePage() {
 
       <SectionCard title="Settings">
         <SettingListItem name="Change Password" suffix="chevron" icon={Lock} />
-        <SettingListItem name="Update Profile" suffix="chevron" icon={User} />
+        <SettingListItem name="Update Profile" suffix="chevron" icon={User} to="/profile/update" />
       </SectionCard>
 
       <SectionCard title="Notifications">
