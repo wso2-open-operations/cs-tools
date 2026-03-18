@@ -56,11 +56,12 @@ export default function DescribeIssuePage(): JSX.Element {
   const { showError } = useErrorBanner();
   const [value, setValue] = useState("");
   const [hasApiFailed, setHasApiFailed] = useState(false);
+  const [isLoadingAfterClick, setIsLoadingAfterClick] = useState(false);
 
   const { data: projectDeployments } = useGetProjectDeployments(
     projectId || "",
   );
-  const { productsByDeploymentId, isLoading: isProductsLoading } =
+  const { productsByDeploymentId } =
     useAllDeploymentProducts(projectDeployments);
   const envProducts = useMemo(
     () => buildEnvProducts(productsByDeploymentId, projectDeployments),
@@ -88,6 +89,7 @@ export default function DescribeIssuePage(): JSX.Element {
     if (!plainText.trim() || !projectId) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
+    setIsLoadingAfterClick(true);
 
     try {
       const conversationResponse = await postConversation({
@@ -110,6 +112,7 @@ export default function DescribeIssuePage(): JSX.Element {
       );
     } finally {
       submittingRef.current = false;
+      setIsLoadingAfterClick(false);
     }
   }, [
     plainText,
@@ -128,7 +131,7 @@ export default function DescribeIssuePage(): JSX.Element {
   }, [projectId, navigate]);
 
   const isSubmitDisabled =
-    !projectId || !plainText.trim() || isSubmitting;
+    !projectId || !plainText.trim();
 
   return (
     <Box
@@ -234,7 +237,7 @@ export default function DescribeIssuePage(): JSX.Element {
                 variant="contained"
                 color="warning"
                 startIcon={
-                  isSubmitting ? (
+                  isLoadingAfterClick ? (
                     <CircularProgress color="inherit" size={18} />
                   ) : (
                     <Send size={18} />
@@ -243,7 +246,7 @@ export default function DescribeIssuePage(): JSX.Element {
                 onClick={handleSubmit}
                 disabled={isSubmitDisabled}
               >
-                {isSubmitting ? "Getting help…" : "Submit & Get Help"}
+                {isLoadingAfterClick ? "Getting help…" : "Submit & Get Help"}
               </Button>
             </Box>
           </Stack>
