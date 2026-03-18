@@ -6,20 +6,30 @@ export interface Case {
   updatedOn: Date;
   title: string;
   description: string;
+  slaResponseTime: string;
   assigned?: string;
   statusId?: string;
   severityId?: string;
   issueTypeId?: string;
   product?: string;
+  productVersion?: string;
   reporter?: string;
   account?: string;
   parentCaseId?: string;
   conversationId?: string;
+  deployment?: string;
 }
 
 export type CaseSummary = Omit<
   Case,
-  "updatedOn" | "productId" | "reporter" | "account" | "parentCaseId" | "conversationId"
+  | "updatedOn"
+  | "productId"
+  | "reporter"
+  | "account"
+  | "parentCaseId"
+  | "conversationId"
+  | "slaResponseTime"
+  | "deployment"
 >;
 
 export interface Comment {

@@ -20,7 +20,14 @@ export function OverlineSlot({
   return (
     <Stack height={40}>
       <Stack
-        sx={{ flexDirection: "row", flexGrow: 1, gap: 1, alignItems: "center", transformOrigin: "top left" }}
+        sx={{
+          flexDirection: "row",
+          flexGrow: 1,
+          gap: 1,
+          alignItems: "center",
+          transformOrigin: "top left",
+          minWidth: 0,
+        }}
         component={motion.div}
         variants={containerVariants}
         animate={variant}
@@ -33,7 +40,19 @@ export function OverlineSlot({
 
       {variant === "shrunk" && (
         <motion.div variants={titleVariants} initial="initial" animate="enter" exit="exit">
-          <Typography variant="body1" fontWeight="medium" mt={-1}>
+          <Typography
+            variant="body1"
+            fontWeight="medium"
+            mt={-1}
+            sx={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              display: "-webkit-box",
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: "vertical",
+              wordBreak: "break-word",
+            }}
+          >
             {title ?? <Skeleton variant="text" width="100%" height={30} />}
           </Typography>
         </motion.div>

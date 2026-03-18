@@ -118,11 +118,14 @@ function toCase(dto: CaseDTO): Case {
     statusId: dto.status?.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
-    product: dto.product?.label,
+    product: dto.deployedProduct?.label,
+    productVersion: dto.deployedProduct?.version ?? undefined,
+    deployment: dto.deployment?.label ?? undefined,
     reporter: dto.csManager?.label,
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
     conversationId: dto.parentCase?.id,
+    slaResponseTime: dto.slaResponseTime,
   };
 }
 

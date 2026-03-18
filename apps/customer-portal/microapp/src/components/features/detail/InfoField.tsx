@@ -18,8 +18,8 @@ export function InfoField({ label, value, icon }: InfoFieldProps) {
       </Typography>
       <Stack direction="row" alignItems="center" gap={1}>
         {Icon && <Icon size={pxToRem(16)} />}
-        <Typography variant="body2" component="div" sx={{ flex: 1 }}>
-          {value ?? <Skeleton variant="text" width={"100%"} height={30} />}
+        <Typography variant="body2" component="div" sx={{ flex: 1, wordBreak: "break-all" }}>
+          {value ?? <Skeleton variant="text" width="100%" height={30} />}
         </Typography>
       </Stack>
     </Stack>

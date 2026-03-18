@@ -126,10 +126,6 @@ export default function ChatDetailPage() {
     };
   }, [data, overlineSlotVariant]);
 
-  useEffect(() => {
-    console.log("variant:", overlineSlotVariant);
-  }, [overlineSlotVariant]);
-
   return (
     <>
       <Stack gap={2} mb={10}>

@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Suspense, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button, Card, Grid, pxToRem, Stack, Tab, Tabs, Typography, useTheme } from "@wso2/oxygen-ui";
 import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";

@@ -16,9 +16,9 @@
 
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Grid, Skeleton, Stack } from "@wso2/oxygen-ui";
+import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import {
   ActivityTimelineEntrySkeleton,
   InfoField,
@@ -34,6 +34,7 @@ import { cases } from "@src/services/cases";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { useProject } from "@context/project";
+import ms from "ms";
 
 dayjs.extend(relativeTime);
 
@@ -52,33 +53,10 @@ export default function CaseDetailPage() {
   });
 
   const issueType = filters?.issueTypes.find((issueType) => issueType.id === data?.issueTypeId)?.label;
-  const severity = filters?.severities.find((severity) => severity.id === data?.severityId)?.label;
 
-  const AppBarSlot = () =>
-    data ? (
-      <Stack direction="row" gap={1.5} mt={1}>
-        <StatusChip id={data.statusId} size="small" />
-        <PriorityChip id={data.severityId} size="small" />
-      </Stack>
-    ) : (
-      <Stack direction="row" gap={1.5} mt={1}>
-        <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: "16px" }} />
-        <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: "16px" }} />
-      </Stack>
-    );
-
-  useLayoutEffect(() => {
-    layout.setTitleOverride(data?.title ?? <Skeleton variant="text" width="100%" height={35} />);
-    layout.setOverlineSlotOverride(<OverlineSlot type="case" id={data?.number} />);
-    layout.setAppBarSlotsOverride(<AppBarSlot />);
-
-    return () => {
-      layout.setTitleOverride(undefined);
-      layout.setOverlineSlotOverride(undefined);
-      layout.setAppBarSlotsOverride(undefined);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  const slaResponseTimeInMilliseconds = Number.isFinite(Number(data?.slaResponseTime))
+    ? Number(data?.slaResponseTime)
+    : undefined;
 
   const mutation = useMutation({
     ...cases.createComment(id!),
@@ -99,9 +77,45 @@ export default function CaseDetailPage() {
     });
   };
 
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const next = entry.isIntersecting ? "normal" : "shrunk";
+        setOverlineSlotVariant(next);
+      },
+      {
+        root: null,
+        rootMargin: "-80px 0px 0px 0px",
+        threshold: 1.0,
+      },
+    );
+
+    observer.observe(element);
+
+    return () => observer.unobserve(element);
+  }, []);
+
+  useLayoutEffect(() => {
+    layout.setTitleOverride(
+      <OverlineSlot variant={overlineSlotVariant} type="case" id={data?.number} title={data?.title} />,
+    );
+
+    return () => {
+      layout.setTitleOverride(undefined);
+    };
+  }, [data, overlineSlotVariant]);
   return (
     <>
       <Stack gap={2} mb={10}>
+        <Typography ref={ref} variant="h5" fontWeight="medium">
+          {data?.title}
+        </Typography>
         <SectionCard title="Case Information">
           <Grid spacing={1.5} container>
             <Grid size={12}>
@@ -114,13 +128,43 @@ export default function CaseDetailPage() {
               <InfoField label="Reporter" value={isLoading ? undefined : (data?.reporter ?? "N/A")} icon={User} />
             </Grid>
             <Grid size={6}>
+              <InfoField
+                label="Status"
+                value={
+                  data?.statusId ? (
+                    <StatusChip id={data.statusId} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
+              />
+            </Grid>
+            <Grid size={6}>
+              <InfoField
+                label="Priority"
+                value={
+                  data?.statusId ? (
+                    <PriorityChip id={data.severityId} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
+              />
+            </Grid>
+            <Grid size={6}>
               <InfoField label="Category" value={isLoading || isFiltersLoading ? undefined : (issueType ?? "N/A")} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Severity" value={isLoading || isFiltersLoading ? undefined : (severity ?? "N/A")} />
-            </Grid>
-            <Grid size={12}>
-              <InfoField label="Affected Service" value={isLoading ? undefined : data?.product || "N/A"} />
+              <InfoField
+                label="SLA Response Time"
+                value={
+                  isLoading
+                    ? undefined
+                    : slaResponseTimeInMilliseconds !== undefined
+                      ? ms(slaResponseTimeInMilliseconds, { long: true })
+                      : "N/A"
+                }
+              />
             </Grid>
             <Grid size={6}>
               <InfoField
@@ -139,6 +183,19 @@ export default function CaseDetailPage() {
             </Grid>
             <Grid size={6}>
               <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+            </Grid>
+          </Grid>
+        </SectionCard>
+        <SectionCard title="Product & Environment">
+          <Grid spacing={1.5} container>
+            <Grid size={12}>
+              <InfoField label="Product Name" value={isLoading ? undefined : data?.product || "N/A"} />
+            </Grid>
+            <Grid size={12}>
+              <InfoField label="Version" value={isLoading ? undefined : data?.productVersion || "N/A"} />
+            </Grid>
+            <Grid size={12}>
+              <InfoField label="Deployment" value={isLoading ? undefined : data?.deployment || "N/A"} />
             </Grid>
           </Grid>
         </SectionCard>

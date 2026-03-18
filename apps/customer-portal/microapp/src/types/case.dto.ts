@@ -26,7 +26,7 @@ export interface CaseSummaryDTO {
 export interface CaseDTO {
   updatedOn: string;
   slaResponseTime: string;
-  product: (EntityReference & { version: string | null }) | null;
+  deployedProduct: (EntityReference & { version: string | null }) | null;
   account: (EntityReference & { type: string | null; count: number | null }) | null;
   csManager: (EntityReference & { email: string | null }) | null;
   closedOn: string | null;
@@ -42,11 +42,11 @@ export interface CaseDTO {
   assignedEngineer: EntityReference | null;
   project: EntityReference | null;
   type: EntityReference | null;
-  deployedProduct: EntityReference | null;
+  product: EntityReference | null;
   parentCase: EntityReference | null;
   conversation: EntityReference | null;
   issueType: EntityReference | null;
-  deployment: EntityReference | null;
+  deployment: (EntityReference & { type: string }) | null;
   severity: EntityReference | null;
   status: EntityReference | null;
 }
