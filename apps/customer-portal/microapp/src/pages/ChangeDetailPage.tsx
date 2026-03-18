@@ -97,19 +97,33 @@ export default function ChangeDetailPage() {
             <Grid size={12}>
               <InfoField
                 label="Communication Plan"
-                value={!isLoading ? (data?.communicationPlan ?? "No communication plan available") : undefined}
+                value={
+                  !isLoading
+                    ? data?.communicationPlan
+                      ? stripHtmlTags(data.communicationPlan)
+                      : "No communication plan available"
+                    : undefined
+                }
               />
             </Grid>
             <Grid size={12}>
               <InfoField
                 label="Rollback Plan"
-                value={!isLoading ? (data?.rollbackPlan ?? "No rollback plan available") : undefined}
+                value={
+                  !isLoading
+                    ? data?.rollbackPlan
+                      ? stripHtmlTags(data.rollbackPlan)
+                      : "No rollback plan available"
+                    : undefined
+                }
               />
             </Grid>
             <Grid size={12}>
               <InfoField
                 label="Test Plan"
-                value={!isLoading ? (data?.testPlan ?? "No test plan available") : undefined}
+                value={
+                  !isLoading ? (data?.testPlan ? stripHtmlTags(data.testPlan) : "No test plan available") : undefined
+                }
               />
             </Grid>
           </Grid>

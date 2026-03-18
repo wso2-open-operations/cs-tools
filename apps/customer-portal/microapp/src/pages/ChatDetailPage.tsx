@@ -133,38 +133,9 @@ export default function ChatDetailPage() {
           {data?.description}
         </Typography>
         <SectionCard>
-          <Stack direction="row" justifyContent="space-between" gap={1.5}>
-            <StatusChip id={data?.statusId} size="small" />
-            <Stack direction="row" gap={3}>
-              <Stack direction="row" alignItems="center" gap={1}>
-                <Box color="text.secondary">
-                  <MessageSquare size={pxToRem(14)} />
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  {data?.count} messages
-                </Typography>
-              </Stack>
-
-              <Stack direction="row" alignItems="center" gap={1}>
-                <Box color="text.secondary">
-                  <BookOpen size={pxToRem(14)} />
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  0 KB articles
-                </Typography>
-              </Stack>
-            </Stack>
-          </Stack>
-          <Divider sx={{ mt: 1, mb: 1 }} />
           <Grid spacing={1.5} container>
             <Grid size={6}>
               <InfoField label="Started" value={dayjs(data?.createdOn).format("MMM D, YYYY h:mm A")} />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Resolved" value={undefined} />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Duration" value={undefined} />
             </Grid>
             <Grid size={6}>
               <InfoField
@@ -177,6 +148,12 @@ export default function ChatDetailPage() {
                   )
                 }
               />
+            </Grid>
+            <Grid size={6}>
+              <InfoField label="Messages Exchanged" value={`${data?.count} messages`} />
+            </Grid>
+            <Grid size={6}>
+              <InfoField label="Available KBs" value="0 KB articles" />
             </Grid>
           </Grid>
         </SectionCard>
