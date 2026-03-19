@@ -19,12 +19,10 @@ import {
   Avatar,
   Box,
   Button,
-  Card,
   Dialog,
   FormControl,
   IconButton,
   MenuItem,
-  Paper,
   Select,
   Skeleton,
   TextField,
@@ -45,6 +43,44 @@ import {
 import { TIME_ZONE_OPTIONS } from "@constants/timeZoneConstants";
 
 const PASSWORD_RESET_URL = "https://wso2.com/user/password";
+
+/**
+ * Formats epoch timestamp to localized date string in user's timezone.
+ *
+ * @param {string | undefined} epochMs - Epoch timestamp in milliseconds as string.
+ * @param {string | undefined} timeZone - IANA timezone string.
+ * @returns {string} Formatted date string or "Not Available".
+ */
+const formatLastPasswordUpdate = (
+  epochMs: string | undefined,
+  timeZone: string | undefined,
+): string => {
+  if (!epochMs) return "Not Available";
+
+  try {
+    const timestamp = parseInt(epochMs, 10);
+    if (isNaN(timestamp)) return "Not Available";
+
+    const date = new Date(timestamp);
+
+    if (!timeZone) {
+      return date.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+    }
+
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone,
+    });
+  } catch {
+    return "Not Available";
+  }
+};
 
 /**
  * Maps role strings to user-friendly labels. Returns highest role when multiple roles present.
@@ -90,7 +126,8 @@ export default function UserProfileModal({
     if (open && userDetails) {
       const raw = userDetails.phoneNumber ?? "";
       setPhoneNumber(raw);
-      const { countryCode: cc, nationalNumber: nn } = parseE164ToCountryCode(raw);
+      const { countryCode: cc, nationalNumber: nn } =
+        parseE164ToCountryCode(raw);
       setCountryCode(cc);
       setNationalNumber(nn);
       setTimeZone(userDetails.timeZone ?? "");
@@ -147,9 +184,11 @@ export default function UserProfileModal({
         const hasPhoneInPayload = payload.phoneNumber !== undefined;
         const isValidationError =
           hasPhoneInPayload &&
-          (/invalid|validation/i.test(msg) || (msg.includes("400") && /phone|format/i.test(msg)));
+          (/invalid|validation/i.test(msg) ||
+            (msg.includes("400") && /phone|format/i.test(msg)));
         const isGenericPhoneFailure =
-          hasPhoneInPayload && /failed to update phone|update phone number/i.test(msg);
+          hasPhoneInPayload &&
+          /failed to update phone|update phone number/i.test(msg);
         if (isValidationError) {
           showError("Please enter a valid phone number");
         } else if (isGenericPhoneFailure) {
@@ -159,7 +198,16 @@ export default function UserProfileModal({
         }
       },
     });
-  }, [userDetails, countryCode, nationalNumber, timeZone, patchUserMe, showSuccess, showError, onClose]);
+  }, [
+    userDetails,
+    countryCode,
+    nationalNumber,
+    timeZone,
+    patchUserMe,
+    showSuccess,
+    showError,
+    onClose,
+  ]);
 
   const handleClose = useCallback(() => {
     if (!patchUserMe.isPending) {
@@ -185,6 +233,13 @@ export default function UserProfileModal({
     return timeZone;
   }, [timeZone]);
 
+  const lastPasswordUpdate = useMemo(() => {
+    return formatLastPasswordUpdate(
+      userDetails?.lastPasswordUpdateTime,
+      userDetails?.timeZone,
+    );
+  }, [userDetails?.lastPasswordUpdateTime, userDetails?.timeZone]);
+
   return (
     <Dialog
       open={open}
@@ -208,13 +263,26 @@ export default function UserProfileModal({
       >
         {isLoading || !userDetails ? (
           <Box sx={{ p: 4, display: "flex", flexDirection: "column", gap: 4 }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
               <Skeleton variant="text" width={150} height={40} />
               <Skeleton variant="circular" width={32} height={32} />
             </Box>
             <Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
               <Skeleton variant="circular" width={120} height={120} />
-              <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
+              <Box
+                sx={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                }}
+              >
                 <Skeleton variant="text" width={200} height={32} />
                 <Skeleton variant="text" width={100} height={20} />
               </Box>
@@ -275,9 +343,19 @@ export default function UserProfileModal({
                 </Box>
 
                 <Box sx={{ p: 3, width: "100%" }}>
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <Box
+                    sx={{ display: "flex", flexDirection: "column", gap: 3 }}
+                  >
                     <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: "1 1 45%", minWidth: 200 }}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 1,
+                          flex: "1 1 45%",
+                          minWidth: 200,
+                        }}
+                      >
                         <Typography variant="body2" fontWeight={500}>
                           Full Name
                         </Typography>
@@ -291,7 +369,15 @@ export default function UserProfileModal({
                           }}
                         />
                       </Box>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: "1 1 45%", minWidth: 200 }}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 1,
+                          flex: "1 1 45%",
+                          minWidth: 200,
+                        }}
+                      >
                         <Typography variant="body2" fontWeight={500}>
                           Email
                         </Typography>
@@ -306,7 +392,9 @@ export default function UserProfileModal({
                         />
                       </Box>
                     </Box>
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <Box
+                      sx={{ display: "flex", flexDirection: "column", gap: 1 }}
+                    >
                       <Typography variant="body2" fontWeight={500}>
                         Mobile Number
                       </Typography>
@@ -332,7 +420,10 @@ export default function UserProfileModal({
                               size="small"
                             >
                               {PHONE_COUNTRY_OPTIONS.map((o) => (
-                                <MenuItem key={o.countryCode} value={o.countryCode}>
+                                <MenuItem
+                                  key={o.countryCode}
+                                  value={o.countryCode}
+                                >
                                   {o.flag} {o.label}
                                 </MenuItem>
                               ))}
@@ -365,7 +456,9 @@ export default function UserProfileModal({
                           }}
                         >
                           <TextField
-                            value={formatPhoneForDisplay(phoneNumber) || "Not set"}
+                            value={
+                              formatPhoneForDisplay(phoneNumber) || "Not set"
+                            }
                             size="small"
                             disabled
                             fullWidth
@@ -389,9 +482,25 @@ export default function UserProfileModal({
                       )}
                     </Box>
                     <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: "1 1 45%", minWidth: 200 }}>
-                        <FormControl fullWidth size="small" disabled={patchUserMe.isPending}>
-                          <Typography variant="body2" fontWeight={500} sx={{ mb: 1 }}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 1,
+                          flex: "1 1 45%",
+                          minWidth: 200,
+                        }}
+                      >
+                        <FormControl
+                          fullWidth
+                          size="small"
+                          disabled={patchUserMe.isPending}
+                        >
+                          <Typography
+                            variant="body2"
+                            fontWeight={500}
+                            sx={{ mb: 1 }}
+                          >
                             Time Zone
                           </Typography>
                           <Select
@@ -401,7 +510,10 @@ export default function UserProfileModal({
                             renderValue={(selected) => {
                               if (!selected) {
                                 return (
-                                  <Typography variant="body2" color="text.secondary">
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                  >
                                     Select timezone
                                   </Typography>
                                 );
@@ -419,25 +531,31 @@ export default function UserProfileModal({
                       </Box>
                     </Box>
 
-                    <Paper
+                    <Box
                       sx={{
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "space-between",
                         p: 2,
+                        bgcolor: "background.default",
+                        borderRadius: 1,
+                        border: 1,
+                        borderColor: "divider",
                         mt: 2,
                       }}
                     >
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 2 }}
+                      >
                         <Box sx={{ p: 1 }}>
-                          <Lock size={20}  />
+                          <Lock size={20} />
                         </Box>
                         <Box>
                           <Typography variant="body2" fontWeight={500}>
                             Password
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Last changed 10/15/2024
+                            Last changed : {lastPasswordUpdate}
                           </Typography>
                         </Box>
                       </Box>
@@ -453,7 +571,7 @@ export default function UserProfileModal({
                       >
                         Change Password
                       </Button>
-                    </Paper>
+                    </Box>
                   </Box>
                 </Box>
               </Box>
@@ -486,4 +604,3 @@ export default function UserProfileModal({
     </Dialog>
   );
 }
-
