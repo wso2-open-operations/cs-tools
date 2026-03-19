@@ -96,9 +96,10 @@ export interface GetCasesRequestDTO {
 }
 
 export interface CreateCaseRequestDTO {
+  type: string;
   projectId: string;
   deploymentId: string;
-  productId: string;
+  deployedProductId: string;
   title: string;
   description: string;
   issueTypeKey: number;

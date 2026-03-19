@@ -25,13 +25,14 @@ import { projects } from "@src/services/projects";
 import { cases } from "@src/services/cases";
 import type { CaseClassificationResponseDTO } from "@src/types";
 import { useEffect, useMemo, useState } from "react";
+import * as Yup from "yup";
 
 type CreateCaseFormValues = {
   project: string;
   product: string;
   deployment: string;
-  type: number;
-  severity: number;
+  type: string;
+  severity: string;
   title: string;
   description: string;
 };
@@ -56,18 +57,22 @@ export default function CreateCasePage() {
       deployment: "",
       title: "",
       description: "",
-      type: issueTypeOptions[0].value,
-      severity: severityLevelOptions[0].value,
+      type: "",
+      severity: "",
     },
+    validationSchema: createCaseValidationSchema,
+    validateOnBlur: true,
+    validateOnChange: true,
     onSubmit: (values) => {
       mutation.mutate({
+        type: "default_case",
         projectId: values.project,
         deploymentId: values.deployment,
-        productId: values.product,
+        deployedProductId: values.product,
         title: values.title,
         description: values.description,
-        issueTypeKey: values.type,
-        severityKey: values.severity,
+        issueTypeKey: Number(values.type),
+        severityKey: Number(values.severity),
       });
     },
   });
@@ -103,10 +108,10 @@ export default function CreateCasePage() {
 
   const mutation = useMutation({
     ...cases.create,
-    onSuccess: () => {
+    onSuccess: ({ id }) => {
       queryClient.invalidateQueries({ queryKey: ["cases"] });
       setTimeout(() => {
-        navigate("/support");
+        navigate(`/cases/${id}`);
       }, 500);
     },
   });
@@ -187,6 +192,7 @@ export default function CreateCasePage() {
               }
             />
             <SelectField
+              required
               name="deployment"
               label="Deployment Type"
               aiLabel={classified.has("deployment") ? "Auto Detected" : undefined}
@@ -198,6 +204,8 @@ export default function CreateCasePage() {
                 formik.setFieldValue("product", "");
               }}
               disabled={!formik.values.project || deploymentQuery.isLoading}
+              error={formik.touched.deployment && Boolean(formik.errors.deployment)}
+              helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
             />
             <SelectField
               required
@@ -209,6 +217,14 @@ export default function CreateCasePage() {
               value={formik.values.product}
               onChange={formik.handleChange}
               disabled={!formik.values.deployment || productQuery.isLoading}
+              error={formik.values.deployment ? formik.touched.product && Boolean(formik.errors.product) : false}
+              helperText={
+                formik.values.deployment
+                  ? formik.touched.product && formik.errors.product
+                    ? formik.errors.product
+                    : undefined
+                  : undefined
+              }
             />
           </Stack>
           <Stack gap={2}>
@@ -219,18 +235,26 @@ export default function CreateCasePage() {
               required
               name="title"
               label="Issue Title"
+              placeholder="Briefly describe the issue"
               aiLabel={classified.has("title") ? "Generated from Chat" : undefined}
               value={formik.values.title}
               onChange={formik.handleChange}
+              error={formik.touched.title && Boolean(formik.errors.title)}
+              helperText={formik.touched.title && formik.errors.title ? formik.errors.title : undefined}
             />
             <TextField
               required
               multiline
               name="description"
               label="Case Description"
+              placeholder="Explain the issue, including any relevant details"
               aiLabel={classified.has("description") ? "From Conversation" : undefined}
               value={formik.values.description}
               onChange={formik.handleChange}
+              error={formik.touched.description && Boolean(formik.errors.description)}
+              helperText={
+                formik.touched.description && formik.errors.description ? formik.errors.description : undefined
+              }
             />
             <SelectField
               required
@@ -241,6 +265,8 @@ export default function CreateCasePage() {
               options={issueTypeOptions}
               value={formik.values.type}
               onChange={formik.handleChange}
+              error={formik.touched.type && Boolean(formik.errors.type)}
+              helperText={formik.touched.type && formik.errors.type ? formik.errors.type : undefined}
             />
             <SelectField
               required
@@ -251,6 +277,8 @@ export default function CreateCasePage() {
               options={severityLevelOptions}
               value={formik.values.severity}
               onChange={formik.handleChange}
+              error={formik.touched.severity && Boolean(formik.errors.severity)}
+              helperText={formik.touched.severity && formik.errors.severity ? formik.errors.severity : undefined}
             />
           </Stack>
           {messages.length > 0 && <ConversationSummary messages={messages} />}
@@ -262,3 +290,21 @@ export default function CreateCasePage() {
     </>
   );
 }
+
+const createCaseValidationSchema = Yup.object({
+  project: Yup.string().required("Project is required"),
+  deployment: Yup.string().required("Deployment type is required"),
+  product: Yup.string().required("Product & version is required"),
+  title: Yup.string()
+    .trim()
+    .min(5, "Title must be at least 5 characters")
+    .max(200, "Title must be 200 characters or less")
+    .required("Issue title is required"),
+  description: Yup.string()
+    .trim()
+    .min(20, "Description must be at least 20 characters")
+    .max(5000, "Description must be 5000 characters or less")
+    .required("Case description is required"),
+  type: Yup.number().typeError("Issue type is required").required("Issue type is required"),
+  severity: Yup.number().typeError("Severity level is required").required("Severity level is required"),
+});

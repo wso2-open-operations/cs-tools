@@ -29,7 +29,8 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
 
     if (id) {
       queryClient.fetchQuery(projects.get(id)).then((data) => {
-        setNoveraEnabled(data.agentEnabled);
+        // setNoveraEnabled(data.agentEnabled);
+        setNoveraEnabled(false); // TODO: Remove this line
       });
     }
   };

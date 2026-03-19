@@ -166,8 +166,15 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
 ];
 
 export const SCROLL_OVERRIDES: Array<{ path: string; position: "top" | "bottom" | number }> = [
+  { path: "/cases/all", position: "top" },
   { path: "/cases/:id", position: "bottom" },
+
+  { path: "/chats/all", position: "top" },
   { path: "/chats/:id", position: "bottom" },
+
+  { path: "/services/all", position: "top" },
   { path: "/services/:id", position: "bottom" },
+
+  { path: "/changes/all", position: "top" },
   { path: "/changes/:id", position: "bottom" },
 ];
