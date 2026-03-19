@@ -225,22 +225,20 @@ export default function DashboardPage(): JSX.Element {
     const source = engagementStats;
     const outstanding =
       source?.outstandingEngagementTypeCount ?? [];
+    const normalizeEngagementLabel = (label: string): string => {
+      if (label === "New Feature / Improvement") return "Improvements";
+      if (label === "Consultancy") return "Services";
+      return label;
+    };
 
-    const getCount = (label: string) =>
-      outstanding.find((item) => item.label === label)?.count ?? 0;
-
-    const onboarding = getCount("Onboarding");
-    const migration = getCount("Migration");
-    const improvements = getCount("New Feature / Improvement");
-    const services = getCount("Consultancy");
-
-    const total = onboarding + migration + improvements + services;
+    const categories = outstanding.map((item) => ({
+      name: normalizeEngagementLabel(item.label),
+      value: item.count ?? 0,
+    }));
+    const total = categories.reduce((sum, item) => sum + item.value, 0);
 
     return {
-      onboarding,
-      migration,
-      services,
-      improvements,
+      categories,
       total,
     };
   }, [engagementStats]);
