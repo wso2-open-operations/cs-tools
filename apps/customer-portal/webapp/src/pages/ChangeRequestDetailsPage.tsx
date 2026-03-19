@@ -809,7 +809,6 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           <Paper variant="outlined">
             <Box sx={{ px: 3, pt: 3 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-                <ChevronRight size={20} />
                 <Typography variant="h6">Change Request Workflow</Typography>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
