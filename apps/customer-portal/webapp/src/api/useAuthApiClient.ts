@@ -42,14 +42,6 @@ export function useAuthApiClient() {
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("x-user-id-token", token);
 
-    // Security headers
-    headers.set("X-Content-Type-Options", "nosniff");
-    headers.set("Content-Security-Policy", "upgrade-insecure-requests");
-    headers.set(
-      "Strict-Transport-Security",
-      "max-age=31536000; includeSubDomains"
-    );
-
     // Default Accept header if not present
     if (!headers.has("Accept")) {
       headers.set("Accept", "application/json");
