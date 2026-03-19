@@ -31,16 +31,6 @@ const PROJECT_SEVERITY_PIE_COLORS: Record<string, string> = {
   "14": colors.green[500],
 };
 
-const PROJECT_ACTIVE_CASES_PIE_COLORS: Record<string, string> = {
-  "1": colors.blue[500],
-  "3": colors.green[500],
-  "6": colors.teal[400],
-  "10": colors.cyan[500],
-  "18": colors.yellow[600],
-  "1003": colors.orange[500],
-  "1006": colors.red[500],
-};
-
 const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
   Migration: colors.blue[500],
   Consultancy: colors.green[500],
@@ -51,7 +41,6 @@ const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
 
 export default function HomePage() {
   const { projectId } = useProject();
-  const { data: stats } = useQuery(cases.stats(projectId!));
   const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["default_case"] }));
   const { data: enagagementCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["engagement"] }));
   const { data: serviceRequestCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["service_request"] }));

@@ -21,7 +21,7 @@ import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
 import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
 
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
@@ -56,12 +56,14 @@ export default function SupportPage() {
 
   const { projectId, noveraEnabled } = useProject();
   const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
+  const { data: serviceRequestCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["service_request"] }));
+  const { data: changeRequestCaseTypeStats } = useQuery(changeRequests.stats(projectId!));
 
   const metrics = [
-    { label: "Open Cases", value: project?.metrics.cases ?? "N/A" },
-    { label: "Active Chats", value: project?.metrics.chats ?? "N/A" },
-    { label: "Service Requests", value: "N/A" },
-    { label: "Change Requests", value: "N/A" },
+    { label: "Open Cases", value: project?.metrics.cases },
+    { label: "Active Chats", value: project?.metrics.chats },
+    { label: "Service Requests", value: serviceRequestCaseTypeStats?.activeCount },
+    { label: "Change Requests", value: changeRequestCaseTypeStats?.activeCount },
   ];
 
   return (
