@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, TextField, Typography } from "@wso2/oxygen-ui";
+import { Box, LinearProgress, TextField, Typography } from "@wso2/oxygen-ui";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import useInfiniteProjects, {
@@ -43,7 +43,6 @@ export default function ProjectHub(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
   const [searchQuery, setSearchQuery] = useState<string>("");
-
   // Use debounce hook
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
 
@@ -84,24 +83,33 @@ export default function ProjectHub(): JSX.Element {
   ]);
 
   useEffect(() => {
-    if (isLoading || isAuthLoading) {
+    if (isLoading) {
       showLoader();
       return () => hideLoader();
     }
-  }, [isLoading, isAuthLoading, showLoader, hideLoader]);
+  }, [isLoading, showLoader, hideLoader]);
+
+  const isRedirectingToSingleProject =
+    !isLoading &&
+    !isAuthLoading &&
+    !isError &&
+    projects.length === 1 &&
+    !searchQuery;
 
   // Navigate to dashboard if there is only one project
   useEffect(() => {
-    if (
-      !isLoading &&
-      !isAuthLoading &&
-      !isError &&
-      projects.length === 1 &&
-      !searchQuery
-    ) {
+    if (isRedirectingToSingleProject) {
       navigate(`/projects/${projects[0].id}/dashboard`, { replace: true });
     }
-  }, [projects, isLoading, isAuthLoading, isError, navigate, searchQuery]);
+  }, [
+    isRedirectingToSingleProject,
+    projects,
+    isLoading,
+    isAuthLoading,
+    isError,
+    navigate,
+    searchQuery,
+  ]);
 
   useEffect(() => {
     if (isError) {
@@ -116,7 +124,35 @@ export default function ProjectHub(): JSX.Element {
   }, [projects.length, logger]);
 
   const renderContent = () => {
-    if (isLoading || isAuthLoading) {
+    const centeredLoader = (message: string): JSX.Element => (
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 2,
+        }}
+      >
+        <LinearProgress
+          color="warning"
+          sx={{ width: "80%", maxWidth: 400, height: 4 }}
+        />
+        <Typography variant="body2" color="text.secondary">
+          {message}
+        </Typography>
+      </Box>
+    );
+
+    if (isRedirectingToSingleProject) {
+      return centeredLoader("Redirecting, this may take a moment…");
+    }
+
+    if (isAuthLoading) return null;
+
+    if (isLoading) {
       return (
         <Box
           sx={{
@@ -368,7 +404,21 @@ export default function ProjectHub(): JSX.Element {
           </Box>
         )}
         {!showOnlySearchBar && (
-          <Box sx={{ width: "100%" }}>{renderContent()}</Box>
+          <Box
+            sx={{
+              width: "100%",
+              ...(isLoading || isAuthLoading || isRedirectingToSingleProject
+                ? {
+                    flex: 1,
+                    minHeight: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                  }
+                : {}),
+            }}
+          >
+            {renderContent()}
+          </Box>
         )}
       </Box>
     </Box>

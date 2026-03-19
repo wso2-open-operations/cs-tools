@@ -110,6 +110,9 @@ vi.mock("@wso2/oxygen-ui", () => ({
     purple: { 700: "#9C27B0" },
     teal: { 700: "#008080" },
     orange: { 700: "#FFA500" },
+    red: { 500: "#EF4444" },
+    yellow: { 700: "#F59E0B" },
+    green: { 500: "#22C55E" },
   },
 }));
 
