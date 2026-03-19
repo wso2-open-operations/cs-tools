@@ -90,7 +90,7 @@ export default function SettingsPage(): JSX.Element {
           canAddOrRemoveUsers={isCustomerAdmin}
         />
       )}
-      {displayTab === "ai" && <SettingsAiAssistant />}
+      {displayTab === "ai" && <SettingsAiAssistant projectId={projectId} />}
     </Box>
   );
 }

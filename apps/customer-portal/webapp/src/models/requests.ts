@@ -262,3 +262,8 @@ export interface ValidateContactRequest {
 export interface PatchChangeRequestRequest {
   plannedStartOn: string;
 }
+
+// Request body for PATCH /projects/:id.
+export interface PatchProjectRequest {
+  hasAgent?: boolean;
+}

@@ -27,10 +27,13 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot, CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useState, useEffect, type JSX } from "react";
-import {
-  getNoveraChatEnabled,
-  setNoveraChatEnabled,
-} from "@utils/settingsStorage";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import { usePatchProject } from "@api/usePatchProject";
+import { setNoveraChatEnabled } from "@utils/settingsStorage";
+
+interface SettingsAiAssistantProps {
+  projectId: string;
+}
 
 interface AiCapability {
   id: string;
@@ -43,21 +46,42 @@ interface AiCapability {
 /**
  * AI Assistant settings tab: Novera chat, knowledge base suggestions.
  *
+ * @param {SettingsAiAssistantProps} props - Component props.
  * @returns {JSX.Element} The component.
  */
-export default function SettingsAiAssistant(): JSX.Element {
+export default function SettingsAiAssistant({
+  projectId,
+}: SettingsAiAssistantProps): JSX.Element {
   const theme = useTheme();
+  const { data: projectDetails } = useGetProjectDetails(projectId);
+  const patchProject = usePatchProject(projectId);
   const [noveraEnabled, setNoveraEnabledState] = useState(true);
   const [kbSuggestionsEnabled, setKbSuggestionsEnabled] = useState(true);
 
   useEffect(() => {
-    setNoveraEnabledState(getNoveraChatEnabled());
-  }, []);
+    if (projectDetails?.account?.hasAgent !== undefined) {
+      const enabled = projectDetails.account.hasAgent;
+      setNoveraEnabledState(enabled);
+      setNoveraChatEnabled(enabled);
+    }
+  }, [projectDetails?.account?.hasAgent]);
 
-  const handleNoveraToggle = useCallback((checked: boolean) => {
-    setNoveraEnabledState(checked);
-    setNoveraChatEnabled(checked);
-  }, []);
+  const handleNoveraToggle = useCallback(
+    (checked: boolean) => {
+      const previous = noveraEnabled;
+      setNoveraEnabledState(checked);
+      setNoveraChatEnabled(checked);
+      patchProject.mutate(
+        { hasAgent: checked },
+        {onError: () => {
+            setNoveraEnabledState(previous);
+            setNoveraChatEnabled(previous);
+          },
+        },
+      );
+    },
+    [noveraEnabled, patchProject],
+  );
 
   const handleKbToggle = useCallback((checked: boolean) => {
     setKbSuggestionsEnabled(checked);
