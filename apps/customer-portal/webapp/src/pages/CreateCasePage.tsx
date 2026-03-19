@@ -888,7 +888,7 @@ export default function CreateCasePage(): JSX.Element {
               description={relatedCase.description}
             />
           ) : (
-            <ConversationSummary metadata={undefined} isLoading={false} />
+            <ConversationSummary conversationId={conversationId} />
           )}
         </Grid>
       )}
