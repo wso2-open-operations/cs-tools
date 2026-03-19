@@ -304,16 +304,6 @@ export default function ProjectHub(): JSX.Element {
     !isAuthLoading &&
     !isError;
 
-  // Center content when displaying projects (not search-only view) or loading
-  const shouldCenterContent =
-    showOnlySearchBar ||
-    isLoading ||
-    isAuthLoading ||
-    (!isLoading &&
-      !isAuthLoading &&
-      projects.length > 0 &&
-      projects.length <= 3);
-
   return (
     <Box
       sx={{
@@ -329,8 +319,10 @@ export default function ProjectHub(): JSX.Element {
           display: "flex",
           flexDirection: "column",
           flex: 1,
-          justifyContent: shouldCenterContent ? "center" : "flex-start",
-          pt: 0,
+          justifyContent: "center",
+          alignItems: "center",
+          pt: 2,
+          px: 2,
         }}
       >
         {!(
@@ -342,12 +334,11 @@ export default function ProjectHub(): JSX.Element {
         ) && (
           <Box
             sx={{
-              mb: showOnlySearchBar ? 0 : 3,
-              mt: showOnlySearchBar ? -15 : 3,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               textAlign: "center",
+              pb: 1,
             }}
           >
             {/* project hub title */}
@@ -407,14 +398,11 @@ export default function ProjectHub(): JSX.Element {
           <Box
             sx={{
               width: "100%",
-              ...(isLoading || isAuthLoading || isRedirectingToSingleProject
-                ? {
-                    flex: 1,
-                    minHeight: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                  }
-                : {}),
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              py: 1,
             }}
           >
             {renderContent()}
