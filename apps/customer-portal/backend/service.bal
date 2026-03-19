@@ -1449,6 +1449,35 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        // Verify user has access to the project before returning summary
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, projectId);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access project with ID: ${projectId}!`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the requested project."
+                    }
+                };
+            }
+
+            string customError = "Failed to verify project access.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
         ai_chat_agent:ConversationSummaryResponse|error summaryResponse = ai_chat_agent:getSummary(projectId, conversationId);
         if summaryResponse is error {
             if getStatusCode(summaryResponse) == http:STATUS_UNAUTHORIZED {
@@ -4381,7 +4410,7 @@ isolated service / on new websocket:Listener(wsPort) {
         authorization:UserInfoPayload|error userInfo = authorization:getUserInfoFromRequest(req);
         if userInfo is error {
             log:printError("WebSocket upgrade rejected: authorization failed", userInfo);
-            return error websocket:UpgradeError("Unauthorized: " + userInfo.message());
+            return error websocket:UpgradeError("Unauthorized");
         }
         log:printInfo(string `Upgrading to WebSocket for session ID: ${sessionId}, user: ${userInfo.email}`);
         return new WsProxyService(sessionId);
