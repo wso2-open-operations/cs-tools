@@ -26,6 +26,7 @@ import { cases } from "@src/services/cases";
 import type { CaseClassificationResponseDTO } from "@src/types";
 import { useEffect, useMemo, useState } from "react";
 import * as Yup from "yup";
+import { overrideOrDefault } from "../utils/others";
 
 type CreateCaseFormValues = {
   project: string;
@@ -45,9 +46,6 @@ export default function CreateCasePage() {
   const queryClient = useQueryClient();
   const { projectId } = useProject();
 
-  const { data: filters } = useSuspenseQuery(cases.filters(projectId!));
-  const issueTypeOptions = filters.issueTypes.map((type) => ({ value: Number(type.id), label: type.label }));
-  const severityLevelOptions = filters.severities.map((type) => ({ value: Number(type.id), label: type.label }));
   const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
 
   const formik = useFormik<CreateCaseFormValues>({
@@ -77,8 +75,15 @@ export default function CreateCasePage() {
     },
   });
 
+  const { data: filters } = useSuspenseQuery(cases.filters(formik.values.project));
+  const issueTypeOptions = filters.issueTypes.map((type) => ({ value: Number(type.id), label: type.label }));
+  const severityLevelOptions = filters.severities.map((type) => ({
+    value: Number(type.id),
+    label: overrideOrDefault(type.label),
+  }));
+
   const deploymentQuery = useQuery({
-    ...projects.deployments(projectId!),
+    ...projects.deployments(formik.values.project),
     enabled: !!formik.values.project,
   });
 
@@ -93,7 +98,7 @@ export default function CreateCasePage() {
   }));
 
   const deploymentOptions = useMemo(
-    () => deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.type })) ?? [],
+    () => deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.name })) ?? [],
     [deploymentQuery.data],
   );
 
@@ -103,7 +108,7 @@ export default function CreateCasePage() {
         value: product.id,
         label: product.name,
       })) ?? [],
-    [productQuery.data, formik.values.deployment],
+    [productQuery.data],
   );
 
   const mutation = useMutation({
@@ -156,7 +161,7 @@ export default function CreateCasePage() {
     }
 
     setClassified(autoFilledFields);
-  }, [classifications, deploymentOptions, productOptions]);
+  }, [classifications, deploymentOptions]);
 
   return (
     <>
@@ -184,7 +189,13 @@ export default function CreateCasePage() {
               label="Project"
               options={projectsOptions}
               value={formik.values.project}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                formik.setFieldValue("deployment", "");
+                formik.setFieldValue("product", "");
+                classified.delete("deployment");
+                classified.delete("product");
+              }}
               startAdornment={
                 <InputAdornment position="start">
                   <Folder size={pxToRem(20)} />
@@ -202,6 +213,8 @@ export default function CreateCasePage() {
               onChange={(e) => {
                 formik.handleChange(e);
                 formik.setFieldValue("product", "");
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+                classified.delete("product");
               }}
               disabled={!formik.values.project || deploymentQuery.isLoading}
               error={formik.touched.deployment && Boolean(formik.errors.deployment)}
@@ -215,7 +228,10 @@ export default function CreateCasePage() {
               placeholder="Select Product & Version"
               options={productOptions}
               value={formik.values.product}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+              }}
               disabled={!formik.values.deployment || productQuery.isLoading}
               error={formik.values.deployment ? formik.touched.product && Boolean(formik.errors.product) : false}
               helperText={
@@ -238,7 +254,10 @@ export default function CreateCasePage() {
               placeholder="Briefly describe the issue"
               aiLabel={classified.has("title") ? "Generated from Chat" : undefined}
               value={formik.values.title}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+              }}
               error={formik.touched.title && Boolean(formik.errors.title)}
               helperText={formik.touched.title && formik.errors.title ? formik.errors.title : undefined}
             />
@@ -250,7 +269,10 @@ export default function CreateCasePage() {
               placeholder="Explain the issue, including any relevant details"
               aiLabel={classified.has("description") ? "From Conversation" : undefined}
               value={formik.values.description}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+              }}
               error={formik.touched.description && Boolean(formik.errors.description)}
               helperText={
                 formik.touched.description && formik.errors.description ? formik.errors.description : undefined
@@ -264,7 +286,10 @@ export default function CreateCasePage() {
               aiLabel={classified.has("type") ? "AI Classified" : undefined}
               options={issueTypeOptions}
               value={formik.values.type}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+              }}
               error={formik.touched.type && Boolean(formik.errors.type)}
               helperText={formik.touched.type && formik.errors.type ? formik.errors.type : undefined}
             />
@@ -276,7 +301,10 @@ export default function CreateCasePage() {
               aiLabel={classified.has("severity") ? "AI Classified" : undefined}
               options={severityLevelOptions}
               value={formik.values.severity}
-              onChange={formik.handleChange}
+              onChange={(e) => {
+                formik.handleChange(e);
+                classified.delete(e.target.name as keyof CreateCaseFormValues);
+              }}
               error={formik.touched.severity && Boolean(formik.errors.severity)}
               helperText={formik.touched.severity && formik.errors.severity ? formik.errors.severity : undefined}
             />
