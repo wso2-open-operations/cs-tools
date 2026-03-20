@@ -4413,7 +4413,7 @@ isolated service / on new websocket:Listener(wsPort) {
     isolated resource function get [string sessionId](http:Request req) returns websocket:Service|websocket:UpgradeError {
         authorization:UserInfoPayload|error userInfo = authorization:getUserInfoFromRequest(req);
         if userInfo is error {
-            return error websocket:UpgradeError(userInfo.message());
+            return error websocket:UpgradeError(ERR_MSG_USER_INFO_HEADER_NOT_FOUND);
         }
         return new WsProxyService(sessionId);
     }
