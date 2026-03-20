@@ -4250,7 +4250,6 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     #
     # + projectId - ID of the project
     # + deploymentId - ID of the deployment
-    # + payload - Project status request containing email
     # + return - Change request details object or Error
     isolated resource function post projects/[string projectId]/deployments/[string deploymentId]/license
         (http:RequestContext ctx)returns product_consumption_subscription:License|http:InternalServerError
