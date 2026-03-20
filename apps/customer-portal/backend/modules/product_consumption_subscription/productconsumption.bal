@@ -53,7 +53,7 @@ public isolated function downloadLicense(LicenseDownloadPayload payload) returns
         return error("Application ID is required.");
     }
 
-    if (status == 2 ) {
+    if status == 2 {
         ApplicationSubscriptionResponse _ = check productConsumptionClient->/applications/[applicationId]/subscribe
             .post(<ApplicationSubscriptionPayload>{
             applicationId
