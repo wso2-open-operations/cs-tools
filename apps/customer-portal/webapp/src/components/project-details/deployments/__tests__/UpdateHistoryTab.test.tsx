@@ -39,7 +39,6 @@ describe("UpdateHistoryTab", () => {
     productVersion: "2.1.0",
     isLoading: false,
     onSaveUpdates: vi.fn(),
-    onClose: vi.fn(),
   };
 
   it("renders update history timeline", () => {
