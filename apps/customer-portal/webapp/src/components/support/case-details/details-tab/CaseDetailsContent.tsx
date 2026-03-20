@@ -20,6 +20,7 @@ import { useLocation } from "react-router";
 import type { CaseDetails } from "@models/responses";
 import { useGetCaseAttachments } from "@api/useGetCaseAttachments";
 import { useGetCallRequests } from "@api/useGetCallRequests";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import {
   getStatusColor,
   resolveColorFromTheme,
@@ -101,11 +102,22 @@ export default function CaseDetailsContent({
   const attachmentCount = attachmentsQuery.data?.pages?.[0]?.totalRecords;
 
   const resolvedProjectId = data?.project?.id ?? projectId;
-  const callsQuery = useGetCallRequests(resolvedProjectId, caseId);
+
+  // Derive state keys from filters so the queryKey matches CallsPanel exactly —
+  // React Query deduplicates the network call when both components are mounted.
+  const { data: projectFilters } = useGetProjectFilters(resolvedProjectId);
+  const callRequestStateKeys = useMemo<number[] | undefined>(() => {
+    if (!projectFilters?.callRequestStates) return undefined;
+    return projectFilters.callRequestStates
+      .map((s) => Number(s.id))
+      .filter((n) => !Number.isNaN(n));
+  }, [projectFilters]);
+
+  const callsQuery = useGetCallRequests(resolvedProjectId, caseId, callRequestStateKeys);
   const callCount =
     callsQuery.data?.pages?.[0]?.totalRecords ??
     callsQuery.data?.pages?.flatMap((p) => p.callRequests ?? []).length ??
-    0;
+    undefined;
 
   const assignedEngineer = data?.assignedEngineer;
   const engineerInitials = getInitials(assignedEngineer);
