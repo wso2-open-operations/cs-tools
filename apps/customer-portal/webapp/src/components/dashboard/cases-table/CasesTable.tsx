@@ -36,11 +36,13 @@ const OUTSTANDING_STATUS_IDS = [1, 10, 18, 1003, 1006] as const;
 interface CasesTableProps {
   projectId: string;
   excludeS0?: boolean;
+  hasAgent?: boolean;
 }
 
 const CasesTable = ({
   projectId,
   excludeS0 = false,
+  hasAgent = false,
 }: CasesTableProps): JSX.Element => {
   const navigate = useNavigate();
   const { isLoading: isAuthLoading } = useAsgardeo();
@@ -234,6 +236,7 @@ const CasesTable = ({
             setIsFilterOpen(!isFilterOpen);
           }
         }}
+        hasAgent={hasAgent}
       />
 
       {/* Filter dropdowns section */}

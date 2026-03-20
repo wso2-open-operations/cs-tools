@@ -83,18 +83,6 @@ export default function ChangeRequestsPage(): JSX.Element {
     isFetching: isStatsFetching,
   } = useGetProjectChangeRequestStats(projectId || "", { enabled: !!projectId });
 
-  // Debug logging for stats
-  useEffect(() => {
-    console.log("[ChangeRequestsPage] Stats Debug:", {
-      projectId,
-      stats,
-      isStatsLoading,
-      isStatsError,
-      isStatsFetching,
-      enabled: !!projectId,
-    });
-  }, [projectId, stats, isStatsLoading, isStatsError, isStatsFetching]);
-
   // Build API request (following cases listing pattern)
   const changeRequestSearchRequest = useMemo<
     Omit<ChangeRequestSearchRequest, "pagination">

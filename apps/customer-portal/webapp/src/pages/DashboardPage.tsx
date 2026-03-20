@@ -61,6 +61,7 @@ export default function DashboardPage(): JSX.Element {
     projectReady &&
     project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
   const excludeS0 = projectReady ? !isManagedCloudSubscription : false;
+  const hasAgent = projectReady ? (project?.hasAgent ?? false) : false;
 
   const {
     data: combinedCasesStats,
@@ -439,6 +440,7 @@ export default function DashboardPage(): JSX.Element {
           <CasesTable
             projectId={projectId}
             excludeS0={excludeS0}
+            hasAgent={hasAgent}
           />
         </Box>
       )}

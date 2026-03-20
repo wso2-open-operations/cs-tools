@@ -23,12 +23,14 @@ interface CasesTableHeaderProps {
   activeFiltersCount: number;
   isFiltersOpen: boolean;
   onFilterToggle: () => void;
+  hasAgent?: boolean;
 }
 
 const CasesTableHeader = ({
   activeFiltersCount,
   isFiltersOpen,
   onFilterToggle,
+  hasAgent = false,
 }: CasesTableHeaderProps): JSX.Element => {
   const navigate = useNavigate();
   const { projectId: rawProjectId } = useParams<{ projectId?: string }>();
@@ -36,8 +38,14 @@ const CasesTableHeader = ({
   const hasActiveFilters = activeFiltersCount > 0;
 
   const handleCreateCase = useCallback(() => {
-    navigate(`/projects/${projectId}/support/chat/describe-issue`);
-  }, [navigate, projectId]);
+    if (hasAgent) {
+      navigate(`/projects/${projectId}/support/chat/describe-issue`);
+    } else {
+      navigate(`/projects/${projectId}/support/chat/create-case`, {
+        state: { skipChat: true },
+      });
+    }
+  }, [navigate, projectId, hasAgent]);
 
   return (
     <Box>
