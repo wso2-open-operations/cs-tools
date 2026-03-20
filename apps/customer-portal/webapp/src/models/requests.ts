@@ -212,7 +212,7 @@ export interface CreateCallRequest {
 
 // Request body for updating a call request (PATCH /cases/:caseId/call-requests/:id).
 export interface PatchCallRequest {
-  reason: string;
+  reason?: string;
   stateKey: number;
   utcTimes?: string[];
 }
