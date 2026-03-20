@@ -110,5 +110,5 @@ public isolated function downloadLicense(LicenseDownloadPayload payload) returns
         License licenseData = license.result.license;
         return licenseData;
     }
-    return  error("Unexpected application status: " + status.toString());
+    return error("Unexpected application status: " + status.toString());
 }
