@@ -2242,6 +2242,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /projects/{projectId}/deployments/{deploymentId}/license:
+    post:
+      summary: Download license for a project deployment.
+      operationId: postProjectsProjectidDeploymentsDeploymentidLicense
+      parameters:
+      - name: projectId
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          type: string
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/License'
+        "500":
+          description: InternalServerError
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 components:
   schemas:
     Account:
@@ -2257,12 +2295,10 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
-          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
-          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -2423,7 +2459,6 @@ components:
       description: Request payload for searching call requests.
     CallRequestUpdatePayload:
       required:
-      - reason
       - stateKey
       type: object
       properties:
@@ -2431,9 +2466,9 @@ components:
           type: integer
           description: State key
           format: int64
-        reason:
+        cancellationReason:
           type: string
-          description: Reason for the update
+          description: Reason for the requested call cancellation
         utcTimes:
           type: array
           description: New preferred UTC times for the call (mandatory when stateKey
@@ -3942,6 +3977,19 @@ components:
           type: string
           description: Email of the integration user
       description: Integration user.
+    License:
+      required:
+      - signature
+      - subscriptionData
+      type: object
+      properties:
+        subscriptionData:
+          $ref: '#/components/schemas/SubscriptionData'
+        signature:
+          type: string
+          description: Response signature
+      additionalProperties: false
+      description: License details within the license response.
     Membership:
       required:
       - id
@@ -4805,6 +4853,35 @@ components:
       enum:
       - desc
       - asc
+    SubscriptionData:
+      required:
+      - clientId
+      - clientSecret
+      - deploymentId
+      - deploymentName
+      - secrets
+      - subscriptionKey
+      type: object
+      properties:
+        deploymentId:
+          type: string
+          description: Deployment identifier
+        deploymentName:
+          type: string
+          description: Deployment name
+        subscriptionKey:
+          type: string
+          description: Subscription key
+        clientId:
+          type: string
+          description: OAuth2 client ID
+        clientSecret:
+          type: string
+          description: OAuth2 client secret
+        secrets:
+          type: string
+          description: Subscription secrets
+      description: Subscription data within the license response.
     TimeCardSearchPayload:
       type: object
       properties:
@@ -5029,6 +5106,10 @@ components:
           phoneNumber:
             type: string
             description: Phone number of the user
+          lastPasswordUpdateTime:
+            type: string
+            description: Last password update time
+            nullable: true
     UserResponse:
       required:
       - email
