@@ -1,4 +1,4 @@
-import type { CreateContactRequestDTO, Me, MeDTO, Role, User, UserDTO, UsersDTO } from "@src/types";
+import type { CreateContactRequestDTO, EditMeDTO, Me, MeDTO, Role, User, UserDTO, UsersDTO } from "@src/types";
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import apiClient from "@src/services/apiClient";
 
@@ -28,6 +28,10 @@ const editContact = async (
   body: Partial<Omit<CreateContactRequestDTO, "contactEmail" | "contactFirstName" | "contactLastName">>,
 ): Promise<void> => {
   await apiClient.patch(USER_ACTIONS_ENDPOINT(id, email), body);
+};
+
+const editMe = async (body: Partial<EditMeDTO>): Promise<void> => {
+  await apiClient.patch(USERS_ME_ENDPOINT, body);
 };
 
 /* Mappers */
@@ -61,6 +65,11 @@ function toUser(dto: UserDTO): User {
 /* Query Options */
 export const users = {
   me: () => queryOptions({ queryKey: ["me"], queryFn: getMe }),
+
+  editMe: () =>
+    mutationOptions({
+      mutationFn: (body: Partial<EditMeDTO>) => editMe(body),
+    }),
 
   all: (projectId: string) => queryOptions({ queryKey: ["users", projectId], queryFn: () => getUsers(projectId) }),
 

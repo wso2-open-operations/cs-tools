@@ -26,3 +26,8 @@ export interface CreateContactRequestDTO {
   isCsIntegrationUser: boolean;
   isSecurityContact: boolean;
 }
+
+export interface EditMeDTO {
+  phoneNumber: string;
+  timeZone: string;
+}

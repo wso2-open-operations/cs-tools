@@ -170,21 +170,6 @@ export default function CreateCasePage() {
 
   return (
     <>
-      <Backdrop
-        sx={{
-          color: "primary.contrastText",
-          zIndex: (theme) => theme.zIndex.drawer + 1,
-          flexDirection: "column",
-          gap: 2,
-          pointerEvents: "none",
-        }}
-        open={mutation.isPending}
-      >
-        <CircularProgress color="inherit" />
-        <Typography variant="h6" color="inherit">
-          Saving your case...
-        </Typography>
-      </Backdrop>
       <form onSubmit={formik.handleSubmit}>
         <Stack pb={5} gap={5}>
           <Stack gap={2}>
@@ -315,8 +300,13 @@ export default function CreateCasePage() {
             />
           </Stack>
           {messages.length > 0 && <ConversationSummary messages={messages} />}
-          <Button type="submit" variant="contained" sx={{ textTransform: "initial" }}>
-            Create Case
+          <Button
+            type="submit"
+            variant="contained"
+            startIcon={formik.isSubmitting ? <CircularProgress size={16} color="inherit" /> : undefined}
+            sx={{ textTransform: "initial" }}
+          >
+            {formik.isSubmitting ? "Saving..." : "Create Case"}
           </Button>
         </Stack>
       </form>

@@ -24,13 +24,25 @@ import { Bell, BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxyg
 import { useLayout } from "@context/layout";
 import { SettingListItem } from "@components/features/settings";
 import { Avatar } from "@components/features/users";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { users } from "@src/services/users";
+import { useProject } from "../context/project";
+import { projects } from "../services/projects";
+import { useNotify } from "../context/snackbar";
 
 export default function ProfilePage() {
   const layout = useLayout();
+  const notify = useNotify();
+  const { projectId, noveraEnabled } = useProject();
   const { data } = useQuery(users.me());
   const name = data ? data?.firstName + " " + data?.lastName : undefined;
+
+  const projectEditMutation = useMutation({
+    ...projects.edit(projectId!),
+    onError: () => {
+      notify.error("Failed to update project. Please try again.");
+    },
+  });
 
   const AppBarSlot = () => (
     <Stack direction="row" alignItems="center" gap={1.5} mt={-2}>
@@ -100,7 +112,12 @@ export default function ProfilePage() {
           description="Enable AI-powered chat support"
           iconColor={colors.purple[500]}
           icon={Bot}
-          suffix={<Switch defaultChecked />}
+          suffix={
+            <Switch
+              checked={noveraEnabled}
+              onChange={(event) => projectEditMutation.mutate({ hasAgent: event.target.checked })}
+            />
+          }
         />
         <SettingListItem
           name="Smart Knowledge Base"

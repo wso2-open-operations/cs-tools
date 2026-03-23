@@ -36,7 +36,7 @@ import {
   PROJECT_DETAILS_ENDPOINT,
 } from "@config/endpoints";
 import apiClient from "@src/services/apiClient";
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
 import { stripHtmlTags } from "@utils/others";
 
 const getAllProjects = async (): Promise<Project[]> => {
@@ -49,6 +49,10 @@ const getAllProjects = async (): Promise<Project[]> => {
 const getProject = async (id: string): Promise<ProjectInfo> => {
   const response = (await apiClient.get<ProjectDTO>(PROJECT_DETAILS_ENDPOINT(id))).data;
   return mapProjectDTOToProject(response);
+};
+
+const editProject = async (id: string, body: { hasAgent: boolean }): Promise<void> => {
+  await apiClient.patch(PROJECT_DETAILS_ENDPOINT(id), body);
 };
 
 const getDeploymentsByProject = async (
@@ -150,6 +154,11 @@ export const projects = {
     queryOptions({
       queryKey: ["project", id],
       queryFn: () => getProject(id),
+    }),
+
+  edit: (id: string) =>
+    mutationOptions({
+      mutationFn: (body: { hasAgent: boolean }) => editProject(id, body),
     }),
 
   deployments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
