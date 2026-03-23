@@ -60,7 +60,8 @@ export default function RegenerateTokenModal({
 }: RegenerateTokenModalProps): JSX.Element {
   const [secret, setSecret] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedSecret, setCopiedSecret] = useState(false);
+  const [copiedName, setCopiedName] = useState(false);
 
   const regenerateMutation = useRegenerateRegistryToken(projectId);
 
@@ -76,19 +77,25 @@ export default function RegenerateTokenModal({
   function handleClose() {
     setSecret(null);
     setShowSecret(false);
-    setCopied(false);
+    setCopiedSecret(false);
+    setCopiedName(false);
     regenerateMutation.reset();
     onClose();
   }
 
-  async function handleCopy() {
-    if (!secret) return;
+  async function handleCopy(textToCopy: string, type: "name" | "secret") {
+    if (!textToCopy) return;
     try {
-      await navigator.clipboard.writeText(secret);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback: select + copy
+      await navigator.clipboard.writeText(textToCopy);
+      if (type === "name") {
+        setCopiedName(true);
+        setTimeout(() => setCopiedName(false), 2000);
+      } else {
+        setCopiedSecret(true);
+        setTimeout(() => setCopiedSecret(false), 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
     }
   }
 
@@ -119,9 +126,37 @@ export default function RegenerateTokenModal({
               will not be able to see it again after closing this dialog.
             </Alert>
             <TextField
+              label="Token Name"
+              fullWidth
+              value={token?.displayName ?? token?.name}
+              InputProps={{
+                readOnly: true,
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      onClick={() =>
+                        handleCopy(
+                          token?.displayName ?? token?.name ?? "",
+                          "name",
+                        )
+                      }
+                      color={copiedName ? "success" : "default"}
+                      aria-label="Copy token name"
+                    >
+                      {copiedName ? (
+                        <CheckCircle size={18} />
+                      ) : (
+                        <Copy size={18} />
+                      )}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <TextField
               label="New Token Secret"
               fullWidth
-              multiline={!showSecret}
               value={secret}
               InputProps={{
                 readOnly: true,
@@ -141,11 +176,11 @@ export default function RegenerateTokenModal({
                     </IconButton>
                     <IconButton
                       size="small"
-                      onClick={handleCopy}
-                      color={copied ? "success" : "default"}
+                      onClick={() => handleCopy(secret ?? "", "secret")}
+                      color={copiedSecret ? "success" : "default"}
                       aria-label="Copy secret"
                     >
-                      {copied ? (
+                      {copiedSecret ? (
                         <CheckCircle size={18} />
                       ) : (
                         <Copy size={18} />
@@ -185,7 +220,7 @@ export default function RegenerateTokenModal({
       <DialogActions sx={{ px: 3, py: 2 }}>
         {isSecretStep ? (
           <Button variant="contained" onClick={handleClose}>
-            Done
+            Close
           </Button>
         ) : (
           <>
