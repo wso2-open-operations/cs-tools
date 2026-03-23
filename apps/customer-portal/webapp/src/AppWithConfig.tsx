@@ -70,8 +70,12 @@ export default function AppWithConfig(): JSX.Element {
       scopes={["openid", "email", "groups"]}
       preferences={{
         theme: {
-          inheritFromBranding: false
-        }
+          inheritFromBranding: false,
+        },
+        user: {
+          fetchUserProfile: false,
+          fetchOrganizations: false,
+        },
       }}
     >
       <BrowserRouter>
