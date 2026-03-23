@@ -66,7 +66,7 @@ export default function ChangeRequestsList({
     return (
       <Box sx={{ textAlign: "center", py: 6 }}>
         <Typography variant="body1" color="text.secondary">
-          No change requests found.
+          No change requests found.Try adjusting your filters or search query.
         </Typography>
       </Box>
     );
