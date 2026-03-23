@@ -24,17 +24,10 @@ import {
   Paper,
   Select,
   TextField,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import {
-  File,
-  PencilLine,
-  Sparkles,
-  Upload,
-  X,
-} from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { File, Sparkles, Upload, X } from "@wso2/oxygen-ui-icons-react";
+import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@constants/supportConstants";
 import { isS0SeverityLabel } from "@constants/dashboardConstants";
 import type { CaseMetadataResponse } from "@models/responses";
@@ -94,9 +87,7 @@ export function CaseDetailsSection({
   isSecurityReport = false,
   excludeS0 = false,
 }: CaseDetailsSectionProps): JSX.Element {
-  const [isEditing, setIsEditing] = useState(false);
-  const effectiveEditing = isRelatedCaseMode || isEditing;
-  const titleReadOnly = isTitleDisabled || !effectiveEditing;
+  const titleReadOnly = isTitleDisabled;
   const meta = metadata as
     | {
         issueTypes?: unknown[];
@@ -141,10 +132,7 @@ export function CaseDetailsSection({
       !filteredBase.some((level) => level.id === extra.id) &&
       (!excludeS0 || !isS0SeverityLabel(extra.label)),
   );
-  const severityLevels = [
-    ...filteredBase,
-    ...filteredExtra,
-  ].map((level) => ({
+  const severityLevels = [...filteredBase, ...filteredExtra].map((level) => ({
     ...level,
     label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
   }));
@@ -163,29 +151,6 @@ export function CaseDetailsSection({
         <Typography variant="h6">
           {isSecurityReport ? "Report Details" : "Case Details"}
         </Typography>
-        {!isRelatedCaseMode && (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Tooltip
-              title={
-                isEditing
-                  ? "Click here to stop modifying case details"
-                  : "Click here to modify case details"
-              }
-              placement="top"
-              arrow
-            >
-              <IconButton
-                onClick={() => setIsEditing(!isEditing)}
-                aria-label={
-                  isEditing ? "Stop editing case details" : "Edit case details"
-                }
-                color={isEditing ? "primary" : "default"}
-              >
-                <PencilLine size={18} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
       </Box>
 
       {/* main form fields container */}
@@ -277,7 +242,7 @@ export function CaseDetailsSection({
               onAttachmentRemove={
                 isSecurityReport ? undefined : onAttachmentRemove
               }
-              disabled={!effectiveEditing}
+              disabled={false}
               value={description}
               onChange={setDescription}
               maxHeight="210px"
@@ -312,15 +277,13 @@ export function CaseDetailsSection({
             </Box>
 
             <Paper
-              role={effectiveEditing ? "button" : undefined}
+              role="button"
               tabIndex={0}
-              aria-disabled={!effectiveEditing}
+              aria-disabled={false}
               onClick={() => {
-                if (!effectiveEditing) return;
                 onAttachmentClick?.();
               }}
               onKeyDown={(e) => {
-                if (!effectiveEditing) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   onAttachmentClick?.();
@@ -328,23 +291,17 @@ export function CaseDetailsSection({
               }}
               sx={{
                 border: 1,
-                borderColor: effectiveEditing ? "divider" : "action.disabled",
+                borderColor: "divider",
                 p: 2,
-                bgcolor: effectiveEditing
-                  ? "action.hover"
-                  : "action.disabledBackground",
-                cursor: effectiveEditing ? "pointer" : "not-allowed",
+                bgcolor: "action.hover",
+                cursor: "pointer",
                 transition: "border-color 0.2s ease",
                 "&:hover": {
-                  borderColor: effectiveEditing
-                    ? "warning.main"
-                    : "action.disabled",
+                  borderColor: "warning.main",
                 },
                 "&:focus-visible": {
                   outline: "2px solid",
-                  outlineColor: effectiveEditing
-                    ? "warning.main"
-                    : "action.disabled",
+                  outlineColor: "warning.main",
                 },
               }}
             >
@@ -367,9 +324,7 @@ export function CaseDetailsSection({
                 <Box sx={{ minWidth: 0, flex: 1 }}>
                   <Typography
                     sx={{
-                      color: effectiveEditing
-                        ? "warning.main"
-                        : "text.disabled",
+                      color: "warning.main",
                       fontSize: "0.875rem",
                       fontWeight: 500,
                     }}
@@ -454,11 +409,7 @@ export function CaseDetailsSection({
                   />
                 )}
               </Box>
-              <FormControl
-                fullWidth
-                size="small"
-                disabled={isLoading || !effectiveEditing}
-              >
+              <FormControl fullWidth size="small" disabled={isLoading}>
                 <Select
                   id="issue-type-select"
                   value={issueType}
@@ -513,11 +464,7 @@ export function CaseDetailsSection({
                   />
                 )}
               </Box>
-              <FormControl
-                fullWidth
-                size="small"
-                disabled={isLoading || !effectiveEditing}
-              >
+              <FormControl fullWidth size="small" disabled={isLoading}>
                 <Select
                   id="severity-level-select"
                   value={severity}

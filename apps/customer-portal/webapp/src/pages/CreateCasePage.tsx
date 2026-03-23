@@ -121,13 +121,15 @@ export default function CreateCasePage(): JSX.Element {
   const searchParams = new URLSearchParams(location.search);
   const caseType = searchParams.get("type");
   const isSecurityReportPath = location.pathname.includes("security-report");
-  const isSecurityReport = caseType === CaseType.SECURITY_REPORT_ANALYSIS || isSecurityReportPath;
+  const isSecurityReport =
+    caseType === CaseType.SECURITY_REPORT_ANALYSIS || isSecurityReportPath;
   const skipChat = !!locationStateRaw?.skipChat || isSecurityReport;
   const { showLoader, hideLoader } = useLoader();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
   const isManagedCloudSubscription =
-    projectDetails?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+    projectDetails?.type?.label ===
+    PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
   const excludeS0 = projectDetails ? !isManagedCloudSubscription : false;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
@@ -271,7 +273,10 @@ export default function CreateCasePage(): JSX.Element {
         const stored = sessionStorage.getItem(CONVERSATION_ID_STORAGE_KEY);
         return stored || undefined;
       } catch (e) {
-        logger.error("Failed to retrieve conversationId from sessionStorage", e);
+        logger.error(
+          "Failed to retrieve conversationId from sessionStorage",
+          e,
+        );
         return undefined;
       }
     },
@@ -285,10 +290,7 @@ export default function CreateCasePage(): JSX.Element {
           locationState.conversationId,
         );
       } catch (e) {
-        logger.error(
-          "Failed to store conversationId in sessionStorage",
-          e,
-        );
+        logger.error("Failed to store conversationId in sessionStorage", e);
       }
       setConversationId(locationState.conversationId);
     }
@@ -303,10 +305,7 @@ export default function CreateCasePage(): JSX.Element {
         sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
       }
     } catch (e) {
-      logger.error(
-        "Failed to persist conversationId to sessionStorage",
-        e,
-      );
+      logger.error("Failed to persist conversationId to sessionStorage", e);
     }
   }, [conversationId, CONVERSATION_ID_STORAGE_KEY, logger]);
 
@@ -729,13 +728,16 @@ export default function CreateCasePage(): JSX.Element {
         );
 
         showSuccess("Case created successfully");
-        
+
         // Clean up sessionStorage safely
         try {
           sessionStorage.removeItem(STORAGE_KEY);
           sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
         } catch (e) {
-          logger.error("Failed to cleanup sessionStorage after case creation", e);
+          logger.error(
+            "Failed to cleanup sessionStorage after case creation",
+            e,
+          );
         }
 
         // Refetch security vulnerabilities if this was a security report

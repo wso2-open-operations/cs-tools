@@ -14,14 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Grid } from "@wso2/oxygen-ui";
-import { CircleAlert, Shield, FileCheck } from "@wso2/oxygen-ui-icons-react";
+import { Box } from "@wso2/oxygen-ui";
 import { useParams } from "react-router";
-import { useMemo, type JSX } from "react";
-import { StatCard } from "@components/dashboard/stats/StatCard";
+import { type JSX } from "react";
+import SupportStatGrid from "@components/common/stat-grid/SupportStatGrid";
 import { usePostProductVulnerabilitiesSearch } from "@api/usePostProductVulnerabilitiesSearch";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
 import { CaseType } from "@constants/supportConstants";
+import { SECURITY_STAT_CONFIGS } from "@constants/securityConstants";
 
 /**
  * SecurityStats component displays security-related statistics cards.
@@ -51,67 +51,25 @@ export default function SecurityStats(): JSX.Element {
     enabled: !!projectId,
   });
 
-  const stats = useMemo(
-    () => [
-      {
-        id: "totalVulnerabilities",
-        label: "Total Vulnerabilities",
-        value: vulnerabilitiesData?.totalRecords ?? 0,
-        icon: <CircleAlert size={20} />,
-        iconColor: "error" as const,
-        tooltipText: "Total number of vulnerabilities detected",
-        isLoading: isVulnerabilitiesLoading,
-        isError: isVulnerabilitiesError,
-      },
-      {
-        id: "activeSecurityReports",
-        label: "Active Security Reports",
-        value: securityReportStats?.activeCount ?? 0,
-        icon: <Shield size={20} />,
-        iconColor: "warning" as const,
-        tooltipText: "Number of active security report analysis cases",
-        isLoading: isSecurityReportLoading,
-        isError: isSecurityReportError,
-      },
-      {
-        id: "resolvedSecurityReports",
-        label: "Resolved Security Reports (Last 30d)",
-        value: securityReportStats?.resolvedCases?.pastThirtyDays ?? 0,
-        icon: <FileCheck size={20} />,
-        iconColor: "success" as const,
-        tooltipText:
-          "Number of security reports resolved in the past 30 days",
-        isLoading: isSecurityReportLoading,
-        isError: isSecurityReportError,
-      },
-    ],
-    [
-      vulnerabilitiesData,
-      isVulnerabilitiesLoading,
-      isVulnerabilitiesError,
-      securityReportStats,
-      isSecurityReportLoading,
-      isSecurityReportError,
-    ],
-  );
+  const stats = {
+    totalVulnerabilities: vulnerabilitiesData?.totalRecords ?? 0,
+    activeSecurityReports: securityReportStats?.activeCount ?? 0,
+    resolvedSecurityReports:
+      securityReportStats?.resolvedCases?.pastThirtyDays ?? 0,
+  };
+
+  const isLoading = isVulnerabilitiesLoading || isSecurityReportLoading;
+  const isError = isVulnerabilitiesError || isSecurityReportError;
 
   return (
-    <Grid container spacing={2} sx={{ mb: 3 }}>
-      {stats.map((stat) => (
-        <Grid key={stat.id} size={{ xs: 12, sm: 6, md: 4 }}>
-          <StatCard
-            label={stat.label}
-            value={stat.value}
-            icon={stat.icon}
-            iconColor={stat.iconColor}
-            tooltipText={stat.tooltipText}
-            showTrend={false}
-            isLoading={stat.isLoading}
-            isError={stat.isError}
-            isTrendError={false}
-          />
-        </Grid>
-      ))}
-    </Grid>
+    <Box>
+      <SupportStatGrid
+        isLoading={isLoading}
+        isError={isError}
+        entityName="security"
+        stats={stats}
+        configs={SECURITY_STAT_CONFIGS}
+      />
+    </Box>
   );
 }

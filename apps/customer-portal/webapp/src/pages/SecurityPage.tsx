@@ -98,7 +98,7 @@ const SecurityPage = (): JSX.Element => {
     <Box>
       <SecurityStats />
 
-      <Box>
+      <Box sx={{ mt: 3 }}>
         <TabBar
           tabs={tabs}
           activeTab={activeTab}

@@ -25,11 +25,9 @@ import {
   Skeleton,
   Typography,
   TextField,
-  IconButton,
-  Tooltip,
 } from "@wso2/oxygen-ui";
-import { PencilLine, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { Sparkles } from "@wso2/oxygen-ui-icons-react";
+import { type JSX } from "react";
 import type { ProductVersionOption } from "@utils/caseCreation";
 
 export interface BasicInformationSectionProps {
@@ -74,9 +72,6 @@ export function BasicInformationSection({
   isRelatedCaseMode = false,
   isDeploymentDisabled = false,
 }: BasicInformationSectionProps): JSX.Element {
-  const [isEditing, setIsEditing] = useState(false);
-  const effectiveEditing = isRelatedCaseMode || isEditing;
-
   const deploymentOptions = Array.from(
     new Set(
       [
@@ -92,7 +87,8 @@ export function BasicInformationSection({
       ),
     ),
   );
-  const useProductOptionList = Array.isArray(productOptionList) && productOptionList.length > 0;
+  const useProductOptionList =
+    Array.isArray(productOptionList) && productOptionList.length > 0;
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -106,31 +102,6 @@ export function BasicInformationSection({
         }}
       >
         <Typography variant="h6">Basic Information</Typography>
-        {!isRelatedCaseMode && (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Tooltip
-            title={
-              isEditing
-                ? "Click here to stop modifying basic information"
-                : "Click here to modify basic information"
-            }
-            placement="top"
-            arrow
-          >
-            <IconButton
-              onClick={() => setIsEditing(!isEditing)}
-              aria-label={
-                isEditing
-                  ? "Stop editing basic information"
-                  : "Edit basic information"
-              }
-              color={isEditing ? "primary" : "default"}
-            >
-              <PencilLine size={18} />
-            </IconButton>
-          </Tooltip>
-        </Box>
-        )}
       </Box>
 
       {/* project card grid layout */}
@@ -157,23 +128,19 @@ export function BasicInformationSection({
               )}
             </Typography>
             {!isRelatedCaseMode && isDeploymentAutoDetected && (
-            <Chip
-              label="Auto detected"
-              size="small"
-              variant="outlined"
-              icon={<Sparkles size={10} />}
-              sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-            />
+              <Chip
+                label="Auto detected"
+                size="small"
+                variant="outlined"
+                icon={<Sparkles size={10} />}
+                sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+              />
             )}
           </Box>
           {isDeploymentLoading ? (
             <Skeleton variant="rounded" height={40} sx={{ maxWidth: "100%" }} />
           ) : (
-            <FormControl
-              fullWidth
-              size="small"
-              disabled={isDeploymentDisabled || !effectiveEditing}
-            >
+            <FormControl fullWidth size="small" disabled={isDeploymentDisabled}>
               <Select
                 value={deployment}
                 onChange={(e) => setDeployment(e.target.value)}
@@ -206,13 +173,13 @@ export function BasicInformationSection({
               </Box>
             </Typography>
             {!isRelatedCaseMode && isProductAutoDetected && (
-            <Chip
-              label="Auto detected"
-              size="small"
-              variant="outlined"
-              icon={<Sparkles size={10} />}
-              sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
-            />
+              <Chip
+                label="Auto detected"
+                size="small"
+                variant="outlined"
+                icon={<Sparkles size={10} />}
+                sx={{ height: 20, fontSize: "0.65rem", p: 0.5 }}
+              />
             )}
           </Box>
           {isProductLoading ? (
@@ -221,7 +188,7 @@ export function BasicInformationSection({
             <FormControl
               fullWidth
               size="small"
-              disabled={isProductDropdownDisabled || !effectiveEditing}
+              disabled={isProductDropdownDisabled}
             >
               <Select
                 value={product}

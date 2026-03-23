@@ -14,6 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CircleAlert, Shield, FileCheck } from "@wso2/oxygen-ui-icons-react";
+import type { SupportStatConfig } from "./supportConstants";
+
 /**
  * Security tab identifiers for the Security Center page.
  */
@@ -33,3 +36,35 @@ export const CaseReportType = {
 
 export type CaseReportTypeValue =
   (typeof CaseReportType)[keyof typeof CaseReportType];
+
+/**
+ * Valid keys for security statistics.
+ */
+export type SecurityStatKey =
+  | "totalVulnerabilities"
+  | "activeSecurityReports"
+  | "resolvedSecurityReports";
+
+/**
+ * Configuration for the security statistics cards.
+ */
+export const SECURITY_STAT_CONFIGS: SupportStatConfig<SecurityStatKey>[] = [
+  {
+    icon: CircleAlert,
+    iconColor: "error",
+    key: "totalVulnerabilities",
+    label: "Total Vulnerabilities",
+  },
+  {
+    icon: Shield,
+    iconColor: "warning",
+    key: "activeSecurityReports",
+    label: "Active Security Reports",
+  },
+  {
+    icon: FileCheck,
+    iconColor: "success",
+    key: "resolvedSecurityReports",
+    label: "Resolved Security Reports (Last 30d)",
+  },
+];
