@@ -19,8 +19,7 @@ import {
   Clock,
   Info,
   Rocket,
-  Server,
-  Key,
+  Server
 } from "@wso2/oxygen-ui-icons-react";
 import { User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { ElementType } from "react";
