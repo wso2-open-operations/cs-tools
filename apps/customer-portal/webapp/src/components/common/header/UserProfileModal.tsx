@@ -30,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, Lock, PencilLine, X } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@api/useGetUserDetails";
+import useGetMetadata from "@api/useGetMetadata";
 import { usePatchUserMe } from "@api/usePatchUserMe";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -112,6 +113,7 @@ export default function UserProfileModal({
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { data: userDetails, isLoading } = useGetUserDetails();
+  const { data: metadata } = useGetMetadata();
   const patchUserMe = usePatchUserMe();
 
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -121,17 +123,18 @@ export default function UserProfileModal({
   const [isPhoneEditing, setIsPhoneEditing] = useState(false);
 
   // Initialize form state when modal opens
-  // eslint-disable-next-line
   useEffect(() => {
     if (open && userDetails) {
       const raw = userDetails.phoneNumber ?? "";
-      setPhoneNumber(raw);
       const { countryCode: cc, nationalNumber: nn } =
         parseE164ToCountryCode(raw);
-      setCountryCode(cc);
-      setNationalNumber(nn);
-      setTimeZone(userDetails.timeZone ?? "");
-      setIsPhoneEditing(false);
+      queueMicrotask(() => {
+        setPhoneNumber(raw);
+        setCountryCode(cc);
+        setNationalNumber(nn);
+        setTimeZone(userDetails.timeZone ?? "");
+        setIsPhoneEditing(false);
+      });
     }
   }, [open, userDetails]);
 
@@ -241,6 +244,13 @@ export default function UserProfileModal({
     if (!timeZone) return "";
     return timeZone;
   }, [timeZone]);
+  const timeZoneOptions = useMemo(() => {
+    const fromMetadata =
+      metadata?.timeZones
+        ?.map((tz) => tz.id || tz.label)
+        .filter((tz) => !!tz) ?? [];
+    return fromMetadata.length > 0 ? fromMetadata : TIME_ZONE_OPTIONS;
+  }, [metadata?.timeZones]);
 
   const lastPasswordUpdate = useMemo(() => {
     return formatLastPasswordUpdate(
@@ -591,7 +601,7 @@ export default function UserProfileModal({
                               return selected;
                             }}
                           >
-                            {TIME_ZONE_OPTIONS.map((tz) => (
+                            {timeZoneOptions.map((tz) => (
                               <MenuItem key={tz} value={tz}>
                                 {tz}
                               </MenuItem>
