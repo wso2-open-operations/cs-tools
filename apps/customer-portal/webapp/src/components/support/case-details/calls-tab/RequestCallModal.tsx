@@ -16,6 +16,7 @@
 
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -28,9 +29,10 @@ import {
   MenuItem,
   Select,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { Info, Plus, Trash2, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useState,
@@ -55,10 +57,11 @@ const DURATION_OPTIONS = [
 ];
 
 const INITIAL_FORM = {
-  preferredDateTimeLocal: "",
+  preferredDateTimesLocal: [""],
   durationInMinutes: 30,
   notes: "",
 };
+const MAX_PREFERRED_TIMES = 3;
 
 export interface RequestCallModalProps {
   open: boolean;
@@ -138,27 +141,34 @@ export default function RequestCallModal({
   const stateKey = Number.isNaN(stateKeyFromCall) ? 2 : stateKeyFromCall;
 
   useEffect(() => {
-    if (!open) {
-      setForm(INITIAL_FORM);
-      setModalError(null);
-      return;
-    }
+    if (!open) return;
     if (editCall) {
-      const preferredUtc =
-        editCall.preferredTimes?.[0] || editCall.scheduleTime || "";
-      setForm({
-        preferredDateTimeLocal: utcToDatetimeLocal(preferredUtc),
-        durationInMinutes: editCall.durationMin ?? 30,
-        notes: stripCustomerPrefixFromReason(editCall.reason || ""),
+      const preferredUtcTimes =
+        editCall.preferredTimes && editCall.preferredTimes.length > 0
+          ? editCall.preferredTimes.slice(0, MAX_PREFERRED_TIMES)
+          : editCall.scheduleTime
+            ? [editCall.scheduleTime]
+            : [""];
+      queueMicrotask(() => {
+        setForm({
+          preferredDateTimesLocal: preferredUtcTimes.map((time) =>
+            utcToDatetimeLocal(time),
+          ),
+          durationInMinutes: editCall.durationMin ?? 30,
+          notes: stripCustomerPrefixFromReason(editCall.reason || ""),
+        });
       });
     } else {
-      setForm(INITIAL_FORM);
+      queueMicrotask(() => {
+        setForm(INITIAL_FORM);
+        setModalError(null);
+      });
     }
   }, [open, editCall]);
 
   const isPending = postCallRequest.isPending || patchCallRequest.isPending;
   const isValid =
-    form.preferredDateTimeLocal.trim() !== "" &&
+    form.preferredDateTimesLocal.every((value) => value.trim() !== "") &&
     (isEdit || (form.notes.trim() !== "" && form.durationInMinutes > 0));
 
   const handleClose = useCallback(() => {
@@ -173,6 +183,41 @@ export default function RequestCallModal({
       setForm((prev) => ({ ...prev, [field]: event.target.value }));
     };
 
+  const handlePreferredTimeChange = useCallback(
+    (index: number) =>
+      (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const value = event.target.value;
+        setForm((prev) => {
+          const nextTimes = [...prev.preferredDateTimesLocal];
+          nextTimes[index] = value;
+          return { ...prev, preferredDateTimesLocal: nextTimes };
+        });
+      },
+    [],
+  );
+
+  const handleAddPreferredTime = useCallback(() => {
+    setForm((prev) => {
+      if (prev.preferredDateTimesLocal.length >= MAX_PREFERRED_TIMES) return prev;
+      return {
+        ...prev,
+        preferredDateTimesLocal: [...prev.preferredDateTimesLocal, ""],
+      };
+    });
+  }, []);
+
+  const handleRemovePreferredTime = useCallback((index: number) => {
+    setForm((prev) => {
+      if (prev.preferredDateTimesLocal.length <= 1) return prev;
+      return {
+        ...prev,
+        preferredDateTimesLocal: prev.preferredDateTimesLocal.filter(
+          (_value, i) => i !== index,
+        ),
+      };
+    });
+  }, []);
+
   const handleDurationChange = (event: SelectChangeEvent<number>) => {
     setForm((prev) => ({
       ...prev,
@@ -185,21 +230,22 @@ export default function RequestCallModal({
     if (!isValid) return;
 
     const now = new Date();
-    const selected = new Date(form.preferredDateTimeLocal);
-    if (Number.isNaN(selected.getTime())) {
-      setModalError("Please enter a valid preferred time.");
-      return;
-    }
-    // Submit-time check matches picker min (now + 1 min) to avoid rejecting valid selections.
     const minAllowed = new Date(now.getTime() + 60 * 1000);
-    if (selected < minAllowed) {
-      setModalError(
-        "The selected date and time cannot be in the past. Please choose a future date and time.",
-      );
-      return;
+    const utcTimes: string[] = [];
+    for (const localTime of form.preferredDateTimesLocal) {
+      const selected = new Date(localTime);
+      if (Number.isNaN(selected.getTime())) {
+        setModalError("Please enter a valid preferred time.");
+        return;
+      }
+      if (selected < minAllowed) {
+        setModalError(
+          "The selected date and time cannot be in the past. Please choose a future date and time.",
+        );
+        return;
+      }
+      utcTimes.push(localToUtcIso(localTime));
     }
-
-    const utcTimes = [localToUtcIso(form.preferredDateTimeLocal)];
 
     const handleError = (error: Error) => {
       const msg = error?.message ?? "";
@@ -212,16 +258,9 @@ export default function RequestCallModal({
     };
 
     if (isEdit && editCall) {
-      const strippedDisplay = stripCustomerPrefixFromReason(
-        editCall.reason || "",
-      );
-      const reasonUnchanged = form.notes.trim() === strippedDisplay;
-      const reasonToSend = reasonUnchanged ? editCall.reason : form.notes.trim();
-
       patchMutate(
         {
           callRequestId: editCall.id,
-          reason: reasonToSend,
           stateKey,
           utcTimes,
         },
@@ -283,7 +322,7 @@ export default function RequestCallModal({
           sx={{ mt: 0.5, fontWeight: "normal", fontSize: "0.875rem" }}
         >
           {isEdit
-            ? "Update the preferred time and notes for this call request."
+            ? "Update preferred times for this call request."
             : "Schedule a call with our support team."}
         </Typography>
         <IconButton
@@ -306,29 +345,76 @@ export default function RequestCallModal({
             {modalError}
           </Alert>
         )}
-        <TextField
-          id="preferred-time"
-          label="Preferred Time *"
-          type="datetime-local"
-          value={form.preferredDateTimeLocal}
-          onChange={handleTextChange("preferredDateTimeLocal")}
-          fullWidth
-          size="small"
-          slotProps={{ inputLabel: { shrink: true } }}
-          inputProps={{
-            min: minDatetimeLocal,
-          }}
-          sx={{ mt: 4, mb: userTimeZone ? 0.5 : 2 }}
-          disabled={isPending}
-        />
+        {form.preferredDateTimesLocal.map((value, index) => (
+          <Box
+            key={`preferred-time-${index}`}
+            sx={{
+              mt: index === 0 ? 4 : 1.5,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
+            <TextField
+              id={`preferred-time-${index}`}
+              label={index === 0 ? "Preferred Time *" : `Preferred Time ${index + 1} *`}
+              type="datetime-local"
+              value={value}
+              onChange={handlePreferredTimeChange(index)}
+              fullWidth
+              size="small"
+              slotProps={{ inputLabel: { shrink: true } }}
+              inputProps={{
+                min: minDatetimeLocal,
+              }}
+              disabled={isPending}
+            />
+            <Box
+              sx={{
+                width: 64,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: 0.5,
+              }}
+            >
+              <IconButton
+                aria-label="Add preferred time"
+                onClick={handleAddPreferredTime}
+                disabled={
+                  isPending ||
+                  form.preferredDateTimesLocal.length >= MAX_PREFERRED_TIMES
+                }
+                size="small"
+              >
+                <Plus size={18} />
+              </IconButton>
+              <IconButton
+                aria-label={`Remove preferred time ${index + 1}`}
+                onClick={() => handleRemovePreferredTime(index)}
+                disabled={isPending || index === 0}
+                size="small"
+              >
+                <Trash2 size={16} />
+              </IconButton>
+            </Box>
+          </Box>
+        ))}
         {userTimeZone && (
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: "block" }}>
-            Your current time zone is {userTimeZone}
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5, mb: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Your current time zone is {userTimeZone}
+            </Typography>
+            <Tooltip title="To change it, please go to the profile page." arrow>
+              <Box component="span" sx={{ display: "inline-flex", ml: 0.25 }}>
+                <Info size={14} />
+              </Box>
+            </Tooltip>
+          </Box>
         )}
 
         {!isEdit && (
-          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+          <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
           <InputLabel id="duration-label">Meeting Duration *</InputLabel>
           <Select<number>
             labelId="duration-label"
