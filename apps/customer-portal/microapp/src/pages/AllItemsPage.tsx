@@ -16,6 +16,7 @@
 
 import {
   FilterSlotBuilder,
+  FilterSlotBuilderSkeleton,
   ItemCardExtended,
   ItemCardExtendedSkeleton,
   type ItemCardProps,
@@ -24,7 +25,7 @@ import { InfiniteScroll } from "@components/shared";
 import { Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import { useLayoutEffect } from "react";
+import { Suspense, useLayoutEffect } from "react";
 import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
@@ -33,8 +34,10 @@ import { changeRequests } from "@src/services/changes";
 
 import { ITEM_DETAIL_PATHS } from "@pages/SupportPage";
 import { serviceRequests } from "../services/services";
-import type { GetCasesRequestDTO, GetChangeRequestsRquestDTO } from "../types";
+import type { CasesFiltersDTO, GetCasesRequestDTO, GetChangeRequestsRquestDTO } from "../types";
 import type { GetChatsRequestDTO } from "../types/chat.dto";
+import EmptyState from "../components/shared/EmptyState";
+import { ErrorBoundary } from "../components/core";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
@@ -43,12 +46,24 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
 
   return (
     <Stack gap={2}>
-      <ItemsListContent type={type} filter={filter} search={search} />
+      <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
+        <ItemsListContent type={type} filter={filter} search={search} />
+      </ErrorBoundary>
     </Stack>
   );
 }
 
 export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
+  return (
+    <ErrorBoundary fallback={<FilterSlotBuilderSkeleton />}>
+      <Suspense fallback={<FilterSlotBuilderSkeleton />}>
+        <FilterSlotContent type={type} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function FilterSlotContent({ type }: { type: ItemCardProps["type"] }) {
   const { projectId } = useProject();
   const { data: filters } = useSuspenseQuery(cases.filters(projectId!));
 
@@ -114,9 +129,13 @@ function CaseListContent({ filter, search }: { filter: string; search: string })
       {...query}
       sentinel={<ItemsListContentSkeleton />}
       tail={
-        <Typography variant="subtitle2" textAlign="center">
-          You're all caught up!
-        </Typography>
+        count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Typography variant="subtitle2" textAlign="center">
+            You're all caught up!
+          </Typography>
+        )
       }
     >
       {(data) => (
@@ -158,9 +177,13 @@ function ChatListContent({ filter, search }: { filter: string; search: string })
       {...query}
       sentinel={<ItemsListContentSkeleton />}
       tail={
-        <Typography variant="subtitle2" textAlign="center">
-          You're all caught up!
-        </Typography>
+        count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Typography variant="subtitle2" textAlign="center">
+            You're all caught up!
+          </Typography>
+        )
       }
     >
       {(data) => (
@@ -203,9 +226,13 @@ function ChangeRequestsListContent({ filter, search }: { filter: string; search:
       {...query}
       sentinel={<ItemsListContentSkeleton />}
       tail={
-        <Typography variant="subtitle2" textAlign="center">
-          You're all caught up!
-        </Typography>
+        count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Typography variant="subtitle2" textAlign="center">
+            You're all caught up!
+          </Typography>
+        )
       }
     >
       {(data) => (
@@ -248,9 +275,13 @@ function ServiceRequestsListContent({ filter, search }: { filter: string; search
       {...query}
       sentinel={<ItemsListContentSkeleton />}
       tail={
-        <Typography variant="subtitle2" textAlign="center">
-          You're all caught up!
-        </Typography>
+        count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Typography variant="subtitle2" textAlign="center">
+            You're all caught up!
+          </Typography>
+        )
       }
     >
       {(data) => (
@@ -279,7 +310,7 @@ function ItemsListContentSkeleton() {
 
 function useSubtitleOverride(count?: number, total?: number) {
   const layout = useLayout();
-  const data = count && total;
+  const data = count !== undefined && total !== undefined;
 
   useLayoutEffect(() => {
     layout.setSubtitleSlotOverride(data ? `${count} of ${total}` : <Skeleton variant="text" width={50} height={20} />);

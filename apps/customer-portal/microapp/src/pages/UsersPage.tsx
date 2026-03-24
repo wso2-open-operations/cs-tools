@@ -26,6 +26,7 @@ import { ErrorBoundary } from "@components/core";
 import { Suspense } from "react";
 
 import { MOCK_ROLES } from "@src/mocks/data/users";
+import EmptyState from "../components/shared/EmptyState";
 
 export default function UsersPage() {
   const navigate = useNavigate();
@@ -104,6 +105,8 @@ export default function UsersPage() {
 function UsersListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(users.all(projectId!));
+
+  if (data.length === 0) return <EmptyState title="No users found" />;
 
   return (
     <>

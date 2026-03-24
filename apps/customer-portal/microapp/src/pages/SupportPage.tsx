@@ -29,6 +29,7 @@ import { ErrorBoundary, Fab } from "@components/core";
 import { chats } from "../services/chats";
 import { changeRequests } from "../services/changes";
 import { serviceRequests } from "../services/services";
+import EmptyState from "../components/shared/EmptyState";
 
 export const TAB_CONFIG = {
   case: { title: "Open Cases", subtitle: "Active support tickets" },
@@ -177,6 +178,8 @@ function CaseItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(cases.all(projectId!, { pagination: { limit: 3 } }));
 
+  if (data.length === 0) return <EmptyState />;
+
   return (
     <>
       {data.map((item) => (
@@ -189,6 +192,8 @@ function CaseItemListContent() {
 function ChatItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(chats.all(projectId!, { pagination: { limit: 3 } }));
+
+  if (data.length === 0) return <EmptyState />;
 
   return (
     <>
@@ -203,6 +208,8 @@ function ChangeRequestItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(changeRequests.all(projectId!, { pagination: { limit: 3 } }));
 
+  if (data.length === 0) return <EmptyState />;
+
   return (
     <>
       {data.map((item) => (
@@ -215,6 +222,9 @@ function ChangeRequestItemListContent() {
 function ServiceRequestItemListContent() {
   const { projectId } = useProject();
   const { data } = useSuspenseQuery(serviceRequests.all(projectId!, { pagination: { limit: 3 } }));
+
+  if (data.length === 0) return <EmptyState />;
+
   return (
     <>
       {data.map((item) => (
