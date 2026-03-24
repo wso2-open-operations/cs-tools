@@ -84,6 +84,9 @@ export function usePatchProject(
       queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.PROJECT_DETAILS, projectId],
       });
+      queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.PROJECTS],
+      });
     },
   });
 }

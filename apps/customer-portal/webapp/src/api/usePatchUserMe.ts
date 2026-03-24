@@ -24,14 +24,19 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import type { PatchUserMeRequest } from "@models/requests";
 
+export interface PatchUserMeResponse {
+  phoneNumber?: string;
+  timeZone?: string;
+}
+
 /**
  * Hook to update current user profile (PATCH /users/me).
  * Only pass changed fields in the request body.
  *
- * @returns {UseMutationResult<void, Error, PatchUserMeRequest>} Mutation result.
+ * @returns {UseMutationResult<PatchUserMeResponse, Error, PatchUserMeRequest>} Mutation result.
  */
 export function usePatchUserMe(): UseMutationResult<
-  void,
+  PatchUserMeResponse,
   Error,
   PatchUserMeRequest
 > {
@@ -40,8 +45,10 @@ export function usePatchUserMe(): UseMutationResult<
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  return useMutation<void, Error, PatchUserMeRequest>({
-    mutationFn: async (payload: PatchUserMeRequest): Promise<void> => {
+  return useMutation<PatchUserMeResponse, Error, PatchUserMeRequest>({
+    mutationFn: async (
+      payload: PatchUserMeRequest,
+    ): Promise<PatchUserMeResponse> => {
       logger.debug("[usePatchUserMe] Request payload:", payload);
 
       if (!isSignedIn || isAuthLoading) {
@@ -74,6 +81,7 @@ export function usePatchUserMe(): UseMutationResult<
         }
         throw new Error(errorMessage);
       }
+      return (await response.json()) as PatchUserMeResponse;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["userDetails"] });

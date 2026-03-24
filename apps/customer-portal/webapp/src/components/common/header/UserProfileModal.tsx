@@ -41,7 +41,6 @@ import {
   toE164FromCountryCode,
   validatePhoneE164,
 } from "@utils/phone";
-import { TIME_ZONE_OPTIONS } from "@constants/timeZoneConstants";
 
 const PASSWORD_RESET_URL = "https://wso2.com/user/password";
 
@@ -187,7 +186,28 @@ export default function UserProfileModal({
     }
 
     patchUserMe.mutate(payload, {
-      onSuccess: () => {
+      onSuccess: (response) => {
+        const hasPhoneInPayload = payload.phoneNumber !== undefined;
+        const hasTimeZoneInPayload = payload.timeZone !== undefined;
+        const isPhoneUpdated =
+          !hasPhoneInPayload || response?.phoneNumber === payload.phoneNumber;
+        const isTimeZoneUpdated =
+          !hasTimeZoneInPayload || response?.timeZone === payload.timeZone;
+        const isSuccessfulUpdate = isPhoneUpdated && isTimeZoneUpdated;
+
+        if (!isSuccessfulUpdate) {
+          if (hasPhoneInPayload && hasTimeZoneInPayload) {
+            showError("Failed to update phone number and time zone.");
+          } else if (hasPhoneInPayload) {
+            showError("Failed to update phone number.");
+          } else if (hasTimeZoneInPayload) {
+            showError("Failed to update time zone.");
+          } else {
+            showError("Failed to update profile.");
+          }
+          return;
+        }
+
         showSuccess("Profile updated successfully");
         onClose();
       },
@@ -244,13 +264,13 @@ export default function UserProfileModal({
     if (!timeZone) return "";
     return timeZone;
   }, [timeZone]);
-  const timeZoneOptions = useMemo(() => {
-    const fromMetadata =
-      metadata?.timeZones
-        ?.map((tz) => tz.id || tz.label)
-        .filter((tz) => !!tz) ?? [];
-    return fromMetadata.length > 0 ? fromMetadata : TIME_ZONE_OPTIONS;
-  }, [metadata?.timeZones]);
+  const timeZoneOptions = useMemo(
+    () =>
+      (metadata?.timeZones ?? []).filter(
+        (tz) => !!tz.id && !!tz.label,
+      ),
+    [metadata?.timeZones],
+  );
 
   const lastPasswordUpdate = useMemo(() => {
     return formatLastPasswordUpdate(
@@ -598,12 +618,15 @@ export default function UserProfileModal({
                                   </Typography>
                                 );
                               }
-                              return selected;
+                              const option = timeZoneOptions.find(
+                                (tz) => tz.id === selected,
+                              );
+                              return option?.label ?? String(selected);
                             }}
                           >
                             {timeZoneOptions.map((tz) => (
-                              <MenuItem key={tz} value={tz}>
-                                {tz}
+                              <MenuItem key={tz.id} value={tz.id}>
+                                {tz.label}
                               </MenuItem>
                             ))}
                           </Select>

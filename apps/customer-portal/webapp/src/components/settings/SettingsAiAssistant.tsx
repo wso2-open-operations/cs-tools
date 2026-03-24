@@ -26,9 +26,10 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot, CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useState, useEffect, type JSX } from "react";
-import useGetProjectDetails from "@api/useGetProjectDetails";
+import { useCallback, useState, useMemo, useEffect, type JSX } from "react";
+import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import { usePatchProject } from "@api/usePatchProject";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { setNoveraChatEnabled } from "@utils/settingsStorage";
 
 interface SettingsAiAssistantProps {
@@ -53,34 +54,51 @@ export default function SettingsAiAssistant({
   projectId,
 }: SettingsAiAssistantProps): JSX.Element {
   const theme = useTheme();
-  const { data: projectDetails } = useGetProjectDetails(projectId);
+  const { showSuccess } = useSuccessBanner();
+  const {
+    data: projectsData,
+    isSuccess: isProjectsLoaded,
+    refetch: refetchProjects,
+  } = useInfiniteProjects({ pageSize: 20, enabled: !!projectId });
   const patchProject = usePatchProject(projectId);
-  const [noveraEnabled, setNoveraEnabledState] = useState(true);
+  const [noveraOverride, setNoveraOverride] = useState<boolean | null>(null);
   const [kbSuggestionsEnabled, setKbSuggestionsEnabled] = useState(true);
 
+  const projectHasAgent = useMemo(() => {
+    if (!isProjectsLoaded) return undefined;
+    const project = flattenProjectPages(projectsData).find((p) => p.id === projectId);
+    return project?.hasAgent;
+  }, [isProjectsLoaded, projectsData, projectId]);
+
+  const noveraEnabled = noveraOverride ?? projectHasAgent ?? true;
+
   useEffect(() => {
-    if (projectDetails?.account?.hasAgent !== undefined) {
-      const enabled = projectDetails.account.hasAgent;
-      setNoveraEnabledState(enabled);
-      setNoveraChatEnabled(enabled);
+    if (projectHasAgent !== undefined) {
+      setNoveraChatEnabled(projectHasAgent);
     }
-  }, [projectDetails?.account?.hasAgent]);
+  }, [projectHasAgent]);
 
   const handleNoveraToggle = useCallback(
     (checked: boolean) => {
       const previous = noveraEnabled;
-      setNoveraEnabledState(checked);
+      setNoveraOverride(checked);
       setNoveraChatEnabled(checked);
       patchProject.mutate(
         { hasAgent: checked },
-        {onError: () => {
-            setNoveraEnabledState(previous);
+        {
+          onSuccess: async () => {
+            await refetchProjects();
+            setNoveraOverride(null);
+            showSuccess("Novera settings updated successfully");
+          },
+          onError: () => {
+            setNoveraOverride(previous);
             setNoveraChatEnabled(previous);
           },
         },
       );
     },
-    [noveraEnabled, patchProject],
+    [noveraEnabled, patchProject, refetchProjects, showSuccess],
   );
 
   const handleKbToggle = useCallback((checked: boolean) => {
