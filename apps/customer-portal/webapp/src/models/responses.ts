@@ -132,6 +132,11 @@ export interface ValidateContactResponse {
   };
 }
 
+// Global metadata response.
+export interface PortalMetadataResponse {
+  timeZones: Array<{ id: string; label: string }>;
+}
+
 // Project contact from GET /projects/:projectId/contacts.
 export interface ProjectContact {
   id: string;
