@@ -16,6 +16,7 @@
 
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -24,9 +25,10 @@ import {
   DialogTitle,
   IconButton,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { Info, Plus, Trash2, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
@@ -52,6 +54,7 @@ export interface ApproveCallRequestModalProps {
    */
   approveStateKey?: number;
 }
+const MAX_PREFERRED_TIMES = 3;
 
 /** Returns datetime-local min string (now + 1 min) to block past times. */
 function getMinDatetimeLocal(): string {
@@ -97,7 +100,7 @@ export default function ApproveCallRequestModal({
   approveStateKey,
 }: ApproveCallRequestModalProps): JSX.Element {
   const patchCallRequest = usePatchCallRequest(projectId, caseId);
-  const [preferredDateTime, setPreferredDateTime] = useState("");
+  const [preferredDateTimes, setPreferredDateTimes] = useState<string[]>([""]);
   const [modalError, setModalError] = useState<string | null>(null);
   const [, setMinTick] = useState(0);
 
@@ -107,62 +110,83 @@ export default function ApproveCallRequestModal({
     return () => clearInterval(id);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) {
-      setPreferredDateTime("");
-      setModalError(null);
-    }
-  }, [open]);
-
   const minDatetimeLocal = getMinDatetimeLocal();
-  const isValid = preferredDateTime.trim() !== "" && approveStateKey !== undefined;
+  const isValid =
+    preferredDateTimes.every((value) => value.trim() !== "") &&
+    approveStateKey !== undefined;
   const isPending = patchCallRequest.isPending;
 
-  const handleDialogClose = useCallback(
-    (_event: object, _reason: string) => {
-      if (isPending) return;
-      onClose();
-    },
-    [isPending, onClose],
-  );
+  const handleDialogClose = useCallback(() => {
+    if (isPending) return;
+    setPreferredDateTimes([""]);
+    setModalError(null);
+    onClose();
+  }, [isPending, onClose]);
 
   const handleClose = useCallback(() => {
     if (isPending) return;
+    setPreferredDateTimes([""]);
+    setModalError(null);
     onClose();
   }, [isPending, onClose]);
 
   const handleDateTimeChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      setPreferredDateTime(e.target.value);
+    (index: number) => (e: ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setPreferredDateTimes((prev) => {
+        const next = [...prev];
+        next[index] = value;
+        return next;
+      });
     },
     [],
   );
+
+  const handleAddPreferredTime = useCallback(() => {
+    setPreferredDateTimes((prev) => {
+      if (prev.length >= MAX_PREFERRED_TIMES) return prev;
+      return [...prev, ""];
+    });
+  }, []);
+
+  const handleRemovePreferredTime = useCallback((index: number) => {
+    setPreferredDateTimes((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_value, i) => i !== index);
+    });
+  }, []);
 
   const handleSubmit = useCallback(() => {
     if (!isValid || !call || approveStateKey === undefined) return;
     setModalError(null);
 
-    const selected = new Date(preferredDateTime);
-    if (Number.isNaN(selected.getTime())) {
-      setModalError("Please enter a valid preferred time.");
-      return;
-    }
     const minAllowed = new Date(new Date().getTime() + 60 * 1000);
-    if (selected < minAllowed) {
-      setModalError(
-        "The selected date and time cannot be in the past. Please choose a future date and time.",
-      );
-      return;
+    const utcTimes: string[] = [];
+    for (const localTime of preferredDateTimes) {
+      const selected = new Date(localTime);
+      if (Number.isNaN(selected.getTime())) {
+        setModalError("Please enter a valid preferred time.");
+        return;
+      }
+      if (selected < minAllowed) {
+        setModalError(
+          "The selected date and time cannot be in the past. Please choose a future date and time.",
+        );
+        return;
+      }
+      utcTimes.push(localToUtcIso(localTime));
     }
 
     patchCallRequest.mutate(
       {
         callRequestId: call.id,
         stateKey: approveStateKey,
-        utcTimes: [localToUtcIso(preferredDateTime)],
+        utcTimes,
       },
       {
         onSuccess: () => {
+          setPreferredDateTimes([""]);
+          setModalError(null);
           onClose();
           onSuccess?.();
         },
@@ -173,7 +197,16 @@ export default function ApproveCallRequestModal({
         },
       },
     );
-  }, [isValid, call, preferredDateTime, approveStateKey, patchCallRequest, onClose, onSuccess, onError]);
+  }, [
+    isValid,
+    call,
+    preferredDateTimes,
+    approveStateKey,
+    patchCallRequest,
+    onClose,
+    onSuccess,
+    onError,
+  ]);
 
   return (
     <Dialog
@@ -218,23 +251,67 @@ export default function ApproveCallRequestModal({
             {modalError}
           </Alert>
         )}
-        <TextField
-          id="approve-preferred-time"
-          label="Preferred Time *"
-          type="datetime-local"
-          value={preferredDateTime}
-          onChange={handleDateTimeChange}
-          fullWidth
-          size="small"
-          slotProps={{ inputLabel: { shrink: true } }}
-          inputProps={{ min: minDatetimeLocal }}
-          sx={{ mt: 4, mb: userTimeZone ? 0.5 : 0 }}
-          disabled={isPending}
-        />
+        {preferredDateTimes.map((value, index) => (
+          <Box
+            key={`approve-preferred-time-${index}`}
+            sx={{
+              mt: index === 0 ? 4 : 1.5,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
+            <TextField
+              id={`approve-preferred-time-${index}`}
+              label={index === 0 ? "Preferred Time *" : `Preferred Time ${index + 1} *`}
+              type="datetime-local"
+              value={value}
+              onChange={handleDateTimeChange(index)}
+              fullWidth
+              size="small"
+              slotProps={{ inputLabel: { shrink: true } }}
+              inputProps={{ min: minDatetimeLocal }}
+              disabled={isPending}
+            />
+            <Box
+              sx={{
+                width: 64,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: 0.5,
+              }}
+            >
+              <IconButton
+                aria-label="Add preferred time"
+                onClick={handleAddPreferredTime}
+                disabled={isPending || preferredDateTimes.length >= MAX_PREFERRED_TIMES}
+                size="small"
+              >
+                <Plus size={18} />
+              </IconButton>
+              <IconButton
+                aria-label={`Remove preferred time ${index + 1}`}
+                onClick={() => handleRemovePreferredTime(index)}
+                disabled={isPending || index === 0}
+                size="small"
+              >
+                <Trash2 size={16} />
+              </IconButton>
+            </Box>
+          </Box>
+        ))}
         {userTimeZone && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-            Your current time zone is {userTimeZone}
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
+            <Typography variant="caption" color="text.secondary">
+              Your current time zone is {userTimeZone}
+            </Typography>
+            <Tooltip title="To change it, please go to the profile page." arrow>
+              <Box component="span" sx={{ display: "inline-flex", ml: 0.25 }}>
+                <Info size={14} />
+              </Box>
+            </Tooltip>
+          </Box>
         )}
       </DialogContent>
 
