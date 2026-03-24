@@ -280,7 +280,11 @@ public isolated function mapDeployedProducts(entity:DeployedProductsResponse res
             releasedOn: product.releasedOn,
             endOfLifeOn: product.endOfLifeOn,
             updates: product.updates,
-            product: associatedProduct != () ? {id: associatedProduct.id, label: associatedProduct.name} : (),
+            product: associatedProduct != () ? {
+                    id: associatedProduct.id,
+                    label: associatedProduct.name,
+                    abbreviation: associatedProduct?.abbreviation
+                } : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name} : (),
             version: version != () ? {id: version.id, label: version.name} : (),
             category: category != () ? {id: category.id, label: category.name} : ()
@@ -462,7 +466,7 @@ public isolated function mapProductVersionsResponse(entity:ProductVersionsRespon
             releaseDate: version.releaseDate,
             supportEolDate: version.supportEolDate,
             earliestPossibleSupportEolDate: version.earliestPossibleSupportEolDate,
-            product: product != () ? {id: product.id, label: product.name, abbreviation: product?.abbreviation} : ()
+            product: product != () ? {id: product.id, label: product.name} : ()
         };
     return {versions, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
 }
@@ -899,7 +903,7 @@ public isolated function mapProjectResponse(entity:ProjectResponse response) ret
 };
 
 # Map metadata response to the desired structure.
-# 
+#
 # + response - Metadata response from the entity service
 # + return - Mapped metadata response
 public isolated function mapMetadataResponse(entity:MetadataResponse response) returns types:MetadataResponse {
