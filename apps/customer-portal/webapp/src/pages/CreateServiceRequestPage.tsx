@@ -13,19 +13,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Button,
-  FormControl,
-  Grid,
-  MenuItem,
-  Paper,
-  Select,
-  Skeleton,
-  TextField,
-  Typography,
-} from "@wso2/oxygen-ui";
-import { ArrowLeft, CircleCheck } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button } from "@wso2/oxygen-ui";
+import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
   useMemo,
@@ -67,6 +56,8 @@ import type { CreateServiceRequestPayload } from "@models/requests";
 import CatalogSelector from "@components/support/service-requests/CatalogSelector";
 import VariableFormFields from "@components/support/service-requests/VariableFormFields";
 import UploadAttachmentModal from "@components/support/case-details/attachments-tab/UploadAttachmentModal";
+import { CaseCreationHeader } from "@components/support/case-creation-layout/header/CaseCreationHeader";
+import { BasicInformationSection } from "@components/support/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseType } from "@constants/supportConstants";
 
 /**
@@ -359,121 +350,36 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 2,
-          mb: 3,
-        }}
-      >
-        <Button
-          variant="text"
-          color="secondary"
-          startIcon={<ArrowLeft size={18} />}
-          onClick={handleBack}
-          sx={{ borderRadius: 0 }}
-        >
-          Back
-        </Button>
-        <Typography variant="h5" fontWeight={600}>
-          New Service Request
-        </Typography>
-      </Box>
+      <CaseCreationHeader
+        onBack={handleBack}
+        hideAiChip
+        backLabel="Back"
+        title="New Service Request"
+        subtitle="Select deployment, product, and request type, then complete the required fields"
+      />
 
       <Box
         component="form"
         onSubmit={handleSubmit}
         sx={{ display: "flex", flexDirection: "column", gap: 3 }}
       >
-        <Paper variant="outlined" sx={{ p: 3, borderRadius: 0 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            Basic Information
-          </Typography>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" sx={{ display: "block", mb: 1 }}>
-                Project
-              </Typography>
-              <TextField
-                fullWidth
-                size="small"
-                disabled
-                value={projectDisplay}
-                sx={{ "& .MuiOutlinedInput-root": { borderRadius: 0 } }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" sx={{ display: "block", mb: 1 }}>
-                Deployment Type <Box component="span" sx={{ color: "warning.main" }}>*</Box>
-              </Typography>
-              {isDeploymentsLoading ? (
-                <Skeleton variant="rounded" height={40} />
-              ) : (
-                <FormControl fullWidth size="small">
-                  <Select
-                    value={deployment}
-                    onChange={(e) => handleDeploymentChange(e.target.value)}
-                    displayEmpty
-                    renderValue={(v) =>
-                      v === "" ? "Select Deployment Type..." : v
-                    }
-                    sx={{ borderRadius: 0 }}
-                  >
-                    <MenuItem value="" disabled>
-                      Select Deployment Type...
-                    </MenuItem>
-                    {baseDeploymentOptions.map((d) => (
-                      <MenuItem key={d} value={d}>
-                        {d}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" sx={{ display: "block", mb: 1 }}>
-                Product Version <Box component="span" sx={{ color: "warning.main" }}>*</Box>
-              </Typography>
-              {deploymentProductsLoading ? (
-                <Skeleton variant="rounded" height={40} />
-              ) : (
-                <FormControl
-                  fullWidth
-                  size="small"
-                  disabled={isProductDropdownDisabled}
-                >
-                  <Select
-                    value={product}
-                    onChange={(e) => handleProductChange(e.target.value)}
-                    displayEmpty
-                    renderValue={(v) => {
-                      if (v === "")
-                        return isProductDropdownDisabled
-                          ? "Select deployment first"
-                          : "Select Product Version...";
-                      const opt = sortedProductOptions.find((o) => o.id === v);
-                      return opt?.label ?? v;
-                    }}
-                    sx={{ borderRadius: 0 }}
-                  >
-                    <MenuItem value="" disabled>
-                      {isProductDropdownDisabled
-                        ? "Select deployment first"
-                        : "Select Product Version..."}
-                    </MenuItem>
-                    {sortedProductOptions.map((p) => (
-                      <MenuItem key={p.id} value={p.id}>
-                        {p.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-            </Grid>
-          </Grid>
-        </Paper>
+        <BasicInformationSection
+          project={projectDisplay}
+          product={product}
+          setProduct={handleProductChange}
+          deployment={deployment}
+          setDeployment={handleDeploymentChange}
+          productOptionList={sortedProductOptions}
+          isProductAutoDetected={false}
+          isDeploymentAutoDetected={false}
+          isRelatedCaseMode
+          metadata={{ deploymentTypes: baseDeploymentOptions }}
+          isDeploymentLoading={isProjectLoading || isDeploymentsLoading}
+          isProductDropdownDisabled={isProductDropdownDisabled}
+          isProductLoading={
+            !!selectedDeploymentId && deploymentProductsLoading
+          }
+        />
 
         {!!productId && (
           <CatalogSelector
@@ -501,7 +407,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
             attachments={attachments}
             onAttachmentClick={handleAttachmentClick}
             onAttachmentRemove={handleAttachmentRemove}
-            onAttachmentAdd={(file, name) => handleSelectAttachment(file, name)}
           />
         )}
 
@@ -512,12 +417,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
         />
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5 }}>
-          <Button
-            variant="outlined"
-            color="inherit"
-            onClick={handleBack}
-            sx={{ borderRadius: 0 }}
-          >
+          <Button variant="outlined" color="inherit" onClick={handleBack}>
             Cancel
           </Button>
           <Button
@@ -526,7 +426,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
             color="primary"
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit}
-            sx={{ borderRadius: 0 }}
           >
             {isCreatePending ? "Creating..." : "Create Service Request"}
           </Button>
