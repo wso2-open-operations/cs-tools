@@ -20,11 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/models"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
 )
 
@@ -43,11 +44,15 @@ const (
 var (
 	// generalFileMgtPermissions is the default set of permissions for project folders.
 	generalFileMgtPermissions = []string{"upload", "list", "download", "create_dirs", "delete", "overwrite", "rename"}
+
+	// usernameRegex validates that a username is non-empty, at most 254 characters (RFC 5321),
+	// and contains no carriage return or newline characters.
+	usernameRegex = regexp.MustCompile(`^[^\r\n]{1,254}$`)
 )
 
 // writeJSONResponse is a helper to standardize writing JSON responses.
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}, logger *log.AppLogger) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		logger.Error("Error writing JSON response: %v", err)
@@ -59,17 +64,11 @@ func sanitizeUsername(u string) string {
 	return util.SanitizeUsername(u)
 }
 
-// validateUsername performs basic validation on username to prevent common injection attacks and ensure validity.
+// validateUsername validates that a username is non-empty, at most 254 characters (RFC 5321),
+// and contains no carriage return or newline characters.
 func validateUsername(username string) error {
-	if username == "" {
-		return fmt.Errorf("username cannot be empty")
-	}
-	if len(username) > 254 { // RFC 5321 limit for email
-		return fmt.Errorf("username too long")
-	}
-	// Check for basic injection attempts
-	if strings.Contains(username, "\n") || strings.Contains(username, "\r") {
-		return fmt.Errorf("invalid characters in username")
+	if !usernameRegex.MatchString(username) {
+		return fmt.Errorf("invalid username: must be 1–254 characters with no newline characters")
 	}
 	return nil
 }
@@ -132,7 +131,6 @@ func (h *Handler) handleAuthStep1(resp *models.KeyIntResponse, req *models.KeyIn
 
 // handleAuthSubsequentSteps processes subsequent steps of the keyboard-interactive authentication flow.
 func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *models.KeyIntRequest, session models.SessionData) {
-
 	if session.NextStep == nil || len(session.NextStep.Authenticators) == 0 {
 		resp.AuthResult = AuthResultFailure
 		resp.Instruction = "Authentication session expired or invalid."
@@ -167,7 +165,7 @@ func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *mo
 	}
 
 	// Support BasicAuthenticator where username is mandatory
-	if selectedAuth.AuthenticatorID == "QmFzaWNBdXRoZW50aWNhdG9yOkxPQ0FM" {
+	if selectedAuth.AuthenticatorID == h.cfg.BasicAuthenticatorID {
 		if _, hasPassword := params["password"]; hasPassword && len(params) == 1 {
 			params["username"] = req.Username
 		}
@@ -210,7 +208,6 @@ func (h *Handler) handleAuthSubsequentSteps(resp *models.KeyIntResponse, req *mo
 
 // handleAuthSuccess finalizes a successful authentication flow.
 func (h *Handler) handleAuthSuccess(resp *models.KeyIntResponse, req *models.KeyIntRequest) {
-
 	resp.AuthResult = AuthResultSuccess
 	h.db.DeleteSession(req.RequestID)
 }

@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/models"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/service"
@@ -289,7 +290,7 @@ func (h *Handler) authenticate(r *http.Request, w http.ResponseWriter) bool {
 		return true
 	}
 
-	apiKey := r.Header.Get("API-Key")
+	apiKey := r.Header.Get(constants.HeaderAPIKey)
 	if apiKey != h.cfg.HookAPIKey {
 		h.logger.Warn("Unauthorized access attempt from %s: invalid or missing API key", r.RemoteAddr)
 		h.auditLog(r, "unknown", r.URL.Path, "unauthorized", "invalid or missing api key")

@@ -28,7 +28,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/service"
-	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
 
 	applog "github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 )
@@ -44,31 +43,26 @@ func main() {
 	// 2. Initialize the custom logger
 	logger := applog.NewAppLogger(cfg.LogLevel)
 
-	// 3. Initialize email regex with custom pattern if provided
-	if err := util.InitEmailRegex(cfg.EmailRegexPattern); err != nil {
-		log.Fatalf("Failed to initialize email regex: %v", err)
-	}
-
-	// 4. Initialize database service
+	// 3. Initialize database service
 	dbService, err := service.NewDBService(cfg, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize database: %v", err)
 	}
 
-	// 5. Initialize external API clients/services
+	// 4. Initialize external API clients/services
 	idpService := service.NewIdPService(cfg, logger)
 	sftpgoService := service.NewSFTPGoService(cfg, logger)
 	subscriptionService := service.NewSubscriptionService(cfg, logger)
 
-	// 6. Initialize the HTTP handler, injecting all dependencies
+	// 5. Initialize the HTTP handler, injecting all dependencies
 	h := handler.NewHandler(cfg, logger, dbService, idpService, sftpgoService, subscriptionService)
 
-	// 7. Set up routes
+	// 6. Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/prelogin-hook", h.PreLoginHook)
 	mux.HandleFunc("/auth-hook", h.AuthHandler)
 
-	// 8. Start the server with graceful shutdown support
+	// 7. Start the server with graceful shutdown support
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      mux,

@@ -27,6 +27,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/httpclient"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/models"
 )
@@ -55,12 +56,12 @@ func (s *SubscriptionService) GetUserFolderList(username string) []string {
 	s.logger.Debug("Attempting to retrieve custom folder list for user: %s", username)
 	apiURL := fmt.Sprintf(s.cfg.SubscriptionAPI, url.QueryEscape(username))
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		s.logger.Error("Folder list request creation error for user %s: %v", username, err)
 		return nil
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set(constants.HeaderAccept, constants.MIMEApplicationJSON)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -100,12 +101,12 @@ func (s *SubscriptionService) IsValidProjectKey(projectKey string) bool {
 	s.logger.Debug("Attempting to validate the project key: %s", projectKey)
 	apiURL := fmt.Sprintf(s.cfg.ProjectAPI, url.QueryEscape(projectKey))
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		s.logger.Error("Project key validation request creation error for %s: %v", projectKey, err)
 		return false
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set(constants.HeaderAccept, constants.MIMEApplicationJSON)
 
 	resp, err := s.client.Do(req)
 	if err != nil {

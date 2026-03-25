@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 )
 
@@ -72,7 +73,7 @@ func TestHandler_Authenticate(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodPost, "/test", nil)
 			if tt.requestKey != "" {
-				req.Header.Set("API-Key", tt.requestKey)
+				req.Header.Set(constants.HeaderAPIKey, tt.requestKey)
 			}
 			w := httptest.NewRecorder()
 

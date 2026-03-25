@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
 )
 
 // Config holds all configuration for the application, loaded from environment variables.
@@ -42,6 +44,8 @@ type Config struct {
 	EmailRegexPattern string
 	// HookAPIKey is the expected X-API-Key header value for authenticating incoming hook requests.
 	HookAPIKey string
+	// BasicAuthenticatorID is the authenticator ID used to identify the BasicAuthenticator in the IdP flow.
+	BasicAuthenticatorID string
 
 	// InternalClientID is the OAuth2 client ID for the internal organization.
 	InternalClientID string
@@ -90,29 +94,29 @@ type Config struct {
 	// DBConnMaxLifetime is the maximum amount of time a connection may be reused.
 	DBConnMaxLifetime time.Duration
 
-	// AdminTokenEP is the computed endpoint for obtaining an SFTPGo admin token.
-	AdminTokenEP string
-	// SftpgoFoldersEP is the computed endpoint for SFTPGo folder management.
-	SftpgoFoldersEP string
-	// SftpgoUsersEP is the computed endpoint for SFTPGo user management.
-	SftpgoUsersEP string
-	// IdPTokenEP is the computed endpoint for obtaining internal IdP OAuth2 tokens.
-	IdPTokenEP string
-	// IdPSCIMUsersEP is the computed endpoint for the internal IdP's SCIM Users API.
-	IdPSCIMUsersEP string
-	// IdPAuthnEP is the computed endpoint for internal IdP app-native authentication.
-	IdPAuthnEP string
-	// IdPAuthorizeEP is the computed endpoint for internal IdP authorization.
-	IdPAuthorizeEP string
+	// AdminTokenEndPoint is the computed endpoint for obtaining an SFTPGo admin token.
+	AdminTokenEndPoint string
+	// SFTPGoFoldersEndPoint is the computed endpoint for SFTPGo folder management.
+	SFTPGoFoldersEndPoint string
+	// SFTPGoUsersEndPoint is the computed endpoint for SFTPGo user management.
+	SFTPGoUsersEndPoint string
+	// IdPTokenEndPoint is the computed endpoint for obtaining internal IdP OAuth2 tokens.
+	IdPTokenEndPoint string
+	// IdPSCIMUsersEndPoint is the computed endpoint for the internal IdP's SCIM Users API.
+	IdPSCIMUsersEndPoint string
+	// IdPAuthnEndPoint is the computed endpoint for internal IdP app-native authentication.
+	IdPAuthnEndPoint string
+	// IdPAuthorizeEndPoint is the computed endpoint for internal IdP authorization.
+	IdPAuthorizeEndPoint string
 
-	// ExternalIdPTokenEP is the computed endpoint for obtaining external IdP OAuth2 tokens.
-	ExternalIdPTokenEP string
-	// ExternalIdPSCIMUsersEP is the computed endpoint for the external IdP's SCIM Users API.
-	ExternalIdPSCIMUsersEP string
-	// ExternalIdPAuthnEP is the computed endpoint for external IdP app-native authentication.
-	ExternalIdPAuthnEP string
-	// ExternalIdPAuthorizeEP is the computed endpoint for external IdP authorization.
-	ExternalIdPAuthorizeEP string
+	// ExternalIdPTokenEndPoint is the computed endpoint for obtaining external IdP OAuth2 tokens.
+	ExternalIdPTokenEndPoint string
+	// ExternalIdPSCIMUsersEndPoint is the computed endpoint for the external IdP's SCIM Users API.
+	ExternalIdPSCIMUsersEndPoint string
+	// ExternalIdPAuthnEndPoint is the computed endpoint for external IdP app-native authentication.
+	ExternalIdPAuthnEndPoint string
+	// ExternalIdPAuthorizeEndPoint is the computed endpoint for external IdP authorization.
+	ExternalIdPAuthorizeEndPoint string
 }
 
 // EnvVar defines a structure for checking environment variables.
@@ -125,6 +129,34 @@ type EnvVar struct {
 	IsSensitive bool
 	// IsCritical indicates if the application cannot start without this variable.
 	IsCritical bool
+}
+
+// getEnvStr returns the value of the environment variable key, or fallback if unset or empty.
+func getEnvStr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// getEnvInt parses key as a base-10 positive integer, returning fallback on any error or non-positive value.
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+// getEnvDuration parses key as a duration string (e.g. "5m"), returning fallback on any error or non-positive value.
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return fallback
 }
 
 // Load reads environment variables into the Config struct and validates them.
@@ -143,119 +175,50 @@ func Load() (*Config, error) {
 		CheckRole:            os.Getenv("CHECK_ROLE"),
 		DIRPath:              os.Getenv("DIR_PATH"),
 		SCIMScope:            os.Getenv("SCIM_SCOPE"),
-		InternalUserSuffix:   os.Getenv("INTERNAL_USER_SUFFIX"),
+		InternalUserSuffix:   getEnvStr("INTERNAL_USER_SUFFIX", "@wso2.com"),
 		LogLevel:             os.Getenv("LOG_LEVEL"),
 		DBConnString:         os.Getenv("DB_CONN_STRING"),
-		Port:                 os.Getenv("PORT"),
-
-		// External org config
+		Port:                 getEnvStr("PORT", "9090"),
 		ExternalClientID:     os.Getenv("EXTERNAL_CLIENT_ID"),
 		ExternalClientSecret: os.Getenv("EXTERNAL_CLIENT_SECRET"),
 		ExternalIdPBasePath:  os.Getenv("EXTERNAL_IDP_BASE_PATH"),
-
-		// Email regex pattern (optional)
-		EmailRegexPattern: os.Getenv("EMAIL_REGEX_PATTERN"),
-
-		// API Key for hooks
-		HookAPIKey: os.Getenv("HOOK_API_KEY"),
-	}
-
-	// Load HTTP Timeout
-	if timeoutStr := os.Getenv("HTTP_TIMEOUT"); timeoutStr != "" {
-		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
-			cfg.HTTPTimeout = timeout
-		}
-	}
-	if cfg.HTTPTimeout == 0 {
-		cfg.HTTPTimeout = 15 // Default to 15 seconds
-	}
-
-	// Load HTTP Server Timeouts
-	if timeoutStr := os.Getenv("READ_TIMEOUT"); timeoutStr != "" {
-		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
-			cfg.ReadTimeout = timeout
-		}
-	}
-	if cfg.ReadTimeout == 0 {
-		cfg.ReadTimeout = 5 // Default to 5 seconds
-	}
-
-	if timeoutStr := os.Getenv("WRITE_TIMEOUT"); timeoutStr != "" {
-		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
-			cfg.WriteTimeout = timeout
-		}
-	}
-	if cfg.WriteTimeout == 0 {
-		cfg.WriteTimeout = 10 // Default to 10 seconds
-	}
-
-	if timeoutStr := os.Getenv("IDLE_TIMEOUT"); timeoutStr != "" {
-		if timeout, err := strconv.Atoi(timeoutStr); err == nil && timeout > 0 {
-			cfg.IdleTimeout = timeout
-		}
-	}
-	if cfg.IdleTimeout == 0 {
-		cfg.IdleTimeout = 120 // Default to 120 seconds
-	}
-
-	// Load Database Connection Pooling Settings
-	if val := os.Getenv("DB_MAX_OPEN_CONNS"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil && i > 0 {
-			cfg.DBMaxOpenConns = i
-		}
-	}
-	if cfg.DBMaxOpenConns == 0 {
-		cfg.DBMaxOpenConns = 25 // Default
-	}
-
-	if val := os.Getenv("DB_MAX_IDLE_CONNS"); val != "" {
-		if i, err := strconv.Atoi(val); err == nil && i > 0 {
-			cfg.DBMaxIdleConns = i
-		}
-	}
-	if cfg.DBMaxIdleConns == 0 {
-		cfg.DBMaxIdleConns = 25 // Default
-	}
-
-	if val := os.Getenv("DB_CONN_MAX_LIFETIME"); val != "" {
-		if d, err := time.ParseDuration(val); err == nil && d > 0 {
-			cfg.DBConnMaxLifetime = d
-		}
-	}
-	if cfg.DBConnMaxLifetime == 0 {
-		cfg.DBConnMaxLifetime = 5 * time.Minute // Default
+		EmailRegexPattern:    os.Getenv("EMAIL_REGEX_PATTERN"),
+		HookAPIKey:           os.Getenv("HOOK_API_KEY"),
+		BasicAuthenticatorID: os.Getenv("BASIC_AUTHENTICATOR_ID"),
+		HTTPTimeout:          getEnvInt("HTTP_TIMEOUT", 15),
+		ReadTimeout:          getEnvInt("READ_TIMEOUT", 5),
+		WriteTimeout:         getEnvInt("WRITE_TIMEOUT", 10),
+		IdleTimeout:          getEnvInt("IDLE_TIMEOUT", 120),
+		DBMaxOpenConns:       getEnvInt("DB_MAX_OPEN_CONNS", 25),
+		DBMaxIdleConns:       getEnvInt("DB_MAX_IDLE_CONNS", 25),
+		DBConnMaxLifetime:    getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 	}
 
 	// Compute endpoints
-	cfg.AdminTokenEP = cfg.SFTPGoBasePath + "/token"
-	cfg.SftpgoFoldersEP = cfg.SFTPGoBasePath + "/folders"
-	cfg.SftpgoUsersEP = cfg.SFTPGoBasePath + "/users"
-	cfg.IdPTokenEP = cfg.InternalIdPBasePath + "/oauth2/token"
-	cfg.IdPSCIMUsersEP = cfg.InternalIdPBasePath + "/scim2/Users"
-	cfg.IdPAuthnEP = cfg.InternalIdPBasePath + "/oauth2/authn"
-	cfg.IdPAuthorizeEP = cfg.InternalIdPBasePath + "/oauth2/authorize/"
+	cfg.AdminTokenEndPoint = cfg.SFTPGoBasePath + "/token"
+	cfg.SFTPGoFoldersEndPoint = cfg.SFTPGoBasePath + "/folders"
+	cfg.SFTPGoUsersEndPoint = cfg.SFTPGoBasePath + "/users"
+	cfg.IdPTokenEndPoint = cfg.InternalIdPBasePath + "/oauth2/token"
+	cfg.IdPSCIMUsersEndPoint = cfg.InternalIdPBasePath + "/scim2/Users"
+	cfg.IdPAuthnEndPoint = cfg.InternalIdPBasePath + "/oauth2/authn"
+	cfg.IdPAuthorizeEndPoint = cfg.InternalIdPBasePath + "/oauth2/authorize/"
 
 	// Compute external org endpoints
 	if cfg.ExternalIdPBasePath != "" {
-		cfg.ExternalIdPTokenEP = cfg.ExternalIdPBasePath + "/oauth2/token"
-		cfg.ExternalIdPSCIMUsersEP = cfg.ExternalIdPBasePath + "/scim2/Users"
-		cfg.ExternalIdPAuthnEP = cfg.ExternalIdPBasePath + "/oauth2/authn"
-		cfg.ExternalIdPAuthorizeEP = cfg.ExternalIdPBasePath + "/oauth2/authorize/"
-	}
-
-	// Set default port if not provided
-	if cfg.Port == "" {
-		cfg.Port = "9090"
-	}
-
-	// Set default internal user suffix if not provided
-	if cfg.InternalUserSuffix == "" {
-		cfg.InternalUserSuffix = "@wso2.com"
+		cfg.ExternalIdPTokenEndPoint = cfg.ExternalIdPBasePath + "/oauth2/token"
+		cfg.ExternalIdPSCIMUsersEndPoint = cfg.ExternalIdPBasePath + "/scim2/Users"
+		cfg.ExternalIdPAuthnEndPoint = cfg.ExternalIdPBasePath + "/oauth2/authn"
+		cfg.ExternalIdPAuthorizeEndPoint = cfg.ExternalIdPBasePath + "/oauth2/authorize/"
 	}
 
 	// Validate variables
 	if err := validateEnvVars(cfg); err != nil {
 		return nil, err
+	}
+
+	// Initialize (and validate) the email regex pattern
+	if err := util.InitEmailRegex(cfg.EmailRegexPattern); err != nil {
+		return nil, fmt.Errorf("invalid EMAIL_REGEX_PATTERN: %w", err)
 	}
 
 	return cfg, nil
@@ -269,6 +232,7 @@ func validateEnvVars(cfg *Config) error {
 		{"LOG_LEVEL", &cfg.LogLevel, false, false},
 		{"EMAIL_REGEX_PATTERN", &cfg.EmailRegexPattern, false, false},
 		{"HOOK_API_KEY", &cfg.HookAPIKey, true, false},
+		{"BASIC_AUTHENTICATOR_ID", &cfg.BasicAuthenticatorID, false, true},
 
 		// IdP Configuration (Internal Users)
 		{"INTERNAL_CLIENT_ID", &cfg.InternalClientID, false, true},
@@ -308,6 +272,13 @@ func validateEnvVars(cfg *Config) error {
 
 	if len(missingCriticalVars) > 0 {
 		return fmt.Errorf("missing critical environment variables: %s", strings.Join(missingCriticalVars, ", "))
+	}
+
+	if cfg.LogLevel != "" {
+		validLogLevels := map[string]bool{"TRACE": true, "DEBUG": true, "INFO": true, "WARN": true, "ERROR": true}
+		if !validLogLevels[cfg.LogLevel] {
+			return fmt.Errorf("invalid LOG_LEVEL '%s': must be one of TRACE, DEBUG, INFO, WARN, ERROR", cfg.LogLevel)
+		}
 	}
 
 	return nil

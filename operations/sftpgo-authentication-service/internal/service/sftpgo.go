@@ -28,6 +28,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/httpclient"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/models"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
@@ -82,13 +83,13 @@ func (s *SFTPGoService) UpdateUser(username, projectKey string, perms map[string
 		return s.logger.Errorf("error marshaling JSON for user update: %v", err)
 	}
 
-	sftpgoUserEP := s.cfg.SftpgoUsersEP + "/" + url.PathEscape(username)
-	req, err := http.NewRequest("PUT", sftpgoUserEP, bytes.NewBuffer(jsonData))
+	sftpgoUserEndPoint := s.cfg.SFTPGoUsersEndPoint + "/" + url.PathEscape(username)
+	req, err := http.NewRequest(http.MethodPut, sftpgoUserEndPoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return s.logger.Errorf("failed to create update user request for '%s': %v", username, err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
+	req.Header.Set(constants.HeaderAuthorization, constants.AuthBearerPrefix+token)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -136,7 +137,7 @@ func (s *SFTPGoService) ProvisionFolders(folders []string) error {
 
 // getAdminToken retrieves an admin authentication token from SFTPGo.
 func (s *SFTPGoService) getAdminToken() (string, error) {
-	req, err := http.NewRequest("GET", s.cfg.AdminTokenEP, nil)
+	req, err := http.NewRequest(http.MethodGet, s.cfg.AdminTokenEndPoint, nil)
 	if err != nil {
 		return "", s.logger.Errorf("failed to create SFTPGo admin token request: %v", err)
 	}
@@ -161,12 +162,12 @@ func (s *SFTPGoService) getAdminToken() (string, error) {
 
 // checkFolderExists checks if a folder with the given name exists in SFTPGo.
 func (s *SFTPGoService) checkFolderExists(name, token string) (bool, error) {
-	endpoint := s.cfg.SftpgoFoldersEP + "/" + url.PathEscape(name)
-	req, err := http.NewRequest("GET", endpoint, nil)
+	endpoint := s.cfg.SFTPGoFoldersEndPoint + "/" + url.PathEscape(name)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false, s.logger.Errorf("failed to create folder check request for '%s': %v", name, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(constants.HeaderAuthorization, constants.AuthBearerPrefix+token)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -201,12 +202,12 @@ func (s *SFTPGoService) createFolder(name, token string) error {
 		s.logger.Debug("Creating folder with payload: %s", string(b))
 	}
 
-	req, err := http.NewRequest("POST", s.cfg.SftpgoFoldersEP, bytes.NewBuffer(b))
+	req, err := http.NewRequest(http.MethodPost, s.cfg.SFTPGoFoldersEndPoint, bytes.NewBuffer(b))
 	if err != nil {
 		return s.logger.Errorf("failed to create SFTPGo folder creation request for '%s': %v", name, err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
+	req.Header.Set(constants.HeaderAuthorization, constants.AuthBearerPrefix+token)
 
 	resp, err := s.client.Do(req)
 	if err != nil {

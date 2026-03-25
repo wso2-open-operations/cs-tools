@@ -28,6 +28,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/httpclient"
+	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/constants"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/log"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/models"
 	"github.com/wso2-open-operations/cs-tools/operations/sftpgo-authentication-service/internal/util"
@@ -58,14 +59,14 @@ type orgContext struct {
 	clientID string
 	// clientSecret is the OAuth2 client secret for the organization.
 	clientSecret string
-	// tokenEP is the OAuth2 token endpoint.
-	tokenEP string
-	// scimEP is the SCIM Users endpoint.
-	scimEP string
-	// authnEP is the app-native authentication endpoint.
-	authnEP string
-	// authorizeEP is the OAuth2 authorize endpoint.
-	authorizeEP string
+	// tokenEndPoint is the OAuth2 token endpoint.
+	tokenEndPoint string
+	// scimEndPoint is the SCIM Users endpoint.
+	scimEndPoint string
+	// authnEndPoint is the app-native authentication endpoint.
+	authnEndPoint string
+	// authorizeEndPoint is the OAuth2 authorize endpoint.
+	authorizeEndPoint string
 }
 
 // getOrgContext returns the appropriate organization context based on whether the user is internal.
@@ -74,19 +75,19 @@ func (s *IdPService) getOrgContext(isInternal bool) orgContext {
 		return orgContext{
 			clientID:     s.cfg.InternalClientID,
 			clientSecret: s.cfg.InternalClientSecret,
-			tokenEP:      s.cfg.IdPTokenEP,
-			scimEP:       s.cfg.IdPSCIMUsersEP,
-			authnEP:      s.cfg.IdPAuthnEP,
-			authorizeEP:  s.cfg.IdPAuthorizeEP,
+			tokenEndPoint:     s.cfg.IdPTokenEndPoint,
+			scimEndPoint:      s.cfg.IdPSCIMUsersEndPoint,
+			authnEndPoint:     s.cfg.IdPAuthnEndPoint,
+			authorizeEndPoint: s.cfg.IdPAuthorizeEndPoint,
 		}
 	}
 	return orgContext{
 		clientID:     s.cfg.ExternalClientID,
 		clientSecret: s.cfg.ExternalClientSecret,
-		tokenEP:      s.cfg.ExternalIdPTokenEP,
-		scimEP:       s.cfg.ExternalIdPSCIMUsersEP,
-		authnEP:      s.cfg.ExternalIdPAuthnEP,
-		authorizeEP:  s.cfg.ExternalIdPAuthorizeEP,
+		tokenEndPoint:     s.cfg.ExternalIdPTokenEndPoint,
+		scimEndPoint:      s.cfg.ExternalIdPSCIMUsersEndPoint,
+		authnEndPoint:     s.cfg.ExternalIdPAuthnEndPoint,
+		authorizeEndPoint: s.cfg.ExternalIdPAuthorizeEndPoint,
 	}
 }
 
@@ -116,14 +117,14 @@ func (s *IdPService) GetAsgardeoUser(username string) (*models.AsgardeoUser, err
 
 	// Use appropriate org endpoint
 	ctx := s.getOrgContext(isInternal)
-	scimURL := fmt.Sprintf("%s?%s", ctx.scimEP, params.Encode())
+	scimURL := fmt.Sprintf("%s?%s", ctx.scimEndPoint, params.Encode())
 
-	req, err := http.NewRequest("GET", scimURL, nil)
+	req, err := http.NewRequest(http.MethodGet, scimURL, nil)
 	if err != nil {
 		return nil, s.logger.Errorf("failed to create SCIM request for user %s: %v", username, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set(constants.HeaderAuthorization, constants.AuthBearerPrefix+token)
+	req.Header.Set(constants.HeaderAccept, constants.MIMEApplicationJSON)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -161,11 +162,11 @@ func (s *IdPService) InitFlow(username string) (*models.IdPResponse, error) {
 	form.Set("scope", "openid")
 	form.Set("response_mode", "direct")
 
-	req, err := http.NewRequest("POST", ctx.authorizeEP, strings.NewReader(form.Encode()))
+	req, err := http.NewRequest(http.MethodPost, ctx.authorizeEndPoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, s.logger.Errorf("failed to create flow ID request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(constants.HeaderContentType, constants.MIMEApplicationFormURLEncoded)
 
 	res, err := s.client.Do(req)
 	if err != nil {
@@ -200,7 +201,7 @@ func (s *IdPService) PostToAuthnEndpoint(payload interface{}, isInternal bool) (
 	}
 
 	ctx := s.getOrgContext(isInternal)
-	res, err := s.client.Post(ctx.authnEP, "application/json", bytes.NewBuffer(payloadBytes))
+	res, err := s.client.Post(ctx.authnEndPoint, constants.MIMEApplicationJSON, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return nil, s.logger.Errorf("failed to send IdP authn request: %v", err)
 	}
@@ -233,11 +234,11 @@ func (s *IdPService) getBearerToken(isInternal bool) (string, error) {
 	data.Set("client_secret", ctx.clientSecret)
 	data.Set("scope", s.cfg.SCIMScope)
 
-	req, err := http.NewRequest("POST", ctx.tokenEP, strings.NewReader(data.Encode()))
+	req, err := http.NewRequest(http.MethodPost, ctx.tokenEndPoint, strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", s.logger.Errorf("failed to create token request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(constants.HeaderContentType, constants.MIMEApplicationFormURLEncoded)
 
 	resp, err := s.client.Do(req)
 	if err != nil {

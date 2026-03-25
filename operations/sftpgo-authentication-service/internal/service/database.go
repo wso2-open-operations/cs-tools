@@ -44,10 +44,6 @@ type DBService struct {
 
 // NewDBService creates a new DBService and establishes a database connection.
 func NewDBService(cfg *config.Config, logger *log.AppLogger) (*DBService, error) {
-	if cfg.DBConnString == "" {
-		return nil, logger.Errorf("DB_CONN_STRING is not set. Service requires a database for session persistence.")
-	}
-
 	connStr := cfg.DBConnString
 	if !strings.Contains(connStr, "parseTime=true") {
 		if strings.Contains(connStr, "?") {

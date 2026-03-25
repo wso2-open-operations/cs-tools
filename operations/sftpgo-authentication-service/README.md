@@ -77,21 +77,12 @@ This project provides a secure, individual-account-based authentication and prov
 
 Copy `.env.example` to `.env` and configure:
 
-#### Service Configuration
-```bash
-PORT="9090"                    # Server port
-LOG_LEVEL="INFO"              # DEBUG, INFO, WARN, ERROR
-HTTP_TIMEOUT="15"             # HTTP client timeout (seconds)
-HOOK_API_KEY="your-key"       # API key for hooks (adds API-Key header requirement)
-```
-
 #### Internal Organization
 ```bash
 INTERNAL_CLIENT_ID="your_internal_client_id"
 INTERNAL_CLIENT_SECRET="your_internal_client_secret"
 INTERNAL_IDP_BASE_PATH="https://api.asgardeo.io/t/internal-org"
-SCIM_SCOPE="internal_user_mgt_view"
-OAUTH_CALLBACK_URL="https://your-app/callback"
+CHECK_ROLE="internal"          # Role display name for internal users
 ```
 
 #### External Organization
@@ -101,6 +92,22 @@ EXTERNAL_CLIENT_SECRET="your_external_client_secret"
 EXTERNAL_IDP_BASE_PATH="https://api.asgardeo.io/t/external-org"
 ```
 
+#### Common IdP Configuration
+```bash
+OAUTH_CALLBACK_URL="https://your-app/callback"
+SCIM_SCOPE="internal_user_mgt_view"                     # Scope required to fetch user details from the IdP
+BASIC_AUTHENTICATOR_ID="..."                            # Authenticator ID for BasicAuthenticator in the IdP flow
+```
+
+#### Service Configuration
+```bash
+PORT="9090"                    # Server port
+LOG_LEVEL="INFO"              # DEBUG, INFO, WARN, ERROR (default: INFO)
+HTTP_TIMEOUT="15"             # HTTP client timeout (seconds)
+HOOK_API_KEY="your-key"       # API key for hooks (adds API-Key header requirement)
+# EMAIL_REGEX_PATTERN="..."   # Optional: custom email validation regex (uses built-in default if not set)
+```
+
 #### SFTPGo Configuration
 ```bash
 SFTPGO_API_BASE="http://localhost:8080/api/v2"
@@ -108,7 +115,6 @@ ADMIN_USER="admin"
 ADMIN_KEY="your-sftpgo-admin-api-key"
 FOLDER_PATH="/path/on/sftpgo/server"
 DIR_PATH="/path/on/sftpgo/server"
-CHECK_ROLE="internal"          # Role display name for internal users
 ```
 
 #### Database Configuration

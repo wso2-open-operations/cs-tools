@@ -40,6 +40,7 @@ func TestLoad_Success(t *testing.T) {
 	os.Setenv("DB_CONN_STRING", "db_conn")
 	os.Setenv("HTTP_TIMEOUT", "20")
 	os.Setenv("HOOK_API_KEY", "test_hook_key")
+	os.Setenv("BASIC_AUTHENTICATOR_ID", "QmFzaWNBdXRoZW50aWNhdG9yOkxPQ0FM")
 
 	defer os.Clearenv()
 
@@ -58,8 +59,8 @@ func TestLoad_Success(t *testing.T) {
 	if cfg.HTTPTimeout != 20 {
 		t.Errorf("Expected HTTPTimeout 20, got %d", cfg.HTTPTimeout)
 	}
-	if cfg.AdminTokenEP != "http://sftpgo.example.com/token" {
-		t.Errorf("Expected AdminTokenEP 'http://sftpgo.example.com/token', got '%s'", cfg.AdminTokenEP)
+	if cfg.AdminTokenEndPoint != "http://sftpgo.example.com/token" {
+		t.Errorf("Expected AdminTokenEP 'http://sftpgo.example.com/token', got '%s'", cfg.AdminTokenEndPoint)
 	}
 }
 
@@ -103,6 +104,7 @@ func TestLoad_Defaults(t *testing.T) {
 	os.Setenv("CHECK_ROLE", "u")
 	os.Setenv("SCIM_SCOPE", "u")
 	os.Setenv("DB_CONN_STRING", "u")
+	os.Setenv("BASIC_AUTHENTICATOR_ID", "u")
 
 	// Unset optional ones that have defaults
 	os.Unsetenv("PORT")
@@ -120,5 +122,30 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.HTTPTimeout != 15 {
 		t.Errorf("Expected default HTTPTimeout 15, got %d", cfg.HTTPTimeout)
+	}
+}
+
+func TestLoad_InvalidLogLevel(t *testing.T) {
+	os.Setenv("INTERNAL_CLIENT_ID", "test_client_id")
+	os.Setenv("INTERNAL_CLIENT_SECRET", "test_client_secret")
+	os.Setenv("OAUTH_CALLBACK_URL", "u")
+	os.Setenv("INTERNAL_IDP_BASE_PATH", "u")
+	os.Setenv("SUBSCRIPTION_API", "u")
+	os.Setenv("PROJECT_API", "u")
+	os.Setenv("SFTPGO_API_BASE", "u")
+	os.Setenv("ADMIN_USER", "u")
+	os.Setenv("ADMIN_KEY", "u")
+	os.Setenv("FOLDER_PATH", "u")
+	os.Setenv("DIR_PATH", "u")
+	os.Setenv("CHECK_ROLE", "u")
+	os.Setenv("SCIM_SCOPE", "u")
+	os.Setenv("DB_CONN_STRING", "u")
+	os.Setenv("BASIC_AUTHENTICATOR_ID", "u")
+	os.Setenv("LOG_LEVEL", "INVALID")
+	defer os.Clearenv()
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Expected error for invalid LOG_LEVEL, got nil")
 	}
 }
