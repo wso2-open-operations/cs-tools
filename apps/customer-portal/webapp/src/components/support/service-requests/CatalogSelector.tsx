@@ -114,17 +114,20 @@ export default function CatalogSelector({
 
   if (isLoading) {
     return (
-      <Paper variant="outlined" sx={{ p: 3, borderRadius: 0 }}>
-        <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
-          Select Request Type *
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" sx={{ mb: 0.5 }}>
+          Select Request Type{" "}
+          <Box component="span" sx={{ color: "warning.main" }}>
+            *
+          </Box>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Choose the type of service request you need from the categories below
         </Typography>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Skeleton variant="rounded" height={72} sx={{ borderRadius: 0 }} />
-          <Skeleton variant="rounded" height={72} sx={{ borderRadius: 0 }} />
-          <Skeleton variant="rounded" height={72} sx={{ borderRadius: 0 }} />
+          <Skeleton variant="rounded" height={72} sx={{ maxWidth: "100%" }} />
+          <Skeleton variant="rounded" height={72} sx={{ maxWidth: "100%" }} />
+          <Skeleton variant="rounded" height={72} sx={{ maxWidth: "100%" }} />
         </Box>
       </Paper>
     );
@@ -132,9 +135,12 @@ export default function CatalogSelector({
 
   if (!catalogs?.length) {
     return (
-      <Paper variant="outlined" sx={{ p: 3, borderRadius: 0 }}>
-        <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
-          Select Request Type *
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" sx={{ mb: 0.5 }}>
+          Select Request Type{" "}
+          <Box component="span" sx={{ color: "warning.main" }}>
+            *
+          </Box>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Choose the type of service request you need from the categories below
@@ -147,17 +153,10 @@ export default function CatalogSelector({
   }
 
   return (
-    <Paper
-      variant="outlined"
-      sx={{
-        p: 3,
-        borderRadius: 0,
-        boxShadow: 1,
-      }}
-    >
-      <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
+    <Paper sx={{ p: 3 }}>
+      <Typography variant="h6" sx={{ mb: 0.5 }}>
         Select Request Type{" "}
-        <Box component="span" sx={{ color: "error.main" }}>
+        <Box component="span" sx={{ color: "warning.main" }}>
           *
         </Box>
       </Typography>
@@ -259,59 +258,99 @@ export default function CatalogSelector({
                   </Box>
                 </Box>
               </AccordionSummary>
-              <AccordionDetails sx={{ p: 0, borderRadius: 0, borderTop: 1 }}>
-                <Box sx={{ display: "flex", flexDirection: "column" }}>
-                  {(catalog.catalogItems ?? []).map((item: CatalogItem, idx) => {
+              <AccordionDetails
+                sx={{ p: 2, borderRadius: 0, borderTop: 1, borderColor: "divider" }}
+              >
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 1,
+                  }}
+                  role="radiogroup"
+                  aria-label={`${catalog.name} request types`}
+                >
+                  {(catalog.catalogItems ?? []).map((item: CatalogItem) => {
                     const isSelected =
                       selectedCatalogId === catalog.id &&
                       selectedCatalogItemId === item.id;
+                    const radioId = `catalog-${catalog.id}-item-${item.id}`;
                     return (
-                      <Box
+                      <Paper
                         key={item.id}
                         component="button"
                         type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        id={radioId}
                         onClick={() =>
                           onSelectCatalogItem(catalog.id, item.id)
                         }
                         sx={{
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "flex-start",
+                          gap: 1.5,
                           width: "100%",
-                          px: 2,
-                          py: 1.5,
+                          p: 1.5,
                           textAlign: "left",
-                          border: "none",
-                          borderBottom:
-                            idx < (catalog.catalogItems?.length ?? 1) - 1
-                              ? 1
-                              : "none",
-                          background: isSelected
-                            ? "action.selected"
-                            : "transparent",
                           cursor: "pointer",
-                          borderRadius: 0,
+                          border: 1,
+                          borderColor: isSelected
+                            ? "primary.main"
+                            : "divider",
+                          bgcolor: isSelected
+                            ? alpha(theme.palette.primary.main, 0.08)
+                            : "transparent",
+                          "&:hover": {
+                            bgcolor: isSelected
+                              ? alpha(theme.palette.primary.main, 0.1)
+                              : "action.hover",
+                          },
                         }}
                       >
+                        <Box
+                          aria-hidden
+                          sx={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            flexShrink: 0,
+                            border: 2,
+                            borderColor: isSelected
+                              ? "primary.main"
+                              : "grey.400",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          {isSelected && (
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                bgcolor: "primary.main",
+                              }}
+                            />
+                          )}
+                        </Box>
                         <Typography
+                          component="span"
                           variant="body2"
-                          color={
-                            isSelected ? "primary" : "text.primary"
-                          }
-                          fontWeight={isSelected ? 600 : 400}
+                          fontWeight={isSelected ? 600 : 500}
+                          color="text.primary"
+                          sx={{ flex: 1 }}
                         >
                           {item.label}
                         </Typography>
-                      </Box>
+                      </Paper>
                     );
                   })}
                   {(!catalog.catalogItems ||
                     catalog.catalogItems.length === 0) && (
-                    <Box sx={{ px: 2, py: 2 }}>
-                      <Typography
-                        variant="body2"
-                        color="text.secondary"
-                      >
+                    <Box sx={{ py: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
                         No items in this catalog
                       </Typography>
                     </Box>
