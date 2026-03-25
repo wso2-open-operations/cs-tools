@@ -27,6 +27,9 @@ main
 *.swp
 *.swo
 
+# Go cache
+.go-cache/
+
 # OS specific files
 .DS_Store
 .DS_Store?
