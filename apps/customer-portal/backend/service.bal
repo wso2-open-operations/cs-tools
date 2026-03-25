@@ -4555,16 +4555,14 @@ isolated service / on new websocket:Listener(wsPort) {
             // "choreo-oauth2-token, <accessToken>, <x-user-id-token>"
             string[] parts = re `,`.split(protocolHeader);
             userIdToken = parts[parts.length() - 1].trim();
-            log:printInfo(string `Extracted x-user-id-token from Sec-WebSocket-Protocol for project: ${sessionId}, token length: ${userIdToken.length()}, parts count: ${parts.length()}`);
         }
-        log:printInfo(string `userIdToken first 20 chars: ${userIdToken.substring(0, int:min(20, userIdToken.length()))}...`);
         // Decode the user ID token to extract user info (email, userId)
         authorization:UserInfoPayload|error userInfo = authorization:getUserInfoFromTokens(userIdToken);
         if userInfo is error {
             log:printError(string `WebSocket auth failed for project: ${sessionId}`, userInfo);
             return error websocket:UpgradeError(ERR_MSG_UNAUTHORIZED_ACCESS);
         }
-        log:printInfo(string `WebSocket upgrade successful for project: ${sessionId}, user: ${userInfo.email}`);
+        log:printInfo(string `WebSocket upgrade successful for project: ${sessionId}`);
         return new WsProxyService(sessionId, userInfo);
     }
 }
