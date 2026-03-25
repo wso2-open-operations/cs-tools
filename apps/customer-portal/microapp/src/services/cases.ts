@@ -129,7 +129,7 @@ function toCase(dto: CaseDTO): Case {
     reporter: dto.csManager?.label,
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
-    conversationId: dto.parentCase?.id,
+    conversationId: dto.conversation?.id,
     slaResponseTime: dto.slaResponseTime,
   };
 }
