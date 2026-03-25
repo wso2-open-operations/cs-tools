@@ -47,7 +47,7 @@ func NewSubscriptionService(cfg *config.Config, logger *log.AppLogger) *Subscrip
 	return &SubscriptionService{
 		cfg:    cfg,
 		logger: logger,
-		client: httpclient.NewLoggingClient(10*time.Second, logger),
+		client: httpclient.NewLoggingClient(time.Duration(cfg.HTTPTimeout)*time.Second, logger),
 	}
 }
 
