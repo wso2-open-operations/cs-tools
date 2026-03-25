@@ -24,8 +24,13 @@ export default function SnackbarProvider({ children }: { children: ReactNode }) 
   const handleClose = () => {
     setOpen(false);
     setTimeout(() => {
-      dequeue();
-      if (items.length > 1) setOpen(true);
+      setItems((prev) => {
+        const next = prev.slice(1);
+        if (next.length > 0) {
+          setOpen(true);
+        }
+        return next;
+      });
     }, 500);
   };
 
