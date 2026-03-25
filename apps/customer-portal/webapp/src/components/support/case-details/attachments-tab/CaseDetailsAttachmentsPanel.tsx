@@ -23,6 +23,7 @@ import {
 } from "@api/useGetCaseAttachments";
 import type { CaseAttachment } from "@models/responses";
 import { useDeleteAttachment } from "@api/useDeleteAttachment";
+import { useGetAttachment } from "@api/useGetAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
@@ -40,6 +41,7 @@ export interface CaseDetailsAttachmentsPanelProps {
 
 /**
  * Renders the Attachments tab: upload button, modal, and list from GET /cases/:id/attachments.
+ * Download uses GET /attachments/:id (authenticated) when inline content is absent.
  * Uses infinite query with server-side pagination (10 items per page).
  *
  * @param {CaseDetailsAttachmentsPanelProps} props - caseId.
@@ -50,6 +52,8 @@ export default function CaseDetailsAttachmentsPanel({
   isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { downloadAttachment, isDownloading, downloadingId } =
+    useGetAttachment();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [attachmentToDelete, setAttachmentToDelete] =
@@ -115,22 +119,19 @@ export default function CaseDetailsAttachmentsPanel({
     isFetchNextPageError,
   ]);
 
-  const handleDownload = (att: CaseAttachment) => {
-    if (att.content) {
-      const isDataUrl = att.content.startsWith("data:");
-      const href = isDataUrl
-        ? att.content
-        : `data:${att.type || "application/octet-stream"};base64,${att.content}`;
-      const link = document.createElement("a");
-      link.href = href;
-      link.download = att.name || "attachment";
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.click();
-      return;
-    }
-    if (att.downloadUrl) {
-      window.open(att.downloadUrl, "_blank", "noopener,noreferrer");
+  const handleDownload = async (att: CaseAttachment) => {
+    try {
+      await downloadAttachment({
+        id: att.id,
+        name: att.name,
+        type: att.type,
+        content: att.content,
+        downloadUrl: att.downloadUrl,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Download failed";
+      showError(message);
     }
   };
 
@@ -233,6 +234,9 @@ export default function CaseDetailsAttachmentsPanel({
                   onDelete={isCaseClosed ? undefined : handleDeleteClick}
                   onEdit={isCaseClosed ? undefined : handleEditClick}
                   hideDescription
+                  isDownloadLoading={
+                    isDownloading && downloadingId === att.id
+                  }
                 />
               ))
             )}
