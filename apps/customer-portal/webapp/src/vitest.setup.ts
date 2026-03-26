@@ -25,6 +25,7 @@ vi.mock("@asgardeo/react", () => ({
     state: {},
     signIn: vi.fn(),
     signOut: vi.fn(),
+    getAccessToken: vi.fn().mockResolvedValue("mock-access-token-123"),
     getIdToken: vi.fn().mockResolvedValue("mock-token-123"),
   }),
   AsgardeoProvider: ({ children }: { children: unknown }) => children,
