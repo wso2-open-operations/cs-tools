@@ -39,7 +39,9 @@ export function capitalize(text: string): string {
 
 export const stripHtmlTags = (str: string): string => {
   if (!str) return "";
-  return str.replace(/<[^>]*>?/gm, "");
+  const txt = document.createElement("textarea");
+  txt.innerHTML = str.replace(/<br\s*\/?>/gi, " ");
+  return txt.value.replace(/<[^>]*>?/gm, "");
 };
 
 export const overrideOrDefault = (s: string) => {
