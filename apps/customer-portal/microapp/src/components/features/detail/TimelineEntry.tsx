@@ -145,7 +145,7 @@ function Comment({ children, attachments = [] }: { children: string; attachments
       <Typography variant="body2">{children}</Typography>
       {attachments.map((attachment) => (
         <>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+          <Stack key={attachment.id} direction="row" alignItems="center" justifyContent="space-between" gap={1}>
             <Stack direction="row" alignItems="center" pt={1} gap={1}>
               <Box color="text.secondary">
                 <Paperclip size={pxToRem(14)} />
