@@ -242,7 +242,9 @@ export const sendNativeLog = (message?: string, data?: unknown, level: LogLevel 
  * Send a request to the native app to navigate back to the previous screen. I.e., close the webview.
  */
 export const goToMyAppsScreen = (): void => {
-  triggerSuperAppAction(Topic.navigateToMyApps);
+  if (window.nativebridge) {
+    triggerSuperAppAction(Topic.navigateToMyApps);
+  }
 };
 
 /**
