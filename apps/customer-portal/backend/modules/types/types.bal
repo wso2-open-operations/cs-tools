@@ -20,7 +20,7 @@ import ballerina/constraint;
 
 public const PHONE_PATTERN_STRING = "^\\+\\d{10,14}$";
 
-# Feature flags configuration.
+# [Configurable] Feature flags.
 public type FeatureFlags record {|
     # Indicates if the usage and metrics page is enabled or not
     boolean metricsPageEnabled;
