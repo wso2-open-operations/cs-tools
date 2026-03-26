@@ -25,14 +25,16 @@ import {
   IconButton,
   Link,
   Typography,
+  Button,
 } from "@wso2/oxygen-ui";
-import { Calendar, PencilLine, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, PencilLine, Trash2, Key } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import DeploymentDocumentList from "@deployments/DeploymentDocumentList";
 import DeploymentProductList from "@deployments/DeploymentProductList";
 import EditDeploymentModal from "@deployments/EditDeploymentModal";
 import DeleteDeploymentModal from "@deployments/DeleteDeploymentModal";
 import { usePatchDeployment } from "@api/usePatchDeployment";
+import { useDownloadDeploymentLicense } from "@api/useDownloadDeploymentLicense";
 
 export interface DeploymentCardProps {
   deployment: ProjectDeploymentItem;
@@ -52,9 +54,18 @@ export default function DeploymentCard({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const patchDeployment = usePatchDeployment();
+  const downloadLicense = useDownloadDeploymentLicense();
 
   const createdAtStr = formatProjectDateTime(createdOn);
   const updatedAtStr = formatProjectDateTime(updatedOn);
+
+  const handleDownloadLicense = () => {
+    downloadLicense.mutate({
+      projectId,
+      deploymentId: deployment.id,
+      deploymentName: name,
+    });
+  };
 
   return (
     <Card>
@@ -161,25 +172,46 @@ export default function DeploymentCard({
         <Divider />
         <Box
           sx={{
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
-            gap: 0.5,
+            justifyContent: "space-between",
+            gap: 1,
             color: "text.secondary",
-            flexShrink: 0,
             fontSize: "0.75rem",
           }}
         >
-          <Calendar
-            size={14}
-            style={{
-              verticalAlign: "middle",
-              display: "inline-block",
-              marginTop: "-2px",
+          <Box
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 0.5,
+              flexShrink: 0,
             }}
-          />
-          <span style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
-            Created on {createdAtStr} • Updated on {updatedAtStr}
-          </span>
+          >
+            <Calendar
+              size={14}
+              style={{
+                verticalAlign: "middle",
+                display: "inline-block",
+                marginTop: "-2px",
+              }}
+            />
+            <span style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
+              Created on {createdAtStr} • Updated on {updatedAtStr}
+            </span>
+          </Box>
+          <Button
+            startIcon={<Key size={16} />}
+            onClick={handleDownloadLicense}
+            disabled={downloadLicense.isPending}
+            variant="outlined"
+            size="small"
+            sx={{
+              textTransform: "none",
+            }}
+          >
+            Download License
+          </Button>
         </Box>
       </CardContent>
 
