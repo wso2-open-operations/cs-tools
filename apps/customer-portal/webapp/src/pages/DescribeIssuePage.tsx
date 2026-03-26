@@ -28,13 +28,9 @@ import { useState, useRef, useCallback, useMemo, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import Editor from "@components/common/rich-text-editor/Editor";
 import { useGetProjectDeployments } from "@api/useGetProjectDeployments";
-import { usePostConversations } from "@api/usePostConversations";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useAllDeploymentProducts } from "@hooks/useAllDeploymentProducts";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import {
-  DEFAULT_CONVERSATION_REGION,
-  DEFAULT_CONVERSATION_TIER,
-} from "@constants/conversationConstants";
 import type { ChatNavState } from "@models/chatNavState";
 import { buildEnvProducts } from "@utils/caseCreation";
 import { htmlToPlainText } from "@utils/richTextEditor";
@@ -55,7 +51,6 @@ export default function DescribeIssuePage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const { showError } = useErrorBanner();
   const [value, setValue] = useState("");
-  const [hasApiFailed, setHasApiFailed] = useState(false);
   const [isLoadingAfterClick, setIsLoadingAfterClick] = useState(false);
 
   const { data: projectDeployments } = useGetProjectDeployments(
@@ -67,9 +62,9 @@ export default function DescribeIssuePage(): JSX.Element {
     () => buildEnvProducts(productsByDeploymentId, projectDeployments),
     [productsByDeploymentId, projectDeployments],
   );
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
 
-  const { mutateAsync: postConversation, isPending: isSubmitting } =
-    usePostConversations();
+  const isSubmitting = false;
   const submittingRef = useRef(false);
 
   const handleBack = useCallback(() => {
@@ -92,21 +87,14 @@ export default function DescribeIssuePage(): JSX.Element {
     setIsLoadingAfterClick(true);
 
     try {
-      const conversationResponse = await postConversation({
-        projectId,
-        message: plainText.trim(),
-        envProducts,
-        region: DEFAULT_CONVERSATION_REGION,
-        tier: DEFAULT_CONVERSATION_TIER,
-      });
-
+      const accountId = projectDetails?.account?.id ?? projectId;
       const state: ChatNavState = {
         initialUserMessage: plainText.trim(),
-        conversationResponse,
+        initialEnvProducts: envProducts,
+        accountId,
       };
       navigate(`/projects/${projectId}/support/chat`, { state });
     } catch {
-      setHasApiFailed(true);
       showError(
         "Could not get help. Please try again or create a support case.",
       );
@@ -118,7 +106,7 @@ export default function DescribeIssuePage(): JSX.Element {
     plainText,
     projectId,
     envProducts,
-    postConversation,
+    projectDetails?.account?.id,
     navigate,
     showError,
   ]);
@@ -222,17 +210,15 @@ export default function DescribeIssuePage(): JSX.Element {
                 flexShrink: 0,
               }}
             >
-              {hasApiFailed && (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<PlusCircle size={18} />}
-                  onClick={handleCreateCase}
-                  disabled={!projectId}
-                >
-                  Create Case
-                </Button>
-              )}
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<PlusCircle size={18} />}
+                onClick={handleCreateCase}
+                disabled={!projectId}
+              >
+                Create Case
+              </Button>
               <Button
                 variant="contained"
                 color="warning"
