@@ -87,6 +87,11 @@ function ProjectsListContent({ search }: { search: string }) {
 
   if (data.length === 0) return <EmptyState />;
 
+  if (data.length === 1) {
+    setProjectId(data[0].id);
+    navigate("/");
+  }
+
   return (
     <>
       {data.map((props) => (
