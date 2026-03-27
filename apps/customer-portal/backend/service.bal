@@ -140,7 +140,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             if cachedUser is types:User {
                 return cachedUser;
             }
-            log:printWarn(string `Unable to read cached user info for ${userInfo.email}`);
+            log:printWarn(string `Unable to read cached user info for ${userInfo.userId}.`, cachedUser);
         }
 
         entity:UserResponse|error userDetails = entity:getUserBasicInfo(userInfo.email, userInfo.idToken);
@@ -244,7 +244,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             } else {
                 error? cacheInvalidate = userCache.invalidate(string `${userInfo.email}:userinfo`);
                 if cacheInvalidate is error {
-                    log:printWarn("Error invalidating user information from cache", cacheInvalidate);
+                    log:printWarn(string `Error invalidating user: ${userInfo.userId} information from cache`,
+                        cacheInvalidate);
                 }
                 updatedUserResponse.phoneNumber = scim:processPhoneNumber(updatedUser);
             }
