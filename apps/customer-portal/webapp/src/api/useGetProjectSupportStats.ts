@@ -87,7 +87,7 @@ export function useGetProjectSupportStats(
         const raw = (await response.json()) as any;
         const data: ProjectSupportStats = {
           ongoingCases: raw?.ongoingCases ?? 0,
-          resolvedRecently: raw?.resolvedPast30DaysCasesCount ?? 0,
+          resolvedPast30DaysCasesCount: raw?.resolvedPast30DaysCasesCount ?? 0,
           resolvedChats: raw?.resolvedChats ?? 0,
           activeChats: raw?.activeChats ?? 0,
         };
