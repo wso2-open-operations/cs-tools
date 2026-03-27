@@ -20,6 +20,7 @@ export const RichText = styled(Box)(({ theme }) => ({
     overflowX: "auto",
     whiteSpace: "pre-wrap",
     backgroundColor: theme.palette.background.default,
+    color: theme.palette.text.primary,
     borderRadius: 4,
   },
 

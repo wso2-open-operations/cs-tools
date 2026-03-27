@@ -11,6 +11,7 @@ import {
   FormHelperText,
   FormControl,
   CircularProgress,
+  alpha,
 } from "@wso2/oxygen-ui";
 import { Link, useNavigate } from "react-router-dom";
 import { SectionCard } from "@components/shared";
@@ -76,7 +77,12 @@ export default function UpdateProfileSettingsPage() {
   return (
     <form onSubmit={formik.handleSubmit}>
       <Stack gap={2}>
-        <Card component={Stack} direction="row" gap={2} sx={{ bgcolor: colors.blue[50], p: 1.5 }}>
+        <Card
+          component={Stack}
+          direction="row"
+          gap={2}
+          sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5 })}
+        >
           <Typography variant="subtitle2" color="text.secondary">
             Keep your contact information up to date for better communication with our support team.
           </Typography>
