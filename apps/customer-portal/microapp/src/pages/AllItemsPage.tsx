@@ -25,7 +25,7 @@ import { InfiniteScroll } from "@components/shared";
 import { Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import { Suspense, useLayoutEffect } from "react";
+import React, { Fragment, Suspense, useLayoutEffect } from "react";
 import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
@@ -141,11 +141,13 @@ function CaseListContent({ filter, search }: { filter: string; search: string })
       {(data) => (
         <>
           {data &&
-            data.pages.map((page) =>
-              page.map((item) => (
-                <ItemCardExtended key={item.id} type="case" to={ITEM_DETAIL_PATHS.case(item.id)} {...item} />
-              )),
-            )}
+            data.pages.map((page, pageIndex) => (
+              <Fragment key={pageIndex}>
+                {page.map((item) => (
+                  <ItemCardExtended key={item.id} type="case" to={ITEM_DETAIL_PATHS.case(item.id)} {...item} />
+                ))}
+              </Fragment>
+            ))}
         </>
       )}
     </InfiniteScroll>
