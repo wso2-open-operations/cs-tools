@@ -67,11 +67,22 @@ export default function SupportPage() {
     { label: "Change Requests", value: changeRequestCaseTypeStats?.activeCount },
   ];
 
+  const handleTabChange = (tab: TabType) => {
+    setTab(tab);
+    setSearchParams(
+      (prev) => {
+        prev.set("tab", tab);
+        return prev;
+      },
+      { replace: true },
+    );
+  };
+
   return (
     <>
       <Grid spacing={1.5} container>
-        {metrics.map((props) => (
-          <Grid size={3}>
+        {metrics.map((props, index) => (
+          <Grid size={3} key={index}>
             <MetricWidget {...props} size="small" base />
           </Grid>
         ))}
@@ -108,15 +119,7 @@ export default function SupportPage() {
           </Card>
         </Grid>
       </Grid>
-      <Tabs
-        variant="fullWidth"
-        sx={{ mt: 3 }}
-        value={tab}
-        onChange={(_, value) => {
-          setTab(value);
-          setSearchParams({ tab: value }, { replace: true });
-        }}
-      >
+      <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => handleTabChange(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
         <Tab label="Service Requests" value="service" disableRipple />
