@@ -35,7 +35,7 @@ export function ProjectCard({
   metrics,
   onClick,
 }: Project & { onClick?: () => void }) {
-  const statusChipColorVariant = status ? PROJECT_STATUS_META[status].color : "default";
+  const statusChipColorVariant = status ? PROJECT_STATUS_META[status]?.color : undefined;
 
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
@@ -47,8 +47,8 @@ export function ProjectCard({
               label={status}
               size="small"
               sx={(theme) => ({
-                bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-                color: theme.palette[statusChipColorVariant].light,
+                bgcolor: statusChipColorVariant ? alpha(theme.palette[statusChipColorVariant].light, 0.1) : undefined,
+                color: statusChipColorVariant ? theme.palette[statusChipColorVariant].light : undefined,
               })}
             />
           ) : (
