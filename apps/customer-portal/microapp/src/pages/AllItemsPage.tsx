@@ -25,7 +25,7 @@ import { InfiniteScroll } from "@components/shared";
 import { Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import React, { Fragment, Suspense, useLayoutEffect } from "react";
+import { Fragment, Suspense, useLayoutEffect } from "react";
 import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
@@ -68,10 +68,10 @@ function FilterSlotContent({ type }: { type: ItemCardProps["type"] }) {
   const { data: filters } = useSuspenseQuery(cases.filters(projectId!));
 
   const SEARCH_PLACEHOLDER_CONFIG: Record<typeof type, string> = {
-    case: "Search cases by ID, title, or description...",
-    chat: "Search chats by ID, title, or message...",
-    service: "Search Service Requests by ID, title, or description...",
-    change: "Search Change Requests by ID, title, or description...",
+    case: "Search Cases",
+    chat: "Search Chats",
+    service: "Search Service Requests",
+    change: "Search Change Requests",
   };
 
   const tabs = (() => {
@@ -317,5 +317,7 @@ function useSubtitleOverride(count?: number, total?: number) {
   useLayoutEffect(() => {
     layout.setSubtitleSlotOverride(data ? `${count} of ${total}` : <Skeleton variant="text" width={50} height={20} />);
     return () => layout.setSubtitleSlotOverride(null);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, total]);
 }
