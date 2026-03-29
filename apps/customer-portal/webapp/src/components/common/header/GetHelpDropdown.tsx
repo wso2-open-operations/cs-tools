@@ -33,7 +33,7 @@ import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { getProjectPermissions } from "@utils/subscriptionUtils";
 
 interface GetHelpMenuItem {
   id: string;
@@ -65,10 +65,9 @@ export default function GetHelpDropdown(): JSX.Element {
   );
 
   const projectTypeLabel = selectedProject?.type?.label;
-  const isServiceRequestVisible =
-    projectTypeLabel === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION ||
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
+  const isServiceRequestVisible = getProjectPermissions(
+    projectTypeLabel,
+  ).hasSR;
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
