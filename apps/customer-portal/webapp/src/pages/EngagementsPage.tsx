@@ -58,6 +58,9 @@ export default function EngagementsPage(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AllCasesFilterValues>({});
+  const [sortField, setSortField] = useState<
+    "createdOn" | "updatedOn" | "severity" | "state"
+  >("createdOn");
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -92,11 +95,11 @@ export default function EngagementsPage(): JSX.Element {
         searchQuery: searchTerm.trim() || undefined,
       },
       sortBy: {
-        field: "createdOn",
+        field: sortField,
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortOrder],
+    [filters, searchTerm, sortField, sortOrder],
   );
 
   const {
@@ -180,6 +183,13 @@ export default function EngagementsPage(): JSX.Element {
     setPage(1);
   };
 
+  const handleSortFieldChange = (
+    value: "createdOn" | "updatedOn" | "severity" | "state",
+  ) => {
+    setSortField(value);
+    setPage(1);
+  };
+
   const handleSearchChange = (value: string) => {
     setSearchTerm(value);
     setPage(1);
@@ -204,6 +214,7 @@ export default function EngagementsPage(): JSX.Element {
         onFilterChange={handleFilterChange}
         onClearFilters={handleClearFilters}
         excludeS0={excludeS0}
+        isProjectContextLoading={!projectReady}
       />
 
       <Box
@@ -219,19 +230,50 @@ export default function EngagementsPage(): JSX.Element {
 
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel id="sort-label">Sort</InputLabel>
+            <InputLabel id="engagements-sort-by-label">Sort by</InputLabel>
+            <Select<"createdOn" | "updatedOn" | "severity" | "state">
+              labelId="engagements-sort-by-label"
+              id="engagements-sort-by"
+              value={sortField}
+              label="Sort by"
+              onChange={(e) =>
+                handleSortFieldChange(
+                  e.target.value as
+                    | "createdOn"
+                    | "updatedOn"
+                    | "severity"
+                    | "state",
+                )
+              }
+            >
+              <MenuItem value="createdOn">
+                <Typography variant="body2">Created on</Typography>
+              </MenuItem>
+              <MenuItem value="updatedOn">
+                <Typography variant="body2">Updated on</Typography>
+              </MenuItem>
+              <MenuItem value="severity">
+                <Typography variant="body2">Severity</Typography>
+              </MenuItem>
+              <MenuItem value="state">
+                <Typography variant="body2">State</Typography>
+              </MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="engagements-order-by-label">Order by</InputLabel>
             <Select<"desc" | "asc">
-              labelId="sort-label"
-              id="sort"
+              labelId="engagements-order-by-label"
+              id="engagements-order-by"
               value={sortOrder}
-              label="Sort"
+              label="Order by"
               onChange={(e) => handleSortChange(e.target.value as "desc" | "asc")}
             >
               <MenuItem value="desc">
-                <Typography variant="body2">Newest First</Typography>
+                <Typography variant="body2">Newest first</Typography>
               </MenuItem>
               <MenuItem value="asc">
-                <Typography variant="body2">Oldest First</Typography>
+                <Typography variant="body2">Oldest first</Typography>
               </MenuItem>
             </Select>
           </FormControl>
