@@ -1418,3 +1418,23 @@ export function estimateLineCount(html: string): number {
 
   return totalLines;
 }
+
+/**
+ * True when the user entered search text or any filter field has a value.
+ * Used to choose empty-state copy (refined vs default list).
+ *
+ * @param searchTerm - Current search string.
+ * @param filters - Filter object (string or numeric values).
+ * @returns {boolean} True if search or any filter is active.
+ */
+export function hasListSearchOrFilters(
+  searchTerm: string,
+  filters: Record<string, string | number | undefined | null>,
+): boolean {
+  if (searchTerm.trim().length > 0) {
+    return true;
+  }
+  return Object.values(filters).some(
+    (v) => v !== undefined && v !== null && String(v).trim() !== "",
+  );
+}
