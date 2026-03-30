@@ -75,8 +75,21 @@ export default function AllCasesPage(): JSX.Element {
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
-  const permissions = getProjectPermissions(project?.type?.label);
-  const excludeS0 = shouldExcludeS0(project?.type?.label);
+  const projectDetailsReady = !isProjectLoading && project !== undefined;
+
+  const permissions = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return getProjectPermissions(undefined);
+    }
+    return getProjectPermissions(project.type?.label);
+  }, [projectDetailsReady, project]);
+
+  const excludeS0 = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return false;
+    }
+    return shouldExcludeS0(project.type?.label);
+  }, [projectDetailsReady, project]);
 
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
