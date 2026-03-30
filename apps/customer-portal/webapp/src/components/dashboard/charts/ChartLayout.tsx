@@ -16,7 +16,10 @@
 
 import { Grid } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { ActiveCasesChart } from "@components/dashboard/charts/ActiveCasesChart";
+import {
+  ActiveCasesChart,
+  type OperationsChartMode,
+} from "@components/dashboard/charts/ActiveCasesChart";
 import { CasesTrendChart } from "@components/dashboard/charts/CasesTrendChart";
 import { OutstandingIncidentsChart } from "@components/dashboard/charts/OutstandingIncidentsChart";
 
@@ -46,11 +49,12 @@ interface ChartLayoutProps {
   isErrorActiveCases?: boolean;
   isErrorEngagements?: boolean;
   excludeS0?: boolean;
+  showOperationsChart?: boolean;
+  operationsChartMode?: OperationsChartMode;
 }
 
 /**
- * ChartLayout component displays the three dashboard charts:
- * outstanding support cases, outstanding operations, and outstanding engagements.
+ * ChartLayout displays outstanding support cases, optional outstanding operations, and engagements.
  *
  * @param {ChartLayoutProps} props - Component props
  * @param {Object} props.outstandingCases - Severity counts for Outstanding Support Cases chart.
@@ -67,11 +71,17 @@ const ChartLayout = ({
   isErrorEngagements,
   excludeS0 = false,
   engagements,
+  showOperationsChart = true,
+  operationsChartMode = "srAndCr",
 }: ChartLayoutProps): JSX.Element => {
+  const chartSpan = showOperationsChart
+    ? { xs: 12 as const, md: 4 as const }
+    : { xs: 12 as const, md: 6 as const };
+
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>
       {/* Outstanding Incidents */}
-      <Grid size={{ xs: 12, md: 4 }}>
+      <Grid size={chartSpan}>
         <OutstandingIncidentsChart
           data={outstandingCases}
           isLoading={isLoading}
@@ -80,17 +90,19 @@ const ChartLayout = ({
         />
       </Grid>
 
-      {/* Active Cases */}
-      <Grid size={{ xs: 12, md: 4 }}>
-        <ActiveCasesChart
-          data={activeCases}
-          isLoading={isLoading}
-          isError={isErrorActiveCases}
-        />
-      </Grid>
+      {showOperationsChart && (
+        <Grid size={{ xs: 12, md: 4 }}>
+          <ActiveCasesChart
+            data={activeCases}
+            isLoading={isLoading}
+            isError={isErrorActiveCases}
+            variant={operationsChartMode}
+          />
+        </Grid>
+      )}
 
       {/* Cases Trend */}
-      <Grid size={{ xs: 12, md: 4 }}>
+      <Grid size={chartSpan}>
         <CasesTrendChart
           data={engagements}
           isLoading={isLoading}

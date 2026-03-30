@@ -36,6 +36,7 @@ interface ProjectStatisticsCardProps {
   isLoading?: boolean;
   isError?: boolean;
   isSidebarOpen?: boolean;
+  showDeploymentsStat?: boolean;
 }
 
 const ProjectStatisticsCard = ({
@@ -43,8 +44,12 @@ const ProjectStatisticsCard = ({
   isLoading,
   isError,
   isSidebarOpen = false,
+  showDeploymentsStat = true,
 }: ProjectStatisticsCardProps): JSX.Element => {
   const gridSize = isSidebarOpen ? { xs: 12, xl: 4 } : { xs: 12, lg: 4 };
+  const visibleStats = showDeploymentsStat
+    ? statItems
+    : statItems.filter((s) => s.key !== "deployments");
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent sx={{ p: 3 }}>
@@ -55,7 +60,7 @@ const ProjectStatisticsCard = ({
         <Divider sx={{ mb: 3, pb: 2 }} />
 
         <Grid container spacing={2}>
-          {statItems.map((stat) => {
+          {visibleStats.map((stat) => {
             const StatIcon = stat.icon;
             return (
               <Grid size={gridSize} key={stat.label}>

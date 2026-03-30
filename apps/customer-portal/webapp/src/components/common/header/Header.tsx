@@ -24,7 +24,7 @@ import Actions from "@components/common/header/Actions";
 import SearchBar from "@components/common/header/SearchBar";
 import ProjectSwitcher from "@components/common/header/ProjectSwitcher";
 import { useAsgardeo } from "@asgardeo/react";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { shouldExcludeS0 } from "@utils/subscriptionUtils";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -73,10 +73,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     return projects.find((p) => p.id === projectId);
   }, [projectId, projects]);
 
-  const isManagedCloudSubscription =
-    selectedProject?.type?.label ===
-    PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
-  const excludeS0 = !isManagedCloudSubscription;
+  const excludeS0 = shouldExcludeS0(selectedProject?.type?.label);
 
   /**
    * Handles the project change.

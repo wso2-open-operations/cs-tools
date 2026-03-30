@@ -42,7 +42,10 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetDeployments } from "@api/useGetDeployments";
 import { isS0Case } from "@utils/support";
 import { CaseType } from "@constants/supportConstants";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import {
+  getProjectPermissions,
+  shouldExcludeS0,
+} from "@utils/subscriptionUtils";
 import type { AllCasesFilterValues } from "@models/responses";
 import AllCasesStatCards from "@components/support/all-cases/AllCasesStatCards";
 import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
@@ -72,10 +75,21 @@ export default function AllCasesPage(): JSX.Element {
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
-  const projectReady = !isProjectLoading && project !== undefined;
-  const isManagedCloudSubscription =
-    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
-  const excludeS0 = projectReady ? !isManagedCloudSubscription : false;
+  const projectDetailsReady = !isProjectLoading && project !== undefined;
+
+  const permissions = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return getProjectPermissions(undefined);
+    }
+    return getProjectPermissions(project.type?.label);
+  }, [projectDetailsReady, project]);
+
+  const excludeS0 = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return false;
+    }
+    return shouldExcludeS0(project.type?.label);
+  }, [projectDetailsReady, project]);
 
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
@@ -212,6 +226,19 @@ export default function AllCasesPage(): JSX.Element {
     setPage(1);
   };
 
+  useEffect(() => {
+    if (!projectDetailsReady) {
+      return;
+    }
+    if (
+      projectDetailsReady &&
+      !permissions.hasDeployments &&
+      filters.deploymentId
+    ) {
+      setFilters((prev) => ({ ...prev, deploymentId: undefined }));
+    }
+  }, [projectDetailsReady, permissions.hasDeployments, filters.deploymentId]);
+
   return (
     <Stack spacing={3}>
       {/* Back button and header */}
@@ -250,7 +277,11 @@ export default function AllCasesPage(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
         filters={filters}
         filterMetadata={filterMetadata}
-        deployments={deploymentsData?.deployments}
+        deployments={
+          permissions.hasDeployments
+            ? deploymentsData?.deployments ?? []
+            : []
+        }
         onFilterChange={handleFilterChange}
         onClearFilters={handleClearFilters}
         excludeS0={excludeS0}

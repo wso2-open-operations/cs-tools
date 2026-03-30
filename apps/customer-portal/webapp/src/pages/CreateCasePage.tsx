@@ -67,7 +67,7 @@ import {
   CaseType,
 } from "@constants/supportConstants";
 import { SecurityTab } from "@constants/securityConstants";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { shouldExcludeS0 } from "@utils/subscriptionUtils";
 import { escapeHtml, htmlToPlainText } from "@utils/richTextEditor";
 import UploadAttachmentModal from "@components/support/case-details/attachments-tab/UploadAttachmentModal";
 import { ROUTE_PREVIOUS_PAGE } from "@/constants/commonConstants";
@@ -132,10 +132,9 @@ export default function CreateCasePage(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
-  const isManagedCloudSubscription =
-    projectDetails?.type?.label ===
-    PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
-  const excludeS0 = projectDetails ? !isManagedCloudSubscription : false;
+  const excludeS0 = projectDetails
+    ? shouldExcludeS0(projectDetails.type?.label)
+    : false;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
   );

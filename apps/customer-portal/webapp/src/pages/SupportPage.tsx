@@ -33,7 +33,7 @@ import {
   SUPPORT_OVERVIEW_CHAT_LIMIT,
   CaseType,
 } from "@constants/supportConstants";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { getProjectPermissions } from "@utils/subscriptionUtils";
 import { isS0Case } from "@utils/support";
 import type { ChatHistoryItem } from "@models/responses";
 
@@ -47,14 +47,9 @@ export default function SupportPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
-  const {
-    data: project,
-    isLoading: isProjectLoading,
-  } = useGetProjectDetails(projectId || "");
-  const isProjectLoaded = !isProjectLoading && project !== undefined;
-  const isManagedCloudSubscription =
-    isProjectLoaded &&
-    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
+  const { data: project } = useGetProjectDetails(projectId || "");
+  const includeS0InSupportMetrics =
+    getProjectPermissions(project?.type?.label).includeS0InSupportMetrics;
 
   const {
     data: stats,
@@ -94,10 +89,9 @@ export default function SupportPage(): JSX.Element {
 
   const rawCases =
     data?.pages?.[0]?.cases?.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
-  const cases =
-    isProjectLoaded && !isManagedCloudSubscription
-      ? rawCases.filter((c) => !isS0Case(c))
-      : rawCases;
+  const cases = !includeS0InSupportMetrics
+    ? rawCases.filter((c) => !isS0Case(c))
+    : rawCases;
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??

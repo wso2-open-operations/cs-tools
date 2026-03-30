@@ -26,7 +26,6 @@ import type { ElementType } from "react";
 import type { TabOption } from "@components/common/tab-bar/TabBar";
 import { colors } from "@wso2/oxygen-ui";
 import type { ProjectStatsResponse } from "@models/responses";
-import { convertMinutesToHours } from "@utils/projectDetails";
 
 export interface Contact {
   role: string;
@@ -42,12 +41,6 @@ export interface Stat {
   key: keyof NonNullable<ProjectStatsResponse["projectStats"]>;
 }
 
-/** Project type labels for conditional UI visibility. */
-export const PROJECT_TYPE_LABELS = {
-  MANAGED_CLOUD_SUBSCRIPTION: "Managed Cloud Subscription",
-  CLOUD_SUPPORT: "Cloud Support",
-  CLOUD_EVALUATION_SUPPORT: "Cloud Evaluation Support",
-} as const;
 
 export const PROJECT_DETAILS_TABS: TabOption[] = [
   {
@@ -109,69 +102,6 @@ export const statItems: Stat[] = [
     key: "deployments",
   },
 ];
-
-export const getRecentActivityItems = (
-  activity?: ProjectStatsResponse["recentActivity"],
-  projectTypeLabel?: string | null,
-): ActivityItem[] => {
-  const hideTimeTracking =
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
-
-  const formatDateTime = (dateString: string): string => {
-    if (!dateString) return "";
-    try {
-      const date = new Date(dateString.replace(" ", "T"));
-      if (isNaN(date.getTime())) return "";
-      const dateStr = date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-      const timeStr = date.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-      return `${dateStr} at ${timeStr}`;
-    } catch {
-      return "";
-    }
-  };
-
-  const items: ActivityItem[] = [];
-
-  if (!hideTimeTracking) {
-    items.push(
-      {
-        label: "Total Time Logged",
-        value:
-          activity?.totalHours !== undefined
-            ? `${convertMinutesToHours(activity.totalHours)} hrs`
-            : "N/A",
-        type: "text",
-      },
-      {
-        label: "Billable Hours",
-        value:
-          activity?.billableHours !== undefined
-            ? `${convertMinutesToHours(activity.billableHours)} hrs`
-            : "N/A",
-        type: "text",
-      },
-    );
-  }
-
-  items.push({
-    label: "Last Deployment",
-    value: activity?.lastDeploymentOn
-      ? formatDateTime(activity.lastDeploymentOn)
-      : "N/A",
-    type: "text",
-  });
-
-  return items;
-};
 
 export const SUBSCRIPTION_STATUS = {
   EXPIRED: "Expired",

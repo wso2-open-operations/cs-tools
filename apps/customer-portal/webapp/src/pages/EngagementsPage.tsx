@@ -38,7 +38,7 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { CaseType } from "@constants/supportConstants";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { shouldExcludeS0 } from "@utils/subscriptionUtils";
 import type { AllCasesFilterValues } from "@models/responses";
 import { isS0Case } from "@utils/support";
 import AllCasesList from "@components/support/all-cases/AllCasesList";
@@ -66,9 +66,9 @@ export default function EngagementsPage(): JSX.Element {
     projectId || "",
   );
   const projectReady = !isProjectLoading && project !== undefined;
-  const isManagedCloudSubscription =
-    project?.type?.label === PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
-  const excludeS0 = projectReady ? !isManagedCloudSubscription : false;
+  const excludeS0 = projectReady
+    ? shouldExcludeS0(project?.type?.label)
+    : false;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 

@@ -26,6 +26,8 @@ import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@components/dashboard/charts/ChartLegend";
 import { ACTIVE_CASES_CHART_DATA } from "@constants/dashboardConstants";
 
+export type OperationsChartMode = "srAndCr" | "srOnly";
+
 interface ActiveCasesChartProps {
   data: {
     serviceRequests: number;
@@ -34,6 +36,7 @@ interface ActiveCasesChartProps {
   };
   isLoading?: boolean;
   isError?: boolean;
+  variant?: OperationsChartMode;
 }
 
 /**
@@ -47,6 +50,7 @@ export const ActiveCasesChart = ({
   data,
   isLoading,
   isError,
+  variant = "srAndCr",
 }: ActiveCasesChartProps): JSX.Element => {
   const safeData = data ?? {
     serviceRequests: 0,
@@ -54,15 +58,20 @@ export const ActiveCasesChart = ({
     total: 0,
   };
 
+  const seriesConfig =
+    variant === "srOnly"
+      ? ACTIVE_CASES_CHART_DATA.filter((item) => item.key === "serviceRequests")
+      : ACTIVE_CASES_CHART_DATA;
+
   const chartData = isError
-    ? ACTIVE_CASES_CHART_DATA.map((item) => ({
+    ? seriesConfig.map((item) => ({
         name: item.name,
         value: 1,
         color: colors.grey?.[300] ?? "#D1D5DB",
       }))
     : isLoading
       ? []
-      : ACTIVE_CASES_CHART_DATA.map((item) => ({
+      : seriesConfig.map((item) => ({
           name: item.name,
           value: safeData[item.key as keyof typeof safeData] ?? 0,
           color: item.color,
@@ -169,13 +178,13 @@ export const ActiveCasesChart = ({
             mt: 2,
           }}
         >
-          {ACTIVE_CASES_CHART_DATA.map((_, i) => (
+          {seriesConfig.map((_, i) => (
             <Skeleton key={i} variant="rounded" width={80} height={20} />
           ))}
         </Box>
       ) : (
         <ChartLegend
-          data={ACTIVE_CASES_CHART_DATA.map((item) => ({
+          data={seriesConfig.map((item) => ({
             name: item.name,
             value: safeData[item.key as keyof typeof safeData] ?? 0,
             color: item.color,

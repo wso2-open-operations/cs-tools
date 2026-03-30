@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import SideBar from "@components/common/side-nav-bar/SideBar";
 import { APP_SHELL_NAV_ITEMS } from "@constants/appLayoutConstants";
-import { PROJECT_TYPE_LABELS } from "@constants/projectDetailsConstants";
+import { PROJECT_TYPE_LABELS } from "@constants/projectTypeConstants";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => {
@@ -80,19 +80,24 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => {
   const mockIcon = (name: string) => () => <svg data-testid={`icon-${name}`} />;
   return {
     Briefcase: mockIcon("Briefcase"),
+    CircleAlert: mockIcon("CircleAlert"),
+    Clock: mockIcon("Clock"),
+    Cog: mockIcon("Cog"),
     FileText: mockIcon("FileText"),
     FolderOpen: mockIcon("FolderOpen"),
     Headset: mockIcon("Headset"),
     Home: mockIcon("Home"),
+    Info: mockIcon("Info"),
+    LayoutDashboard: mockIcon("LayoutDashboard"),
     Megaphone: mockIcon("Megaphone"),
     RefreshCw: mockIcon("RefreshCw"),
+    Rocket: mockIcon("Rocket"),
+    Server: mockIcon("Server"),
     Shield: mockIcon("Shield"),
+    User: mockIcon("User"),
     Users: mockIcon("Users"),
     Settings: mockIcon("Settings"),
     Crown: mockIcon("Crown"),
-    Info: mockIcon("Info"),
-    Server: mockIcon("Server"),
-    Clock: mockIcon("Clock"),
   };
 });
 
@@ -161,11 +166,25 @@ describe("SideBar", () => {
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
   });
 
-  it("should render the Operations item when the project type supports it", () => {
+  it("should render the Operations item for Managed Cloud Subscription", () => {
     mockProjectTypeLabel = PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION;
     render(<SideBar collapsed={false} />);
 
     expect(screen.getByText("Operations")).toBeInTheDocument();
+  });
+
+  it("should render the Operations item for Cloud Support (SR-only)", () => {
+    mockProjectTypeLabel = PROJECT_TYPE_LABELS.CLOUD_SUPPORT;
+    render(<SideBar collapsed={false} />);
+
+    expect(screen.getByText("Operations")).toBeInTheDocument();
+  });
+
+  it("should not render Operations for Cloud Evaluation Support", () => {
+    mockProjectTypeLabel = PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
+    render(<SideBar collapsed={false} />);
+
+    expect(screen.queryByText("Operations")).not.toBeInTheDocument();
   });
 
   it("should render the settings item", () => {

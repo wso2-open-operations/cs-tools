@@ -118,13 +118,27 @@ describe("ActiveCasesChart", () => {
 
     render(<ActiveCasesChart data={incompleteData} isLoading={false} />);
 
-    // Verify that all configured segments are still rendered
     const segments = screen.getAllByTestId("pie-segment");
     expect(segments).toHaveLength(ACTIVE_CASES_CHART_DATA.length);
 
-    // Verify that the missing value was defaulted to 0
     const values = segments.map((s) => s.getAttribute("data-value"));
     expect(values).toContain("0");
+  });
+
+  it("should render a single segment for srOnly variant", () => {
+    render(
+      <ActiveCasesChart
+        data={mockData}
+        isLoading={false}
+        variant="srOnly"
+      />,
+    );
+
+    const segments = screen.getAllByTestId("pie-segment");
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toHaveTextContent(
+      ACTIVE_CASES_CHART_DATA[0].name,
+    );
   });
 
   it("should have correct paddingAngle and minAngle", () => {

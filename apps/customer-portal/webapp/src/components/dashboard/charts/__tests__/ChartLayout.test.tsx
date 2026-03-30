@@ -20,8 +20,12 @@ import ChartLayout from "@components/dashboard/charts/ChartLayout";
 
 // Mock child components
 vi.mock("../ActiveCasesChart", () => ({
-  ActiveCasesChart: ({ isLoading }: any) => (
-    <div data-testid="active-cases-chart" data-loading={isLoading}>
+  ActiveCasesChart: ({ isLoading, variant }: any) => (
+    <div
+      data-testid="active-cases-chart"
+      data-loading={isLoading}
+      data-variant={variant}
+    >
       Active Cases Chart
     </div>
   ),
@@ -109,6 +113,34 @@ describe("ChartLayout", () => {
     expect(screen.getByTestId("outstanding-cases-chart")).toHaveAttribute(
       "data-loading",
       "true",
+    );
+  });
+
+  it("should omit operations chart when showOperationsChart is false", () => {
+    render(<ChartLayout {...mockProps} showOperationsChart={false} />);
+
+    expect(screen.queryByTestId("active-cases-chart")).not.toBeInTheDocument();
+    expect(screen.getByTestId("outstanding-cases-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("cases-trend-chart")).toBeInTheDocument();
+  });
+
+  it("should pass operationsChartMode to ActiveCasesChart", () => {
+    render(
+      <ChartLayout {...mockProps} operationsChartMode="srOnly" />,
+    );
+
+    expect(screen.getByTestId("active-cases-chart")).toHaveAttribute(
+      "data-variant",
+      "srOnly",
+    );
+  });
+
+  it("should default operationsChartMode to srAndCr on ActiveCasesChart", () => {
+    render(<ChartLayout {...mockProps} />);
+
+    expect(screen.getByTestId("active-cases-chart")).toHaveAttribute(
+      "data-variant",
+      "srAndCr",
     );
   });
 });

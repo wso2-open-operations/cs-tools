@@ -19,10 +19,8 @@ import { useParams, useOutletContext } from "react-router";
 import { useState, useEffect, useMemo, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@components/common/tab-bar/TabBar";
-import {
-  PROJECT_DETAILS_TABS,
-  PROJECT_TYPE_LABELS,
-} from "@constants/projectDetailsConstants";
+import { PROJECT_DETAILS_TABS } from "@constants/projectDetailsConstants";
+import { getProjectPermissions } from "@utils/subscriptionUtils";
 import ProjectInformationCard from "@components/project-details/project-overview/project-information/ProjectInformationCard";
 import ProjectStatisticsCard from "@components/project-details/project-overview/project-statistics/ProjectStatisticsCard";
 import ContactInfoCard from "@components/project-details/project-overview/contact-info/ContactInfoCard";
@@ -59,13 +57,15 @@ export default function ProjectDetails(): JSX.Element {
     () => allProjects.find((p) => p.id === projectId),
     [allProjects, projectId],
   );
-  const projectTypeLabel = currentProject?.type?.label;
 
   const {
     data: project,
     isFetching: isProjectFetching,
     error: projectError,
   } = useGetProjectDetails(projectId || "");
+
+  const projectTypeLabel =
+    currentProject?.type?.label ?? project?.type?.label;
 
   const {
     data: stats,
@@ -98,20 +98,23 @@ export default function ProjectDetails(): JSX.Element {
     }
   }, [projectError, statsError, logger]);
 
-  const hideDeploymentsAndTimeTracking =
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT;
-  const hideServiceHoursAllocations = hideDeploymentsAndTimeTracking;
+  const permissions = useMemo(
+    () => getProjectPermissions(projectTypeLabel),
+    [projectTypeLabel],
+  );
 
   const visibleTabs = useMemo(
     () =>
       PROJECT_DETAILS_TABS.filter((tab) => {
-        if (hideDeploymentsAndTimeTracking) {
-          return tab.id !== "deployments" && tab.id !== "time-tracking";
+        if (tab.id === "deployments" && !permissions.hasDeployments) {
+          return false;
+        }
+        if (tab.id === "time-tracking" && !permissions.hasTimeLogs) {
+          return false;
         }
         return true;
       }),
-    [hideDeploymentsAndTimeTracking],
+    [permissions.hasDeployments, permissions.hasTimeLogs],
   );
 
   useEffect(() => {
@@ -151,6 +154,7 @@ export default function ProjectDetails(): JSX.Element {
                   isLoading={(isDetailsLoading || !stats) && !statsError}
                   isError={!!statsError}
                   isSidebarOpen={!sidebarCollapsed}
+                  showDeploymentsStat={permissions.hasDeployments}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
@@ -160,7 +164,7 @@ export default function ProjectDetails(): JSX.Element {
                   isError={!!projectError}
                 />
               </Grid>
-              {!hideServiceHoursAllocations && (
+              {permissions.showServiceHoursAllocationsCard && (
                 <Grid size={{ xs: 12, md: 6 }}>
                   <ServiceHoursAllocationsCard
                     project={project}

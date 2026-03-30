@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import RecentActivityCard from "@components/project-details/project-overview/recent-activity/RecentActivityCard";
-import { getRecentActivityItems } from "@constants/projectDetailsConstants";
+import { getRecentActivityItems } from "@utils/subscriptionUtils";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -39,8 +39,7 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   Zap: () => <svg data-testid="icon-zap" />,
 }));
 
-// Mock constants/utils
-vi.mock("@/constants/projectDetailsConstants", () => ({
+vi.mock("@utils/subscriptionUtils", () => ({
   getRecentActivityItems: vi.fn(),
 }));
 
