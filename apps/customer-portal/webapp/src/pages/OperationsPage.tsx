@@ -44,11 +44,21 @@ import { getProjectPermissions } from "@utils/subscriptionUtils";
 export default function OperationsPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
-  const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
-    projectId || "",
-  );
-  const permissionsResolved = !isProjectLoading && !!project;
-  const projectTypeLabel = project?.type?.label;
+  const {
+    data: project,
+    isLoading: isProjectLoading,
+    isError: isProjectDetailsError,
+  } = useGetProjectDetails(projectId || "");
+
+  const projectFetchSettled = !isProjectLoading;
+  const projectLoadFailed =
+    !!projectId &&
+    projectFetchSettled &&
+    (isProjectDetailsError || project === undefined);
+  const permissionsReady =
+    projectFetchSettled && !!project && !isProjectDetailsError;
+
+  const projectTypeLabel = permissionsReady ? project?.type?.label : undefined;
   const permissions = getProjectPermissions(projectTypeLabel);
 
   const isServiceRequestEnabled = permissions.hasSR;
