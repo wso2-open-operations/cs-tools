@@ -179,7 +179,7 @@ const ProjectMetadata = ({
         </Grid>
       </Grid>
 
-      {/* Row 2: SLA Status, Go Live Date, Onboarding Status */}
+      {/* Row 2: Overall Status, Go Live Date, Onboarding Status */}
       <Grid
         container
         spacing={2}
@@ -201,7 +201,7 @@ const ProjectMetadata = ({
               fontWeight="medium"
               sx={{ display: "block", mb: 0.5 }}
             >
-              SLA Status
+              Overall Status
             </Typography>
             {isLoading || isError ? (
               <Skeleton variant="rounded" width={60} height={24} />
