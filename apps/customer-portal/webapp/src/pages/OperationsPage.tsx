@@ -15,7 +15,7 @@
 // under the License.
 
 import { type JSX, useMemo } from "react";
-import { Box, Grid, Stack } from "@wso2/oxygen-ui";
+import { Box, Grid, Stack, Typography } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import SupportStatGrid from "@components/common/stat-grid/SupportStatGrid";
@@ -34,6 +34,7 @@ import useGetChangeRequests from "@api/useGetChangeRequests";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
 import { useGetProjectChangeRequestsStats } from "@api/useGetProjectChangeRequestsStats";
 import { getProjectPermissions } from "@utils/subscriptionUtils";
+import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 /**
  * OperationsPage component. Displays operations statistics,
@@ -129,7 +130,7 @@ export default function OperationsPage(): JSX.Element {
 
   // Avoid an empty stats flash before project type is known (enables correct queries).
   const stats: Partial<Record<OperationsStatKey, number>> | undefined =
-    isProjectLoading || !project
+    !permissionsReady
       ? undefined
       : srReady && crReady
         ? {
@@ -141,7 +142,9 @@ export default function OperationsPage(): JSX.Element {
               activeChangeRequests !== undefined && {
                 activeChangeRequests,
               }),
-            ...(completedThisMonth > 0 && { completedThisMonth }),
+            ...((isServiceRequestEnabled || isChangeRequestEnabled) && {
+              completedThisMonth,
+            }),
             ...(isChangeRequestEnabled &&
               scheduledCrCount > 0 && {
                 upcomingChanges: scheduledCrCount,
@@ -154,7 +157,7 @@ export default function OperationsPage(): JSX.Element {
     (isChangeRequestEnabled && isCrStatsError);
 
   const operationsStatConfigs = useMemo(() => {
-    if (!permissionsResolved) {
+    if (!permissionsReady) {
       return OPERATIONS_STAT_CONFIGS;
     }
     if (!isServiceRequestEnabled && !isChangeRequestEnabled) {
@@ -167,11 +170,7 @@ export default function OperationsPage(): JSX.Element {
         (isChangeRequestEnabled ||
           (c.key !== "activeChangeRequests" && c.key !== "upcomingChanges")),
     );
-  }, [
-    permissionsResolved,
-    isServiceRequestEnabled,
-    isChangeRequestEnabled,
-  ]);
+  }, [permissionsReady, isServiceRequestEnabled, isChangeRequestEnabled]);
 
   const overviewGridSize =
     isServiceRequestEnabled && isChangeRequestEnabled
@@ -180,12 +179,23 @@ export default function OperationsPage(): JSX.Element {
 
   const loadingOverviewGridSize = { xs: 12, lg: 6 };
 
+  if (projectLoadFailed) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <ErrorIndicator entityName="project" size="medium" />
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Unable to load project details. Please try again later.
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Stack spacing={3}>
       <Box>
         <SupportStatGrid<OperationsStatKey>
           isLoading={
-            !permissionsResolved ||
+            !permissionsReady ||
             (stats === undefined &&
               ((isServiceRequestEnabled && isSrStatsLoading) ||
                 (isChangeRequestEnabled && isCrStatsLoading)))
@@ -196,7 +206,7 @@ export default function OperationsPage(): JSX.Element {
           configs={operationsStatConfigs}
         />
       </Box>
-      {!permissionsResolved ? (
+      {!permissionsReady ? (
         <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
           <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
             <SupportOverviewCard
@@ -264,7 +274,7 @@ export default function OperationsPage(): JSX.Element {
                 >
                   <OutstandingCasesList
                     cases={serviceRequests}
-                    isLoading={isProjectLoading || isSrLoading}
+                    isLoading={isSrLoading}
                     onCaseClick={
                       projectId
                         ? (c) =>
@@ -297,7 +307,7 @@ export default function OperationsPage(): JSX.Element {
                 >
                   <OutstandingChangeRequestsList
                     changeRequests={changeRequests}
-                    isLoading={isProjectLoading || isCrLoading}
+                    isLoading={isCrLoading}
                     onItemClick={
                       projectId
                         ? (cr) =>
