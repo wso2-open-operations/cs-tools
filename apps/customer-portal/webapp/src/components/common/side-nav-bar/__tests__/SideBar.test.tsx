@@ -79,6 +79,7 @@ vi.mock("@wso2/oxygen-ui", () => {
 vi.mock("@wso2/oxygen-ui-icons-react", () => {
   const mockIcon = (name: string) => () => <svg data-testid={`icon-${name}`} />;
   return {
+    BarChart3: mockIcon("BarChart3"),
     Briefcase: mockIcon("Briefcase"),
     CircleAlert: mockIcon("CircleAlert"),
     Clock: mockIcon("Clock"),
