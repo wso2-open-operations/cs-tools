@@ -413,8 +413,8 @@ export interface ChangeRequestSearchResponse {
 // Change Request Stats
 export interface ChangeRequestStats {
   totalRequests: number;
-  scheduled: number;
-  inProgress: number;
+  awaitingYourAction: number;
+  ongoing: number;
   completed: number;
 }
 
