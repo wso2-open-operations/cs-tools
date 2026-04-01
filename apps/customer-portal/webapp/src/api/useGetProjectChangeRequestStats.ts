@@ -23,46 +23,7 @@ import type {
   ChangeRequestStatsResponse,
   ChangeRequestStats,
 } from "@models/responses";
-
-/**
- * Maps the API response to ChangeRequestStats.
- *
- * @param {ChangeRequestStatsResponse} response - The API response.
- * @returns {ChangeRequestStats} The mapped stats object.
- */
-function mapChangeRequestStats(
-  response: ChangeRequestStatsResponse,
-): ChangeRequestStats {
-  const { totalCount, stateCount } = response;
-
-  // Find scheduled count (label: "Scheduled")
-  const scheduled =
-    stateCount.find((state) => state.label === "Scheduled")?.count ?? 0;
-
-  // Calculate in-progress count (sum of: Implement, Review, Customer Approval, Customer Review)
-  const inProgressLabels = [
-    "Implement",
-    "Review",
-    "Customer Approval",
-    "Customer Review",
-  ];
-  const inProgress = stateCount
-    .filter((state) => inProgressLabels.includes(state.label))
-    .reduce((sum, state) => sum + state.count, 0);
-
-  // Calculate completed count (sum of: Closed, Canceled, Rollback)
-  const completedLabels = ["Closed", "Canceled", "Rollback"];
-  const completed = stateCount
-    .filter((state) => completedLabels.includes(state.label))
-    .reduce((sum, state) => sum + state.count, 0);
-
-  return {
-    totalRequests: totalCount,
-    scheduled,
-    inProgress,
-    completed,
-  };
-}
+import { mapChangeRequestStats } from "@utils/changeRequests";
 
 /**
  * Custom hook to fetch project change request statistics.
