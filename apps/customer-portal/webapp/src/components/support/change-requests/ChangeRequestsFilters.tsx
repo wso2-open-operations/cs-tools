@@ -31,7 +31,7 @@ import type {
 import {
   CHANGE_REQUEST_FILTER_DEFINITIONS,
   formatImpactLabel,
-} from "@constants/supportConstants";
+} from "@constants/changeRequestConstants";
 import { deriveFilterLabels } from "@utils/support";
 
 export interface ChangeRequestsFiltersProps {
