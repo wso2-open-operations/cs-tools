@@ -118,11 +118,13 @@ export default function RequestCallModal({
   }, [open]);
 
   const minDatetimeLocal = useMemo(
-    () =>
-      computeMinScheduleDatetimeLocalForTimeZone(
+    () => {
+      void minDatetimeTick;
+      return computeMinScheduleDatetimeLocalForTimeZone(
         severityAllocationMinutes,
         userTimeZone,
-      ),
+      );
+    },
     [severityAllocationMinutes, minDatetimeTick, userTimeZone],
   );
 
@@ -154,13 +156,13 @@ export default function RequestCallModal({
     queueMicrotask(() => {
       setForm({
         preferredDateTimesLocal: preferredUtcTimes.map((time) =>
-          callRequestApiPreferredTimeToDatetimeLocal(time),
+          callRequestApiPreferredTimeToDatetimeLocal(time, userTimeZone),
         ),
         durationInMinutes: editCall.durationMin ?? 30,
         notes: stripCustomerPrefixFromReason(editCall.reason || ""),
       });
     });
-  }, [open, editCall]);
+  }, [open, editCall, userTimeZone]);
 
   useEffect(() => {
     if (!open || editCall) {
@@ -184,21 +186,23 @@ export default function RequestCallModal({
     if (!open || isEdit) return;
     const floorKey = normalizeDatetimeLocalForCompare(minDatetimeLocal);
     if (!floorKey) return;
-    setForm((prev) => {
-      let changed = false;
-      const next = prev.preferredDateTimesLocal.map((v) => {
-        if (!v.trim()) {
-          changed = true;
-          return minDatetimeLocal;
-        }
-        const vk = normalizeDatetimeLocalForCompare(v);
-        if (!vk || vk < floorKey) {
-          changed = true;
-          return minDatetimeLocal;
-        }
-        return v;
+    queueMicrotask(() => {
+      setForm((prev) => {
+        let changed = false;
+        const next = prev.preferredDateTimesLocal.map((v) => {
+          if (!v.trim()) {
+            changed = true;
+            return minDatetimeLocal;
+          }
+          const vk = normalizeDatetimeLocalForCompare(v);
+          if (!vk || vk < floorKey) {
+            changed = true;
+            return minDatetimeLocal;
+          }
+          return v;
+        });
+        return changed ? { ...prev, preferredDateTimesLocal: next } : prev;
       });
-      return changed ? { ...prev, preferredDateTimesLocal: next } : prev;
     });
   }, [open, isEdit, minDatetimeLocal]);
 
@@ -276,7 +280,10 @@ export default function RequestCallModal({
     const minKey = normalizeDatetimeLocalForCompare(minDatetimeLocal);
     const utcTimes: string[] = [];
     for (const localTime of form.preferredDateTimesLocal) {
-      const iso = callRequestPreferredTimeFromDatetimeLocal(localTime);
+      const iso = callRequestPreferredTimeFromDatetimeLocal(
+        localTime,
+        userTimeZone,
+      );
       if (!iso) {
         setModalError("Please enter a valid preferred time.");
         return;
@@ -344,6 +351,7 @@ export default function RequestCallModal({
     onSuccess,
     onError,
     minDatetimeLocal,
+    userTimeZone,
   ]);
 
   return (
