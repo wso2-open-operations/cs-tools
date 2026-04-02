@@ -22,7 +22,7 @@ import { MemoryRouter } from "react-router";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import ProjectDeployments from "@components/project-details/deployments/ProjectDeployments";
-import { useGetDeployments } from "@api/useGetDeployments";
+import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 
 const mockDeployments = {
   deployments: [
@@ -39,9 +39,9 @@ const mockDeployments = {
   ],
 };
 
-vi.mock("@api/useGetDeployments");
-vi.mock("@api/useGetDeploymentsProducts", () => ({
-  useGetDeploymentsProducts: () => ({
+vi.mock("@api/usePostProjectDeploymentsSearch");
+vi.mock("@api/usePostDeploymentProductsSearch", () => ({
+  usePostDeploymentProductsSearchAll: () => ({
     data: [],
     isLoading: false,
     isError: false,
@@ -156,13 +156,13 @@ vi.mock("@components/common/error-banner/ErrorBanner", () => ({
 
 describe("ProjectDeployments", () => {
   beforeEach(() => {
-    vi.mocked(useGetDeployments).mockReturnValue({
-      data: mockDeployments,
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
+      data: mockDeployments.deployments,
       isLoading: false,
       isPending: false,
       isError: false,
       error: null,
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
   });
 
   it("should render deployment cards when data is loaded", () => {
@@ -184,13 +184,13 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show loading skeletons when isLoading is true", () => {
-    vi.mocked(useGetDeployments).mockReturnValue({
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
       data: undefined,
       isLoading: true,
       isPending: true,
       isError: false,
       error: null,
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -198,13 +198,13 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show loading skeletons when isPending is true and isLoading is false", () => {
-    vi.mocked(useGetDeployments).mockReturnValue({
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
       data: null,
       isLoading: false,
       isPending: true,
       isError: false,
       error: null,
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -212,13 +212,13 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show empty state when data is undefined and not loading (initial state)", () => {
-    vi.mocked(useGetDeployments).mockReturnValue({
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
       data: undefined,
       isLoading: false,
       isPending: false,
       isError: false,
       error: null,
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -227,13 +227,13 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show error state when isError is true", () => {
-    vi.mocked(useGetDeployments).mockReturnValue({
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
       data: undefined,
       isLoading: false,
       isPending: false,
       isError: true,
       error: new Error("Network error"),
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
@@ -241,13 +241,13 @@ describe("ProjectDeployments", () => {
   });
 
   it("should show empty state when deployments are empty", () => {
-    vi.mocked(useGetDeployments).mockReturnValue({
-      data: { deployments: [] },
+    vi.mocked(usePostProjectDeploymentsSearchAll).mockReturnValue({
+      data: [],
       isLoading: false,
       isPending: false,
       isError: false,
       error: null,
-    } as unknown as ReturnType<typeof useGetDeployments>);
+    } as unknown as ReturnType<typeof usePostProjectDeploymentsSearchAll>);
 
     renderWithProviders(<ProjectDeployments projectId="project-123" />);
 
