@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import { Box, Button, Chip, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import {
   Calendar,
   CircleCheck,
@@ -24,8 +24,12 @@ import {
   Building2,
   Info,
   Mail,
+  FileText,
+  ExternalLink,
 } from "@wso2/oxygen-ui-icons-react";
 import { type ReactElement, type JSX } from "react";
+import { Link, useLocation, useParams } from "react-router";
+import DOMPurify from "dompurify";
 import type { CaseDetails } from "@models/responses";
 import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
@@ -42,12 +46,14 @@ import {
   mapSeverityToDisplay,
   resolveColorFromTheme,
   isSecurityReportAnalysisType,
+  stripHtml,
 } from "@utils/support";
 
 export interface CaseDetailsDetailsPanelProps {
   data: CaseDetails | undefined;
   isError: boolean;
   isEngagement?: boolean;
+  isServiceRequest?: boolean;
 }
 
 /**
@@ -61,20 +67,36 @@ export default function CaseDetailsDetailsPanel({
   data,
   isError,
   isEngagement = false,
+  isServiceRequest = false,
 }: CaseDetailsDetailsPanelProps): JSX.Element {
   const theme = useTheme();
+  const { projectId = "" } = useParams<{ projectId: string }>();
+  const location = useLocation();
+  const basePath = location.pathname.includes("/operations/")
+    ? "operations"
+    : "support";
 
   const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
   const overviewTitle = isSecurityReportAnalysis
     ? "Security Report Analysis Overview"
     : isEngagement
     ? "Engagement Overview"
+    : isServiceRequest
+    ? "Service Request Overview"
     : "Case Overview";
   const overviewIdLabel = isSecurityReportAnalysis
     ? "Security Report Analysis ID"
     : isEngagement
     ? "Engagement ID"
+    : isServiceRequest
+    ? "Request number"
     : "Case ID";
+
+  const productDisplayName =
+    data?.deployedProduct?.label?.trim?.()?.length
+      ? data.deployedProduct.label
+      : (data?.product?.label ?? null);
+  const relatedChangeRequest = data?.changeRequests?.[0];
 
   if (isError) {
     return (
@@ -119,12 +141,54 @@ export default function CaseDetailsDetailsPanel({
   return (
     <Stack spacing={3}>
       {/* Section 1: Overview */}
-      <CaseDetailsCard title={overviewTitle} icon={<Info size={20} aria-hidden />}>
+      <CaseDetailsCard
+        title={overviewTitle}
+        icon={<Info size={20} aria-hidden />}
+        rightAction={
+          isServiceRequest ? (
+            <Button
+              component={Link}
+              to={
+                relatedChangeRequest
+                  ? `/projects/${projectId}/${basePath}/change-requests/${relatedChangeRequest.id}`
+                  : ""
+              }
+              variant="text"
+              size="small"
+              startIcon={<ExternalLink size={14} />}
+              disabled={!relatedChangeRequest}
+              sx={{ minHeight: "unset", p: 0, textTransform: "none" }}
+            >
+              View related change request
+            </Button>
+          ) : null
+        }
+      >
         <Box sx={twoColumnGridSx}>
           <Box>
             <Typography {...labelSx}>{overviewIdLabel}</Typography>
             <Typography {...valueSx}>{formatValue(data?.number)}</Typography>
           </Box>
+          {isServiceRequest && data?.internalId ? (
+            <Box>
+              <Typography {...labelSx}>WSO2 Case Id</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data.internalId)}
+              </Typography>
+            </Box>
+          ) : null}
+          {isServiceRequest && !isSecurityReportAnalysis ? (
+            <Box>
+              <Typography {...labelSx}>Request type</Typography>
+              <Typography {...valueSx}>
+                {typeof data?.type === "object" && data?.type?.label
+                  ? data.type.label
+                  : typeof data?.type === "string"
+                  ? data.type
+                  : formatValue(null)}
+              </Typography>
+            </Box>
+          ) : null}
           <Box>
             <Typography {...labelSx}>Status</Typography>
             <Chip
@@ -177,15 +241,25 @@ export default function CaseDetailsDetailsPanel({
               }}
             />
           </Box>
-          <Box>
-            <Typography {...labelSx}>Category</Typography>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Tag size={16} color={theme.palette.text.secondary} aria-hidden />
+          {(!isServiceRequest || data?.issueType) && (
+            <Box>
+              <Typography {...labelSx}>Category</Typography>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Tag size={16} color={theme.palette.text.secondary} aria-hidden />
+                <Typography {...valueSx}>
+                  {formatValue(data?.issueType)}
+                </Typography>
+              </Stack>
+            </Box>
+          )}
+          {isServiceRequest && data?.createdBy ? (
+            <Box>
+              <Typography {...labelSx}>Created by</Typography>
               <Typography {...valueSx}>
-                {formatValue(data?.issueType)}
+                {formatValue(data.createdBy)}
               </Typography>
-            </Stack>
-          </Box>
+            </Box>
+          ) : null}
           <Box>
             <Typography {...labelSx}>Created Date</Typography>
             <Stack direction="row" alignItems="center" spacing={1}>
@@ -212,6 +286,64 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Stack>
           </Box>
+          {isServiceRequest && data?.duration ? (
+            <Box>
+              <Typography {...labelSx}>Duration</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data.duration)}
+              </Typography>
+            </Box>
+          ) : null}
+          {isServiceRequest ? (
+            <Box>
+              <Typography {...labelSx}>Assigned team</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data?.assignedTeam ?? null)}
+              </Typography>
+            </Box>
+          ) : null}
+          {/* Related change request action is rendered in the card header (top-right) */}
+          {isServiceRequest &&
+          (data?.engagementStartDate || data?.engagementEndDate) ? (
+            <>
+              <Box>
+                <Typography {...labelSx}>Engagement start</Typography>
+                <Typography {...valueSx}>
+                  {formatDateOnly(data?.engagementStartDate ?? null)}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography {...labelSx}>Engagement end</Typography>
+                <Typography {...valueSx}>
+                  {formatDateOnly(data?.engagementEndDate ?? null)}
+                </Typography>
+              </Box>
+            </>
+          ) : null}
+          {isServiceRequest && data?.assignedTeam ? (
+            <Box>
+              <Typography {...labelSx}>Assigned team</Typography>
+              <Typography {...valueSx}>
+                {formatValue(data.assignedTeam)}
+              </Typography>
+            </Box>
+          ) : null}
+          {isServiceRequest && (data?.catalog || data?.catalogItem) ? (
+            <>
+              <Box>
+                <Typography {...labelSx}>Catalog</Typography>
+                <Typography {...valueSx}>
+                  {formatValue(data?.catalog ?? null)}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography {...labelSx}>Catalog item</Typography>
+                <Typography {...valueSx}>
+                  {formatValue(data?.catalogItem ?? null)}
+                </Typography>
+              </Box>
+            </>
+          ) : null}
           {!isEngagement && (
             <Box>
               <Typography {...labelSx}>SLA Response Time</Typography>
@@ -259,6 +391,58 @@ export default function CaseDetailsDetailsPanel({
         </Box>
       </CaseDetailsCard>
 
+      {isServiceRequest ? (
+        <CaseDetailsCard
+          title="Description"
+          icon={<FileText size={20} aria-hidden />}
+        >
+          {data?.description ? (
+            <Box
+              component="div"
+              sx={{
+                typography: "body2",
+                color: "text.primary",
+                "& p": { mb: 0.5 },
+                "& p:last-child": { mb: 0 },
+                "& code": {
+                  display: "block",
+                  p: 1,
+                  bgcolor: "action.hover",
+                  fontSize: "0.875rem",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "break-word",
+                },
+              }}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(data.description),
+              }}
+            />
+          ) : (
+            <Typography {...valueSx}>Nothing</Typography>
+          )}
+        </CaseDetailsCard>
+      ) : (
+        data?.variables &&
+        data.variables.length > 0 && (
+          <CaseDetailsCard
+            title="Request details"
+            icon={<FileText size={20} aria-hidden />}
+          >
+            <Stack spacing={2}>
+              {data.variables.map((v, i) => (
+                <Box key={`${v.name}-${i}`}>
+                  <Typography {...labelSx}>{formatValue(v.name)}</Typography>
+                  <Typography {...valueSx} sx={{ whiteSpace: "pre-wrap" }}>
+                    {stripHtml(v.value ?? "") || formatValue(v.value)}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          </CaseDetailsCard>
+        )
+      )}
+
       {/* Section 2: Product & Environment */}
       {!isEngagement && (
         <CaseDetailsCard
@@ -281,11 +465,7 @@ export default function CaseDetailsDetailsPanel({
             <Box>
               <Typography {...labelSx}>Product Name</Typography>
               <Typography {...valueSx}>
-                {formatValue(
-                  data?.deployedProduct?.label?.trim?.()?.length
-                    ? data.deployedProduct.label
-                    : null,
-                )}
+                {formatValue(productDisplayName)}
               </Typography>
             </Box>
             <Box>
@@ -307,7 +487,9 @@ export default function CaseDetailsDetailsPanel({
       {/* Section 3: Closed Case Details (only when case is closed) */}
       {statusLabel?.toLowerCase() === "closed" && (
         <CaseDetailsCard
-          title="Closed Case Details"
+          title={
+            isServiceRequest ? "Closed Request Details" : "Closed Case Details"
+          }
           icon={<CircleCheck size={20} aria-hidden />}
         >
           <Box sx={twoColumnGridSx}>
@@ -384,7 +566,7 @@ export default function CaseDetailsDetailsPanel({
                   />
                 </Box>
               )}
-              {!isEngagement && (
+              {!isEngagement && !isServiceRequest && (
                 <Box>
                   <Typography {...labelSx}>CS Manager</Typography>
                   <Typography {...valueSx}>
