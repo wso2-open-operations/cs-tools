@@ -40,6 +40,11 @@ function renderWithProviders(ui: ReactElement) {
   );
 }
 
+const defaultSelectionProps = {
+  selectedProduct: null,
+  onToggleProductSelect: vi.fn(),
+};
+
 const mockProducts: DeploymentProductItem[] = [
   {
     id: "prod-1",
@@ -89,7 +94,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     expect(screen.getByText("WSO2 Products")).toBeInTheDocument();
@@ -107,7 +116,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     expect(screen.getByText("WSO2 API Manager")).toBeInTheDocument();
@@ -124,7 +137,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     expect(screen.getByText("WSO2 Products")).toBeInTheDocument();
@@ -149,7 +166,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     expect(screen.getAllByText("Not Available").length).toBeGreaterThan(0);
@@ -163,7 +184,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     const skeletons = document.querySelectorAll(".MuiSkeleton-root");
@@ -178,7 +203,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     expect(screen.getByText("Failed to load products")).toBeInTheDocument();
@@ -192,7 +221,11 @@ describe("DeploymentProductList", () => {
     } as unknown as ReturnType<typeof useGetDeploymentsProducts>);
 
     renderWithProviders(
-      <DeploymentProductList deploymentId="dep-123" projectId="proj-1" />,
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
     );
 
     const addButton = screen.getByRole("button", { name: /Add Product/i });
