@@ -27,59 +27,34 @@ import {
   Box,
   Button,
   Stack,
+  Select,
+  MenuItem,
   Typography,
+  FormControl,
+  InputLabel,
   Pagination,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
+import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
+import { useGetDeployments } from "@api/useGetDeployments";
+import { hasListSearchOrFilters, isS0Case } from "@utils/support";
 import { CaseType } from "@constants/supportConstants";
+import {
+  getProjectPermissions,
+  shouldExcludeS0,
+} from "@utils/subscriptionUtils";
+import type { AllCasesFilterValues } from "@models/responses";
+import AllCasesStatCards from "@components/support/all-cases/AllCasesStatCards";
+import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
+import AllCasesList from "@components/support/all-cases/AllCasesList";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
-import ServiceRequestsList from "@components/support/service-requests/ServiceRequestsList";
-import ServiceRequestsSearchBar from "@components/support/service-requests/ServiceRequestsSearchBar";
-import ServiceRequestsStatCards from "@components/support/service-requests/ServiceRequestsStatCards";
-
-export type ServiceRequestStatusBucket =
-  | "pending"
-  | "inProgress"
-  | "completed"
-  | "rejected";
-
-function classifyServiceRequestStatus(
-  statusLabel: string,
-): ServiceRequestStatusBucket {
-  const s = statusLabel.toLowerCase();
-  if (
-    s.includes("open") ||
-    s.includes("awaiting") ||
-    s.includes("waiting") ||
-    s.includes("pending")
-  ) {
-    return "pending";
-  }
-  if (s.includes("progress")) {
-    return "inProgress";
-  }
-  if (s.includes("rejected") || s.includes("cancelled")) {
-    return "rejected";
-  }
-  if (
-    s.includes("closed") ||
-    s.includes("resolved") ||
-    s.includes("completed")
-  ) {
-    return "completed";
-  }
-  return "pending";
-}
-
-export type ServiceRequestStatusFilter =
-  | "all"
-  | "pending"
-  | "in_progress"
-  | "completed";
 
 /**
- * ServiceRequestsPage displays all service requests with filters and search.
+ * ServiceRequestsPage lists service requests using the same filters, sort,
+ * and pagination pattern as All Cases; only the case type filter differs.
  *
  * @returns {JSX.Element} The rendered Service Requests page.
  */
@@ -89,126 +64,164 @@ export default function ServiceRequestsPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
-  const basePath = location.pathname.includes("/operations/") ? "operations" : "support";
+  const basePath = location.pathname.includes("/operations/")
+    ? "operations"
+    : "support";
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState<ServiceRequestStatusFilter>("all");
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState<AllCasesFilterValues>({});
+  const [sortField, setSortField] = useState<
+    "createdOn" | "updatedOn" | "severity" | "state"
+  >("createdOn");
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
+    projectId || "",
+  );
+  const projectDetailsReady = !isProjectLoading && project !== undefined;
+
+  const permissions = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return getProjectPermissions(undefined);
+    }
+    return getProjectPermissions(project.type?.label);
+  }, [projectDetailsReady, project]);
+
+  const excludeS0 = useMemo(() => {
+    if (!projectDetailsReady || !project) {
+      return false;
+    }
+    return shouldExcludeS0(project.type?.label);
+  }, [projectDetailsReady, project]);
+
+  const { data: filterMetadata } = useGetProjectFilters(projectId || "");
+  const { data: deploymentsData } = useGetDeployments(projectId || "");
+
+  const {
+    data: stats,
+    isLoading: isStatsQueryLoading,
+    isError: isStatsError,
+  } = useGetProjectCasesStats(projectId || "", {
+    caseTypes: [CaseType.SERVICE_REQUEST],
+    enabled: !!projectId,
+  });
 
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
         caseTypes: [CaseType.SERVICE_REQUEST],
+        statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+        severityId: filters.severityId ? Number(filters.severityId) : undefined,
+        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+        deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
         createdByMe: createdByMe || undefined,
       },
       sortBy: {
-        field: "createdOn" as const,
-        order: "desc" as const,
+        field: sortField,
+        order: sortOrder,
       },
     }),
-    [searchTerm, createdByMe],
+    [filters, searchTerm, sortField, sortOrder, createdByMe],
   );
 
   const {
     data,
     isLoading: isCasesQueryLoading,
-    isError: isCasesQueryError,
+    isError: isCasesError,
     hasNextPage,
     fetchNextPage,
-  } = useGetProjectCases(projectId || "", caseSearchRequest);
+    isFetchingNextPage,
+  } = useGetProjectCases(projectId || "", caseSearchRequest, {
+    enabled: !!projectId,
+  });
 
   const { showLoader, hideLoader } = useLoader();
 
+  const hasStatsResponse = stats !== undefined;
   const hasCasesResponse = data !== undefined;
+  const isProjectContextLoading = isProjectLoading;
+  const isStatsLoading =
+    isProjectContextLoading ||
+    isStatsQueryLoading ||
+    (!!projectId && !hasStatsResponse);
+
   const isCasesAreaLoading =
-    !isCasesQueryError &&
-    (isCasesQueryLoading || (!!projectId && !hasCasesResponse));
+    isCasesQueryLoading ||
+    (!!projectId && !hasCasesResponse) ||
+    isFetchingNextPage;
+
+  const isInitialPageLoading = isStatsLoading || isCasesAreaLoading;
 
   useEffect(() => {
-    if (isCasesAreaLoading) {
+    if (isInitialPageLoading) {
       showLoader();
       return () => hideLoader();
     }
     hideLoader();
-  }, [isCasesAreaLoading, showLoader, hideLoader]);
+  }, [isInitialPageLoading, showLoader, hideLoader]);
 
   useEffect(() => {
-    if (!data || !hasNextPage) {
-      return;
+    if (!data) return;
+    const loadedPages = data.pages.length;
+    if (page > loadedPages && hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
     }
-    void fetchNextPage();
-  }, [data, hasNextPage, fetchNextPage]);
+  }, [page, data, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const allServiceRequests = useMemo(
-    () => data?.pages.flatMap((p) => p.cases) ?? [],
-    [data],
+  const currentPageCases = useMemo(() => {
+    if (!data || data.pages.length === 0) return [];
+    const requestedPageIndex = page - 1;
+    if (requestedPageIndex < 0 || requestedPageIndex >= data.pages.length) {
+      return [];
+    }
+    return data.pages[requestedPageIndex]?.cases ?? [];
+  }, [data, page]);
+
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
+
+  const filteredAndSearchedCases = useMemo(
+    () =>
+      excludeS0
+        ? currentPageCases.filter((c) => !isS0Case(c))
+        : currentPageCases,
+    [currentPageCases, excludeS0],
   );
 
-  const srStats = useMemo(() => {
-    const counts = { pending: 0, inProgress: 0, completed: 0, rejected: 0 };
-    for (const sr of allServiceRequests) {
-      const bucket = classifyServiceRequestStatus(sr.status?.label ?? "");
-      counts[bucket] += 1;
-    }
-    return counts;
-  }, [allServiceRequests]);
-
-  const filteredServiceRequests = useMemo(() => {
-    let filtered = [...allServiceRequests];
-
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (sr) =>
-          sr.number?.toLowerCase().includes(searchLower) ||
-          sr.title?.toLowerCase().includes(searchLower) ||
-          sr.description?.toLowerCase().includes(searchLower),
-      );
-    }
-
-    if (statusFilter !== "all") {
-      const filterToBucket: Record<
-        Exclude<ServiceRequestStatusFilter, "all">,
-        ServiceRequestStatusBucket
-      > = {
-        pending: "pending",
-        in_progress: "inProgress",
-        completed: "completed",
-      };
-      const targetBucket = filterToBucket[statusFilter];
-      filtered = filtered.filter(
-        (sr) =>
-          classifyServiceRequestStatus(sr.status?.label ?? "") === targetBucket,
-      );
-    }
-
-    filtered.sort((a, b) => {
-      const dateA = new Date(a.createdOn).getTime() || 0;
-      const dateB = new Date(b.createdOn).getTime() || 0;
-      return dateB - dateA;
-    });
-      
-    return filtered;
-  }, [allServiceRequests, searchTerm, statusFilter]);
-
-  const totalItems = filteredServiceRequests.length;
-
-  const paginatedServiceRequests = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    return filteredServiceRequests.slice(startIndex, startIndex + pageSize);
-  }, [filteredServiceRequests, page]);
-
+  const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
+  const paginatedCases = filteredAndSearchedCases;
   const totalPages = Math.ceil(totalItems / pageSize);
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
   };
 
-  const handleStatusFilterChange = (value: ServiceRequestStatusFilter) => {
-    setStatusFilter(value);
+  const handleFilterChange = (field: string, value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [field]: value || undefined,
+    }));
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setFilters({});
+    setSearchTerm("");
+    setPage(1);
+  };
+
+  const handleSortChange = (value: "desc" | "asc") => {
+    setSortOrder(value);
+    setPage(1);
+  };
+
+  const handleSortFieldChange = (
+    value: "createdOn" | "updatedOn" | "severity" | "state",
+  ) => {
+    setSortField(value);
     setPage(1);
   };
 
@@ -217,17 +230,26 @@ export default function ServiceRequestsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleClearRefinements = () => {
-    setSearchTerm("");
-    setStatusFilter("all");
-    setPage(1);
-  };
+  useEffect(() => {
+    if (!projectDetailsReady) {
+      return;
+    }
+    if (
+      projectDetailsReady &&
+      !permissions.hasDeployments &&
+      filters.deploymentId
+    ) {
+      setFilters((prev) => ({ ...prev, deploymentId: undefined }));
+    }
+  }, [projectDetailsReady, permissions.hasDeployments, filters.deploymentId]);
+
+  const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
 
   const handleNewServiceRequest = () => {
     navigate(`/projects/${projectId}/${basePath}/service-requests/create`);
   };
 
-  if (isCasesQueryError) {
+  if (isCasesError) {
     return (
       <Stack spacing={3}>
         <Box>
@@ -239,10 +261,7 @@ export default function ServiceRequestsPage(): JSX.Element {
           >
             Back
           </Button>
-          <ErrorIndicator
-            entityName="service requests"
-            size="medium"
-          />
+          <ErrorIndicator entityName="service requests" size="medium" />
         </Box>
       </Stack>
     );
@@ -272,7 +291,7 @@ export default function ServiceRequestsPage(): JSX.Element {
           <Typography variant="body2" color="text.secondary">
             {createdByMe
               ? "Manage and track your service requests"
-              : "Manage deployments, and operations, infrastructure change, and service configurations"}
+              : "Manage deployments, operations, infrastructure change, and service configurations"}
           </Typography>
         </Box>
         <Button
@@ -286,19 +305,29 @@ export default function ServiceRequestsPage(): JSX.Element {
         </Button>
       </Box>
 
-      <ServiceRequestsStatCards
-        isLoading={isCasesAreaLoading}
-        isError={isCasesQueryError}
-        stats={srStats}
+      <AllCasesStatCards
+        isLoading={isStatsLoading}
+        isError={isStatsError}
+        stats={stats}
+        statEntityName="service request"
       />
 
-      <ServiceRequestsSearchBar
+      <AllCasesSearchBar
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
-        statusFilter={statusFilter}
-        onStatusFilterChange={handleStatusFilterChange}
-        stats={srStats}
-        onClearRefinements={handleClearRefinements}
+        isFiltersOpen={isFiltersOpen}
+        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+        filters={filters}
+        filterMetadata={filterMetadata}
+        deployments={
+          projectDetailsReady && permissions.hasDeployments
+            ? (deploymentsData?.deployments ?? [])
+            : []
+        }
+        onFilterChange={handleFilterChange}
+        onClearFilters={handleClearFilters}
+        excludeS0={excludeS0}
+        isProjectContextLoading={isProjectContextLoading}
       />
 
       <Box
@@ -309,20 +338,71 @@ export default function ServiceRequestsPage(): JSX.Element {
         }}
       >
         <Typography variant="body2" color="text.secondary">
-          Showing {paginatedServiceRequests.length} of {totalItems} service
-          requests
+          Showing {paginatedCases.length} of {totalItems} service requests
         </Typography>
-        
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="sr-sort-by-label">Sort by</InputLabel>
+            <Select<"createdOn" | "updatedOn" | "severity" | "state">
+              labelId="sr-sort-by-label"
+              id="sr-sort-by"
+              value={sortField}
+              label="Sort by"
+              onChange={(e) =>
+                handleSortFieldChange(
+                  e.target.value as
+                    | "createdOn"
+                    | "updatedOn"
+                    | "severity"
+                    | "state",
+                )
+              }
+            >
+              <MenuItem value="createdOn">
+                <Typography variant="body2">Created on</Typography>
+              </MenuItem>
+              <MenuItem value="updatedOn">
+                <Typography variant="body2">Updated on</Typography>
+              </MenuItem>
+              <MenuItem value="severity">
+                <Typography variant="body2">Severity</Typography>
+              </MenuItem>
+              <MenuItem value="state">
+                <Typography variant="body2">State</Typography>
+              </MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="sr-order-by-label">Order by</InputLabel>
+            <Select<"desc" | "asc">
+              labelId="sr-order-by-label"
+              id="sr-order-by"
+              value={sortOrder}
+              label="Order by"
+              onChange={(e) =>
+                handleSortChange(e.target.value as "desc" | "asc")
+              }
+            >
+              <MenuItem value="desc">
+                <Typography variant="body2">Newest first</Typography>
+              </MenuItem>
+              <MenuItem value="asc">
+                <Typography variant="body2">Oldest first</Typography>
+              </MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
       </Box>
 
-      <ServiceRequestsList
-        serviceRequests={paginatedServiceRequests}
-        isLoading={isCasesAreaLoading}
-        hasListRefinement={
-          searchTerm.trim().length > 0 || statusFilter !== "all"
-        }
-        onServiceRequestClick={(sr) =>
-          navigate(`/projects/${projectId}/${basePath}/service-requests/${sr.id}`)
+      <AllCasesList
+        cases={paginatedCases}
+        isLoading={isCasesAreaLoading && !isCasesError}
+        isError={isCasesError}
+        hasListRefinement={listHasRefinement}
+        onCaseClick={(c) =>
+          navigate(
+            `/projects/${projectId}/${basePath}/service-requests/${c.id}`,
+          )
         }
       />
 
