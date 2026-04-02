@@ -16,9 +16,10 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useGetDeploymentsProducts } from "@api/useGetDeploymentsProducts";
+import { usePostDeploymentProductsSearchAll } from "@api/usePostDeploymentProductsSearch";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { useAuthApiClient } from "@api/useAuthApiClient";
 
 const mockDeploymentProductsResponse = [
   {
@@ -53,7 +54,11 @@ vi.mock("@asgardeo/react", () => ({
   }),
 }));
 
-describe("useGetDeploymentsProducts", () => {
+vi.mock("@api/useAuthApiClient", () => ({
+  useAuthApiClient: vi.fn(),
+}));
+
+describe("usePostDeploymentProductsSearchAll", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -65,6 +70,7 @@ describe("useGetDeploymentsProducts", () => {
       json: () => Promise.resolve(mockDeploymentProductsResponse),
       status: 200,
     } as Response);
+    vi.mocked(useAuthApiClient).mockReturnValue(mockAuthFetch);
     (
       window as unknown as {
         config?: { CUSTOMER_PORTAL_BACKEND_BASE_URL?: string };
@@ -85,15 +91,15 @@ describe("useGetDeploymentsProducts", () => {
 
   it("should return deployment products from API", async () => {
     const { result } = renderHook(
-      () => useGetDeploymentsProducts("deployment-123"),
+      () => usePostDeploymentProductsSearchAll("deployment-123"),
       { wrapper },
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockAuthFetch).toHaveBeenCalledWith(
-      expect.stringContaining("/deployments/deployment-123/products"),
-      expect.objectContaining({ method: "GET" }),
+      expect.stringContaining("/deployments/deployment-123/products/search"),
+      expect.objectContaining({ method: "POST" }),
     );
     expect(result.current.data).toEqual(mockDeploymentProductsResponse);
     expect(result.current.data?.[0].product.label).toBe(
@@ -102,7 +108,7 @@ describe("useGetDeploymentsProducts", () => {
   });
 
   it("should be disabled when deploymentId is empty", () => {
-    const { result } = renderHook(() => useGetDeploymentsProducts(""), {
+    const { result } = renderHook(() => usePostDeploymentProductsSearchAll(""), {
       wrapper,
     });
 
