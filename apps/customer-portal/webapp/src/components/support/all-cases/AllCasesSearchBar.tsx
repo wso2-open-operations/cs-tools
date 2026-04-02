@@ -55,6 +55,9 @@ export interface AllCasesSearchBarProps {
   onClearFilters: () => void;
   excludeS0?: boolean;
   isProjectContextLoading?: boolean;
+  onLoadMoreDeployments?: () => void;
+  hasMoreDeployments?: boolean;
+  isFetchingMoreDeployments?: boolean;
 }
 
 /**
@@ -75,6 +78,9 @@ export default function AllCasesSearchBar({
   onClearFilters,
   excludeS0 = false,
   isProjectContextLoading = false,
+  onLoadMoreDeployments,
+  hasMoreDeployments = false,
+  isFetchingMoreDeployments = false,
 }: AllCasesSearchBarProps): JSX.Element {
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(event.target.value);
@@ -146,6 +152,9 @@ export default function AllCasesSearchBar({
             deployments={deployments}
             onFilterChange={onFilterChange}
             excludeS0={excludeS0}
+            onLoadMoreDeployments={onLoadMoreDeployments}
+            hasMoreDeployments={hasMoreDeployments}
+            isFetchingMoreDeployments={isFetchingMoreDeployments}
           />
         </>
       )}
