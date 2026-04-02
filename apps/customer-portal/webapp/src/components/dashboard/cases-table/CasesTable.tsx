@@ -21,7 +21,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetProjectFilters from "@api/useGetProjectFilters";
-import { useGetDeployments } from "@api/useGetDeployments";
+import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 import type { FilterField } from "@components/common/filter-panel/FilterPopover";
 import CasesTableHeader from "@components/dashboard/cases-table/CasesTableHeader";
 import CasesFilters from "@components/dashboard/cases-table/CasesFilters";
@@ -51,7 +51,7 @@ const CasesTable = ({
 }: CasesTableProps): JSX.Element => {
   const navigate = useNavigate();
   const { isLoading: isAuthLoading } = useAsgardeo();
-  const [filters, setFilters] = useState<Record<string, any>>({});
+  const [filters, setFilters] = useState<Record<string, string | number>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
@@ -63,19 +63,22 @@ const CasesTable = ({
   } = useGetProjectFilters(projectId);
 
   // Fetch deployments for the deployment filter
-  const { data: deploymentsData } = useGetDeployments(projectId);
+  const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(projectId, {
+    pageSize: 10,
+    enabled: !!projectId,
+  });
+  const deploymentsList = useMemo(
+    () => deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [],
+    [deploymentsQuery.data],
+  );
 
-  useEffect(() => {
-    if (!includeDeploymentFilter) {
-      setFilters((prev) =>
-        prev.deploymentId != null && prev.deploymentId !== ""
-          ? { ...prev, deploymentId: undefined }
-          : prev,
-      );
-    }
-  }, [includeDeploymentFilter]);
+  const effectiveFilters = useMemo(
+    () =>
+      includeDeploymentFilter ? filters : { ...filters, deploymentId: undefined },
+    [filters, includeDeploymentFilter],
+  );
 
-  const dynamicFilterFields: FilterField[] = useMemo(() => {
+  const dynamicFilterFields: Array<FilterField & { type: "select" }> = useMemo(() => {
     return ALL_CASES_FILTER_DEFINITIONS
       .filter(
         (def) =>
@@ -89,7 +92,7 @@ const CasesTable = ({
       let options: { label: string; value: string }[];
       if (isDeploymentFilter) {
         options =
-          deploymentsData?.deployments?.map((deployment) => ({
+          deploymentsList.map((deployment) => ({
             label: deployment.type?.label || deployment.name,
             value: deployment.id,
           })) ?? [];
@@ -98,16 +101,18 @@ const CasesTable = ({
         if (!Array.isArray(metadataOptions)) {
           options = [];
         } else {
-          const filtered =
+          const filtered: Array<{ label: string; id: string }> =
             def.metadataKey === "severities" && excludeS0
               ? metadataOptions.filter(
                   (item: { label: string }) =>
                     !isS0SeverityLabel(item.label),
                 )
               : def.metadataKey === "caseStates"
-                ? (metadataOptions as any[]).filter((s) => !isClosedStatus(s.label))
+                ? (metadataOptions as Array<{ label: string; id: string }>).filter(
+                    (s) => !isClosedStatus(s.label),
+                  )
                 : metadataOptions;
-          options = filtered.map((item: { label: string; id: string }) => ({
+          options = filtered.map((item) => ({
             label:
               def.metadataKey === "severities"
                 ? mapSeverityToDisplay(item.label)
@@ -122,9 +127,23 @@ const CasesTable = ({
           label,
           type: "select" as const,
           options,
+          ...(isDeploymentFilter
+            ? {
+                onLoadMore: () => {
+                  if (
+                    deploymentsQuery.hasNextPage &&
+                    !deploymentsQuery.isFetchingNextPage
+                  ) {
+                    void deploymentsQuery.fetchNextPage();
+                  }
+                },
+                hasMore: !!deploymentsQuery.hasNextPage,
+                isFetchingMore: deploymentsQuery.isFetchingNextPage,
+              }
+            : null),
         };
       });
-  }, [filtersMetadata, deploymentsData, excludeS0, includeDeploymentFilter]);
+  }, [filtersMetadata, deploymentsList, excludeS0, includeDeploymentFilter, deploymentsQuery]);
 
   const caseSearchRequest = useMemo(
     () => {
@@ -135,15 +154,21 @@ const CasesTable = ({
       
       return {
         filters: {
-          statusIds: filters.statusId 
-            ? [Number(filters.statusId)] 
+          statusIds: effectiveFilters.statusId
+            ? [Number(effectiveFilters.statusId)]
             : defaultStatusIds.length > 0 
               ? defaultStatusIds 
               : [...OUTSTANDING_STATUS_IDS],
           caseTypes: [CaseType.DEFAULT_CASE],
-          severityId: filters.severityId ? Number(filters.severityId) : undefined,
-          issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-          deploymentId: filters.deploymentId || undefined,
+          severityId: effectiveFilters.severityId
+            ? Number(effectiveFilters.severityId)
+            : undefined,
+          issueId: effectiveFilters.issueTypes
+            ? Number(effectiveFilters.issueTypes)
+            : undefined,
+          deploymentId: effectiveFilters.deploymentId
+            ? String(effectiveFilters.deploymentId)
+            : undefined,
         },
         sortBy: {
           field: "createdOn",
@@ -151,7 +176,7 @@ const CasesTable = ({
         },
       };
     },
-    [filters, filtersMetadata],
+    [effectiveFilters, filtersMetadata],
   );
 
   const offset = page * rowsPerPage;
@@ -170,19 +195,11 @@ const CasesTable = ({
   });
 
   useEffect(() => {
-    if (showAll && infiniteQuery.hasNextPage && !infiniteQuery.isFetchingNextPage && isLoadingAll) {
-      void infiniteQuery.fetchNextPage();
-    } else if (showAll && !infiniteQuery.hasNextPage && isLoadingAll) {
-      setIsLoadingAll(false);
-    }
-  }, [
-    showAll,
-    infiniteQuery.hasNextPage,
-    infiniteQuery.isFetchingNextPage,
-    infiniteQuery.fetchNextPage,
-    isLoadingAll,
-    infiniteQuery.data,
-  ]);
+    if (!showAll) return;
+    if (!infiniteQuery.hasNextPage) return;
+    if (infiniteQuery.isFetchingNextPage) return;
+    void infiniteQuery.fetchNextPage();
+  }, [showAll, infiniteQuery]);
 
   const paginatedData = useMemo((): CaseSearchResponse => {
     const filterS0 = (items: CaseListItem[]): CaseListItem[] =>
@@ -222,7 +239,7 @@ const CasesTable = ({
     setIsLoadingAll(false);
   };
 
-  const handleUpdateFilter = (field: string, value: any) => {
+  const handleUpdateFilter = (field: string, value: string | number) => {
     setFilters((prev) => ({
       ...prev,
       [field]: value,
@@ -270,7 +287,7 @@ const CasesTable = ({
           <Box sx={{ mb: 3 }}>
             <CasesFilters
               filters={filters}
-              filterFields={dynamicFilterFields as any}
+              filterFields={dynamicFilterFields}
               onFilterChange={handleUpdateFilter}
             />
           </Box>
