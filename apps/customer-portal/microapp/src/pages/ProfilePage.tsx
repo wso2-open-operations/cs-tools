@@ -77,10 +77,6 @@ export default function ProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  useEffect(() => {
-    getVersion((version) => console.log("Micro App Version: ", version));
-  }, []);
-
   return (
     <Stack gap={2.5}>
       <SectionCard title="Account Information">

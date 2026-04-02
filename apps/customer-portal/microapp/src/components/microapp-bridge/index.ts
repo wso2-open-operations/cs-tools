@@ -42,23 +42,14 @@ export interface BrowserConfiguration {
 declare global {
   interface Window {
     nativebridge?: {
-      requestToken: () => void;
-      resolveToken: (token: string) => void;
       requestIdToken: () => void;
       resolveIdToken: (token: string) => void;
       resolveDeviceSafeAreaInsets?: (data: { insets: EdgeInsets }) => void;
-      requestQR: () => void;
-      resolveQR: (qrString: string) => void;
-      requestItemList: () => void;
       resolveConfirmAlert: (action: string) => void;
-      resolveQRCode: (qrData: string) => void;
-      rejectQRCode: (error: string) => void;
       resolveSaveLocalData: () => void;
       rejectSaveLocalData: (error: string) => void;
       resolveGetLocalData: (encodedData: { value?: string }) => void;
       rejectGetLocalData: (error: string) => void;
-      resolveTotpQrMigrationData: (encodedData: { data: string }) => void;
-      rejectTotpQrMigrationData: (error: string) => void;
       resolveOpenUrl?: () => void;
       rejectOpenUrl?: (error: any) => void;
       requestMicroAppVersion: () => void;
@@ -79,7 +70,7 @@ export const getToken = (callback: Callback<string>): void => {
       callback(token);
     };
   } else {
-    console.error("Native bridge is not available");
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
     callback();
   }
 };
@@ -94,7 +85,7 @@ export const showAlert = (title: string, message: string, buttonText: string): v
 
     window.ReactNativeWebView.postMessage(alertData);
   } else {
-    console.error("Native bridge is not available");
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -124,22 +115,7 @@ export const showConfirmAlert = (
       }
     };
   } else {
-    console.error("Native bridge is not available");
-  }
-};
-
-// Scan QR Code
-export const scanQRCode = (
-  successCallback: (qrData: string) => void,
-  failedToRespondCallback: (error: string) => void,
-): void => {
-  if (window.nativebridge && window.ReactNativeWebView) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ topic: TOPIC.QR_REQUEST }));
-
-    window.nativebridge.resolveQRCode = (qrData: string) => successCallback(qrData);
-    window.nativebridge.rejectQRCode = (error: string) => failedToRespondCallback(error);
-  } else {
-    console.error("Native bridge is not available");
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -164,7 +140,7 @@ export const saveLocalData = (
     window.nativebridge.resolveSaveLocalData = callback;
     window.nativebridge.rejectSaveLocalData = (error: string) => failedToRespondCallback(error);
   } else {
-    console.error("Native bridge is not available");
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -189,29 +165,7 @@ export const getLocalData = <T>(
 
     window.nativebridge.rejectGetLocalData = (error: string) => failedToRespondCallback(error);
   } else {
-    console.error("Native bridge is not available");
-  }
-};
-
-// TOTP QR Migration Data
-export const totpQrMigrationData = (
-  callback: (data: string[]) => void,
-  failedToRespondCallback: (error: string) => void,
-): void => {
-  if (window.nativebridge && window.ReactNativeWebView) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ topic: TOPIC.TOTP }));
-
-    window.nativebridge.resolveTotpQrMigrationData = (encodedData: { data: string }) => {
-      if (encodedData.data) {
-        callback(encodedData.data.replace(" ", "").split(","));
-      } else {
-        callback([]);
-      }
-    };
-
-    window.nativebridge.rejectTotpQrMigrationData = (error: string) => failedToRespondCallback(error);
-  } else {
-    console.error("Native bridge is not available");
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
@@ -228,7 +182,7 @@ const triggerSuperAppAction = (topic: TopicType, data?: unknown): void => {
     });
     window.ReactNativeWebView.postMessage(messageData);
   } else {
-    console.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
