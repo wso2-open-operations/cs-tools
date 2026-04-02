@@ -63,8 +63,6 @@ apiClient.interceptors.request.use(
         config.headers["x-user-id-token"] = token;
         config.headers["Content-Type"] = "application/json";
 
-        Logger.info("Added authorization token to request");
-
         // NOTE: This header is intended for local development testing only.
         // This manually injects the JWT assertion header and must remain disabled in production.
         config.headers["x-jwt-assertion"] = token;

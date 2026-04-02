@@ -30,9 +30,3 @@ export interface Message {
   conversationId: string;
   timestamp: Date;
 }
-
-// interface KB {
-//   id: string;
-//   title: string;
-//   score: number;
-// }

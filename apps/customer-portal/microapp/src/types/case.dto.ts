@@ -194,7 +194,7 @@ export interface CommentDTO {
 
 export interface CreateCommentRequestDTO {
   content: string;
-  type: "work_note" | "comments";
+  type: "comments";
 }
 
 export interface GetCasesStatsRequestDTO {
