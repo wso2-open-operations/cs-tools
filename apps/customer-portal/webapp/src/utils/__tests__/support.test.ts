@@ -64,6 +64,8 @@ import {
   hasDisplayableContent,
   stripCustomerPrefixFromReason,
   formatCallRequestBackendDateTimeShort,
+  formatCallRequestPromptScheduledTime,
+  callRequestApiPreferredTimeToDatetimeLocal,
   callRequestPreferredTimeFromDatetimeLocal,
   datetimeLocalWallTimeToUtcMs,
   normalizeDatetimeLocalForCompare,
@@ -161,6 +163,21 @@ describe("support utils", () => {
   });
 
   describe("formatCallRequestBackendDateTimeShort", () => {
+    it("formats literal Z ISO as wall clock (not UTC shift)", () => {
+      expect(
+        formatCallRequestBackendDateTimeShort("2026-04-01T16:55:00.000Z"),
+      ).toBe("Apr 1, 4:55 PM");
+    });
+
+    it("formatCallRequestPromptScheduledTime prefers first preferred time over scheduleTime", () => {
+      expect(
+        formatCallRequestPromptScheduledTime(
+          ["2026-04-02T08:45:00.000Z"],
+          "2026-04-02T14:15:00.000Z",
+        ),
+      ).toBe("Apr 2, 8:45 AM");
+    });
+
     it("formats YYYY-MM-DD HH:mm:ss as wall-clock without shifting timezone", () => {
       expect(formatCallRequestBackendDateTimeShort("2026-04-02 05:49:41")).toBe(
         "Apr 2, 5:49 AM",
@@ -207,6 +224,20 @@ describe("support utils", () => {
     it("resolves Colombo wall clock to consistent UTC ms", () => {
       const ms = wallClockToUtcMilliseconds(2026, 4, 3, 6, 17, "Asia/Colombo");
       expect(ms).toBe(Date.parse("2026-04-03T00:47:00.000Z"));
+    });
+  });
+
+  describe("callRequestApiPreferredTimeToDatetimeLocal", () => {
+    it("strips literal Z to datetime-local (same clock as POST)", () => {
+      expect(
+        callRequestApiPreferredTimeToDatetimeLocal("2026-04-01T16:55:00.000Z"),
+      ).toBe("2026-04-01T16:55");
+    });
+
+    it("maps space-separated API time to datetime-local", () => {
+      expect(
+        callRequestApiPreferredTimeToDatetimeLocal("2024-10-29 14:00:00"),
+      ).toBe("2024-10-29T14:00");
     });
   });
 
