@@ -153,6 +153,9 @@ export default function CaseDetailsDetailsPanel({
                   ? `/projects/${projectId}/${basePath}/change-requests/${relatedChangeRequest.id}`
                   : ""
               }
+              state={{
+                returnTo: location.pathname + location.search,
+              }}
               variant="text"
               size="small"
               startIcon={<ExternalLink size={14} />}
@@ -174,18 +177,6 @@ export default function CaseDetailsDetailsPanel({
               <Typography {...labelSx}>WSO2 Case Id</Typography>
               <Typography {...valueSx}>
                 {formatValue(data.internalId)}
-              </Typography>
-            </Box>
-          ) : null}
-          {isServiceRequest && !isSecurityReportAnalysis ? (
-            <Box>
-              <Typography {...labelSx}>Request type</Typography>
-              <Typography {...valueSx}>
-                {typeof data?.type === "object" && data?.type?.label
-                  ? data.type.label
-                  : typeof data?.type === "string"
-                  ? data.type
-                  : formatValue(null)}
               </Typography>
             </Box>
           ) : null}
