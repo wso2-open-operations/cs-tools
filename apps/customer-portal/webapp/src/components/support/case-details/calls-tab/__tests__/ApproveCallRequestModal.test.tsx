@@ -49,6 +49,12 @@ const mockCall: CallRequest = {
   state: { id: "3", label: "Pending on Customer" },
 };
 
+const mockCallNoPreferredTimes: CallRequest = {
+  ...mockCall,
+  preferredTimes: [],
+  scheduleTime: "",
+};
+
 const defaultProps = {
   open: true,
   call: mockCall,
@@ -57,6 +63,7 @@ const defaultProps = {
   onClose: vi.fn(),
   onSuccess: vi.fn(),
   onError: vi.fn(),
+  approveStateKey: 2,
 };
 
 describe("ApproveCallRequestModal", () => {
@@ -76,20 +83,32 @@ describe("ApproveCallRequestModal", () => {
     ).toBeInTheDocument();
   });
 
-  it("should render the preferred time input", () => {
+  it("should render the preferred time input prefilled from API wall clock", () => {
     renderWithProviders(<ApproveCallRequestModal {...defaultProps} />);
-    expect(screen.getByDisplayValue("")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2024-10-29T14:00")).toBeInTheDocument();
     expect(screen.getAllByLabelText(/Preferred Time/i).length).toBeGreaterThan(0);
   });
 
   it("should have Approve button disabled when time is not entered", () => {
-    renderWithProviders(<ApproveCallRequestModal {...defaultProps} />);
+    renderWithProviders(
+      <ApproveCallRequestModal
+        {...defaultProps}
+        call={mockCallNoPreferredTimes}
+      />,
+    );
     expect(screen.getByRole("button", { name: /^Approve$/i })).toBeDisabled();
   });
 
   it("should enable Approve button when a preferred time is entered", () => {
-    renderWithProviders(<ApproveCallRequestModal {...defaultProps} />);
-    const input = document.querySelector<HTMLInputElement>("#approve-preferred-time");
+    renderWithProviders(
+      <ApproveCallRequestModal
+        {...defaultProps}
+        call={mockCallNoPreferredTimes}
+      />,
+    );
+    const input = document.querySelector<HTMLInputElement>(
+      "#approve-preferred-time-0",
+    );
     if (!input) throw new Error("Preferred time input not found");
     fireEvent.change(input, { target: { value: "2099-12-31T14:00" } });
     expect(screen.getByRole("button", { name: /^Approve$/i })).not.toBeDisabled();
