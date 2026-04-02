@@ -15,45 +15,29 @@
 // under the License.
 
 import { render, screen, fireEvent } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/ChatInput";
 
-// Mock @wso2/oxygen-ui components
-vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: any) => <div data-testid="box">{children}</div>,
-  Button: ({ children, onClick }: any) => (
-    <button onClick={onClick}>{children}</button>
-  ),
-  CircularProgress: () => <span data-testid="circular-progress" />,
-  IconButton: ({ children, onClick, disabled }: any) => (
-    <button data-testid="icon-button" onClick={onClick} disabled={disabled}>
-      {children}
-    </button>
-  ),
-  Paper: ({ children }: any) => <div data-testid="paper">{children}</div>,
-  Typography: ({ children }: any) => (
-    <span data-testid="typography">{children}</span>
-  ),
-  Stack: ({ children }: any) => <div>{children}</div>,
-  colors: {
-    orange: {
-      700: "#C2410C",
-    },
-  },
-}));
-
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Send: () => <svg data-testid="icon-send" />,
-  Sparkles: () => <svg data-testid="icon-sparkles" />,
-}));
-
-// Mock Tooltip component
 vi.mock("@wso2/oxygen-ui", async () => {
-  const actual: any = await vi.importActual("@wso2/oxygen-ui");
+  const actual: Record<string, unknown> = await vi.importActual("@wso2/oxygen-ui");
   return {
     ...actual,
-    Tooltip: ({ children }: any) => <div data-testid="tooltip">{children}</div>,
+    Tooltip: ({ children }: { children: ReactNode }) => (
+      <div data-testid="tooltip">{children}</div>
+    ),
+  };
+});
+
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@wso2/oxygen-ui-icons-react")
+  >();
+  return {
+    ...actual,
+    Send: () => <svg data-testid="icon-send" />,
+    PanelTopClose: () => <svg data-testid="icon-panel-close" />,
+    FileText: () => <svg data-testid="icon-file" />,
   };
 });
 
@@ -67,7 +51,7 @@ vi.mock("@components/common/rich-text-editor/Editor", () => ({
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             onSubmitKeyDown?.();
           }
@@ -110,7 +94,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    const sendButton = screen.getByTestId("icon-button");
+    const sendButton = screen.getByRole("button", { name: /send message/i });
     fireEvent.click(sendButton);
 
     expect(onSendMock).toHaveBeenCalled();
