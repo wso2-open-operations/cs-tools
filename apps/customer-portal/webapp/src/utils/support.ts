@@ -1759,64 +1759,34 @@ export function normalizeDatetimeLocalForCompare(
 }
 
 /**
- * Call-request API expects preferred times as the modal wall clock with a `Z` suffix (no offset math).
+ * Converts datetime-local wall-clock value to a real UTC ISO string using the given profile/browser timezone.
  *
  * @param localValue - Value from input type="datetime-local" (profile-zone civil time).
  * @returns ISO string e.g. `2026-04-01T16:55:00.000Z`, or "" if invalid.
  */
 export function callRequestPreferredTimeFromDatetimeLocal(
   localValue: string,
+  profileTimeZone?: string | null,
 ): string {
   const trimmed = localValue.trim();
   const m = DATETIME_LOCAL_VALUE_RE.exec(trimmed);
   if (!m) return "";
-  const sec =
-    m[6] != null && m[6] !== "" ? String(m[6]).padStart(2, "0") : "00";
-  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${sec}.000Z`;
+  const utcMs = datetimeLocalWallTimeToUtcMs(trimmed, profileTimeZone);
+  if (utcMs == null) return "";
+  return new Date(utcMs).toISOString();
 }
 
 /**
- * Maps API preferred/schedule strings to `datetime-local` using the same wall-clock rules as
- * {@link callRequestPreferredTimeFromDatetimeLocal}. Literal `...Z` from the API is treated as
- * display clock, not a real UTC instant.
+ * Maps API preferred/schedule UTC strings to `datetime-local` in a given profile/browser timezone.
  *
  * @param apiStr - Raw string from preferredTimes or scheduleTime.
  * @returns `YYYY-MM-DDTHH:mm` or empty if unparseable.
  */
 export function callRequestApiPreferredTimeToDatetimeLocal(
   apiStr: string | null | undefined,
+  profileTimeZone?: string | null,
 ): string {
-  if (!apiStr?.trim()) return "";
-  const t = apiStr.trim();
-  const z = CALL_REQUEST_API_LITERAL_Z_RE.exec(t);
-  if (z) {
-    return `${z[1]}-${z[2]}-${z[3]}T${z[4]}:${z[5]}`;
-  }
-  const ymd =
-    /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (ymd) {
-    const yyyy = ymd[1];
-    const mo = ymd[2]!.padStart(2, "0");
-    const d = ymd[3]!.padStart(2, "0");
-    const h = ymd[4]!.padStart(2, "0");
-    const mi = ymd[5]!;
-    return `${yyyy}-${mo}-${d}T${h}:${mi}`;
-  }
-  const mdy =
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (mdy) {
-    const mo = mdy[1]!.padStart(2, "0");
-    const d = mdy[2]!.padStart(2, "0");
-    const yyyy = mdy[3];
-    const h = mdy[4]!.padStart(2, "0");
-    const mi = mdy[5]!;
-    return `${yyyy}-${mo}-${d}T${h}:${mi}`;
-  }
-  return toDatetimeLocalInputFromApiString(t);
+  return toDatetimeLocalInTimeZoneFromApiString(apiStr, profileTimeZone);
 }
 
 /**
