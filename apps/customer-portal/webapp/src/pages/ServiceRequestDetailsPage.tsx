@@ -74,6 +74,11 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   }, [isError, showError]);
 
   const handleBack = () => {
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    if (returnTo) {
+      navigate(returnTo);
+      return;
+    }
     const basePath = location.pathname.includes("/operations/")
       ? "operations"
       : "support";
