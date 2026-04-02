@@ -21,6 +21,7 @@ export interface CaseDetailsCardProps {
   title: string;
   icon: ReactNode;
   children: ReactNode;
+  rightAction?: ReactNode;
 }
 
 /**
@@ -33,16 +34,25 @@ export default function CaseDetailsCard({
   title,
   icon,
   children,
+  rightAction,
 }: CaseDetailsCardProps): JSX.Element {
   return (
     <Card variant="outlined">
       <CardContent sx={{ p: 3, "&:last-child": { pb: 3 } }}>
         <Stack spacing={3}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            {icon}
-            <Typography variant="h6" color="text.primary">
-              {title}
-            </Typography>
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={1}
+            sx={{ justifyContent: "space-between" }}
+          >
+            <Stack direction="row" alignItems="center" spacing={1}>
+              {icon}
+              <Typography variant="h6" color="text.primary">
+                {title}
+              </Typography>
+            </Stack>
+            {rightAction}
           </Stack>
           {children}
         </Stack>
