@@ -46,6 +46,7 @@ export default function SupportPage(): JSX.Element {
   const logger = useLogger();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const supportPath = `/projects/${projectId}/support`;
 
   const { data: project } = useGetProjectDetails(projectId || "");
   const includeS0InSupportMetrics =
@@ -136,11 +137,15 @@ export default function SupportPage(): JSX.Element {
             footerButtons={[
               {
                 label: "View my cases",
-                onClick: () => navigate("cases?createdByMe=true"),
+                onClick: () =>
+                  navigate("cases?createdByMe=true", {
+                    state: { returnTo: supportPath },
+                  }),
               },
               {
                 label: "View all cases",
-                onClick: () => navigate("cases"),
+                onClick: () =>
+                  navigate("cases", { state: { returnTo: supportPath } }),
               },
             ]}
             isError={isCasesError}
@@ -150,7 +155,10 @@ export default function SupportPage(): JSX.Element {
               isLoading={isCasesLoading}
               onCaseClick={
                 projectId
-                  ? (c) => navigate(`/projects/${projectId}/support/cases/${c.id}`)
+                  ? (c) =>
+                      navigate(`/projects/${projectId}/support/cases/${c.id}`, {
+                        state: { returnTo: supportPath },
+                      })
                   : undefined
               }
             />
@@ -165,11 +173,17 @@ export default function SupportPage(): JSX.Element {
             footerButtons={[
               {
                 label: "View my chat history",
-                onClick: () => navigate("conversations?createdByMe=true"),
+                onClick: () =>
+                  navigate("conversations?createdByMe=true", {
+                    state: { returnTo: supportPath },
+                  }),
               },
               {
                 label: "View all chat history",
-                onClick: () => navigate("conversations"),
+                onClick: () =>
+                  navigate("conversations", {
+                    state: { returnTo: supportPath },
+                  }),
               },
             ]}
             isError={isChatError}
@@ -194,7 +208,10 @@ export default function SupportPage(): JSX.Element {
                         navigate(
                           `/projects/${projectId}/support/conversations/${chatId}`,
                           {
-                            state: { conversationSummary: summary },
+                            state: {
+                              conversationSummary: summary,
+                              returnTo: supportPath,
+                            },
                           },
                         );
                       }
