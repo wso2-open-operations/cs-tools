@@ -64,6 +64,11 @@ import {
   hasDisplayableContent,
   stripCustomerPrefixFromReason,
   formatCallRequestBackendDateTimeShort,
+  callRequestPreferredTimeFromDatetimeLocal,
+  datetimeLocalWallTimeToUtcMs,
+  normalizeDatetimeLocalForCompare,
+  resolveCallSchedulingTimeZone,
+  wallClockToUtcMilliseconds,
   isWithinOpenRelatedCaseWindow,
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
@@ -172,6 +177,91 @@ describe("support utils", () => {
       expect(formatCallRequestBackendDateTimeShort("")).toBe("--");
       expect(formatCallRequestBackendDateTimeShort(undefined)).toBe("--");
       expect(formatCallRequestBackendDateTimeShort("not a date")).toBe("--");
+    });
+  });
+
+  describe("datetimeLocalWallTimeToUtcMs (profile / filter API time zone)", () => {
+    it("interprets datetime-local as Asia/Colombo wall time for API ISO", () => {
+      const ms = datetimeLocalWallTimeToUtcMs(
+        "2026-04-03T06:17",
+        "Asia/Colombo",
+      );
+      expect(ms).not.toBeNull();
+      expect(new Date(ms!).toISOString()).toMatch(
+        /^2026-04-03T00:47:00\.000Z$/,
+      );
+    });
+
+    it("maps WSO2/Colombo filter API id to same UTC ms as Asia/Colombo", () => {
+      const msIana = datetimeLocalWallTimeToUtcMs(
+        "2026-04-03T06:17",
+        "Asia/Colombo",
+      );
+      const msWso2 = datetimeLocalWallTimeToUtcMs(
+        "2026-04-03T06:17",
+        "WSO2/Colombo",
+      );
+      expect(msWso2).toBe(msIana);
+    });
+
+    it("resolves Colombo wall clock to consistent UTC ms", () => {
+      const ms = wallClockToUtcMilliseconds(2026, 4, 3, 6, 17, "Asia/Colombo");
+      expect(ms).toBe(Date.parse("2026-04-03T00:47:00.000Z"));
+    });
+  });
+
+  describe("callRequestPreferredTimeFromDatetimeLocal", () => {
+    it("echoes modal wall clock as Z-suffixed ISO (not true UTC offset)", () => {
+      expect(callRequestPreferredTimeFromDatetimeLocal("2026-04-01T16:55")).toBe(
+        "2026-04-01T16:55:00.000Z",
+      );
+    });
+
+    it("returns empty for invalid input", () => {
+      expect(callRequestPreferredTimeFromDatetimeLocal("")).toBe("");
+      expect(callRequestPreferredTimeFromDatetimeLocal("bad")).toBe("");
+    });
+  });
+
+  describe("normalizeDatetimeLocalForCompare", () => {
+    it("orders lexicographically for same-width strings", () => {
+      expect(normalizeDatetimeLocalForCompare("2026-04-01T08:00")).toBe(
+        "2026-04-01T08:00",
+      );
+      expect(
+        normalizeDatetimeLocalForCompare("2026-04-01T08:00")! <
+          normalizeDatetimeLocalForCompare("2026-04-01T16:55")!,
+      ).toBe(true);
+    });
+
+    it("returns null for invalid input", () => {
+      expect(normalizeDatetimeLocalForCompare("")).toBeNull();
+    });
+  });
+
+  describe("resolveCallSchedulingTimeZone", () => {
+    it("maps WSO2/Colombo to Asia/Colombo", () => {
+      expect(resolveCallSchedulingTimeZone("WSO2/Colombo")).toBe(
+        "Asia/Colombo",
+      );
+    });
+
+    it("falls back to a valid IANA id for empty input", () => {
+      const tz = resolveCallSchedulingTimeZone("");
+      expect(typeof tz).toBe("string");
+      expect(tz.length).toBeGreaterThan(0);
+    });
+
+    it("falls back for invalid zone ids", () => {
+      const tz = resolveCallSchedulingTimeZone("Not/A/Real/Zone");
+      expect(typeof tz).toBe("string");
+      expect(() =>
+        new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date()),
+      ).not.toThrow();
+    });
+
+    it("passes through Asia/Kolkata", () => {
+      expect(resolveCallSchedulingTimeZone("Asia/Kolkata")).toBe("Asia/Kolkata");
     });
   });
 
