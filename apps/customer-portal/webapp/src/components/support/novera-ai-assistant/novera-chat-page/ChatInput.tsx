@@ -41,7 +41,7 @@ const CHAT_PLACEHOLDER = "Type your message...";
 
 /**
  * Renders the input area for the Novera Chat page with rich text editor.
- * Single line by default, extends on Shift+Enter up to 5 lines, then scrollable.
+ * Rich text: Ctrl+Enter or ⌘+Enter sends; Enter adds lines or list items.
  *
  * @returns The ChatInput JSX element.
  */
