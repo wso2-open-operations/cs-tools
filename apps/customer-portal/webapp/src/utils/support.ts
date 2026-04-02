@@ -1712,3 +1712,283 @@ export function computeMinScheduleDatetimeLocal(
   const severityStr = toLocalStr(target);
   return severityStr > floorStr ? severityStr : floorStr;
 }
+
+/**
+ * Filter API / profile may return IDs that are not valid for `Intl` `timeZone`
+ * (e.g. WSO2/Colombo). Map those to canonical IANA zones.
+ */
+const API_TIMEZONE_TO_INTL_ALIASES: Record<string, string> = {
+  "WSO2/Colombo": "Asia/Colombo",
+};
+
+/**
+ * Returns an ID accepted by `Intl.DateTimeFormat` `{ timeZone }`, or null if unknown/invalid.
+ *
+ * @param apiTimeZone - Value from profile or filters metadata.
+ */
+function normalizeApiTimeZoneToIntlTimeZone(
+  apiTimeZone: string | null | undefined,
+): string | null {
+  const raw = apiTimeZone?.trim();
+  if (!raw) return null;
+  const candidate = API_TIMEZONE_TO_INTL_ALIASES[raw] ?? raw;
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(
+      new Date("2020-06-15T12:00:00Z"),
+    );
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Zone for call scheduling: normalized profile/filter value, or the browser's time zone.
+ *
+ * @param profileOrApiTimeZone - User profile `timeZone` (may be API-specific id).
+ */
+export function resolveCallSchedulingTimeZone(
+  profileOrApiTimeZone: string | null | undefined,
+): string {
+  const normalized = normalizeApiTimeZoneToIntlTimeZone(profileOrApiTimeZone);
+  if (normalized) return normalized;
+  try {
+    const fromBrowser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (fromBrowser && typeof fromBrowser === "string") return fromBrowser;
+  } catch {
+    /* ignore */
+  }
+  return "UTC";
+}
+
+const DATETIME_LOCAL_VALUE_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/**
+ * Normalizes a datetime-local string to `YYYY-MM-DDTHH:mm` for ordering (lexicographic compare).
+ *
+ * @param localValue - Value from input type="datetime-local".
+ * @returns Normalized string or null if unparseable.
+ */
+export function normalizeDatetimeLocalForCompare(
+  localValue: string | null | undefined,
+): string | null {
+  const m = DATETIME_LOCAL_VALUE_RE.exec(localValue?.trim() ?? "");
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
+}
+
+/**
+ * Call-request API expects preferred times as the modal wall clock with a `Z` suffix (no offset math).
+ *
+ * @param localValue - Value from input type="datetime-local" (profile-zone civil time).
+ * @returns ISO string e.g. `2026-04-01T16:55:00.000Z`, or "" if invalid.
+ */
+export function callRequestPreferredTimeFromDatetimeLocal(
+  localValue: string,
+): string {
+  const trimmed = localValue.trim();
+  const m = DATETIME_LOCAL_VALUE_RE.exec(trimmed);
+  if (!m) return "";
+  const sec =
+    m[6] != null && m[6] !== "" ? String(m[6]).padStart(2, "0") : "00";
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${sec}.000Z`;
+}
+
+/**
+ * Formats an instant as YYYY-MM-DDTHH:mm in a given IANA time zone (civil time).
+ *
+ * @param instantMs - UTC epoch milliseconds.
+ * @param timeZone - IANA zone (e.g. Asia/Colombo).
+ * @returns {string} datetime-local compatible string.
+ */
+export function instantToDatetimeLocalStringInZone(
+  instantMs: number,
+  timeZone: string,
+): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(new Date(instantMs));
+  const g = (t: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === t)?.value ?? "";
+  return `${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g("minute")}`;
+}
+
+function readZonedCalendarParts(ms: number, timeZone: string) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(new Date(ms));
+  const g = (t: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === t)?.value ?? NaN);
+  return {
+    y: g("year"),
+    mo: g("month"),
+    d: g("day"),
+    ho: g("hour"),
+    mi: g("minute"),
+  };
+}
+
+/**
+ * Resolves UTC epoch ms for a civil wall-clock time in an IANA time zone.
+ *
+ * @param year - Calendar year.
+ * @param month - 1–12.
+ * @param day - Day of month.
+ * @param hour - 0–23.
+ * @param minute - 0–59.
+ * @param timeZone - IANA zone.
+ * @returns UTC ms, or null if no match (invalid local time).
+ */
+export function wallClockToUtcMilliseconds(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+): number | null {
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  const anchor = Date.UTC(year, month - 1, day, 12, 0, 0);
+  const windowMs = 72 * 3600 * 1000;
+  for (let ms = anchor - windowMs; ms <= anchor + windowMs; ms += 60 * 1000) {
+    const p = readZonedCalendarParts(ms, timeZone);
+    if (
+      p.y === year &&
+      p.mo === month &&
+      p.d === day &&
+      p.ho === hour &&
+      p.mi === minute
+    ) {
+      return ms;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses a datetime-local value (YYYY-MM-DDTHH:mm) to UTC ms using the user's profile zone
+ * (filter API ids like WSO2/Colombo are normalized). If profile zone is missing or invalid,
+ * uses the browser's time zone. For POST/PATCH `utcTimes`, use
+ * {@link callRequestPreferredTimeFromDatetimeLocal} instead (backend expects modal wall clock + Z).
+ *
+ * @param localValue - Value from input type="datetime-local".
+ * @param profileTimeZone - Profile/filter time zone id (optional).
+ * @returns UTC ms or null if unparseable.
+ */
+export function datetimeLocalWallTimeToUtcMs(
+  localValue: string | null | undefined,
+  profileTimeZone?: string | null,
+): number | null {
+  const trimmed = localValue?.trim() ?? "";
+  if (!trimmed) return null;
+  const m = DATETIME_LOCAL_VALUE_RE.exec(trimmed);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  const tz = resolveCallSchedulingTimeZone(profileTimeZone);
+  return wallClockToUtcMilliseconds(y, mo, d, h, mi, tz);
+}
+
+/**
+ * Same as {@link toDatetimeLocalInputFromApiString} but expresses the instant in a given IANA zone.
+ *
+ * @param apiStr - API date/time string.
+ * @param profileTimeZone - Profile/filter zone; if missing/invalid, uses browser zone.
+ * @returns {string} YYYY-MM-DDTHH:mm for datetime-local.
+ */
+export function toDatetimeLocalInTimeZoneFromApiString(
+  apiStr: string | null | undefined,
+  profileTimeZone?: string | null,
+): string {
+  if (!apiStr?.trim()) return "";
+  const normalizedApi = normalizeUtcDateString(apiStr.trim());
+  const ms = Date.parse(normalizedApi);
+  if (Number.isNaN(ms)) return toDatetimeLocalInputFromApiString(apiStr);
+  const tz = resolveCallSchedulingTimeZone(profileTimeZone);
+  return instantToDatetimeLocalStringInZone(ms, tz);
+}
+
+function roundUpToNextFiveMinuteMarkInTimeZone(
+  instantMs: number,
+  timeZone: string,
+): number {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  let t = instantMs;
+  for (let i = 0; i < 200; i++) {
+    const parts = fmt.formatToParts(new Date(t));
+    const s = Number(parts.find((p) => p.type === "second")?.value ?? 0);
+    const mi = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    if (s === 0 && mi % 5 === 0) return t;
+    if (s !== 0) {
+      t += (60 - s) * 1000;
+    } else {
+      t += ((5 - (mi % 5)) % 5 || 5) * 60 * 1000;
+    }
+  }
+  return t;
+}
+
+/**
+ * Like {@link computeMinScheduleDatetimeLocal} but uses the user's IANA zone for civil date/time strings.
+ * Ensures datetime-local values align with profile timezone when converting to UTC for the API.
+ *
+ * @param allocationMinutes - Minutes after now before first slot; null/undefined uses now+1m floor only.
+ * @param profileTimeZone - Profile/filter zone; falls back to browser when omitted/invalid.
+ */
+export function computeMinScheduleDatetimeLocalForTimeZone(
+  allocationMinutes?: number | null,
+  profileTimeZone?: string | null,
+): string {
+  const tz = resolveCallSchedulingTimeZone(profileTimeZone);
+
+  const floorMs = Date.now() + 60 * 1000;
+  const floorStr = instantToDatetimeLocalStringInZone(floorMs, tz);
+
+  if (
+    allocationMinutes == null ||
+    Number.isNaN(allocationMinutes) ||
+    allocationMinutes < 0
+  ) {
+    return floorStr;
+  }
+
+  let targetMs = Date.now() + allocationMinutes * 60 * 1000;
+  targetMs = roundUpToNextFiveMinuteMarkInTimeZone(targetMs, tz);
+  const severityStr = instantToDatetimeLocalStringInZone(targetMs, tz);
+  return severityStr > floorStr ? severityStr : floorStr;
+}
