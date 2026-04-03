@@ -21,17 +21,16 @@ import ProjectCardSkeleton from "@components/project-hub/project-card/ProjectCar
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children }: any) => <div data-testid="box">{children}</div>,
-  Card: ({ children }: any) => <div data-testid="card">{children}</div>,
   Divider: () => <hr data-testid="divider" />,
   Form: {
+    CardButton: ({ children }: any) => (
+      <div data-testid="card-button">{children}</div>
+    ),
     CardContent: ({ children }: any) => (
       <div data-testid="card-content">{children}</div>
     ),
-    CardHeader: ({ title, subheader }: any) => (
-      <div data-testid="card-header">
-        {title}
-        {subheader}
-      </div>
+    CardHeader: ({ title }: any) => (
+      <div data-testid="card-header">{title}</div>
     ),
     CardActions: ({ children }: any) => (
       <div data-testid="card-actions">{children}</div>
@@ -52,7 +51,7 @@ describe("ProjectCardSkeleton", () => {
   it("should render all sections of the skeleton", () => {
     render(<ProjectCardSkeleton />);
 
-    expect(screen.getByTestId("card")).toBeInTheDocument();
+    expect(screen.getByTestId("card-button")).toBeInTheDocument();
     expect(screen.getByTestId("card-header")).toBeInTheDocument();
     expect(screen.getAllByTestId("card-content")).toHaveLength(2);
     expect(screen.getByTestId("card-actions")).toBeInTheDocument();
@@ -62,7 +61,7 @@ describe("ProjectCardSkeleton", () => {
     render(<ProjectCardSkeleton />);
 
     expect(screen.getAllByTestId("skeleton-rounded")).toHaveLength(3);
-    expect(screen.getAllByTestId("skeleton-text")).toHaveLength(9);
+    expect(screen.getAllByTestId("skeleton-text")).toHaveLength(6);
     expect(screen.getAllByTestId("skeleton-circular")).toHaveLength(3);
   });
 });
