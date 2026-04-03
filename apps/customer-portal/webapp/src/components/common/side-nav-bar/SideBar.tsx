@@ -19,6 +19,7 @@ import { Settings } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useMemo } from "react";
 import { useLocation, useParams, Link as NavigateLink } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import useGetMetadata from "@api/useGetMetadata";
 import { APP_SHELL_NAV_ITEMS } from "@constants/appLayoutConstants";
 import { getProjectPermissions } from "@utils/subscriptionUtils";
 
@@ -52,6 +53,9 @@ export default function SideBar({
   const projectsQuery = useInfiniteProjects({ enabled: !!projectId });
   const projects = flattenProjectPages(projectsQuery.data);
   const selectedProject = projects.find((project) => project.id === projectId);
+  const { data: portalMetadata } = useGetMetadata();
+  const usageMetricsEnabled =
+    portalMetadata?.featureFlags?.usageMetricsEnabled === true;
 
   const projectTypeLabel = selectedProject?.type?.label;
   const isProjectTypeResolved =
@@ -62,12 +66,22 @@ export default function SideBar({
   );
 
   const navItems = useMemo(() => {
-    if (!isProjectTypeResolved || !permissions.hasOperations) {
-      return APP_SHELL_NAV_ITEMS.filter((item) => item.id !== "operations");
+    let items = APP_SHELL_NAV_ITEMS;
+
+    if (!usageMetricsEnabled) {
+      items = items.filter((item) => item.id !== "usage-metrics");
     }
 
-    return APP_SHELL_NAV_ITEMS;
-  }, [isProjectTypeResolved, permissions.hasOperations]);
+    if (!isProjectTypeResolved || !permissions.hasOperations) {
+      items = items.filter((item) => item.id !== "operations");
+    }
+
+    return items;
+  }, [
+    isProjectTypeResolved,
+    permissions.hasOperations,
+    usageMetricsEnabled,
+  ]);
 
   return (
     <Sidebar
