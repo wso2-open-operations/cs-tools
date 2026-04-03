@@ -21,7 +21,6 @@ import type { ProjectDetails } from "@models/responses";
 import { formatProjectDate } from "@utils/projectDetails";
 import ProjectHeader from "@components/project-details/project-overview/project-information/ProjectHeader";
 import ProjectName from "@components/project-details/project-overview/project-information/ProjectName";
-import ProjectDescription from "@components/project-details/project-overview/project-information/ProjectDescription";
 import ProjectMetadata from "@components/project-details/project-overview/project-information/ProjectMetadata";
 import SubscriptionDetails from "@components/project-details/project-overview/project-information/SubscriptionDetails";
 
@@ -40,7 +39,6 @@ const ProjectInformationCard = ({
 }: ProjectInformationCardProps): JSX.Element => {
   const getKey = () => project?.key || "--";
   const getName = () => project?.name || "--";
-  const getDescription = () => project?.description || "--";
   const getCreatedDate = () =>
     project?.createdOn ? formatProjectDate(project.createdOn) : "--";
   const getType = () => project?.type || { id: "--", label: "--" };
@@ -69,12 +67,6 @@ const ProjectInformationCard = ({
           <ProjectName
             name={getName()}
             projectKey={getKey()}
-            isLoading={isLoading}
-            isError={isError}
-          />
-
-          <ProjectDescription
-            description={getDescription()}
             isLoading={isLoading}
             isError={isError}
           />
