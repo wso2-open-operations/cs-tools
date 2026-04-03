@@ -94,6 +94,11 @@ export default function AddProductModal({
   const [versions, setVersions] = useState<ProductVersionItem[]>([]);
   const previousProductIdRef = useRef<string>("");
   const [cachedProductsTotalRecords, setCachedProductsTotalRecords] = useState<
+    number | null
+  >(null);
+  const [cachedVersionsTotalRecords, setCachedVersionsTotalRecords] = useState<
+    number | null
+  >(null);
 
   const {
     data: productsPage,
@@ -126,26 +131,82 @@ export default function AddProductModal({
     offset: versionOffset,
   });
 
+  useEffect(() => {
+    if (!isFetchingVersions) {
+      setVersionsLoadMorePending(false);
+    }
+  }, [isFetchingVersions]);
+
   /* eslint-disable react-hooks/set-state-in-effect -- accumulate paginated product rows for the Select menu */
   useEffect(() => {
     if (!productsPage) return;
+
     const pageItems = productsPage.products ?? [];
     const offset = productsPage.offset ?? 0;
+    const pageLimit =
+      typeof productsPage.limit === "number" && productsPage.limit > 0
+        ? productsPage.limit
+        : 10;
+
+    const applyServerProductsTotal = (): void => {
+      if (
+        typeof productsPage.totalRecords === "number" &&
+        !Number.isNaN(productsPage.totalRecords)
+      ) {
+        setCachedProductsTotalRecords(productsPage.totalRecords);
+      }
+    };
+
+    if (offset > 0 && pageItems.length === 0) {
+      setCachedProductsTotalRecords(accumulatedProductsLengthRef.current);
+      return;
+    }
 
     if (offset === 0) {
       setProducts(pageItems);
+      if (pageItems.length < pageLimit) {
+        setCachedProductsTotalRecords(pageItems.length);
+      } else {
+        applyServerProductsTotal();
+      }
       return;
     }
-    setProducts((prev) => [...prev, ...pageItems]);
+
+    setProducts((prev) => {
+      const prevIds = new Set(
+        prev.map((p) => p.id).filter((id): id is string => Boolean(id)),
+      );
+      const newItems = pageItems.filter(
+        (p) => typeof p.id === "string" && p.id.length > 0 && !prevIds.has(p.id),
+      );
+      const mergedLen = prev.length + newItems.length;
+
+      if (newItems.length === 0) {
+        queueMicrotask(() => setCachedProductsTotalRecords(prev.length));
+        return prev;
+      }
+
+      if (pageItems.length < pageLimit) {
+        queueMicrotask(() => setCachedProductsTotalRecords(mergedLen));
+      } else {
+        queueMicrotask(() => applyServerProductsTotal());
+      }
+
+      return [...prev, ...newItems];
+    });
   }, [productsPage]);
 
-  const productsTotalRecords = productsPage?.totalRecords ?? products.length;
+  const productsTotalRecords =
+    cachedProductsTotalRecords ??
+    productsPage?.totalRecords ??
+    products.length;
   const canLoadMoreProducts = products.length < productsTotalRecords;
 
   const handleProductsScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
       const target = event.currentTarget;
       if (
+        productsLoadMorePending ||
         !canLoadMoreProducts ||
         isLoadingProducts ||
         isFetchingProducts ||
@@ -159,10 +220,12 @@ export default function AddProductModal({
         target.scrollHeight - target.scrollTop - target.clientHeight <
         threshold
       ) {
+        setProductsLoadMorePending(true);
         setProductOffset((prev) => prev + 10);
       }
     },
     [
+      productsLoadMorePending,
       canLoadMoreProducts,
       isLoadingProducts,
       isFetchingProducts,
@@ -175,6 +238,7 @@ export default function AddProductModal({
       previousProductIdRef.current = form.productId;
       setVersionOffset(0);
       setVersions([]);
+      setCachedVersionsTotalRecords(null);
     }
 
     if (!form.productId) {
@@ -187,29 +251,86 @@ export default function AddProductModal({
 
     const pageItems = versionsPage.versions ?? [];
     const offset = versionsPage.offset ?? 0;
+    const pageLimit =
+      typeof versionsPage.limit === "number" && versionsPage.limit > 0
+        ? versionsPage.limit
+        : 10;
 
-    if (offset === 0) {
-      setVersions(pageItems);
+    const applyServerVersionsTotal = (): void => {
+      if (
+        typeof versionsPage.totalRecords === "number" &&
+        !Number.isNaN(versionsPage.totalRecords)
+      ) {
+        setCachedVersionsTotalRecords(versionsPage.totalRecords);
+      }
+    };
+
+    if (offset > 0 && pageItems.length === 0) {
+      setCachedVersionsTotalRecords(accumulatedVersionsLengthRef.current);
       return;
     }
 
-    setVersions((prev) => [...prev, ...pageItems]);
+    if (offset === 0) {
+      setVersions(pageItems);
+      if (pageItems.length < pageLimit) {
+        setCachedVersionsTotalRecords(pageItems.length);
+      } else {
+        applyServerVersionsTotal();
+      }
+      return;
+    }
+
+    setVersions((prev) => {
+      const prevIds = new Set(
+        prev.map((v) => v.id).filter((id): id is string => Boolean(id)),
+      );
+      const newItems = pageItems.filter(
+        (v) => typeof v.id === "string" && v.id.length > 0 && !prevIds.has(v.id),
+      );
+      const mergedLen = prev.length + newItems.length;
+
+      if (newItems.length === 0) {
+        queueMicrotask(() => setCachedVersionsTotalRecords(prev.length));
+        return prev;
+      }
+
+      if (pageItems.length < pageLimit) {
+        queueMicrotask(() => setCachedVersionsTotalRecords(mergedLen));
+      } else {
+        queueMicrotask(() => applyServerVersionsTotal());
+      }
+
+      return [...prev, ...newItems];
+    });
   }, [form.productId, versionsPage]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const versionsTotalRecords = versionsPage?.totalRecords ?? versions.length;
+  const versionsTotalRecords =
+    cachedVersionsTotalRecords ??
+    versionsPage?.totalRecords ??
+    versions.length;
   const canLoadMoreVersions = versions.length < versionsTotalRecords;
 
-  /** Matches dashboard deployment filter: spinner only while fetching additional pages (offset past zero). */
+  /**
+   * Footer spinner only after the user scrolls to load more (pending flag), not for
+   * background refetches or inflated API totalRecords.
+   */
   const isFetchingMoreProducts =
-    isFetchingProducts && productOffset > 0 && products.length > 0;
+    productsLoadMorePending &&
+    isFetchingProducts &&
+    productOffset > 0 &&
+    products.length > 0;
   const isFetchingMoreVersions =
-    isFetchingVersions && versionOffset > 0 && versions.length > 0;
+    versionsLoadMorePending &&
+    isFetchingVersions &&
+    versionOffset > 0 &&
+    versions.length > 0;
 
   const handleVersionsScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
       const target = event.currentTarget;
       if (
+        versionsLoadMorePending ||
         !canLoadMoreVersions ||
         isLoadingVersions ||
         isFetchingVersions ||
@@ -223,10 +344,12 @@ export default function AddProductModal({
         target.scrollHeight - target.scrollTop - target.clientHeight <
         threshold
       ) {
+        setVersionsLoadMorePending(true);
         setVersionOffset((prev) => prev + 10);
       }
     },
     [
+      versionsLoadMorePending,
       canLoadMoreVersions,
       isLoadingVersions,
       isFetchingVersions,
@@ -250,6 +373,10 @@ export default function AddProductModal({
     setVersionOffset(0);
     setVersions([]);
     previousProductIdRef.current = "";
+    setProductsLoadMorePending(false);
+    setVersionsLoadMorePending(false);
+    setCachedProductsTotalRecords(null);
+    setCachedVersionsTotalRecords(null);
     onClose();
   }, [onClose]);
 
