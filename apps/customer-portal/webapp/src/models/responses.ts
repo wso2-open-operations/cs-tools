@@ -879,7 +879,7 @@ export interface DeploymentProductItem {
   createdOn: string;
   updatedOn: string;
   description: string | null;
-  product: { id: string; label: string };
+  product: { id: string; label: string; abbreviation?: string | null };
   deployment: { id: string; label: string };
   version?: { id: string; label: string } | string | null;
   cores?: number | null;
