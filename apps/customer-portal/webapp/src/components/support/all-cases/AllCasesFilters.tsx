@@ -29,6 +29,11 @@ import type {
   AllCasesFilterValues,
   ProjectDeploymentItem,
 } from "@models/responses";
+import { SelectMenuLoadMoreRow } from "@components/common/select-menu-load-more-row/SelectMenuLoadMoreRow";
+import {
+  EMPTY_DROPDOWN_PLACEHOLDER,
+  paginatedSelectMenuListProps,
+} from "@constants/dropdownConstants";
 import { ALL_CASES_FILTER_DEFINITIONS } from "@constants/supportConstants";
 import { isS0SeverityLabel } from "@constants/dashboardConstants";
 import { deriveFilterLabels, mapSeverityToDisplay } from "@utils/support";
@@ -94,7 +99,9 @@ export default function AllCasesFilters({
                     : item.label,
                 value: def.useLabelAsValue ? item.label : item.id,
               }));
-            })();
+              })();
+
+        const hasNoOptions = (options?.length ?? 0) === 0;
 
         return (
           <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
@@ -109,37 +116,50 @@ export default function AllCasesFilters({
                 MenuProps={
                   isDeploymentFilter
                     ? {
-                        MenuListProps: {
-                          onScroll: (e: UIEvent<HTMLElement>) => {
-                            if (
-                              !onLoadMoreDeployments ||
-                              !hasMoreDeployments ||
-                              isFetchingMoreDeployments
-                            ) {
-                              return;
-                            }
-                            const el = e.currentTarget;
-                            const threshold = 24;
-                            const isNearBottom =
-                              el.scrollHeight -
-                                el.scrollTop -
-                                el.clientHeight <
-                              threshold;
-                            if (isNearBottom) onLoadMoreDeployments();
-                          },
-                        },
+                        MenuListProps: paginatedSelectMenuListProps(
+                          onLoadMoreDeployments && hasMoreDeployments
+                            ? (e: UIEvent<HTMLElement>) => {
+                                if (
+                                  !onLoadMoreDeployments ||
+                                  !hasMoreDeployments ||
+                                  isFetchingMoreDeployments
+                                ) {
+                                  return;
+                                }
+                                const el = e.currentTarget;
+                                const threshold = 24;
+                                const isNearBottom =
+                                  el.scrollHeight -
+                                    el.scrollTop -
+                                    el.clientHeight <
+                                  threshold;
+                                if (isNearBottom) onLoadMoreDeployments();
+                              }
+                            : undefined,
+                        ),
                       }
                     : undefined
                 }
               >
                 <MenuItem value="">
-                  <Typography variant="body2">{allLabel}</Typography>
+                  <Typography variant="body2">
+                    {hasNoOptions ? EMPTY_DROPDOWN_PLACEHOLDER : allLabel}
+                  </Typography>
                 </MenuItem>
                 {options?.map((option) => (
                   <MenuItem key={option.value} value={option.value}>
                     <Typography variant="body2">{option.label}</Typography>
                   </MenuItem>
                 ))}
+                <SelectMenuLoadMoreRow
+                  visible={Boolean(
+                    isDeploymentFilter &&
+                      onLoadMoreDeployments &&
+                      hasMoreDeployments &&
+                      isFetchingMoreDeployments &&
+                      (options?.length ?? 0) > 0,
+                  )}
+                />
               </Select>
             </FormControl>
           </Grid>
