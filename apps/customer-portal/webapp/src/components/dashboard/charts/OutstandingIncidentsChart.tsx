@@ -135,7 +135,7 @@ export const OutstandingIncidentsChart = ({
                   <Cell
                     key={`cell-${index}`}
                     fill={entry.color}
-                    stroke={colors.common.white}
+                    stroke="none"
                   />
                 ))}
               </Pie>
