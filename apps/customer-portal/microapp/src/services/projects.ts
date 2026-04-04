@@ -51,7 +51,7 @@ const getProject = async (id: string): Promise<ProjectInfo> => {
   return mapProjectDtoToProject(response);
 };
 
-const editProject = async (id: string, body: { hasAgent: boolean }): Promise<void> => {
+const editProject = async (id: string, body: { hasAgent?: boolean; hasKbReferences?: boolean }): Promise<void> => {
   await apiClient.patch(PROJECT_DETAILS_ENDPOINT(id), body);
 };
 
@@ -114,6 +114,7 @@ function mapProjectDtoToProject(project: ProjectDto): ProjectInfo {
     description: stripHtmlTags(project.description),
     type: project.type?.label ?? "N/A",
     agentEnabled: project.account.hasAgent,
+    kbReferencesEnabled: project.account.hasKbReferences,
   };
 }
 
@@ -158,7 +159,7 @@ export const projects = {
 
   edit: (id: string) =>
     mutationOptions({
-      mutationFn: (body: { hasAgent: boolean }) => editProject(id, body),
+      mutationFn: (body: { hasAgent?: boolean; hasKbReferences?: boolean }) => editProject(id, body),
     }),
 
   deployments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>

@@ -33,15 +33,18 @@ export default function ProfilePage() {
   const layout = useLayout();
   const notify = useNotify();
   const queryClient = useQueryClient();
-  const { projectId, noveraEnabled } = useProject();
+  const { projectId, noveraEnabled, kbReferencesEnabled } = useProject();
   const { data } = useQuery(users.me());
   const name = data ? data?.firstName + " " + data?.lastName : undefined;
 
   const projectEditMutation = useMutation({
     ...projects.edit(projectId!),
-    onError: () => {
+    onError: (_, variables) => {
       notify.error("Failed to update project. Please try again.");
+      if (variables.hasAgent) setIsNoveraEnabled(!variables.hasAgent);
+      if (variables.hasKbReferences) setIsKbReferencesEnabled(!variables.hasKbReferences);
     },
+    onSuccess: () => queryClient.refetchQueries({ queryKey: projects.get(projectId!).queryKey }),
   });
 
   const AppBarSlot = () => (
@@ -62,6 +65,8 @@ export default function ProfilePage() {
     queryClient.prefetchQuery(metadata.get());
   };
 
+  const [isNoveraEnabled, setIsNoveraEnabled] = useState(noveraEnabled);
+  const [isKbReferencesEnabled, setIsKbReferencesEnabled] = useState(kbReferencesEnabled);
   const [version, setVersion] = useState<string | undefined>(undefined);
 
   useEffect(() => getVersion((version) => setVersion(version)));
@@ -135,8 +140,11 @@ export default function ProfilePage() {
           icon={Bot}
           suffix={
             <Switch
-              checked={noveraEnabled}
-              onChange={(event) => projectEditMutation.mutate({ hasAgent: event.target.checked })}
+              checked={isNoveraEnabled}
+              onChange={(event) => {
+                projectEditMutation.mutate({ hasAgent: event.target.checked });
+                setIsNoveraEnabled(!isNoveraEnabled);
+              }}
             />
           }
         />
@@ -145,7 +153,15 @@ export default function ProfilePage() {
           description="Get intelligent article suggestions"
           iconColor={colors.blue[500]}
           icon={BookOpen}
-          suffix={<Switch defaultChecked />}
+          suffix={
+            <Switch
+              checked={isKbReferencesEnabled}
+              onChange={(event) => {
+                projectEditMutation.mutate({ hasKbReferences: event.target.checked });
+                setIsKbReferencesEnabled(!isKbReferencesEnabled);
+              }}
+            />
+          }
         />
       </SectionCard>
       {version && (

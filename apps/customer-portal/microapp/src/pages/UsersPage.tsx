@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Card, Grid, Stack, Typography, Button, Divider, useTheme, SearchBar } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
@@ -147,7 +147,7 @@ function UserRolesInfo() {
       <Typography variant="subtitle1" fontWeight="medium">
         User Roles
       </Typography>
-      <Stack gap={0.3} mt={0.5}>
+      <Stack gap={1} mt={0.5}>
         {MOCK_ROLES.map((role) => (
           <Typography variant="subtitle2" fontWeight="medium">
             {role.name}:&nbsp;

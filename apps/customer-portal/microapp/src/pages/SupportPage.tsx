@@ -15,9 +15,8 @@
 // under the License.
 
 import { Suspense, useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Button, Card, Grid, pxToRem, Stack, Tab, Tabs, Typography, useTheme } from "@wso2/oxygen-ui";
-import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
+import { useSearchParams } from "react-router-dom";
+import { Card, Grid, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
 import { MetricWidget } from "@components/features/dashboard";
 import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
 
@@ -30,6 +29,7 @@ import { chats } from "../services/chats";
 import { changeRequests } from "../services/changes";
 import { serviceRequests } from "../services/services";
 import EmptyState from "../components/shared/EmptyState";
+import { useNotify } from "../context/snackbar";
 
 export const TAB_CONFIG = {
   case: { title: "Open Cases", subtitle: "Active support tickets" },
@@ -48,14 +48,13 @@ export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => st
 type TabType = ItemCardProps["type"];
 
 export default function SupportPage() {
-  const theme = useTheme();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const allowedTabs: TabType[] = ["case", "chat", "service", "change"];
   const tabFromParams = allowedTabs.find((t) => t === rawTab) ?? "case";
   const [tab, setTab] = useState<TabType>(tabFromParams);
 
-  const { projectId, noveraEnabled } = useProject();
+  const { projectId } = useProject();
   const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
   const { data: serviceRequestCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["service_request"] }));
   const { data: changeRequestCaseTypeStats } = useQuery(changeRequests.stats(projectId!));
@@ -86,38 +85,6 @@ export default function SupportPage() {
             <MetricWidget {...props} size="small" base />
           </Grid>
         ))}
-        <Grid size={12}>
-          <Card
-            component={Stack}
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-            px={2}
-            py={1.5}
-            gap={2}
-            elevation={0}
-          >
-            <Stack direction="row" alignItems="center" gap={2}>
-              <MessageSquareQuote size={pxToRem(40)} color={theme.palette.primary.main} />
-              <Stack>
-                <Typography variant="body1" fontWeight="medium" color="primary">
-                  Need help with something new?
-                </Typography>
-                <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
-                  Chat with Novera or Create Support Case
-                </Typography>
-              </Stack>
-            </Stack>
-            <Button
-              component={Link}
-              to={noveraEnabled ? "/chat" : "/create"}
-              variant="contained"
-              sx={{ textTransform: "initial", flexShrink: 0, height: 40 }}
-            >
-              Get Help
-            </Button>
-          </Card>
-        </Grid>
       </Grid>
       <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => handleTabChange(value)}>
         <Tab label="Cases" value="case" disableRipple />
@@ -248,5 +215,14 @@ function ItemsListContentSkeleton() {
 }
 
 function ItemsListErrorBoundary({ children }: { children: ReactNode }) {
-  return <ErrorBoundary fallback={<ItemsListContentSkeleton />}>{children}</ErrorBoundary>;
+  const notify = useNotify();
+
+  return (
+    <ErrorBoundary
+      fallback={<ItemsListContentSkeleton />}
+      onError={() => notify.error("Content failed to load. Please try again later.")}
+    >
+      {children}
+    </ErrorBoundary>
+  );
 }

@@ -15,11 +15,12 @@
 // under the License.
 
 import { useProject } from "@root/src/context/project";
-import { Fab as MuiFab } from "@wso2/oxygen-ui";
-import { Plus } from "@wso2/oxygen-ui-icons-react";
+import { Fab as MuiFab, useTheme } from "@wso2/oxygen-ui";
+import { MessageSquareIcon, PencilIcon } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
 
 export function Fab() {
+  const theme = useTheme();
   const { noveraEnabled } = useProject();
 
   return (
@@ -27,13 +28,22 @@ export function Fab() {
       component={Link}
       role="link"
       size="medium"
-      variant="extended"
+      variant="circular"
       color="primary"
-      sx={{ textTransform: "initial", position: "fixed", right: 10, bottom: "calc(var(--tab-bar-height) + 60px)" }}
+      sx={{
+        textTransform: "initial",
+        position: "fixed",
+        right: 10,
+        bottom: "calc(var(--tab-bar-height) + 60px)",
+      }}
       to={noveraEnabled ? "/chat" : "/create"}
+      disabled
     >
-      <Plus />
-      Create Case
+      {noveraEnabled ? (
+        <MessageSquareIcon fill={theme.palette.primary.contrastText} />
+      ) : (
+        <PencilIcon fill={theme.palette.primary.contrastText} />
+      )}
     </MuiFab>
   );
 }

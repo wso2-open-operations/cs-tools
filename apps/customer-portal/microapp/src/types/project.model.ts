@@ -39,6 +39,7 @@ export interface ProjectInfo {
   description: string;
   type: string;
   agentEnabled: boolean;
+  kbReferencesEnabled: boolean;
 }
 
 export interface Deployment {

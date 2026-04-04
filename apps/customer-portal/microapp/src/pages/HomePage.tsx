@@ -45,7 +45,7 @@ export default function HomePage() {
       ? multipleCaseTypesStats.activeCount + changeRequestCaseTypeStats.activeCount
       : undefined;
 
-  const resolvedThisMonth = defaultCaseTypeStats?.resolvedCases.currentMonth;
+  const resolvedThisMonth = defaultCaseTypeStats?.resolvedCases.pastThirtyDays;
   const resolvedThisMonthChangeRate = defaultCaseTypeStats?.changeRate.resolvedEngagements;
   const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
   const averageResponseTimeChangeRate = defaultCaseTypeStats?.changeRate.averageResponseTime;

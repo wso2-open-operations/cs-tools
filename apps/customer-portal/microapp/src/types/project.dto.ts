@@ -34,6 +34,7 @@ export interface ProjectDto {
   account: {
     id: string;
     hasAgent: boolean;
+    hasKbReferences: boolean;
     name: string;
     activationDate: string | null;
     deactivationDate: string | null;

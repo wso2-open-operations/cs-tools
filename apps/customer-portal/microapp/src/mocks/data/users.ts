@@ -17,22 +17,14 @@
 export const MOCK_ROLES = [
   {
     name: "Admin",
-    description: "Full access to manage project, users, and settings",
+    description: "Manage users by adding or removing members within the assigned project.",
   },
   {
-    name: "Developer",
-    description: "Create and manage cases, chats, and requests",
+    name: "Portal User",
+    description: "Log in to the Support Portal to create and manage support cases within assigned projects.",
   },
   {
-    name: "Security",
-    description: "Security-focused access and monitoring",
-  },
-  {
-    name: "Procurement",
-    description: "Procurement and purchasing management",
-  },
-  {
-    name: "Manager",
-    description: "Team oversight and reporting access",
+    name: "System User",
+    description: "Used exclusively for system-to-system integrations and cannot log in to the Support Portal.",
   },
 ];
