@@ -32,6 +32,7 @@ import Footer from "@components/common/footer/Footer";
 import Header from "@components/common/header/Header";
 import SideBar from "@components/common/side-nav-bar/SideBar";
 import NoveraFloatingChat from "@components/common/novera-floating-chat/NoveraFloatingChat";
+import { FloatingNoveraVisibilityProvider } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
 import {
   getSidebarCollapsed,
   setSidebarCollapsed,
@@ -95,9 +96,10 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     /\/projects\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname) ||
     /\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname);
   const isServiceRequestDetailsPage =
-    /\/projects\/[^/]+\/(?:support|operations)\/service-requests\/[^/]+$/.test(
+    /\/projects\/[^/]+\/(?:support|operations)\/service-requests\/(?!create$)[^/]+$/.test(
       location.pathname,
-    ) || /\/[^/]+\/(?:support|operations)\/service-requests\/[^/]+$/.test(
+    ) ||
+    /\/[^/]+\/(?:support|operations)\/service-requests\/(?!create$)[^/]+$/.test(
       location.pathname,
     );
   const isEngagementDetailsPage = location.pathname.includes("/engagements/");
@@ -154,77 +156,79 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
 
         {/* Main content. */}
         <AppShell.Main>
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "100%",
-              width: "100%",
-              flex: 1,
-              minHeight: 0,
-              overflow: "hidden",
-              position: "relative",
-            }}
-          >
-            {isVisible && (
-              <LinearProgress
-                color="warning"
-                sx={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  zIndex: 1300,
-                  height: 3,
-                }}
-              />
-            )}
+          <FloatingNoveraVisibilityProvider>
             <Box
-              ref={mainContentRef}
               sx={{
-                flex: 1,
-                minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                overflow: "auto",
-                ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
-                ...(isAuthLoading
-                  ? { p: 0 }
-                  : isDetailsStylePage
-                    ? { px: 0, pb: 0, pt: 0 }
-                    : { p: 3 }),
+                height: "100%",
+                width: "100%",
+                flex: 1,
+                minHeight: 0,
+                overflow: "hidden",
+                position: "relative",
               }}
             >
-              {isAuthLoading ? (
-                <Box
+              {isVisible && (
+                <LinearProgress
+                  color="warning"
                   sx={{
-                    flex: 1,
-                    minHeight: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 2,
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 1300,
+                    height: 3,
                   }}
-                >
-                  <LinearProgress
-                    color="warning"
-                    sx={{ width: "80%", maxWidth: 400, height: 4 }}
-                  />
-                  <Typography variant="body2" color="text.secondary">
-                    {loadingMessage}
-                  </Typography>
-                </Box>
-              ) : (
-                children || (
-                  <Outlet
-                    context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
-                  />
-                )
+                />
               )}
+              <Box
+                ref={mainContentRef}
+                sx={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "auto",
+                  ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
+                  ...(isAuthLoading
+                    ? { p: 0 }
+                    : isDetailsStylePage
+                      ? { px: 0, pb: 0, pt: 0 }
+                      : { p: 3 }),
+                }}
+              >
+                {isAuthLoading ? (
+                  <Box
+                    sx={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 2,
+                    }}
+                  >
+                    <LinearProgress
+                      color="warning"
+                      sx={{ width: "80%", maxWidth: 400, height: 4 }}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {loadingMessage}
+                    </Typography>
+                  </Box>
+                ) : (
+                  children || (
+                    <Outlet
+                      context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
+                    />
+                  )
+                )}
+              </Box>
+              {!isProjectHub && <NoveraFloatingChat />}
             </Box>
-            {!isProjectHub && <NoveraFloatingChat />}
-          </Box>
+          </FloatingNoveraVisibilityProvider>
         </AppShell.Main>
 
         {/* Footer component. */}
