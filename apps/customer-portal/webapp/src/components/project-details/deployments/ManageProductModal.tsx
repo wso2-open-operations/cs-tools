@@ -96,7 +96,8 @@ export interface ManageProductModalProps {
  * Modal for managing (editing) a deployment product.
  * Product Details tab: Core Count, TPS, and Description are editable.
  * Update History tab: View, add, edit, and delete product updates.
- * Dismiss only via Close; successful saves refresh list data without closing.
+ * Dismiss via Close or after a successful save on the Product Details tab; Update
+ * History saves refresh list data without closing the modal.
  *
  * @param {ManageProductModalProps} props - open, deploymentId, product, onClose, optional onSuccess/onError.
  * @returns {JSX.Element | null} The manage product modal or null when product is missing.
@@ -200,6 +201,7 @@ export default function ManageProductModal({
         body,
       });
       onSuccess?.();
+      onClose();
     } catch (error) {
       onError?.(
         error instanceof Error ? error.message : "Failed to update product",
@@ -217,6 +219,7 @@ export default function ManageProductModal({
     patchProduct,
     onSuccess,
     onError,
+    onClose,
   ]);
 
   const handleSaveUpdates = useCallback(
