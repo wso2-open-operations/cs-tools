@@ -124,12 +124,40 @@ describe("UserProfile", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("should keep the account menu trigger available while auth or profile is loading", () => {
+  it("should keep the account menu trigger available while auth is loading", () => {
     mockUseAsgardeo.mockReturnValue({ isSignedIn: true, isLoading: true });
     render(<UserProfile />);
 
     expect(screen.getByTestId("user-menu-trigger")).toBeInTheDocument();
     expect(screen.getByTestId("header-name")).toHaveTextContent("Loading…");
+  });
+
+  it("should keep the account menu trigger available while profile (useGetUserDetails) is loading", () => {
+    mockUseGetUserDetails.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+    });
+    render(<UserProfile />);
+
+    expect(screen.getByTestId("user-menu-trigger")).toBeInTheDocument();
+    expect(screen.getByTestId("header-name")).toHaveTextContent("Loading…");
+  });
+
+  it("should show cached name and email when isError but userDetails data exists", () => {
+    mockUseGetUserDetails.mockReturnValue({
+      data: mockUserDetails,
+      isLoading: false,
+      isError: true,
+      error: new Error("stale"),
+    });
+    render(<UserProfile />);
+
+    const expectedName = `${mockUserDetails.firstName} ${mockUserDetails.lastName}`;
+    expect(screen.getByTestId("header-name")).toHaveTextContent(expectedName);
+    expect(screen.getByTestId("header-email")).toHaveTextContent(
+      mockUserDetails.email,
+    );
   });
 
   it("should show Unknown User in the menu header when user details fail to load", () => {
