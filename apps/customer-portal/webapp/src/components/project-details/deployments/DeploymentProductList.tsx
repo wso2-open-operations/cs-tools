@@ -153,6 +153,7 @@ export default function DeploymentProductList({
 }: DeploymentProductListProps): JSX.Element {
   const queryClient = useQueryClient();
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [addProductModalKey, setAddProductModalKey] = useState(0);
   const [editingProduct, setEditingProduct] =
     useState<DeploymentProductItem | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(
@@ -234,7 +235,10 @@ export default function DeploymentProductList({
             size="small"
             startIcon={<Plus />}
             sx={{ height: 32, fontSize: "0.75rem" }}
-            onClick={() => setIsAddProductModalOpen(true)}
+            onClick={() => {
+              setAddProductModalKey((k) => k + 1);
+              setIsAddProductModalOpen(true);
+            }}
           >
             Add Product
           </Button>
@@ -279,6 +283,7 @@ export default function DeploymentProductList({
         )}
 
         <AddProductModal
+          key={addProductModalKey}
           open={isAddProductModalOpen}
           deploymentId={deploymentId}
           projectId={projectId}
