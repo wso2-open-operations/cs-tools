@@ -64,7 +64,7 @@ const CATALOG_ICON_MAP: Array<{
   },
   {
     pattern: /information\s*request/i,
-    config: { Icon: FileText, paletteKey: "secondary" },
+    config: { Icon: FileText, paletteKey: "success" },
   },
   {
     pattern: /artifact\s*deployment/i,
@@ -76,7 +76,7 @@ const CATALOG_ICON_MAP: Array<{
   },
   {
     pattern: /product\s*change/i,
-    config: { Icon: Settings, paletteKey: "primary" },
+    config: { Icon: Settings, paletteKey: "info" },
   },
   {
     pattern: /infrastructure/i,
@@ -91,7 +91,7 @@ function getCatalogIconConfig(catalogName: string): CatalogIconConfig {
   return (
     match?.config ?? {
       Icon: FileText,
-      paletteKey: "secondary",
+      paletteKey: "info",
     }
   );
 }
