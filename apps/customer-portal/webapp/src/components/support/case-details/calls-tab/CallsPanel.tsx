@@ -404,7 +404,7 @@ export default function CallsPanel({
   );
 
   return (
-    <Stack spacing={3} sx={{ flex: 1, minHeight: 0, width: "100%" }}>
+    <Stack spacing={3}>
       {successMessage && (
         <SuccessBanner
           message={successMessage}
