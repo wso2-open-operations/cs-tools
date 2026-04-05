@@ -189,29 +189,27 @@ export default function AddProductModal({
       return;
     }
 
-    setProducts((prev) => {
-      const prevIds = new Set(
-        prev.map((p) => p.id).filter((id): id is string => Boolean(id)),
-      );
-      const newItems = pageItems.filter(
-        (p) => typeof p.id === "string" && p.id.length > 0 && !prevIds.has(p.id),
-      );
-      const mergedLen = prev.length + newItems.length;
+    const prevProducts = products;
+    const prevProductIds = new Set(
+      prevProducts.map((p) => p.id).filter((id): id is string => Boolean(id)),
+    );
+    const newProductItems = pageItems.filter(
+      (p) => typeof p.id === "string" && p.id.length > 0 && !prevProductIds.has(p.id),
+    );
+    const mergedProductsLen = prevProducts.length + newProductItems.length;
 
-      if (newItems.length === 0) {
-        queueMicrotask(() => setCachedProductsTotalRecords(prev.length));
-        return prev;
-      }
+    if (newProductItems.length === 0) {
+      setCachedProductsTotalRecords(prevProducts.length);
+      return;
+    }
 
-      if (pageItems.length < pageLimit) {
-        queueMicrotask(() => setCachedProductsTotalRecords(mergedLen));
-      } else {
-        queueMicrotask(() => applyServerProductsTotal());
-      }
-
-      return [...prev, ...newItems];
-    });
-  }, [productsPage]);
+    if (pageItems.length < pageLimit) {
+      setCachedProductsTotalRecords(mergedProductsLen);
+    } else {
+      applyServerProductsTotal();
+    }
+    setProducts([...prevProducts, ...newProductItems]);
+  }, [productsPage, products]);
 
   const productsTotalRecords =
     cachedProductsTotalRecords ??
@@ -297,29 +295,27 @@ export default function AddProductModal({
       return;
     }
 
-    setVersions((prev) => {
-      const prevIds = new Set(
-        prev.map((v) => v.id).filter((id): id is string => Boolean(id)),
-      );
-      const newItems = pageItems.filter(
-        (v) => typeof v.id === "string" && v.id.length > 0 && !prevIds.has(v.id),
-      );
-      const mergedLen = prev.length + newItems.length;
+    const prevVersions = versions;
+    const prevVersionIds = new Set(
+      prevVersions.map((v) => v.id).filter((id): id is string => Boolean(id)),
+    );
+    const newVersionItems = pageItems.filter(
+      (v) => typeof v.id === "string" && v.id.length > 0 && !prevVersionIds.has(v.id),
+    );
+    const mergedVersionsLen = prevVersions.length + newVersionItems.length;
 
-      if (newItems.length === 0) {
-        queueMicrotask(() => setCachedVersionsTotalRecords(prev.length));
-        return prev;
-      }
+    if (newVersionItems.length === 0) {
+      setCachedVersionsTotalRecords(prevVersions.length);
+      return;
+    }
 
-      if (pageItems.length < pageLimit) {
-        queueMicrotask(() => setCachedVersionsTotalRecords(mergedLen));
-      } else {
-        queueMicrotask(() => applyServerVersionsTotal());
-      }
-
-      return [...prev, ...newItems];
-    });
-  }, [form.productId, versionsPage]);
+    if (pageItems.length < pageLimit) {
+      setCachedVersionsTotalRecords(mergedVersionsLen);
+    } else {
+      applyServerVersionsTotal();
+    }
+    setVersions([...prevVersions, ...newVersionItems]);
+  }, [form.productId, versionsPage, versions]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const versionsTotalRecords =
