@@ -18,7 +18,7 @@ import { Box, Card, Divider, pxToRem, Skeleton, Stack, Typography, type SxProps,
 import { Sparkle } from "@wso2/oxygen-ui-icons-react";
 import { KBCard } from "./KBCard";
 import { ChecklistItem } from "./ChecklistItem";
-import Markdown from "react-markdown";
+import { TypewriterText } from "../../shared";
 
 export type MessageBlock =
   | { type: "text"; value: string }
@@ -29,9 +29,18 @@ export interface ChatMessage {
   author: "you" | "assistant";
   blocks: MessageBlock[];
   timestamp?: string;
+  animated?: boolean;
+  pending?: boolean;
 }
 
-export function MessageBubble({ author, blocks, timestamp = "Just Now", sx }: ChatMessage & { sx?: SxProps<Theme> }) {
+export function MessageBubble({
+  author,
+  blocks,
+  timestamp = "Just Now",
+  sx,
+  animated = true,
+  pending = false,
+}: ChatMessage & { sx?: SxProps<Theme> }) {
   const you = author === "you";
 
   return (
@@ -40,17 +49,37 @@ export function MessageBubble({ author, blocks, timestamp = "Just Now", sx }: Ch
         component={Stack}
         p={1.5}
         ml={you ? 10 : undefined}
-        width={you ? "fit-content" : undefined}
+        width={you ? "fit-content" : "100%"}
         sx={{ ...sx, bgcolor: "background.paper" }}
       >
         {!you && (
-          <Stack direction="row" justifyContent="start" gap={1} mb={0.5}>
+          <Stack direction="row" justifyContent="space-between" gap={1} mb={0.5}>
             <Box color="primary.main">
               <Sparkle size={pxToRem(18)} />
             </Box>
-            <Typography variant="subtitle2" color="text.disabled">
-              {timestamp}
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: "medium",
+                background: "linear-gradient(90deg, #aaa 25%, #fff 50%, #aaa 75%)",
+                backgroundSize: "200% 100%",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+                animation: "shimmer 1.5s infinite linear",
+                "@keyframes shimmer": {
+                  from: { backgroundPosition: "200% center" },
+                  to: { backgroundPosition: "-200% center" },
+                },
+                opacity: "80%",
+              }}
+            >
+              Thinking
             </Typography>
+
+            {/* <Typography variant="subtitle2" color="text.disabled">
+              {timestamp}
+            </Typography> */}
           </Stack>
         )}
 
@@ -65,7 +94,7 @@ export function MessageBubble({ author, blocks, timestamp = "Just Now", sx }: Ch
                     component="span"
                     sx={{ "& > *": { margin: 0, lineHeight: 1.7 } }}
                   >
-                    <Markdown>{block.value}</Markdown>
+                    <TypewriterText tokens={block.value.split("")} animated={animated} pending={pending} />
                   </Typography>
                 );
 

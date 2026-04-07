@@ -161,7 +161,7 @@ export default function ChatPage() {
 
       <Stack mb={20} gap={2}>
         {messages.map((message, index) => (
-          <MessageBubble key={index} {...message} />
+          <MessageBubble key={index} {...message} animated={index !== 0 && message.author !== "you"} />
         ))}
       </Stack>
       <div ref={bottomRef} />

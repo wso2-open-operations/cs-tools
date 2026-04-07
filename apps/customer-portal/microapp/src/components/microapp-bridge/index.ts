@@ -42,6 +42,8 @@ export interface BrowserConfiguration {
 declare global {
   interface Window {
     nativebridge?: {
+      requestToken: () => void;
+      resolveToken: (token: string) => void;
       requestIdToken: () => void;
       resolveIdToken: (token: string) => void;
       resolveDeviceSafeAreaInsets?: (data: { insets: EdgeInsets }) => void;
@@ -61,6 +63,18 @@ declare global {
     };
   }
 }
+
+export const getAccessToken = (callback: Callback<string>): void => {
+  if (window.nativebridge) {
+    window.nativebridge.requestToken();
+    window.nativebridge.resolveToken = (token: string) => {
+      callback(token);
+    };
+  } else {
+    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
+    callback();
+  }
+};
 
 // Function to get token from React Native
 export const getToken = (callback: Callback<string>): void => {
