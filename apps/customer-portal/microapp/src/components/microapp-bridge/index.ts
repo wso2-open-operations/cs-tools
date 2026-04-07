@@ -51,7 +51,7 @@ declare global {
       resolveGetLocalData: (encodedData: { value?: string }) => void;
       rejectGetLocalData: (error: string) => void;
       resolveOpenUrl?: () => void;
-      rejectOpenUrl?: (error: any) => void;
+      rejectOpenUrl?: (error: string) => void;
       requestMicroAppVersion: () => void;
       resolveMicroAppVersion: (version: string) => void;
       rejectMicroAppVersion: (error: string) => void;

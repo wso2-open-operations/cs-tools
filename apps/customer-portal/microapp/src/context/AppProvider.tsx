@@ -25,9 +25,9 @@ export default function AppProvider({ children }: { children: React.ReactNode })
     <ColorModeProvider>
       <LayoutProvider>
         <SnackbarProvider>
-          <MeProvider>
-            <ProjectProvider>{children}</ProjectProvider>
-          </MeProvider>
+          <ProjectProvider>
+            <MeProvider>{children}</MeProvider>
+          </ProjectProvider>
         </SnackbarProvider>
       </LayoutProvider>
     </ColorModeProvider>

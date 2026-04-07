@@ -21,16 +21,45 @@ import { LoadingFallback } from "@root/src/components/ui/LoadingFallback";
 import axios from "axios";
 import { AuthorizationFallback } from "@root/src/components/ui";
 import { ADMIN_USER_ROLE } from "@root/src/config/constants";
+import { getLastVisitedProjectId } from "@root/src/utils/others";
+import { projects } from "@root/src/services/projects";
+import { useEffect, useMemo, useState } from "react";
+import { useProject } from "../project";
+import { useNavigate } from "react-router-dom";
 
 export default function MeProvider({ children }: { children: React.ReactNode }) {
-  const { data, isLoading, error } = useQuery(users.me());
+  const navigate = useNavigate();
+  const { setProjectId } = useProject();
+  const lastVisitedProjectId = getLastVisitedProjectId();
+  const { data: meData, isLoading: meLoading, error: meError } = useQuery(users.me());
+  const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useQuery({ ...projects.all() });
+  const [initialized, setInitialized] = useState(false);
 
-  if (isLoading) return <LoadingFallback />;
+  const lastVisitedProject = useMemo(() => {
+    if (!projectsData || !lastVisitedProjectId) return undefined;
 
-  if (axios.isAxiosError(error)) return <AuthorizationFallback />;
+    return projectsData.find((p) => p.id === lastVisitedProjectId);
+  }, [projectsData, lastVisitedProjectId]);
+
+  useEffect(() => {
+    if (initialized) return;
+
+    if (lastVisitedProject) {
+      setProjectId(lastVisitedProject.id);
+      navigate("/", { replace: true });
+
+      setInitialized(true);
+    }
+  }, [initialized, lastVisitedProject, setProjectId, navigate]);
+
+  if (meLoading || projectsLoading) return <LoadingFallback />;
+
+  if (axios.isAxiosError(meError) || axios.isAxiosError(projectsError)) return <AuthorizationFallback />;
 
   return (
-    <MeContext.Provider value={{ roles: data?.roles ?? [], isAdmin: data?.roles.includes(ADMIN_USER_ROLE) ?? false }}>
+    <MeContext.Provider
+      value={{ roles: meData?.roles ?? [], isAdmin: meData?.roles.includes(ADMIN_USER_ROLE) ?? false }}
+    >
       {children}
     </MeContext.Provider>
   );

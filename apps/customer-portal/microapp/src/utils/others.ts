@@ -18,6 +18,7 @@ import { useEffect } from "react";
 import { STRING_OVERRIDES } from "../components/features/support/config";
 import { matchPath, useLocation } from "react-router-dom";
 import { SCROLL_OVERRIDES } from "../components/layout/config";
+import { LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY } from "../config/constants";
 
 export const stringAvatar = (name: string) => {
   if (!name) return "";
@@ -62,7 +63,31 @@ export function useScrollControl(position: "top" | "bottom" = "top", onRouteChan
 
   useEffect(() => {
     if (onRouteChange) scroll();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, onRouteChange]);
 
   return scroll;
+}
+
+export const setLastVisitedProjectId = (projectId: string | null) => {
+  document.cookie = `${LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY}=${projectId}; path=/`;
+};
+
+export function getLastVisitedProjectId(): string | undefined {
+  const name = LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY + "=";
+  const decodedCookie = decodeURIComponent(document.cookie);
+  const ca = decodedCookie.split(";");
+
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) == " ") {
+      c = c.substring(1);
+    }
+    if (c.indexOf(name) == 0) {
+      return c.substring(name.length, c.length);
+    }
+  }
+
+  return undefined;
 }

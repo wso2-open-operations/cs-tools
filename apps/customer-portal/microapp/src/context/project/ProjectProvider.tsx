@@ -18,6 +18,7 @@ import { useState } from "react";
 import { ProjectContext } from "./ProjectContext";
 import { useQuery } from "@tanstack/react-query";
 import { projects } from "src/services/projects";
+import { setLastVisitedProjectId } from "@root/src/utils/others";
 
 export default function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -27,13 +28,18 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
     enabled: !!projectId,
   });
 
+  const setAndStoreProjectId = (id: string | null) => {
+    setProjectId(id);
+    setLastVisitedProjectId(id); // local storage
+  };
+
   return (
     <ProjectContext.Provider
       value={{
         projectId,
         noveraEnabled: data?.agentEnabled ?? false,
         kbReferencesEnabled: data?.kbReferencesEnabled ?? false,
-        setProjectId,
+        setProjectId: setAndStoreProjectId,
       }}
     >
       {children}
