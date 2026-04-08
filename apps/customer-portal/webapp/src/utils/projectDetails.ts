@@ -466,7 +466,8 @@ export function formatServiceHoursDecimalAsHrMin(
   if (
     hours == null ||
     typeof hours !== "number" ||
-    !Number.isFinite(hours)
+    !Number.isFinite(hours) ||
+    hours < 0
   ) {
     return "Not Available";
   }
@@ -499,7 +500,8 @@ export function formatMinutesAsHrMin(
   if (
     minutes == null ||
     typeof minutes !== "number" ||
-    !Number.isFinite(minutes)
+    !Number.isFinite(minutes) ||
+    minutes < 0
   ) {
     return "Not Available";
   }

@@ -216,13 +216,9 @@ export function stripChangeRequestAllTags(
  */
 export function changeRequestToApiDatetime(datetimeLocal: string): string {
   if (!datetimeLocal) return "";
-  const d = new Date(datetimeLocal);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const h = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(datetimeLocal);
+  if (!match) return "";
+  const [, y, m, day, h, min, s = "00"] = match;
   return `${y}-${m}-${day} ${h}:${min}:${s}`;
 }
 
@@ -233,17 +229,11 @@ export function changeRequestToApiDatetime(datetimeLocal: string): string {
  * @returns Value for input type="datetime-local".
  */
 export function changeRequestToDatetimeLocal(apiDatetime: string): string {
-  try {
-    const d = new Date(apiDatetime.replace(" ", "T"));
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const h = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
-    return `${y}-${m}-${day}T${h}:${min}`;
-  } catch {
-    return "";
-  }
+  if (!apiDatetime) return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(apiDatetime);
+  if (!match) return "";
+  const [, y, m, day, h, min] = match;
+  return `${y}-${m}-${day}T${h}:${min}`;
 }
 
 // --- Workflow / decision mode -------------------------------------------------

@@ -251,6 +251,18 @@ export default function NoveraFloatingChat(): JSX.Element | null {
       }));
       setIsSending(false);
     },
+    onClose: () => {
+      upsertActiveBotMessage((msg) => ({
+        ...msg,
+        isLoading: false,
+        isError: true,
+        text: "Something went wrong. Please try again.",
+        thinkingSteps: [],
+        thinkingLabel: null,
+        isStreaming: false,
+      }));
+      setIsSending(false);
+    },
   });
 
   const handleSend = useCallback(async () => {
@@ -303,7 +315,11 @@ export default function NoveraFloatingChat(): JSX.Element | null {
   ]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const lastMessage = messages[messages.length - 1];
+    const isStreaming = lastMessage?.isStreaming === true;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isStreaming ? "auto" : "smooth",
+    });
   }, [messages]);
 
   if (!projectId || !hasAgent) {
@@ -323,6 +339,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
       <Box sx={{ position: "fixed", right: 24, bottom: 60, zIndex: 1300 }}>
         <Tooltip title="Chat with Novera AI" placement="left">
           <IconButton
+            aria-label="Open Novera AI chat"
             onClick={() => {
               setIsOpen(true);
               setIsMinimized(false);
@@ -395,6 +412,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
             <Box sx={{ display: "flex", alignItems: "center" }}>
               <IconButton
                 size="small"
+                aria-label={isMinimized ? "Expand chat" : "Minimize chat"}
                 sx={{ color: "common.white" }}
                 onClick={() => setIsMinimized((v) => !v)}
               >
@@ -402,6 +420,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
               </IconButton>
               <IconButton
                 size="small"
+                aria-label="Close chat"
                 sx={{ color: "common.white" }}
                 onClick={() => setIsOpen(false)}
               >
@@ -410,7 +429,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
             </Box>
           </Box>
         </Box>
-  
+
         {!isMinimized && (
           <>
             <Box
@@ -430,7 +449,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
               )}
               <div ref={messagesEndRef} />
             </Box>
-  
+
             <Divider />
             <Box sx={{ p: 1.5, bgcolor: "background.paper" }}>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>

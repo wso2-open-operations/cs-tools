@@ -683,7 +683,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                     Created Date
                   </Typography>
                   <Typography variant="body2">
-                    {changeRequest.createdOn}
+                    {changeRequest.createdOn ? formatDateTime(changeRequest.createdOn) : "Not Available"}
                   </Typography>
                 </Box>
 

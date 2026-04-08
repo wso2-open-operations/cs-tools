@@ -90,9 +90,7 @@ export default function CallRequestCard({
     statusLabel === CallRequestStatus.NOTES_PENDING ||
     statusLower.includes("notes pending");
   const isCustomerRejected =
-    call.state?.id === String(CALL_REQUEST_STATE_CUSTOMER_REJECTED) ||
-    statusLabel === CallRequestStatus.REJECTED ||
-    statusLower.includes("customer rejected");
+    call.state?.id === String(CALL_REQUEST_STATE_CUSTOMER_REJECTED);
   const hideCustomerActions = isNotesPending || isCustomerRejected;
   const colorPath = getCallRequestStatusColor(statusLabel);
   const resolvedColor = isCancelled

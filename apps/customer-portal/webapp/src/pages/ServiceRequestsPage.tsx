@@ -154,7 +154,7 @@ export default function ServiceRequestsPage(): JSX.Element {
   const isStatsLoading =
     isProjectContextLoading ||
     isStatsQueryLoading ||
-    (!!projectId && !hasStatsResponse);
+    (!!projectId && !hasStatsResponse && !isStatsError);
 
   const isCasesAreaLoading =
     isCasesQueryLoading ||

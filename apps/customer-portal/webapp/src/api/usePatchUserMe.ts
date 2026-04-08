@@ -92,7 +92,12 @@ export function usePatchUserMe(): UseMutationResult<
         return {
           ...old,
           ...(variables.timeZone !== undefined
-            ? { timeZone: variables.timeZone }
+            ? {
+                timeZone:
+                  data.timeZone !== undefined
+                    ? data.timeZone
+                    : variables.timeZone,
+              }
             : {}),
           ...(variables.phoneNumber !== undefined
             ? {
@@ -104,9 +109,7 @@ export function usePatchUserMe(): UseMutationResult<
             : {}),
         };
       });
-      void queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey[0] !== "userDetails",
-      });
+      void queryClient.invalidateQueries({ queryKey: ["userDetails"] });
     },
   });
 }
