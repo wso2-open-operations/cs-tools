@@ -159,6 +159,7 @@ export default function CreateCasePage(): JSX.Element {
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
+  const [isSubmitLocked, setIsSubmitLocked] = useState(false);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(projectId || "", {
     pageSize: 10,
@@ -643,20 +644,25 @@ export default function CreateCasePage(): JSX.Element {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!projectId) return;
+    if (isSubmitLocked) return;
+    setIsSubmitLocked(true);
 
     const titlePlain = htmlToPlainText(title).trim();
     const descriptionPlain = htmlToPlainText(description).trim();
     if (!titlePlain) {
       showError("Please enter a case title.");
+      setIsSubmitLocked(false);
       return;
     }
     if (!descriptionPlain) {
       showError("Please enter a description.");
+      setIsSubmitLocked(false);
       return;
     }
 
     if (isSecurityReport && attachments.length === 0) {
       showError("Please attach at least one security report file.");
+      setIsSubmitLocked(false);
       return;
     }
 
@@ -667,12 +673,14 @@ export default function CreateCasePage(): JSX.Element {
     );
     if (!deploymentMatch) {
       showError("Please select a deployment type.");
+      setIsSubmitLocked(false);
       return;
     }
 
     const productId = resolveProductId(product, allDeploymentProducts);
     if (!productId) {
       showError("Please select a product version.");
+      setIsSubmitLocked(false);
       return;
     }
 
@@ -684,11 +692,13 @@ export default function CreateCasePage(): JSX.Element {
       issueTypeKey = resolveIssueTypeKey(issueType, filters?.issueTypes);
       if (!issueTypeKey) {
         showError("Please select an issue type.");
+        setIsSubmitLocked(false);
         return;
       }
       const parsedSeverity = parseInt(severity, 10);
       if (Number.isNaN(parsedSeverity)) {
         showError("Please select a severity.");
+        setIsSubmitLocked(false);
         return;
       }
       severityKey = parsedSeverity;
@@ -713,6 +723,7 @@ export default function CreateCasePage(): JSX.Element {
             ? error.message
             : "Failed to process attachments. Please try again.";
         showError(message);
+        setIsSubmitLocked(false);
         return;
       } finally {
         setIsPreparingAttachments(false);
@@ -792,6 +803,7 @@ export default function CreateCasePage(): JSX.Element {
           error?.message?.trim() ||
           "We couldn't create your case. Please check required fields and try again.";
         showError(msg);
+        setIsSubmitLocked(false);
       },
     });
   };
@@ -913,6 +925,7 @@ export default function CreateCasePage(): JSX.Element {
                 isFiltersLoading ||
                 isCreatePending ||
                 isPreparingAttachments ||
+                isSubmitLocked ||
                 !projectId ||
                 !selectedDeploymentId ||
                 deploymentProductsLoading ||
