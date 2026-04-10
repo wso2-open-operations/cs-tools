@@ -33,7 +33,7 @@ import type { JSX } from "react";
 import type { UpdateLevelsSearchResponse } from "@models/responses";
 import { getUpdateTypeChipColor } from "@utils/updates";
 import EmptyState from "@components/common/empty-state/EmptyState";
-import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
+import Error500Page from "@components/common/error/Error500Page";
 
 export interface PendingUpdatesListProps {
   data: UpdateLevelsSearchResponse | null;
@@ -66,7 +66,7 @@ export function PendingUpdatesList({
           py: 5,
         }}
       >
-        <ErrorStateIcon style={{ width: 200, height: "auto" }} />
+        <Error500Page style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           Failed to load pending updates.
         </Typography>
