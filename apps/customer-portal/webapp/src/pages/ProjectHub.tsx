@@ -31,7 +31,7 @@ import { FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/common/empty-state/SearchNoResultsIcon";
-import ErrorStateIcon from "@components/common/error-state/ErrorStateIcon";
+import Error500Page from "@components/common/error/Error500Page";
 
 /**
  * ProjectHub component.
@@ -204,7 +204,7 @@ export default function ProjectHub(): JSX.Element {
             py: 10,
           }}
         >
-          <ErrorStateIcon />
+          <Error500Page />
           <Typography variant="h4">Something Went Wrong</Typography>
           <Typography variant="subtitle2" color="text.secondary">
             We couldn&apos;t load the data right now. Please try again or
