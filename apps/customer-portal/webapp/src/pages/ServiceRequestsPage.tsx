@@ -113,6 +113,7 @@ export default function ServiceRequestsPage(): JSX.Element {
     isError: isStatsError,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.SERVICE_REQUEST],
+    createdByMe: createdByMe || undefined,
     enabled: !!projectId,
   });
 
