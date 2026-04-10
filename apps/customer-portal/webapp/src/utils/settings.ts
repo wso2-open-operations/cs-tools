@@ -18,7 +18,7 @@ import { colors } from "@wso2/oxygen-ui";
 import type { ComponentType } from "react";
 import { NULL_PLACEHOLDER } from "@constants/settingsConstants";
 import type { ProjectContact } from "@models/responses";
-import { Code, Crown, Monitor, Users } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield, Users } from "@wso2/oxygen-ui-icons-react";
 
 /** Priority: Admin > System User > Portal User (default). */
 
@@ -43,6 +43,8 @@ export function getRoleBadges(contact: ProjectContact): RoleBadge[] {
 
   if (contact.isCsIntegrationUser) {
     badges.push({ label: "System User", Icon: Code, chipColor: "info" });
+  } else if (contact.isSecurityContact) {
+    badges.push({ label: "Security User", Icon: Shield, chipColor: "error" });
   } else {
     badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
   }
