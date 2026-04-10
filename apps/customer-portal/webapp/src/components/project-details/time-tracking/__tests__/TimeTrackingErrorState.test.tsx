@@ -18,8 +18,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import TimeTrackingErrorState from "@time-tracking/TimeTrackingErrorState";
 
-// Mock @components/common/error-state/ErrorStateIcon
-vi.mock("@components/common/error-state/ErrorStateIcon", () => ({
+// Mock @components/common/error/Error500Page
+vi.mock("@components/common/error/Error500Page", () => ({
   default: () => <div data-testid="error-icon" />,
 }));
 
