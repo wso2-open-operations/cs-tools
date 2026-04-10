@@ -90,6 +90,14 @@ const App: React.FC = () => {
                 <Route path="all" element={<AllItemsPage type="change" />} />
                 <Route path=":id" element={<ChangeDetailPage />} />
               </Route>
+              <Route path="/sras">
+                <Route path="all" element={<AllItemsPage type="sra" />} />
+                <Route path=":id" element={<ChangeDetailPage />} />
+              </Route>
+              <Route path="/engagements">
+                <Route path="all" element={<AllItemsPage type="engagement" />} />
+                <Route path=":id" element={<ChangeDetailPage />} />
+              </Route>
             </Route>
           </Route>
         </Routes>

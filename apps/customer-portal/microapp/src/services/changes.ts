@@ -128,7 +128,5 @@ export const changeRequests = {
     queryOptions({
       queryKey: ["change-requests-stats", id],
       queryFn: () => getChangeRequestsStats(id),
-      staleTime: 0,
-      gcTime: 0,
     }),
 };

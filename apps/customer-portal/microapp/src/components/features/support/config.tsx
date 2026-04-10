@@ -14,7 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { MessageSquare, OctagonAlert, RefreshCcw, Settings, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import {
+  Briefcase,
+  MessageSquare,
+  OctagonAlert,
+  RefreshCcw,
+  Settings,
+  Shield,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
 import type { ItemType } from "./ItemCard";
 import { colors, type ChipProps } from "@wso2/oxygen-ui";
 
@@ -34,6 +42,14 @@ export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> 
   change: {
     icon: RefreshCcw,
     color: colors.cyan[500],
+  },
+  sra: {
+    icon: Shield,
+    color: colors.orange[500],
+  },
+  engagement: {
+    icon: Briefcase,
+    color: colors.grey[600],
   },
 };
 

@@ -31,6 +31,8 @@ import { serviceRequests } from "../services/services";
 import EmptyState from "../components/shared/EmptyState";
 import { useNotify } from "../context/snackbar";
 import { ITEM_DETAIL_PATHS, TAB_CONFIG } from "../config/constants";
+import { securityReportAnalysis } from "../services/sra";
+import { engagements } from "../services/engagements";
 
 type TabType = ItemCardProps["type"];
 
@@ -73,11 +75,13 @@ export default function SupportPage() {
           </Grid>
         ))}
       </Grid>
-      <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => handleTabChange(value)}>
+      <Tabs variant="scrollable" sx={{ mt: 3 }} value={tab} onChange={(_, value) => handleTabChange(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
         <Tab label="Service Requests" value="service" disableRipple />
         <Tab label="Change Requests" value="change" disableRipple />
+        <Tab label="Security Report Analysis" value="sra" disableRipple />
+        <Tab label="Engagements" value="engagement" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
@@ -125,6 +129,24 @@ function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
         <ItemsListErrorBoundary>
           <Suspense fallback={<ItemsListContentSkeleton />}>
             <ChangeRequestItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "sra":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <SecurityReportAnalysisItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "engagement":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <EngagementItemListContent />
           </Suspense>
         </ItemsListErrorBoundary>
       );
@@ -186,6 +208,36 @@ function ServiceRequestItemListContent() {
     <>
       {data.map((item) => (
         <ItemCard key={item.id} type="service" to={ITEM_DETAIL_PATHS["service"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function SecurityReportAnalysisItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(securityReportAnalysis.all(projectId!, { pagination: { limit: 3 } }));
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="sra" to={ITEM_DETAIL_PATHS["sra"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function EngagementItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(engagements.all(projectId!, { pagination: { limit: 3 } }));
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="engagement" to={ITEM_DETAIL_PATHS["engagement"](item.id)} {...item} />
       ))}
     </>
   );

@@ -108,6 +108,8 @@ export const TAB_CONFIG = {
   chat: { title: "Chat History", subtitle: "Recent Novera conversations" },
   service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
   change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
+  sra: { title: "Security Report Analysis", subtitle: "Security findings, assessments, and reviews" },
+  engagement: { title: "Engagements", subtitle: "Ongoing and completed client engagements" },
 };
 
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
@@ -115,6 +117,8 @@ export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => st
   chat: (id) => `/chats/${id}`,
   service: (id) => `/services/${id}`,
   change: (id) => `/changes/${id}`,
+  sra: (id) => `/sra/${id}`,
+  engagement: (id) => `/sra/${id}`,
 };
 
 export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";

@@ -25,6 +25,7 @@ export interface CaseSummaryDto {
   internalId: string;
   number: string;
   createdOn: string;
+  createdBy: string;
   title: string;
   description?: string;
   assignedEngineer?: EntityReference;
@@ -37,6 +38,7 @@ export interface CaseSummaryDto {
   deployment?: EntityReference;
   severity?: EntityReference;
   status?: EntityReference;
+  engagementType?: EntityReference;
 }
 
 export interface CaseDto {
@@ -53,6 +55,7 @@ export interface CaseDto {
   internalId: string;
   number: string;
   createdOn: string;
+  createdBy: string;
   title: string;
   description: string;
   assignedEngineer: EntityReference | null;

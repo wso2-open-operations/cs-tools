@@ -49,11 +49,21 @@ interface ChangeItemCardExtendedProps extends BaseItemCardExtendedProps, ChangeR
   type: "change";
 }
 
+interface SraItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
+  type: "sra";
+}
+
+interface EngagementItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
+  type: "engagement";
+}
+
 export type ItemCardExtendedProps =
   | CaseItemCardExtendedProps
   | ChatItemCardExtendedProps
   | ServiceItemCardExtendedProps
-  | ChangeItemCardExtendedProps;
+  | ChangeItemCardExtendedProps
+  | SraItemCardExtendedProps
+  | EngagementItemCardExtendedProps;
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
   const theme = useTheme();
@@ -70,8 +80,11 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
               <Typography variant="subtitle2" color="text.secondary">
                 {props.number}
               </Typography>
-              {(type === "case" || type === "service") && <PriorityChip size="small" id={props.severityId ?? "N/A"} />}
+              {(type === "case" || type === "service" || type === "sra") && (
+                <PriorityChip size="small" id={props.severityId ?? "N/A"} />
+              )}
               {type === "service" && <Chip size="small" label={props.issueType ?? "N/A"} />}
+              {type === "engagement" && <Chip size="small" label={props.engagementType ?? "Unspecified"} />}
               {type === "change" && (
                 <>
                   <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId ?? "N/A"} />
@@ -89,10 +102,19 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
 
           <Stack gap={0.2}>
             <Typography variant="body1" color="text.primary" noWrap>
-              {(type === "case" || type === "service" || type === "change") && props.title}
+              {(type === "case" ||
+                type === "service" ||
+                type === "change" ||
+                type === "sra" ||
+                type === "engagement") &&
+                props.title}
               {type === "chat" && props.description}
             </Typography>
-            {(type === "case" || type === "service" || type === "change") && (
+            {(type === "case" ||
+              type === "service" ||
+              type === "change" ||
+              type === "sra" ||
+              type === "engagement") && (
               <Typography
                 variant="subtitle2"
                 color="text.secondary"
@@ -139,6 +161,9 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return "Requested By";
                     case "change":
                       return "Owner";
+                    case "sra":
+                    case "engagement":
+                      return "Created By";
                   }
                 })()}
               </Typography>
@@ -149,7 +174,9 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return props.assigned ?? "N/A";
                     case "chat":
                       return props.count;
+                    case "sra":
                     case "service":
+                    case "engagement":
                       return props.createdBy;
                     case "change":
                       return props.assignedTeam ?? "N/A";
@@ -186,6 +213,8 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                 case "case":
                 case "chat":
                 case "service":
+                case "sra":
+                case "engagement":
                   return `Created ${dayjs(props.createdOn).fromNow()}`;
                 case "change":
                   return `Updated ${dayjs(props.updatedOn).fromNow()}`;

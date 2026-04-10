@@ -19,6 +19,7 @@ export interface Case {
   internalId: string;
   number: string;
   createdOn: Date;
+  createdBy: string;
   updatedOn: Date;
   title: string;
   description: string;
@@ -38,15 +39,8 @@ export interface Case {
 
 export type CaseSummary = Omit<
   Case,
-  | "updatedOn"
-  | "productId"
-  | "reporter"
-  | "account"
-  | "parentCaseId"
-  | "conversationId"
-  | "slaResponseTime"
-  | "deployment"
->;
+  "updatedOn" | "productId" | "reporter" | "account" | "parentCaseId" | "conversationId" | "slaResponseTime"
+> & { engagementType?: string };
 
 export interface Comment {
   id: string;

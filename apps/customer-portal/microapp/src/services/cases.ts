@@ -116,21 +116,25 @@ export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
+    createdBy: dto.createdBy,
     title: dto.title,
     description: dto.description ?? "",
     assigned: dto.assignedEngineer?.label,
     statusId: dto.status?.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
+    deployment: dto.deployment?.label,
+    engagementType: dto.engagementType?.label,
   };
 }
 
-function toCase(dto: CaseDto): Case {
+export function toCase(dto: CaseDto): Case {
   return {
     id: dto.id,
     internalId: dto.internalId,
     number: dto.number,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
+    createdBy: dto.createdBy,
     updatedOn: new Date(dto.updatedOn.replace(" ", "T")),
     title: dto.title,
     description: dto.description ?? "",
@@ -206,8 +210,6 @@ export const cases = {
     queryOptions({
       queryKey: ["cases-stats", id, body],
       queryFn: () => getCasesStats(id, body),
-      staleTime: 0,
-      gcTime: 0,
     }),
 
   comments: (id: string) => queryOptions({ queryKey: ["comments", id], queryFn: () => getComments(id) }),

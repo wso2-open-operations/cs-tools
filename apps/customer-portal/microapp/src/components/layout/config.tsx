@@ -162,6 +162,34 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     hasBackAction: true,
     tabIndex: 1,
   },
+  {
+    path: "/sras/all",
+    title: "All Security Report Analysis",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+    appBarSlots: <FilterAppBarSlot type="change" />,
+  },
+  {
+    path: "/sras/:id",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+  },
+  {
+    path: "/engagements/all",
+    title: "All Engagements",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+    appBarSlots: <FilterAppBarSlot type="change" />,
+  },
+  {
+    path: "/engagements/:id",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+  },
 ];
 
 export const SCROLL_OVERRIDES: Array<{ path: string; position: "top" | "bottom" | number }> = [

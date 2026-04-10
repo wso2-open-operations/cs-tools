@@ -29,6 +29,8 @@ import { useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
 import { Suspense, useLayoutEffect } from "react";
 import { ErrorBoundary } from "../components/core";
+import { SecurityReportAnalysisListContent } from "../components/features/support/SecurityReportAnalysisListContent";
+import { EngagementListContent } from "../components/features/support/EngagementListContent";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
@@ -54,6 +56,10 @@ function ItemsListContent({ type, filter, search }: { type: ItemCardProps["type"
       return <ServiceRequestListContent filter={filter} search={search} />;
     case "change":
       return <ChangeRequestListContent filter={filter} search={search} />;
+    case "sra":
+      return <SecurityReportAnalysisListContent filter={filter} search={search} />;
+    case "engagement":
+      return <EngagementListContent filter={filter} search={search} />;
     default:
       return null;
   }

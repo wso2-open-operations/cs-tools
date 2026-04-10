@@ -31,16 +31,16 @@ export function ItemListView({ title, subtitle, viewAllPath, children }: ItemLis
 
   return (
     <>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1}>
-        <Stack>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1} width="100%">
+        <Stack mr={2} minWidth={0}>
           <Typography variant="h6">{title}</Typography>
           {subtitle && (
-            <Typography variant="subtitle2" color="text.secondary">
+            <Typography variant="subtitle2" color="text.secondary" noWrap>
               {subtitle}
             </Typography>
           )}
         </Stack>
-        <Button variant="text" component={Link} to={viewAllPath} sx={{ textTransform: "initial" }}>
+        <Button variant="text" component={Link} to={viewAllPath} sx={{ textTransform: "initial", flexShrink: 0 }}>
           <Stack direction="row" gap={1}>
             <Typography variant="body1" color="primary">
               View All

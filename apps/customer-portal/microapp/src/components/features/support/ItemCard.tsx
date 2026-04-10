@@ -29,7 +29,7 @@ import type { ServiceRequestSummary } from "@root/src/types/service.model";
 
 dayjs.extend(relativeTime);
 
-export type ItemType = "case" | "chat" | "service" | "change";
+export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement";
 
 export type Status =
   | "in progress"
@@ -68,7 +68,21 @@ interface ServiceItemCardProps extends BaseItemCardProps, ServiceRequestSummary 
   type: "service";
 }
 
-export type ItemCardProps = CaseItemCardProps | ChatItemCardProps | ChangeItemCardProps | ServiceItemCardProps;
+interface SraItemCardProps extends BaseItemCardProps, CaseSummary {
+  type: "sra";
+}
+
+interface EngagementItemCardProps extends BaseItemCardProps, CaseSummary {
+  type: "engagement";
+}
+
+export type ItemCardProps =
+  | CaseItemCardProps
+  | ChatItemCardProps
+  | ChangeItemCardProps
+  | ServiceItemCardProps
+  | SraItemCardProps
+  | EngagementItemCardProps;
 
 export function ItemCard(props: ItemCardProps) {
   const theme = useTheme();
@@ -84,7 +98,9 @@ export function ItemCard(props: ItemCardProps) {
             <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
               {props.number}
             </Typography>
-            {(type === "case" || type === "service") && <PriorityChip size="small" id={props.severityId ?? "N/A"} />}
+            {(type === "case" || type === "sra" || type === "service") && (
+              <PriorityChip size="small" id={props.severityId ?? "N/A"} />
+            )}
             {type === "change" && (
               <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId ?? "N/A"} />
             )}
@@ -93,7 +109,8 @@ export function ItemCard(props: ItemCardProps) {
         </Stack>
 
         <Typography variant="body1" color="text.primary" mr={1} noWrap>
-          {(type === "case" || type === "service" || type === "change") && props.title}
+          {(type === "case" || type === "sra" || type === "engagement" || type === "service" || type === "change") &&
+            props.title}
           {type === "chat" && props.description}
         </Typography>
 
@@ -101,10 +118,12 @@ export function ItemCard(props: ItemCardProps) {
           <StatusChip type={type} size="small" id={props.statusId ?? "N/A"} />
           <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
           <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-            {type === "case" && (props.assigned ?? "N/A")}
+            {type === "case" && (props.assigned ?? "Not Assigned")}
             {type === "chat" && `${props.count} messages`}
-            {type === "service" && (props.issueType ?? "N/A")}
-            {type === "change" && (props.requestType ?? "N/A")}
+            {type === "service" && (props.issueType ?? "Unspecified")}
+            {type === "change" && (props.requestType ?? "Unspecified")}
+            {type === "sra" && (props.deployment ?? "No Environment")}
+            {type === "engagement" && (props.engagementType ?? "Unspecified")}
           </Typography>
 
           {type === "chat" && (
