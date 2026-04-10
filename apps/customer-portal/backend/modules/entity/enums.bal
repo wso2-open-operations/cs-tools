@@ -65,3 +65,10 @@ public enum TimeCardState {
 public enum StatsFilter {
     ME = "me"
 }
+
+# Valid product class values.
+public enum ProductClass {
+    SERVICE_MODEL = "service_model",
+    SOFTWARE_MODEL = "software_model",
+    PRODUCT_MODEL = "product_model"
+}

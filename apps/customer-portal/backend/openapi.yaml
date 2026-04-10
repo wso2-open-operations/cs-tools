@@ -2837,13 +2837,10 @@ components:
           description: Reason for the requested call cancellation
         utcTimes:
           type: array
-          description: New preferred UTC times for the call
+          description: New preferred UTC times for the call (mandatory when stateKey
+            is 2)
           items:
             $ref: '#/components/schemas/DateTime'
-        durationInMinutes:
-          type: integer
-          description: New duration in minutes for the call
-          format: int64
       additionalProperties: false
       description: Request payload for updating a call request.
     Case:
@@ -4329,6 +4326,7 @@ components:
       description: Pagination information.
     Product:
       required:
+      - class
       - id
       - name
       type: object
@@ -4338,6 +4336,9 @@ components:
         name:
           type: string
           description: Name
+        class:
+          type: string
+          description: "Product class (service_model, software_model, or product_model)"
       description: Product data.
     ProductUpdate:
       required:

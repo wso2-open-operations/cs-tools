@@ -987,6 +987,8 @@ public type CallRequestSearchPayload record {|
 public type CallRequest record {|
     # ID
     string id;
+    # Number of the call request
+    string number;
     # Associated case information
     ReferenceItem case;
     # Reason for the call request
@@ -997,6 +999,8 @@ public type CallRequest record {|
     int durationMin;
     # Scheduled time for the call
     string? scheduleTime;
+    # Meeting link for the scheduled call
+    string? meetingLink;
     # Created date and time
     string createdOn;
     # Updated date and time

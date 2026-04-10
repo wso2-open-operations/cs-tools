@@ -449,7 +449,9 @@ public isolated function mapSearchCallRequestResponse(entity:CallRequestsRespons
             createdOn: callRequest.createdOn,
             updatedOn: callRequest.updatedOn,
             case: {id: case.id, label: case.name},
-            state: {id: state.id.toString(), label: state.label}
+            state: {id: state.id.toString(), label: state.label},
+            number: callRequest.number,
+            meetingLink: callRequest.meetingLink
         };
 
     return {callRequests, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};

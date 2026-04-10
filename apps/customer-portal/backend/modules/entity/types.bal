@@ -1426,6 +1426,8 @@ public type CallRequestSearchPayload record {|
 public type CallRequest record {|
     # ID
     IdString id;
+    # Number of the call request
+    string number;
     # Associated case information
     ReferenceTableItem case;
     # Reason for the call request
@@ -1436,6 +1438,8 @@ public type CallRequest record {|
     int durationMin;
     # Scheduled time for the call
     string? scheduleTime;
+     # Meeting link for the scheduled call
+    string? meetingLink;
     # Created date and time
     string createdOn;
     # Updated date and time
@@ -1567,6 +1571,11 @@ public type UpdatedDeployment record {|
 
 # Request payload for searching products.
 public type ProductSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Product class to filter by
+        ProductClass 'class?;
+    |} filters?;
     # Pagination details
     Pagination pagination?;
 |};
@@ -1577,6 +1586,8 @@ public type Product record {|
     IdString id;
     # Name
     string name;
+    # Product class (service_model, software_model, or product_model)
+    string 'class;
     json...;
 |};
 
