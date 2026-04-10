@@ -38,6 +38,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import {
+  PencilLine,
   Plus,
   Search,
   Shield,
@@ -46,11 +47,13 @@ import {
 import useGetProjectContacts from "@api/useGetProjectContacts";
 import { usePostProjectContact } from "@api/usePostProjectContact";
 import { useDeleteProjectContact } from "@api/useDeleteProjectContact";
+import { usePatchProjectContact } from "@api/usePatchProjectContact";
 import { NULL_PLACEHOLDER, ROLE_CONFIG } from "@constants/settingsConstants";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import AddUserModal from "@components/settings/AddUserModal";
+import EditUserModal from "@components/settings/EditUserModal";
 import RemoveUserModal from "@components/settings/RemoveUserModal";
 import {
   getAvatarColor,
@@ -82,10 +85,12 @@ export default function SettingsUserManagement({
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ProjectContact | null>(null);
+  const [editTarget, setEditTarget] = useState<ProjectContact | null>(null);
 
   const { data: contacts = [], isLoading, isFetching, error } = useGetProjectContacts(projectId);
   const postContact = usePostProjectContact(projectId);
   const deleteContact = useDeleteProjectContact(projectId);
+  const patchContact = usePatchProjectContact(projectId);
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
 
@@ -140,6 +145,29 @@ export default function SettingsUserManagement({
       },
     });
   }, [removeTarget, deleteContact, showSuccess, showError]);
+
+  const handleEditUser = useCallback(
+    (next: { isSecurityContact: boolean }) => {
+      if (!editTarget?.email) return;
+      if (editTarget.isCsIntegrationUser) {
+        showError("System Users cannot be security contacts.");
+        return;
+      }
+      patchContact.mutate(
+        { email: editTarget.email, isSecurityContact: next.isSecurityContact },
+        {
+          onSuccess: () => {
+            setEditTarget(null);
+            showSuccess("Security contact updated");
+          },
+          onError: (err) => {
+            showError(err?.message ?? "Failed to update user. Please try again.");
+          },
+        },
+      );
+    },
+    [editTarget, patchContact, showSuccess, showError],
+  );
 
   const isEffectiveLoading = isLoading || isFetching;
 
@@ -416,18 +444,38 @@ export default function SettingsUserManagement({
                   </TableCell>
                   {canAddOrRemoveUsers && (
                     <TableCell align="right">
-                      <Tooltip title="Remove user">
-                        <span>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            aria-label="Remove user"
-                            onClick={() => setRemoveTarget(contact)}
-                          >
-                            <Trash2 size={16} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
+                      <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
+                        <Tooltip
+                          title={
+                            contact.isCsIntegrationUser
+                              ? "System Users cannot be security contacts"
+                              : "Edit user"
+                          }
+                        >
+                          <span>
+                            <IconButton
+                              size="small"
+                              aria-label="Edit user"
+                              disabled={contact.isCsIntegrationUser}
+                              onClick={() => setEditTarget(contact)}
+                            >
+                              <PencilLine size={16} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Remove user">
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              aria-label="Remove user"
+                              onClick={() => setRemoveTarget(contact)}
+                            >
+                              <Trash2 size={16} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                   )}
                 </TableRow>
@@ -458,7 +506,7 @@ export default function SettingsUserManagement({
                 ? (colors.purple?.[600] ?? theme.palette.primary.main)
                 : (theme.palette[role.paletteKey]?.main ?? theme.palette.text.primary);
             return (
-              <Grid key={role.id} size={{ xs: 12, md: 4 }}>
+              <Grid key={role.id} size={{ xs: 12, sm: 6, md: 3 }}>
                 <Box>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
                     <RoleIcon size={18} color={roleColor} />
@@ -486,6 +534,14 @@ export default function SettingsUserManagement({
         onClose={() => setIsAddModalOpen(false)}
         onSubmit={handleAddUser}
         isSubmitting={postContact.isPending}
+      />
+
+      <EditUserModal
+        open={editTarget !== null}
+        contact={editTarget}
+        isSubmitting={patchContact.isPending}
+        onClose={() => setEditTarget(null)}
+        onSubmit={handleEditUser}
       />
 
       <RemoveUserModal
