@@ -2837,8 +2837,7 @@ components:
           description: Reason for the requested call cancellation
         utcTimes:
           type: array
-          description: New preferred UTC times for the call 
-            is 2)
+          description: New preferred UTC times for the call
           items:
             $ref: '#/components/schemas/DateTime'
       additionalProperties: false
