@@ -69,7 +69,12 @@ export default function UsageMetricTrendCard({
           </Typography>
           <Typography
             variant="caption"
-            sx={{ color: colors.green?.[600] ?? "#16A34A", fontWeight: 600 }}
+            sx={{
+              color: metric.deltaLabel.startsWith("-")
+                ? (colors.red?.[600] ?? "#DC2626")
+                : (colors.green?.[600] ?? "#16A34A"),
+              fontWeight: 600,
+            }}
           >
             {metric.deltaLabel}
           </Typography>
