@@ -1586,7 +1586,7 @@ public type Product record {|
     IdString id;
     # Name
     string name;
-    # Product class (service_model, software_model, or product_model)
+    # Product class (Product Model)
     string 'class;
     json...;
 |};
