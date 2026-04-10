@@ -111,6 +111,7 @@ export default function AllCasesPage(): JSX.Element {
     isError: isStatsError,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.DEFAULT_CASE],
+    createdByMe: createdByMe || undefined,
     enabled: !!projectId,
   });
 
