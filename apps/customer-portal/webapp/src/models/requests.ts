@@ -272,3 +272,10 @@ export interface PatchChangeRequestRequest {
 export interface PatchProjectRequest {
   hasAgent?: boolean;
 }
+
+// Request body for creating a registry token (POST /projects/:projectId/registry-tokens).
+export interface CreateRegistryTokenRequest {
+  robotName: string;
+  tokenType: "User" | "Service";
+  createdFor?: string;
+}

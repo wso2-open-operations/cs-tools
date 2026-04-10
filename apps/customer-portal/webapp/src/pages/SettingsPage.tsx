@@ -15,17 +15,19 @@
 // under the License.
 
 import { Box, Typography } from "@wso2/oxygen-ui";
-import { Bot, Users } from "@wso2/oxygen-ui-icons-react";
+import { Bot, KeyRound, Users } from "@wso2/oxygen-ui-icons-react";
 import { useParams } from "react-router";
 import { useState, useMemo, type JSX } from "react";
 import useGetUserDetails from "@api/useGetUserDetails";
 import TabBar from "@components/common/tab-bar/TabBar";
 import SettingsAiAssistant from "@components/settings/SettingsAiAssistant";
 import SettingsUserManagement from "@components/settings/SettingsUserManagement";
+import SettingsRegistryTokens from "@components/settings/SettingsRegistryTokens";
 
 const SETTINGS_TABS = [
   { id: "users", label: "User Management", icon: Users },
   { id: "ai", label: "AI Assistant", icon: Bot },
+  { id: "registryTokens", label: "Registry Tokens", icon: KeyRound },
 ] as const;
 
 /** Role that can see AI Assistant tab and User Management Add/Delete. */
@@ -91,6 +93,12 @@ export default function SettingsPage(): JSX.Element {
         />
       )}
       {displayTab === "ai" && <SettingsAiAssistant projectId={projectId} />}
+      {displayTab === "registryTokens" && (
+        <SettingsRegistryTokens
+          projectId={projectId}
+          isAdmin={isCustomerAdmin}
+        />
+      )}
     </Box>
   );
 }

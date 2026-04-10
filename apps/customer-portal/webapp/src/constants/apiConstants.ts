@@ -55,6 +55,8 @@ export const ApiQueryKeys = {
   CHANGE_REQUEST_STATS: "change-request-stats",
   CATALOGS_SEARCH: "catalogs-search",
   CATALOG_ITEM_VARIABLES: "catalog-item-variables",
+  REGISTRY_TOKENS_SEARCH: "registry-tokens-search",
+  INTEGRATION_USERS: "integration-users",
 } as const;
 
 // Constants for API-related mutation keys.

@@ -1152,3 +1152,30 @@ export interface CatalogItemVariable {
 export interface CatalogItemVariablesResponse {
   variables: CatalogItemVariable[];
 }
+
+// Registry token from POST /projects/projectId/registry-tokens/search.
+export interface RegistryToken {
+  id?: number;
+  name: string;
+  displayName?: string;
+  description: string;
+  creationTime?: string;
+  tokenType?: "User" | "Service";
+  createdFor?: string;
+  createdBy?: string;
+  expiresAt?: number;
+  disable?: boolean;
+  duration?: number;
+  permissions?: { namespace: string }[];
+}
+
+// Response for POST /projects/projectId/registry-tokens (create token).
+export interface RegistryTokenCreationResponse {
+  secret: string;
+}
+
+// Integration user from GET /projects/projectId/integration-users.
+export interface IntegrationUser {
+  id: string;
+  email: string;
+}

@@ -20,6 +20,7 @@ import {
   Info,
   Rocket,
   Server,
+  Key,
 } from "@wso2/oxygen-ui-icons-react";
 import { User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { ElementType } from "react";
