@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Code, Crown, Monitor } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield } from "@wso2/oxygen-ui-icons-react";
 
 /** Placeholder for empty/null values in user management UI. */
 export const NULL_PLACEHOLDER = "--";
@@ -49,6 +49,17 @@ export const ROLE_CONFIG = [
     permissions: [
       "Used exclusively for system to system integrations",
       "Cannot log in to the Support Portal",
+    ],
+  },
+  {
+    id: "security_user",
+    label: "Security User",
+    Icon: Shield,
+    paletteKey: "error" as const,
+    permissions: [
+      "Access security advisories",
+      "Create security cases",
+      "View vulnerability reports",
     ],
   },
 ] as const;
