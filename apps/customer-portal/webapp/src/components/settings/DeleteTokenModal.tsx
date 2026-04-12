@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useDeleteRegistryToken } from "@api/useDeleteRegistryToken";
-import type { RegistryToken } from "@models/responses";
+import type { RegistryToken } from "@/types/registryTokens";
 
 export interface DeleteTokenModalProps {
   open: boolean;

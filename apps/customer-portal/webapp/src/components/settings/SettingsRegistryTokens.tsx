@@ -59,7 +59,7 @@ import GenerateTokenModal from "@components/settings/GenerateTokenModal";
 import DeleteTokenModal from "@components/settings/DeleteTokenModal";
 import RegenerateTokenModal from "@components/settings/RegenerateTokenModal";
 import { useSearchRegistryTokens } from "@api/useSearchRegistryTokens";
-import type { RegistryToken } from "@models/responses";
+import type { RegistryToken } from "@/types/registryTokens";
 
 /** Placeholder for empty/null values. */
 const DASH = "--";

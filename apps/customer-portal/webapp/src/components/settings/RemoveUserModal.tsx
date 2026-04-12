@@ -26,7 +26,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectContact } from "@models/responses";
+import type { ProjectContact } from "@/types/users";
 
 export interface RemoveUserModalProps {
   open: boolean;

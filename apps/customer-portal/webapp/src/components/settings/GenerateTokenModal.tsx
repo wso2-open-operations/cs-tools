@@ -33,7 +33,7 @@ import {
 import { CheckCircle, Copy, Eye, EyeOff, X } from "@wso2/oxygen-ui-icons-react";
 import { useCreateRegistryToken } from "@api/useCreateRegistryToken";
 import { useGetIntegrationUsers } from "@api/useGetIntegrationUsers";
-import type { IntegrationUser } from "@models/responses";
+import type { IntegrationUser } from "@/types/users";
 
 /** Allowed characters for robotName: alphanumeric + dashes. */
 const ROBOT_NAME_REGEX = /^[a-zA-Z0-9-]+$/;
