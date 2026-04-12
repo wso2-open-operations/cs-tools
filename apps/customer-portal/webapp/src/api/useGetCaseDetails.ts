@@ -20,7 +20,7 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiError } from "@api/ApiError";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 
 /**
  * Fetches a single case by id. When projectId is provided, it is included in the query key.

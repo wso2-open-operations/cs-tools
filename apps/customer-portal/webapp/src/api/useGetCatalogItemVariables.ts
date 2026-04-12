@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CatalogItemVariablesResponse } from "@models/responses";
+import type { CatalogItemVariablesResponse } from "@/types/catalogs";
 
 /**
  * Fetches catalog item variables (GET /catalogs/:catalogId/items/:itemId).
