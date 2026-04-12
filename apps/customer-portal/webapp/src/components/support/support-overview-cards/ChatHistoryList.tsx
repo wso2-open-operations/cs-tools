@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot, Clock, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { ChatHistoryItem } from "@models/responses";
+import type { ChatHistoryItem } from "@/types/conversations";
 import { ChatAction } from "@constants/supportConstants";
 import {
   getChatActionColor,

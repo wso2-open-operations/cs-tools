@@ -17,7 +17,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import OutstandingCasesList from "@components/support/support-overview-cards/OutstandingCasesList";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 
 vi.mock("@utils/support", () => ({
   formatRelativeTime: vi.fn(() => "2 hours ago"),

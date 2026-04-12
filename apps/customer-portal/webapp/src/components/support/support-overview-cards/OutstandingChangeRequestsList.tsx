@@ -16,7 +16,7 @@
 
 import { Box, Chip, Form, Typography, alpha } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import type { ChangeRequestItem } from "@models/responses";
+import type { ChangeRequestItem } from "@/types/changeRequests";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import { formatRelativeTime } from "@utils/support";
 import OutstandingChangeRequestsSkeleton from "./OutstandingChangeRequestsSkeleton";

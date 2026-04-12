@@ -39,10 +39,7 @@ import PendingUpdatesListSkeleton from "@components/updates/pending-updates/Pend
 import EmptyState from "@components/common/empty-state/EmptyState";
 import Error500Page from "@components/common/error/Error500Page";
 import UpdateLevelsReportModal from "@components/updates/all-updates/UpdateLevelsReportModal";
-import type {
-  ProductUpdateLevelEntry,
-  ProductUpdateLevelsResponse,
-} from "@models/responses";
+import type { ProductUpdateLevelEntry, ProductUpdateLevelsResponse } from "@/types/updates";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/dropdownConstants";
 import { getUpdateLevelsReportData } from "@utils/updateLevelsReportPdf";
 
