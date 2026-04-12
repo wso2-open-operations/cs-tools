@@ -30,7 +30,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import type { UpdateLevelsSearchResponse } from "@models/responses";
+import type { UpdateLevelsSearchResponse } from "@/types/updates";
 import { getUpdateTypeChipColor } from "@utils/updates";
 import EmptyState from "@components/common/empty-state/EmptyState";
 import Error500Page from "@components/common/error/Error500Page";
