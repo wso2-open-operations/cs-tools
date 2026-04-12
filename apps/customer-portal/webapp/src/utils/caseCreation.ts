@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DeploymentProductItem } from "@models/responses";
-import type { CaseClassificationResponse } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
+import type { CaseClassificationResponse } from "@/types/cases";
 
 // Deployment list item with id and label.
 export interface DeploymentOption {

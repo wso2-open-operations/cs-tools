@@ -23,7 +23,7 @@ import {
   NULL_PLACEHOLDER,
 } from "@utils/updates";
 import { UPDATES_STATS } from "@constants/updatesConstants";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 
 const createUpdateLevelItem = (
   overrides: Partial<RecommendedUpdateLevelItem> = {},

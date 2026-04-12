@@ -22,16 +22,9 @@ import {
   resolveChangeRequestCanonicalState,
   type ChangeRequestState,
 } from "@constants/changeRequestConstants";
-import type {
-  ChangeRequestDetails,
-  CaseComment,
-  ChangeRequestStats,
-  ChangeRequestStatsResponse,
-} from "@models/responses";
-import type {
-  ChangeRequestDecisionMode,
-  ChangeRequestWorkflowStage,
-} from "@/types/changeRequestTypes";
+import type { ChangeRequestDetails, ChangeRequestStats, ChangeRequestStatsResponse } from "@/types/changeRequests";
+import type { CaseComment } from "@/types/cases";
+import type { ChangeRequestDecisionMode, ChangeRequestWorkflowStage } from "@/types/changeRequests";
 
 // --- Change request stats (API → card counts) --------------------------------
 

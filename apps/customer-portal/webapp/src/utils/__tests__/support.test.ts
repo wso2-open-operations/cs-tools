@@ -75,7 +75,7 @@ import {
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
 } from "@utils/support";
-import type { CaseComment } from "@models/responses";
+import type { CaseComment } from "@/types/cases";
 import { createTheme } from "@wso2/oxygen-ui";
 
 describe("support utils", () => {
