@@ -14,79 +14,97 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseCommentInlineAttachment } from "./attachments";
+import type { CaseCommentInlineAttachment } from "@/types/attachments";
 import type {
+  AuditMetadata,
   IdLabelRef,
   MetadataItem,
-  PaginationRequest,
   SharedEnvContext,
-  SortBy,
   TrendData,
-} from "./common";
+  PaginationResponse,
+  SearchRequestBase,
+} from "@/types/common";
 
-// Case creation form metadata (projects, products, severity levels, conversation summary, etc.).
+// Item type for severity level option for case creation form.
+export type SeverityLevelOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+// Item type for conversation summary for case creation form.
+export type CaseCreationConversationSummary = {
+  messagesExchanged: number;
+  troubleshootingAttempts: number;
+  kbArticlesReviewed: number;
+};
+
+// Response type for case creation form metadata.
 export type CaseCreationMetadata = {
   projects: string[];
   products: string[];
   deploymentTypes: string[];
   issueTypes: string[];
-  severityLevels: {
-    id: string;
-    label: string;
-    description: string;
-  }[];
-  conversationSummary: {
-    messagesExchanged: number;
-    troubleshootingAttempts: number;
-    kbArticlesReviewed: number;
-  };
+  severityLevels: SeverityLevelOption[];
+  conversationSummary: CaseCreationConversationSummary;
 };
 
+// Item type for case severity.
 export type CaseSeverity = {
   id: number;
   label: string;
   count: number;
 };
 
+// Item type for case state.
 export type CaseState = {
   id: string;
   label: string;
   count: number;
 };
 
+// Item type for case type.
 export type CaseType = {
   id: string;
   label: string;
   count: number;
 };
 
+// Item type for engagement type count.
 export type EngagementTypeCount = {
   id: string;
   label: string;
   count: number;
 };
 
+// Item type for cases trend period.
 export type CasesTrendPeriod = {
   period: string;
   severities: CaseSeverity[];
 };
 
+// Item type for resolved cases statistics.
+export type ResolvedCasesStats = {
+  total: number;
+  currentMonth: number;
+  pastThirtyDays?: number;
+};
+
+// Item type for cases change rate.
+export type CasesChangeRate = {
+  resolvedEngagements?: number;
+  averageResponseTime?: number;
+};
+
+// Response type for project cases statistics.
 export type ProjectCasesStats = {
   totalCases: number;
   totalCount?: number;
   activeCount?: number;
   outstandingCount?: number;
   averageResponseTime: number;
-  resolvedCases: {
-    total: number;
-    currentMonth: number;
-    pastThirtyDays?: number;
-  };
-  /** Percentage change vs last period for trend display. */
-  changeRate?: {
-    resolvedEngagements?: number;
-    averageResponseTime?: number;
-  };
+  resolvedCases: ResolvedCasesStats;
+  changeRate?: CasesChangeRate;
   stateCount: CaseState[];
   severityCount: CaseSeverity[];
   outstandingSeverityCount: CaseSeverity[];
@@ -96,45 +114,44 @@ export type ProjectCasesStats = {
   outstandingEngagementTypeCount?: EngagementTypeCount[];
 };
 
-export type DashboardMockStats = {
-  totalCases: {
-    value: number;
-    trend: TrendData;
-  };
-  openCases: {
-    value: number;
-    trend: TrendData;
-  };
-  resolvedCases: {
-    value: number;
-    trend: TrendData;
-  };
-  avgResponseTime: {
-    value: string;
-    trend?: TrendData;
-  };
-  casesTrend: Array<{
-    name: string;
-    TypeA: number;
-    TypeB: number;
-    TypeC: number;
-    TypeD: number;
-  }>;
+// Model type for dashboard statistics.
+export type DashboardStat = {
+  value: number;
+  trend: TrendData;
 };
 
-// Case List Item
-export type CaseListItem = {
+// Model type for dashboard response time statistics.
+export type DashboardResponseTimeStat = {
+  value: string;
+  trend?: TrendData;
+};
+
+// Item type for cases trend chart rows.
+export type CasesTrendChartRow = {
+  name: string;
+  TypeA: number;
+  TypeB: number;
+  TypeC: number;
+  TypeD: number;
+};
+
+// Response type for dashboard mock statistics.
+export type DashboardMockStats = {
+  totalCases: DashboardStat;
+  openCases: DashboardStat;
+  resolvedCases: DashboardStat;
+  avgResponseTime: DashboardResponseTimeStat;
+  casesTrend: CasesTrendChartRow[];
+};
+
+// Item type for case list items.
+export type CaseListItem = AuditMetadata & {
   id: string;
   internalId: string;
   number: string;
-  createdOn: string;
-  createdBy?: string;
   title: string;
   description: string;
-  assignedEngineer:
-    | string
-    | { id: string; label?: string; name?: string }
-    | null;
+  assignedEngineer: string | IdLabelRef | null;
   project: IdLabelRef;
   issueType: IdLabelRef | null;
   deployedProduct: IdLabelRef | null;
@@ -145,51 +162,57 @@ export type CaseListItem = {
   caseTypes?: IdLabelRef | null;
 };
 
-// Case Search Response
-export type CaseSearchResponse = {
+// Response type for case search results.
+export type CaseSearchResponse = PaginationResponse & {
   cases: CaseListItem[];
-  totalRecords: number;
-  offset: number;
-  limit: number;
   projects?: IdLabelRef[];
 };
 
-// Case details
+// Item type for account details within a case.
 export type CaseDetailsAccount = {
   type: string | null;
   id: string;
   label: string;
 };
 
-export type CaseDetailsProject = IdLabelRef;
-
+// Item type for deployed product details within a case.
 export type CaseDetailsDeployedProduct = IdLabelRef & {
   version?: string | null;
 };
 
+// Item type for user who closed a case.
 export type CaseDetailsClosedBy = {
   id: string;
   label?: string | null;
   name?: string | null;
 };
 
-export type CaseDetails = {
+// Item type for assigned engineer details within a case.
+export type CaseDetailsAssignedEngineer = {
+  id: string;
+  label?: string;
+  name?: string;
+};
+
+// Item type for custom variables within a case.
+export type CaseVariable = {
+  name: string;
+  value: string;
+};
+
+// Response type for detailed case information.
+export type CaseDetails = AuditMetadata & {
   id: string;
   internalId: string;
   number: string | null;
-  createdOn: string | null;
-  updatedOn: string | null;
   title: string | null;
   description: string | null;
   slaResponseTime: string | null;
   product: IdLabelRef | null;
   account: CaseDetailsAccount | null;
   csManager: IdLabelRef | string | null;
-  assignedEngineer:
-    | string
-    | { id: string; label?: string; name?: string }
-    | null;
-  project: CaseDetailsProject | null;
+  assignedEngineer: string | CaseDetailsAssignedEngineer | null;
+  project: IdLabelRef | null;
   type: IdLabelRef | null;
   deployedProduct: CaseDetailsDeployedProduct | null;
   parentCase: IdLabelRef | null;
@@ -197,10 +220,8 @@ export type CaseDetails = {
   issueType: IdLabelRef | null;
   catalog?: IdLabelRef | null;
   catalogItem?: IdLabelRef | null;
-  /** Filled variables for service requests (from backend). */
-  variables?: { name: string; value: string }[];
+  variables?: CaseVariable[];
   changeRequests?: IdLabelRef[];
-  createdBy?: string | null;
   duration?: string | null;
   assignedTeam?: IdLabelRef | null;
   engagementStartDate?: string | null;
@@ -217,31 +238,24 @@ export type CaseDetails = {
   findingsTotal: number | null;
 };
 
-// Case comment
-export type CaseComment = {
+// Item type for a single case comment.
+export type CaseComment = AuditMetadata & {
   id: string;
   content: string;
   type: string;
-  createdOn: string;
-  createdBy: string;
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
   isEscalated: boolean;
-  /** Whether this comment has inline images. */
   hasInlineAttachments?: boolean;
-  /** Inline attachments for images in content (img src replacement). */
   inlineAttachments?: CaseCommentInlineAttachment[];
 };
 
-// Response for case comments list
-export type CaseCommentsResponse = {
+// Response type for case comments list.
+export type CaseCommentsResponse = PaginationResponse & {
   comments: CaseComment[];
-  totalRecords: number;
-  offset: number;
-  limit: number;
 };
 
-// Response for case metadata (fetching possible statuses, severities, types)
+// Response type for case metadata (fetching possible statuses, severities, types).
 export type CaseMetadataResponse = {
   statuses?: MetadataItem[];
   caseStates?: MetadataItem[];
@@ -257,7 +271,7 @@ export type CaseMetadataResponse = {
   severityBasedAllocationTime?: Record<string, number>;
 };
 
-// Interface for all cases filters state
+// Model type for all cases filter values state.
 export type AllCasesFilterValues = {
   statusId?: string;
   severityId?: string;
@@ -265,8 +279,8 @@ export type AllCasesFilterValues = {
   deploymentId?: string;
 };
 
-// Case attachment item (GET /cases/:id/attachments).
-export type CaseAttachment = {
+// Item type for a case attachment.
+export type CaseAttachment = AuditMetadata & {
   id: string;
   name: string;
   type: string;
@@ -275,71 +289,68 @@ export type CaseAttachment = {
   sizeBytes?: string;
   content?: string | null;
   downloadUrl?: string | null;
-  createdOn: string;
-  createdBy: string;
 };
 
-// Response for case attachments list.
-export type CaseAttachmentsResponse = {
-  limit: number;
-  offset: number;
-  totalRecords: number;
+// Response type for case attachments list.
+export type CaseAttachmentsResponse = PaginationResponse & {
   attachments: CaseAttachment[];
 };
 
-// Case classification response.
+// Model type for extracted case info from AI classification.
+export type CaseClassificationInfo = {
+  description: string;
+  shortDescription: string;
+  productName: string;
+  productVersion: string;
+  environment: string;
+  tier: string;
+  region: string;
+};
+
+// Response type for case classification.
 export type CaseClassificationResponse = {
   issueType: string;
   severityLevel: string;
-  caseInfo: {
-    description: string;
-    shortDescription: string;
-    productName: string;
-    productVersion: string;
-    environment: string;
-    tier: string;
-    region: string;
-  };
+  caseInfo: CaseClassificationInfo;
 };
 
-// Response for creating a support case.
-export type CreateCaseResponse = {
+// Response type for creating a support case.
+export type CreateCaseResponse = AuditMetadata & {
   id: string;
   internalId?: string;
   number?: string;
-  createdBy?: string;
-  createdOn?: string;
   state?: IdLabelRef;
   type?: IdLabelRef;
 };
 
-// Request body for searching cases.
-export type CaseSearchRequest = {
-  filters?: {
-    issueId?: number;
-    deploymentId?: string;
-    severityId?: number;
-    statusId?: number;
-    statusIds?: number[];
-    searchQuery?: string;
-    caseTypes?: string[];
-    createdByMe?: boolean;
-  };
-  pagination: PaginationRequest;
-  sortBy?: SortBy;
+// Filter type for searching cases.
+export type CaseSearchFilters = {
+  issueId?: number;
+  deploymentId?: string;
+  severityId?: number;
+  statusId?: number;
+  statusIds?: number[];
+  searchQuery?: string;
+  caseTypes?: string[];
+  createdByMe?: boolean;
 };
 
-// Request body for case classification.
+// Request type for searching cases.
+export type CaseSearchRequest = SearchRequestBase & {
+  filters?: CaseSearchFilters;
+};
+
+// Request type for case classification.
 export type CaseClassificationRequest = SharedEnvContext & {
   chatHistory: string;
 };
 
-// Request body for PATCH /cases/:caseId (update case state).
+// Request type for patching a case.
 export type PatchCaseRequest = {
   stateKey: number;
 };
 
-// Request body for creating a support case (POST /cases).
+// Request type for creating a support case.
 export type CreateCaseRequest = {
   attachments?: Array<{ file: string; name: string }>;
   type?: string;

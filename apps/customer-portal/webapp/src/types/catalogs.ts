@@ -14,28 +14,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Catalog item within a catalog (from POST /deployments/products/:id/catalogs/search).
+import type { PaginationResponse } from "./common";
+
+// Item type for a catalog item within a catalog.
 export type CatalogItem = {
   id: string;
   label: string;
 }
 
-// Catalog with its items (from POST /deployments/products/:id/catalogs/search).
+// Model type for a catalog with its items.
 export type Catalog = {
   id: string;
   name: string;
   catalogItems: CatalogItem[];
 }
 
-// Response for POST /deployments/products/:id/catalogs/search.
-export type CatalogSearchResponse = {
+// Response type for catalogs search results.
+export type CatalogSearchResponse = PaginationResponse & {
   catalogs: Catalog[];
-  totalRecords: number;
-  limit?: number;
-  offset?: number;
-}
+};
 
-// Variable definition for a catalog item (from GET /catalogs/:catalogId/items/:itemId).
+// Item type for a variable definition for a catalog item.
 export type CatalogItemVariable = {
   id: string;
   questionText: string;
@@ -43,12 +42,24 @@ export type CatalogItemVariable = {
   type: string;
 }
 
-// Response for GET /catalogs/:catalogId/items/:itemId.
+// Response type for catalog item variables.
 export type CatalogItemVariablesResponse = {
   variables: CatalogItemVariable[];
 }
 
-// Request body for creating a service request (POST /cases with type: "service_request").
+// Item type for a service request variable.
+export type ServiceRequestVariable = {
+  id: string;
+  value: string;
+};
+
+// Item type for a service request attachment.
+export type ServiceRequestAttachment = {
+  name: string;
+  file: string;
+};
+
+// Request type for creating a service request.
 export type CreateServiceRequestPayload = {
   type: "service_request";
   projectId: string;
@@ -56,6 +67,6 @@ export type CreateServiceRequestPayload = {
   deployedProductId: string;
   catalogId: string;
   catalogItemId: string;
-  variables: { id: string; value: string }[];
-  attachments?: Array<{ name: string; file: string }>;
+  variables: ServiceRequestVariable[];
+  attachments?: ServiceRequestAttachment[];
 }

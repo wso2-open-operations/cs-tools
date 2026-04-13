@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { AtLeastOne, IdLabelRef, PaginationRequest } from "./common";
+import type {
+  AuditMetadata,
+  IdLabelRef,
+  PaginationResponse,
+  SearchRequestBase,
+} from "@/types/common";
 
-// Change Request Item.
-// Backend: modules/types/types.bal `ChangeRequest` — reference fields are all
-// nullable (`ReferenceItem?`). `IdLabelRef` already carries the optional
-// `number` the backend returns on project/case/deployment/product refs.
-export type ChangeRequestItem = {
+
+// Item type for a change request.
+export type ChangeRequestItem = AuditMetadata & {
   id: string;
   number: string;
   title: string;
@@ -38,12 +41,10 @@ export type ChangeRequestItem = {
   impact: IdLabelRef | null;
   state: IdLabelRef | null;
   type: IdLabelRef | null;
-  createdOn: string;
-  updatedOn: string;
 };
 
-// Change Request Details.
-// Backend: modules/types/types.bal `ChangeRequestResponse`.
+
+// Response type for detailed change request information.
 export type ChangeRequestDetails = ChangeRequestItem & {
   description: string | null;
   createdBy: string;
@@ -59,15 +60,12 @@ export type ChangeRequestDetails = ChangeRequestItem & {
   approvedOn: string | null;
 };
 
-// Change Request Search Response
-export type ChangeRequestSearchResponse = {
+// Response type for change request search results.
+export type ChangeRequestSearchResponse = PaginationResponse & {
   changeRequests: ChangeRequestItem[];
-  totalRecords: number;
-  offset: number;
-  limit: number;
 };
 
-// Change Request Stats
+// Response type for change request statistics.
 export type ChangeRequestStats = {
   totalRequests: number;
   awaitingYourAction: number;
@@ -75,52 +73,56 @@ export type ChangeRequestStats = {
   completed: number;
 };
 
-// Change Request Stats API Response.
-// Backend: `ProjectChangeRequestStatsResponse` — stateCount is ReferenceItem[]
-// and the backend always populates `count` on those refs for this endpoint,
-// so model it as required here.
+// Item type for change request state count.
+export type ChangeRequestStateCount = IdLabelRef & { count: number };
+
+
+// Response type for change request statistics breakdown.
 export type ChangeRequestStatsResponse = {
   totalCount: number;
   activeCount?: number;
   outstandingCount?: number;
-  stateCount: Array<IdLabelRef & { count: number }>;
+  stateCount: ChangeRequestStateCount[];
 };
 
-// Response from PATCH /change-requests/:id (update planned start).
-export type PatchChangeRequestResponse = {
+// Response type for patching a change request.
+export type PatchChangeRequestResponse = AuditMetadata & {
   id: string;
-  updatedBy: string;
-  updatedOn: string;
-}
+};
 
-// Interface for change requests filters state
+// Model type for change request filters state.
 export type ChangeRequestFilterValues = {
   stateId?: string;
   impactId?: string;
 }
 
-// Request body for searching change requests (POST /projects/:projectId/change-requests/search).
-export type ChangeRequestSearchRequest = {
-  filters?: {
-    impactKey?: number;
-    searchQuery?: string;
-    stateKeys?: number[];
-  };
-  pagination: PaginationRequest;
-}
+// Filter type for searching change requests.
+export type ChangeRequestSearchFilters = {
+  impactKey?: number;
+  searchQuery?: string;
+  stateKeys?: number[];
+};
 
-// Request body for PATCH /change-requests/:id (update planned start).
-export type PatchChangeRequestRequest = AtLeastOne<{
+// Request type for searching change requests.
+export type ChangeRequestSearchRequest = SearchRequestBase & {
+  filters?: ChangeRequestSearchFilters;
+};
+
+// Request type for patching a change request.
+export type PatchChangeRequestRequest = {
   plannedStartOn?: string;
   isCustomerApproved?: boolean;
   isCustomerReviewed?: boolean;
-}>;
+};
 
-export type ChangeRequestDecisionMode =
-  | "customerApproval"
-  | "customerReview"
-  | "none";
+// Enum for change request decision mode.
+export enum ChangeRequestDecisionMode {
+  CUSTOMER_APPROVAL = "customerApproval",
+  CUSTOMER_REVIEW = "customerReview",
+  NONE = "none",
+}
 
+// Item type for a change request workflow stage.
 export type ChangeRequestWorkflowStage = {
   name: string;
   description: string;
