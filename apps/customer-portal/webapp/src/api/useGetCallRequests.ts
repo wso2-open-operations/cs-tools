@@ -55,7 +55,12 @@ export function useGetCallRequests(
     readonly (string | number)[],
     number
   >({
-    queryKey: [ApiQueryKeys.CASE_CALL_REQUESTS, projectId, caseId, JSON.stringify(stateKeys ?? [])],
+    queryKey: [
+      ApiQueryKeys.CASE_CALL_REQUESTS,
+      projectId,
+      caseId,
+      JSON.stringify(stateKeys ?? []),
+    ],
     queryFn: async ({ pageParam }): Promise<CallRequestsResponse> => {
       logger.debug(
         `[useGetCallRequests] Fetching call requests for case: ${caseId}, offset: ${pageParam}`,

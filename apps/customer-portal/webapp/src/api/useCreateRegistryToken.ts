@@ -34,13 +34,21 @@ import type { RegistryTokenCreationResponse } from "@/types/registryTokens";
  */
 export function useCreateRegistryToken(
   projectId: string,
-): UseMutationResult<RegistryTokenCreationResponse, Error, CreateRegistryTokenRequest> {
+): UseMutationResult<
+  RegistryTokenCreationResponse,
+  Error,
+  CreateRegistryTokenRequest
+> {
   const logger = useLogger();
   const queryClient = useQueryClient();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  return useMutation<RegistryTokenCreationResponse, Error, CreateRegistryTokenRequest>({
+  return useMutation<
+    RegistryTokenCreationResponse,
+    Error,
+    CreateRegistryTokenRequest
+  >({
     mutationFn: async (body): Promise<RegistryTokenCreationResponse> => {
       logger.debug("[useCreateRegistryToken] Request payload:", body);
 

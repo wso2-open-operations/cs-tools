@@ -39,14 +39,13 @@ export function useGetProjectChangeRequestsStats(
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
-  const enabled = (options?.enabled ?? true) && !!id && isSignedIn && !isAuthLoading;
+  const enabled =
+    (options?.enabled ?? true) && !!id && isSignedIn && !isAuthLoading;
 
   return useQuery<ChangeRequestStatsResponse, Error>({
     queryKey: [ApiQueryKeys.CHANGE_REQUEST_STATS, id],
     queryFn: async (): Promise<ChangeRequestStatsResponse> => {
-      logger.debug(
-        `Fetching change request stats for project ID: ${id}`,
-      );
+      logger.debug(`Fetching change request stats for project ID: ${id}`);
 
       try {
         const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -80,10 +79,7 @@ export function useGetProjectChangeRequestsStats(
           stateCount: raw?.stateCount ?? [],
         };
 
-        logger.debug(
-          "[useGetProjectChangeRequestsStats] Data received:",
-          data,
-        );
+        logger.debug("[useGetProjectChangeRequestsStats] Data received:", data);
         return data;
       } catch (error) {
         logger.error("[useGetProjectChangeRequestsStats] Error:", error);
@@ -98,4 +94,3 @@ export function useGetProjectChangeRequestsStats(
     refetchOnReconnect: false,
   });
 }
-

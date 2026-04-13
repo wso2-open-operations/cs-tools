@@ -28,16 +28,20 @@ import type { UsageStatsResponse } from "@/types/usage";
  */
 export default function useGetProjectUsageStats(projectId: string | undefined) {
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-  
+
   const authFetch = useAuthApiClient();
 
   return useQuery<UsageStatsResponse>({
     queryKey: [ApiQueryKeys.PROJECT_USAGE_STATS, projectId],
     queryFn: async () => {
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL ?? "";
-      const response = await authFetch(`${baseUrl}/projects/${projectId}/stats/usage`);
+      const response = await authFetch(
+        `${baseUrl}/projects/${projectId}/stats/usage`,
+      );
       if (!response.ok) {
-        throw new Error(`Failed to fetch project usage stats: ${response.status}`);
+        throw new Error(
+          `Failed to fetch project usage stats: ${response.status}`,
+        );
       }
       return response.json() as Promise<UsageStatsResponse>;
     },

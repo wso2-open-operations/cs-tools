@@ -19,7 +19,10 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ChangeRequestStatsResponse, ChangeRequestStats } from "@/types/changeRequests";
+import type {
+  ChangeRequestStatsResponse,
+  ChangeRequestStats,
+} from "@/types/changeRequests";
 import { mapChangeRequestStats } from "@utils/changeRequests";
 
 /**
@@ -37,7 +40,8 @@ export function useGetProjectChangeRequestStats(
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  const enabled = (options?.enabled ?? true) && !!projectId && isSignedIn && !isAuthLoading;
+  const enabled =
+    (options?.enabled ?? true) && !!projectId && isSignedIn && !isAuthLoading;
 
   return useQuery<ChangeRequestStats, Error>({
     queryKey: [ApiQueryKeys.CHANGE_REQUEST_STATS, projectId],

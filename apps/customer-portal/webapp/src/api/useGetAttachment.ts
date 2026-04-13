@@ -112,9 +112,7 @@ async function downloadAttachmentThroughBackend(
 
 export interface UseGetAttachmentResult {
   /** Starts download (GET /attachments/:id or inline content). */
-  downloadAttachment: (
-    input: DownloadBackendAttachmentInput,
-  ) => Promise<void>;
+  downloadAttachment: (input: DownloadBackendAttachmentInput) => Promise<void>;
   /** True while a download request is in flight. */
   isDownloading: boolean;
   /** Attachment id currently being downloaded, if any. */

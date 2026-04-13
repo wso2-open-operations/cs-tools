@@ -70,7 +70,8 @@ export default function useGetProjectDetails(
           throw new ApiError(
             response.status,
             response.statusText,
-            apiMessage ?? `Error fetching project details: ${response.statusText}`,
+            apiMessage ??
+              `Error fetching project details: ${response.statusText}`,
           );
         }
 

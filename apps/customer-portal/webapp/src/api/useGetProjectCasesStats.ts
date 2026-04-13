@@ -47,10 +47,23 @@ export function useGetProjectCasesStats(
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
-  const { incidentId, queryId, caseTypes, createdByMe, enabled = true } = options ?? {};
+  const {
+    incidentId,
+    queryId,
+    caseTypes,
+    createdByMe,
+    enabled = true,
+  } = options ?? {};
 
   return useQuery<ProjectCasesStats, Error>({
-    queryKey: [ApiQueryKeys.CASES_STATS, id, incidentId, queryId, caseTypes, createdByMe],
+    queryKey: [
+      ApiQueryKeys.CASES_STATS,
+      id,
+      incidentId,
+      queryId,
+      caseTypes,
+      createdByMe,
+    ],
     queryFn: async (): Promise<ProjectCasesStats> => {
       logger.debug(`Fetching case stats for project ID: ${id}`);
 
