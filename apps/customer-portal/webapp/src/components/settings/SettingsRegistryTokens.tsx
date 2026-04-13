@@ -107,7 +107,7 @@ function formatTimestamp(ts?: number): string {
 }
 
 /** Format ISO date string to DD/MM/YYYY. */
-function formatDate(iso?: string): string {
+function formatDate(iso?: string | null): string {
   if (!iso) return DASH;
   const d = new Date(iso);
   if (isNaN(d.getTime())) return DASH;
@@ -440,7 +440,7 @@ export default function SettingsRegistryTokens({
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatDate(token.creationTime)}
+                          {formatDate(token.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>
