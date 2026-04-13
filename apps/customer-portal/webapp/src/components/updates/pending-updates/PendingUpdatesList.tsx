@@ -74,10 +74,16 @@ export function PendingUpdatesList({
     );
   }
 
-  const entries = data ? Object.entries(data).sort(([a], [b]) => Number(a) - Number(b)) : [];
+  const entries = data
+    ? Object.entries(data).sort(([a], [b]) => Number(a) - Number(b))
+    : [];
 
-  const securityCount = entries.filter(([, e]) => e.updateType === "security").length;
-  const regularCount = entries.filter(([, e]) => e.updateType === "regular").length;
+  const securityCount = entries.filter(
+    ([, e]) => e.updateType === "security",
+  ).length;
+  const regularCount = entries.filter(
+    ([, e]) => e.updateType === "regular",
+  ).length;
   const mixedCount = entries.filter(([, e]) => e.updateType === "mixed").length;
 
   if (entries.length === 0) {
@@ -90,7 +96,8 @@ export function PendingUpdatesList({
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
         There are <strong>{entries.length}</strong> updates with{" "}
-        <strong>{securityCount}</strong> security, <strong>{regularCount}</strong> regular
+        <strong>{securityCount}</strong> security,{" "}
+        <strong>{regularCount}</strong> regular
         {mixedCount > 0 && (
           <>
             , and <strong>{mixedCount}</strong> mixed

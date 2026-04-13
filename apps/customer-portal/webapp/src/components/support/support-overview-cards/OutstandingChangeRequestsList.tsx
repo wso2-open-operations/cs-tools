@@ -46,9 +46,7 @@ export default function OutstandingChangeRequestsList({
   onItemClick,
 }: OutstandingChangeRequestsListProps): JSX.Element {
   if (isError) {
-    return (
-      <ErrorIndicator entityName="change requests" size="medium" />
-    );
+    return <ErrorIndicator entityName="change requests" size="medium" />;
   }
 
   if (isLoading) {
@@ -66,7 +64,12 @@ export default function OutstandingChangeRequestsList({
         }}
       >
         <EmptyIcon
-          style={{ width: 120, maxWidth: "100%", height: "auto", marginBottom: 12 }}
+          style={{
+            width: 120,
+            maxWidth: "100%",
+            height: "auto",
+            marginBottom: 12,
+          }}
         />
         <Typography variant="body2" color="text.secondary">
           No change requests.
@@ -125,36 +128,40 @@ export default function OutstandingChangeRequestsList({
               gap: 1,
             }}
           >
-            {cr.state?.label ? (() => {
-              const statusColor = getChangeRequestStateColor(cr.state);
-              const StatusIcon = getChangeRequestStateIcon(cr.state);
-              return (
-                <Chip
-                  icon={<StatusIcon size={12} />}
-                  label={cr.state.label}
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    bgcolor: alpha(statusColor, 0.1),
-                    color: statusColor,
-                    px: 0,
-                    height: 20,
-                    fontSize: "0.75rem",
-                    fontWeight: 500,
-                    "& .MuiChip-icon": {
+            {cr.state?.label ? (
+              (() => {
+                const statusColor = getChangeRequestStateColor(cr.state);
+                const StatusIcon = getChangeRequestStateIcon(cr.state);
+                return (
+                  <Chip
+                    icon={<StatusIcon size={12} />}
+                    label={cr.state.label}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      bgcolor: alpha(statusColor, 0.1),
                       color: statusColor,
-                      ml: "6px",
-                      mr: "6px",
-                    },
-                    "& .MuiChip-label": {
-                      pl: 0,
-                      pr: "6px",
-                    },
-                  }}
-                />
-              );
-            })() : (
-              <Typography variant="caption" color="text.secondary">—</Typography>
+                      px: 0,
+                      height: 20,
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      "& .MuiChip-icon": {
+                        color: statusColor,
+                        ml: "6px",
+                        mr: "6px",
+                      },
+                      "& .MuiChip-label": {
+                        pl: 0,
+                        pr: "6px",
+                      },
+                    }}
+                  />
+                );
+              })()
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                —
+              </Typography>
             )}
             <Typography variant="caption" color="text.secondary">
               {formatRelativeTime(cr.createdOn ?? undefined)}

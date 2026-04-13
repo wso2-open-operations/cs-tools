@@ -19,7 +19,9 @@ import { describe, it, expect, vi } from "vitest";
 import { UpdatesStatsGrid } from "@components/updates/stat-card-row/UpdatesStatsGrid";
 import type { RecommendedUpdateLevelItem } from "@/types/updates";
 
-const createUpdateLevelItem = (overrides: Partial<RecommendedUpdateLevelItem> = {}): RecommendedUpdateLevelItem => ({
+const createUpdateLevelItem = (
+  overrides: Partial<RecommendedUpdateLevelItem> = {},
+): RecommendedUpdateLevelItem => ({
   productName: "product",
   productBaseVersion: "1.0",
   channel: "full",
@@ -35,8 +37,22 @@ const createUpdateLevelItem = (overrides: Partial<RecommendedUpdateLevelItem> = 
 });
 
 const mockRecommendedUpdateLevels: RecommendedUpdateLevelItem[] = [
-  createUpdateLevelItem({ installedUpdatesCount: 200, installedSecurityUpdatesCount: 40, availableUpdatesCount: 60, availableSecurityUpdatesCount: 30 }),
-  ...Array(19).fill(null).map(() => createUpdateLevelItem({ installedUpdatesCount: 183, installedSecurityUpdatesCount: 39, availableUpdatesCount: 55, availableSecurityUpdatesCount: 21 })),
+  createUpdateLevelItem({
+    installedUpdatesCount: 200,
+    installedSecurityUpdatesCount: 40,
+    availableUpdatesCount: 60,
+    availableSecurityUpdatesCount: 30,
+  }),
+  ...Array(19)
+    .fill(null)
+    .map(() =>
+      createUpdateLevelItem({
+        installedUpdatesCount: 183,
+        installedSecurityUpdatesCount: 39,
+        availableUpdatesCount: 55,
+        availableSecurityUpdatesCount: 21,
+      }),
+    ),
 ];
 
 // Mock StatCard to avoid deep rendering issues and focus on grid logic

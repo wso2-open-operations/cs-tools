@@ -39,7 +39,10 @@ import PendingUpdatesListSkeleton from "@components/updates/pending-updates/Pend
 import EmptyState from "@components/common/empty-state/EmptyState";
 import Error500Page from "@components/common/error/Error500Page";
 import UpdateLevelsReportModal from "@components/updates/all-updates/UpdateLevelsReportModal";
-import type { ProductUpdateLevelEntry, ProductUpdateLevelsItem } from "@/types/updates";
+import type {
+  ProductUpdateLevelEntry,
+  ProductUpdateLevelsItem,
+} from "@/types/updates";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/dropdownConstants";
 import { getUpdateLevelsReportData } from "@utils/updateLevelsReportPdf";
 
@@ -138,7 +141,8 @@ export default function AllUpdatesTab(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
-  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(INITIAL_FILTER);
+  const [filter, setFilter] =
+    useState<AllUpdatesTabFilterState>(INITIAL_FILTER);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [searchParams, setSearchParams] = useState<{
     productName: string;
@@ -153,8 +157,11 @@ export default function AllUpdatesTab(): JSX.Element {
     isError: isProductLevelsError,
   } = useGetProductUpdateLevels();
 
-  const { data: searchData, isLoading: isSearchLoading, isError: isSearchError } =
-    usePostUpdateLevelsSearch(searchParams);
+  const {
+    data: searchData,
+    isLoading: isSearchLoading,
+    isError: isSearchError,
+  } = usePostUpdateLevelsSearch(searchParams);
 
   const productNames = useMemo(
     () => getProductNamesFromProductLevels(productLevelsData),
@@ -193,23 +200,24 @@ export default function AllUpdatesTab(): JSX.Element {
   }, [endLevelOptions, filter.endLevel]);
 
   const handleFilterChange = useCallback(
-    (field: keyof AllUpdatesTabFilterState) => (e: SelectChangeEvent<string>) => {
-      const value = e.target.value;
-      setFilter((prev) => {
-        const next = { ...prev, [field]: value };
-        if (field === "productName") {
-          next.productVersion = "";
-          next.startLevel = "";
-          next.endLevel = "";
-        } else if (field === "productVersion") {
-          next.startLevel = "";
-          next.endLevel = "";
-        } else if (field === "startLevel") {
-          next.endLevel = "";
-        }
-        return next;
-      });
-    },
+    (field: keyof AllUpdatesTabFilterState) =>
+      (e: SelectChangeEvent<string>) => {
+        const value = e.target.value;
+        setFilter((prev) => {
+          const next = { ...prev, [field]: value };
+          if (field === "productName") {
+            next.productVersion = "";
+            next.startLevel = "";
+            next.endLevel = "";
+          } else if (field === "productVersion") {
+            next.startLevel = "";
+            next.endLevel = "";
+          } else if (field === "startLevel") {
+            next.endLevel = "";
+          }
+          return next;
+        });
+      },
     [],
   );
 
@@ -233,13 +241,16 @@ export default function AllUpdatesTab(): JSX.Element {
         startingUpdateLevel: String(searchParams.startingUpdateLevel),
         endingUpdateLevel: String(searchParams.endingUpdateLevel),
       });
-      navigate(`/projects/${projectId}/updates/pending/level/${levelKey}?${params}`);
+      navigate(
+        `/projects/${projectId}/updates/pending/level/${levelKey}?${params}`,
+      );
     },
     [navigate, projectId, searchParams],
   );
 
   const reportData = useMemo(() => {
-    if (!searchData || !searchParams || Object.keys(searchData).length === 0) return null;
+    if (!searchData || !searchParams || Object.keys(searchData).length === 0)
+      return null;
     try {
       return getUpdateLevelsReportData({
         productName: searchParams.productName,
@@ -290,8 +301,14 @@ export default function AllUpdatesTab(): JSX.Element {
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <FormControl fullWidth size="small" disabled={isProductLevelsLoading}>
-                <InputLabel id="all-updates-product-label">Product Name *</InputLabel>
+              <FormControl
+                fullWidth
+                size="small"
+                disabled={isProductLevelsLoading}
+              >
+                <InputLabel id="all-updates-product-label">
+                  Product Name *
+                </InputLabel>
                 <Select
                   labelId="all-updates-product-label"
                   id="all-updates-product"
@@ -317,8 +334,14 @@ export default function AllUpdatesTab(): JSX.Element {
               </FormControl>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <FormControl fullWidth size="small" disabled={isProductLevelsLoading || !filter.productName}>
-                <InputLabel id="all-updates-version-label">Product Version *</InputLabel>
+              <FormControl
+                fullWidth
+                size="small"
+                disabled={isProductLevelsLoading || !filter.productName}
+              >
+                <InputLabel id="all-updates-version-label">
+                  Product Version *
+                </InputLabel>
                 <Select
                   labelId="all-updates-version-label"
                   id="all-updates-version"
@@ -338,16 +361,27 @@ export default function AllUpdatesTab(): JSX.Element {
                     </Typography>
                   </MenuItem>
                   {versionEntries.map((v) => (
-                    <MenuItem key={v.productBaseVersion} value={v.productBaseVersion}>
-                      <Typography variant="body2">{v.productBaseVersion}</Typography>
+                    <MenuItem
+                      key={v.productBaseVersion}
+                      value={v.productBaseVersion}
+                    >
+                      <Typography variant="body2">
+                        {v.productBaseVersion}
+                      </Typography>
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <FormControl fullWidth size="small" disabled={!filter.productVersion}>
-                <InputLabel id="all-updates-start-label">Starting Update Level *</InputLabel>
+              <FormControl
+                fullWidth
+                size="small"
+                disabled={!filter.productVersion}
+              >
+                <InputLabel id="all-updates-start-label">
+                  Starting Update Level *
+                </InputLabel>
                 <Select
                   labelId="all-updates-start-label"
                   id="all-updates-start"
@@ -374,7 +408,9 @@ export default function AllUpdatesTab(): JSX.Element {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={!filter.startLevel}>
-                <InputLabel id="all-updates-end-label">Ending Update Level *</InputLabel>
+                <InputLabel id="all-updates-end-label">
+                  Ending Update Level *
+                </InputLabel>
                 <Select
                   labelId="all-updates-end-label"
                   id="all-updates-end"
@@ -425,7 +461,8 @@ export default function AllUpdatesTab(): JSX.Element {
       {!searchParams ? (
         <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            Select product, version, and update level range, then click Search to view updates.
+            Select product, version, and update level range, then click Search
+            to view updates.
           </Typography>
         </Paper>
       ) : isSearchLoading ? (
