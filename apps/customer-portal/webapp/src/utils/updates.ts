@@ -16,7 +16,11 @@
 
 import { UPDATES_STATS } from "@constants/updatesConstants";
 import type { StatCardColor } from "@constants/dashboardConstants";
-import type { ProductUpdateLevelsItem, RecommendedUpdateLevelItem, UpdatesStats } from "@/types/updates";
+import type {
+  ProductUpdateLevelsItem,
+  RecommendedUpdateLevelItem,
+  UpdatesStats,
+} from "@/types/updates";
 
 /**
  * Returns the StatCard-compatible chip colour for an update type.
@@ -183,7 +187,11 @@ export const getPendingUpdateLevels = (
   const updateLevelSet = new Set(versionEntry.updateLevels);
 
   const pendingLevels: number[] = [];
-  for (let level = endingUpdateLevel + 1; level <= recommendedUpdateLevel; level++) {
+  for (
+    let level = endingUpdateLevel + 1;
+    level <= recommendedUpdateLevel;
+    level++
+  ) {
     if (updateLevelSet.has(level)) {
       pendingLevels.push(level);
     }

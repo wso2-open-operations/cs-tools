@@ -62,11 +62,7 @@ export function normalizeProductLabel(label: string | undefined): string {
  * @returns {boolean} Whether the label should be treated as missing.
  */
 export function isUnknownPlaceholderProductLabel(label: string): boolean {
-  const parts = label
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  const parts = label.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
     return true;
   }
@@ -126,7 +122,8 @@ export function getDeploymentDisplayLabelForEnvironment(
   environmentLabel: string,
   projectDeployments: ProjectDeploymentOption[] | undefined,
 ): string | undefined {
-  if (!environmentLabel?.trim() || !projectDeployments?.length) return undefined;
+  if (!environmentLabel?.trim() || !projectDeployments?.length)
+    return undefined;
   const envLower = environmentLabel.trim().toLowerCase();
   const dep = projectDeployments.find((d) => {
     const typeLabel = d.type?.label?.trim();
@@ -172,8 +169,7 @@ export function resolveDeploymentMatch(
       depName?.toLowerCase() === labelLower
     );
   });
-  if (fromProjectCaseInsensitive)
-    return { id: fromProjectCaseInsensitive.id };
+  if (fromProjectCaseInsensitive) return { id: fromProjectCaseInsensitive.id };
 
   const fromFiltersExact = filterDeployments?.find(
     (d) => d.id === label || d.label === label,
@@ -185,8 +181,7 @@ export function resolveDeploymentMatch(
       d.id?.toLowerCase() === labelLower ||
       d.label?.toLowerCase() === labelLower,
   );
-  if (fromFiltersCaseInsensitive)
-    return { id: fromFiltersCaseInsensitive.id };
+  if (fromFiltersCaseInsensitive) return { id: fromFiltersCaseInsensitive.id };
 
   return null;
 }
@@ -286,7 +281,9 @@ export function shouldAddClassificationProductToOptions(
   baseProductOptions: ProductVersionOption[],
 ): boolean {
   if (!classificationProduct?.trim()) return false;
-  return findMatchingProductId(classificationProduct, baseProductOptions) == null;
+  return (
+    findMatchingProductId(classificationProduct, baseProductOptions) == null
+  );
 }
 
 /** Option for Product Version dropdown: id is deployment product item id, label is "Product Version" display. */
@@ -306,8 +303,13 @@ export function getDeploymentProductDisplayLabel(
 ): string {
   const productLabel = item.product?.label?.trim() ?? "";
   let versionLabel = "";
-  if (typeof item.version === "object" && item.version !== null && "label" in item.version) {
-    versionLabel = (item.version as { id: string; label: string }).label?.trim() ?? "";
+  if (
+    typeof item.version === "object" &&
+    item.version !== null &&
+    "label" in item.version
+  ) {
+    versionLabel =
+      (item.version as { id: string; label: string }).label?.trim() ?? "";
   } else if (typeof item.version === "string") {
     versionLabel = item.version.trim();
   }

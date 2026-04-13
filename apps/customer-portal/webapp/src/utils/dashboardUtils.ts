@@ -39,9 +39,7 @@ export function computeCrCardIsCardLoading(
       );
     case false:
       return (
-        !isErrorCombinedCases &&
-        isCombinedCasesLoading &&
-        !combinedCasesStats
+        !isErrorCombinedCases && isCombinedCasesLoading && !combinedCasesStats
       );
   }
 }
