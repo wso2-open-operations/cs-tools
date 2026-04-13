@@ -26,7 +26,7 @@ import type { JSX, UIEvent } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import type { CaseMetadataResponse, AllCasesFilterValues } from "@/types/cases";
 import type { ProjectDeploymentItem } from "@/types/deployments";
-import { SelectMenuLoadMoreRow } from "@components/common/select-menu-load-more-row/SelectMenuLoadMoreRow";
+import { SelectMenuLoadMoreRow, SELECT_MENU_LOAD_MORE_ROW_VALUE } from "@components/common/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import {
   EMPTY_DROPDOWN_PLACEHOLDER,
   paginatedSelectMenuListProps,
@@ -65,7 +65,9 @@ export default function ListFilters({
   const handleSelectChange =
     (field: string) => (event: SelectChangeEvent<string | string[]>) => {
       const val = event.target.value;
-      onFilterChange(field, Array.isArray(val) ? (val[0] ?? "") : val);
+      const resolved = Array.isArray(val) ? (val[0] ?? "") : val;
+      if (resolved === SELECT_MENU_LOAD_MORE_ROW_VALUE) return;
+      onFilterChange(field, resolved);
     };
 
   return (
@@ -74,29 +76,29 @@ export default function ListFilters({
         const { label, allLabel } = deriveFilterLabels(def.id);
 
         const isDeploymentFilter = def.id === "deployment";
-        const options = isDeploymentFilter && deployments
-          ? deployments.map((deployment) => ({
+        const options = (() => {
+          if (isDeploymentFilter) {
+            return deployments?.map((deployment) => ({
               label: deployment.type?.label || deployment.name,
               value: deployment.id,
-            }))
-          : (() => {
-              const metadataOptions = filterMetadata?.[def.metadataKey];
-              if (!Array.isArray(metadataOptions)) return [];
-              const filtered =
-                def.metadataKey === "severities" && excludeS0
-                  ? metadataOptions.filter(
-                      (item: { label: string }) =>
-                        !isS0SeverityLabel(item.label),
-                    )
-                  : metadataOptions;
-              return filtered.map((item: { label: string; id: string }) => ({
-                label:
-                  def.metadataKey === "severities"
-                    ? mapSeverityToDisplay(item.label)
-                    : item.label,
-                value: def.useLabelAsValue ? item.label : item.id,
-              }));
-              })();
+            })) ?? [];
+          }
+          const metadataOptions = filterMetadata?.[def.metadataKey];
+          if (!Array.isArray(metadataOptions)) return [];
+          const filtered =
+            def.metadataKey === "severities" && excludeS0
+              ? metadataOptions.filter(
+                  (item: { label: string }) => !isS0SeverityLabel(item.label),
+                )
+              : metadataOptions;
+          return filtered.map((item: { label: string; id: string }) => ({
+            label:
+              def.metadataKey === "severities"
+                ? mapSeverityToDisplay(item.label)
+                : item.label,
+            value: def.useLabelAsValue ? item.label : item.id,
+          }));
+        })();
 
         const hasNoOptions = (options?.length ?? 0) === 0;
 

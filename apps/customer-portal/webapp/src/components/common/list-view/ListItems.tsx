@@ -29,6 +29,7 @@ export interface ListItemsProps {
   isError?: boolean;
   hasListRefinement?: boolean;
   onCaseClick?: (caseItem: CaseListItem) => void;
+  entityName?: string;
 }
 
 /**
@@ -43,6 +44,7 @@ export default function ListItems({
   isError = false,
   hasListRefinement = false,
   onCaseClick,
+  entityName = "items",
 }: ListItemsProps): JSX.Element {
   if (isLoading) {
     return <ListSkeleton />;
@@ -51,9 +53,9 @@ export default function ListItems({
   if (isError) {
     return (
       <Box sx={{ textAlign: "center", py: 6 }}>
-        <ErrorIndicator entityName="cases" size="medium" />
+        <ErrorIndicator entityName={entityName} size="medium" />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Failed to load cases. Please try again.
+          Failed to load {entityName}. Please try again.
         </Typography>
       </Box>
     );
@@ -79,7 +81,7 @@ export default function ListItems({
             }}
           />
           <Typography variant="body1" color="text.secondary">
-            No cases found. Try adjusting your filters or search query.
+            No {entityName} found. Try adjusting your filters or search query.
           </Typography>
         </Box>
       );
@@ -102,7 +104,7 @@ export default function ListItems({
           }}
         />
         <Typography variant="body1" color="text.secondary">
-          No cases yet.
+          No {entityName} yet.
         </Typography>
       </Box>
     );

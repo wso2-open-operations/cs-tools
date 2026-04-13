@@ -38,7 +38,7 @@ export default function usePostProjectInstancesMetricsSearch(
 
   return useQuery<InstanceMetricsResponse>({
     queryKey: [ApiQueryKeys.PROJECT_INSTANCE_METRICS, projectId, payload],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL ?? "";
       const response = await authFetch(
         `${baseUrl}/projects/${projectId}/instances/metrics/search`,
@@ -46,6 +46,7 @@ export default function usePostProjectInstancesMetricsSearch(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          signal,
         },
       );
       if (!response.ok) {
