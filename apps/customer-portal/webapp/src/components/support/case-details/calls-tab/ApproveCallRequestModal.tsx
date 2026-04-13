@@ -38,7 +38,7 @@ import {
   type JSX,
 } from "react";
 import { usePatchCallRequest } from "@api/usePatchCallRequest";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import {
   callRequestApiPreferredTimeToDatetimeLocal,
   callRequestPreferredTimeFromDatetimeLocal,

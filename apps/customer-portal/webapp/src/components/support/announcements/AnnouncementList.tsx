@@ -17,7 +17,7 @@
 import { Box, Chip, Form, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 import {
   formatUtcToLocalNoTimezone,
   stripHtml,

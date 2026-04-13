@@ -39,13 +39,8 @@ import EmptyState from "@components/common/empty-state/EmptyState";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
-import type { InstanceUsageEntry, InstanceMetricEntry } from "@models/responses";
-import type {
-  UsageEnvironmentProduct,
-  UsageInstanceChartBlock,
-  UsageProductInstanceRow,
-  UsageTrendRow,
-} from "@models/usageMetrics.types";
+import type { InstanceUsageEntry, InstanceMetricEntry } from "@/types/usage";
+import type { UsageEnvironmentProduct, UsageInstanceChartBlock, UsageProductInstanceRow, UsageTrendRow } from "@/types/usage";
 import { USAGE_LINE_CHART_MARGIN } from "@constants/usageMetricsConstants";
 import { UsageChartSurface } from "@components/project-details/usage-metrics/UsageChartSurface";
 import usePostDeploymentInstancesUsagesSearch from "@api/usePostDeploymentInstancesUsagesSearch";

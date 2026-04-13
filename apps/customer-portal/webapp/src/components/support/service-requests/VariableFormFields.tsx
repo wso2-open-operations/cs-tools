@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, type JSX } from "react";
-import type { CatalogItemVariable } from "@models/responses";
+import type { CatalogItemVariable } from "@/types/catalogs";
 import {
   isAttachmentField,
   isFileCopyPathField,

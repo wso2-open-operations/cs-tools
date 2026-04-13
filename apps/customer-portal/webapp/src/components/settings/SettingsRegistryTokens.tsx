@@ -59,7 +59,7 @@ import GenerateTokenModal from "@components/settings/GenerateTokenModal";
 import DeleteTokenModal from "@components/settings/DeleteTokenModal";
 import RegenerateTokenModal from "@components/settings/RegenerateTokenModal";
 import { useSearchRegistryTokens } from "@api/useSearchRegistryTokens";
-import type { RegistryToken } from "@models/responses";
+import { type RegistryToken, RegistryTokenType } from "@/types/registryTokens";
 
 /** Placeholder for empty/null values. */
 const DASH = "--";
@@ -107,7 +107,7 @@ function formatTimestamp(ts?: number): string {
 }
 
 /** Format ISO date string to DD/MM/YYYY. */
-function formatDate(iso?: string): string {
+function formatDate(iso?: string | null): string {
   if (!iso) return DASH;
   const d = new Date(iso);
   if (isNaN(d.getTime())) return DASH;
@@ -176,11 +176,11 @@ export default function SettingsRegistryTokens({
   } = useSearchRegistryTokens(projectId);
   const isTableLoading = isLoading || isFetching;
   const userTokens = useMemo(
-    () => allTokens.filter((t) => t.tokenType === "User"),
+    () => allTokens.filter((t) => t.tokenType === RegistryTokenType.USER),
     [allTokens],
   );
   const serviceTokens = useMemo(
-    () => allTokens.filter((t) => t.tokenType === "Service"),
+    () => allTokens.filter((t) => t.tokenType === RegistryTokenType.SERVICE),
     [allTokens],
   );
 
@@ -440,7 +440,7 @@ export default function SettingsRegistryTokens({
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatDate(token.creationTime)}
+                          {formatDate(token.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -626,7 +626,7 @@ export default function SettingsRegistryTokens({
         open={generateModalOpen}
         onClose={() => setGenerateModalOpen(false)}
         projectId={projectId}
-        tokenType={displayTokenTab === "service" ? "Service" : "User"}
+        tokenType={displayTokenTab === "service" ? RegistryTokenType.SERVICE : RegistryTokenType.USER}
         isAdmin={isAdmin}
       />
 

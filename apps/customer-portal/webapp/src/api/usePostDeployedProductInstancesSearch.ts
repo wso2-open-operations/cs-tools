@@ -18,8 +18,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { InstanceSearchRequest } from "@models/requests";
-import type { InstancesResponse } from "@models/responses";
+import type { InstanceSearchRequest } from "@/types/usage";
+import type { InstancesResponse } from "@/types/usage";
 
 /**
  * Searches instances for a deployed product.

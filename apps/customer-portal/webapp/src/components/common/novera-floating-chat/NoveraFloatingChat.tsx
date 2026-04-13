@@ -45,15 +45,14 @@ import useGetProjectDetails from "@api/useGetProjectDetails";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 import { useAllDeploymentProducts } from "@hooks/useAllDeploymentProducts";
 import { useChatWebSocket } from "@api/useChatWebSocket";
-import type { Message } from "@models/chatTypes";
+import type { Message } from "@/types/conversations";
 import { buildEnvProducts } from "@utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/subscriptionUtils";
 import { getFinalMessageFromPayload } from "@utils/chat";
 import {
-  CHAT_SENDER_BOT,
-  CHAT_SENDER_USER,
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
 } from "@constants/chatConstants";
+import { ChatSender } from "@/types/conversations";
 import ChatMessageBubble from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
 import LoadingDotsBubble from "@components/support/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
 
@@ -78,7 +77,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
     {
       id: "welcome",
       text: WELCOME_MESSAGE,
-      sender: CHAT_SENDER_BOT,
+      sender: ChatSender.BOT,
       timestamp: new Date(),
     },
   ]);
@@ -162,7 +161,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
           }),
           () => ({
             id: `bot-${Date.now()}`,
-            sender: CHAT_SENDER_BOT,
+            sender: ChatSender.BOT,
             timestamp: new Date(),
             text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
             thinkingSteps: [],
@@ -281,7 +280,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       text,
-      sender: CHAT_SENDER_USER,
+      sender: ChatSender.USER,
       timestamp: new Date(),
     };
     const botMessageId = `bot-${Date.now()}`;
@@ -289,7 +288,7 @@ export default function NoveraFloatingChat(): JSX.Element | null {
     const botLoadingMessage: Message = {
       id: botMessageId,
       text: "",
-      sender: CHAT_SENDER_BOT,
+      sender: ChatSender.BOT,
       timestamp: new Date(),
       isLoading: true,
     };

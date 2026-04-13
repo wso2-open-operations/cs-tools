@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProjectContact } from "@models/responses";
+import type { ProjectContact } from "@/types/users";
 
 /**
  * Hook to fetch project contacts (GET /projects/:projectId/contacts).

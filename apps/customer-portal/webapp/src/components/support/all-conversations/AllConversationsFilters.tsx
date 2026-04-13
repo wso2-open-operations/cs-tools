@@ -24,10 +24,8 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type {
-  CaseMetadataResponse,
-  AllConversationsFilterValues,
-} from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
+import type { AllConversationsFilterValues } from "@/types/conversations";
 import { ALL_CONVERSATIONS_FILTER_DEFINITIONS } from "@constants/supportConstants";
 import { deriveFilterLabels } from "@utils/support";
 

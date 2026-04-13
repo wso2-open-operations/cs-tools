@@ -23,7 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { RegistryTokenCreationResponse } from "@models/responses";
+import type { RegistryTokenCreationResponse } from "@/types/registryTokens";
 
 /**
  * Hook to regenerate a registry token secret (POST /registry-tokens/:id/regenerate).

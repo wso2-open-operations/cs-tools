@@ -17,7 +17,7 @@
 import { Box, Card, CardContent } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
-import type { ProjectDetails } from "@models/responses";
+import type { ProjectDetails } from "@/types/projects";
 import { formatProjectDate } from "@utils/projectDetails";
 import ProjectHeader from "@components/project-details/project-overview/project-information/ProjectHeader";
 import ProjectName from "@components/project-details/project-overview/project-information/ProjectName";

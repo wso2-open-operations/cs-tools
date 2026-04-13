@@ -20,7 +20,7 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiError } from "@api/ApiError";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProjectDetails } from "@models/responses";
+import type { ProjectDetails } from "@/types/projects";
 
 /**
  * Custom hook to fetch detailed project information by ID.

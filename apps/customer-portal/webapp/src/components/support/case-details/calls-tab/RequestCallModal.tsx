@@ -45,7 +45,7 @@ import {
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { usePostCallRequest } from "@api/usePostCallRequest";
 import { usePatchCallRequest } from "@api/usePatchCallRequest";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import { CALL_REQUEST_STATE_PENDING_ON_WSO2 } from "@constants/supportConstants";
 import {
   callRequestApiPreferredTimeToDatetimeLocal,

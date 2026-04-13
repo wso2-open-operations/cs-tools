@@ -17,7 +17,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import UpdateHistoryTab from "@components/project-details/deployments/UpdateHistoryTab";
-import type { ProductUpdate } from "@models/responses";
+import type { ProductUpdate } from "@/types/products";
 
 vi.mock("@api/useGetRecommendedUpdateLevels", () => ({
   useGetRecommendedUpdateLevels: () => ({

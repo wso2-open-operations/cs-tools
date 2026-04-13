@@ -33,7 +33,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { buildEnvProducts } from "@utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/subscriptionUtils";
 import { htmlToPlainText } from "@utils/richTextEditor";
-import type { ChatNavState } from "@/models/chatTypes";
+import type { ChatNavState } from "@/types/conversations";
 
 const ISSUE_PLACEHOLDER =
   "Example: I'm experiencing API Gateway timeout issues in our production environment. The errors started appearing yesterday around 3 PM, and we're seeing 504 errors intermittently...";

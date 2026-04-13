@@ -40,13 +40,9 @@ import {
   FileCheck,
 } from "@wso2/oxygen-ui-icons-react";
 import { type ComponentType } from "react";
-import type {
-  ProjectSupportStats,
-  ProjectCasesStats,
-  CaseMetadataResponse,
-  AllCasesFilterValues,
-  AllConversationsFilterValues,
-} from "@models/responses";
+import type { ProjectSupportStats } from "@/types/projects";
+import type { ProjectCasesStats, CaseMetadataResponse, AllCasesFilterValues } from "@/types/cases";
+import type { AllConversationsFilterValues } from "@/types/conversations";
 
 // Chat actions for the history list.
 export const ChatAction = {

@@ -58,6 +58,7 @@ import {
   generateChangeRequestDetailsPdf,
   getChangeRequestDecisionMode,
 } from "@utils/changeRequests";
+import { ChangeRequestDecisionMode } from "@/types/changeRequests";
 import { formatDateTime } from "@utils/support";
 import {
   formatImpactLabel,
@@ -100,8 +101,8 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
     [changeRequest],
   );
   const decisionMode = getChangeRequestDecisionMode(changeRequest);
-  const canShowApprovalActions = decisionMode !== "none";
-  const canShowProposeNewTime = decisionMode === "customerApproval";
+  const canShowApprovalActions = decisionMode !== ChangeRequestDecisionMode.NONE;
+  const canShowProposeNewTime = decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL;
 
   const impactColor = getChangeRequestImpactColorShades(
     changeRequest?.impact?.label,
@@ -109,9 +110,9 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   const statusColor = getChangeRequestStateColorShades(changeRequest?.state);
 
   const handleApproveChange = () => {
-    if (!changeRequest || decisionMode === "none") return;
+    if (!changeRequest || decisionMode === ChangeRequestDecisionMode.NONE) return;
     patchChangeRequest.mutate(
-      decisionMode === "customerApproval"
+      decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL
         ? { isCustomerApproved: true }
         : { isCustomerReviewed: true },
       {
@@ -126,9 +127,9 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   };
 
   const handleRejectChange = () => {
-    if (!changeRequest || decisionMode === "none") return;
+    if (!changeRequest || decisionMode === ChangeRequestDecisionMode.NONE) return;
     patchChangeRequest.mutate(
-      decisionMode === "customerApproval"
+      decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL
         ? { isCustomerApproved: false }
         : { isCustomerReviewed: false },
       {

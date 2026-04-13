@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import TimeTrackingCard from "@time-tracking/TimeTrackingCard";
-import type { TimeCard } from "@models/responses";
+import type { TimeCard } from "@/types/timeTracking";
 
 describe("TimeTrackingCard", () => {
   const mockCard: TimeCard = {

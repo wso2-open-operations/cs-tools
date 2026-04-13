@@ -22,8 +22,8 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type { PatchUserMeRequest } from "@models/requests";
-import type { UserDetails } from "@models/responses";
+import type { PatchUserMeRequest } from "@/types/users";
+import type { UserDetails } from "@/types/users";
 
 export interface PatchUserMeResponse {
   phoneNumber?: string;

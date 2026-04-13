@@ -19,10 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type {
-  CaseAttachmentsResponse,
-  CaseAttachment,
-} from "@models/responses";
+import type { CaseAttachmentsResponse, CaseAttachment } from "@/types/cases";
 
 const PAGE_SIZE = 10;
 

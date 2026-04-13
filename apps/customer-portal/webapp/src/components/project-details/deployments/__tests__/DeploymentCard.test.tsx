@@ -22,7 +22,7 @@ import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import DeploymentCard from "@components/project-details/deployments/DeploymentCard";
 import type { SelectedDeploymentProduct } from "@components/project-details/deployments/deploymentSelectionTypes";
-import type { ProjectDeploymentItem } from "@models/responses";
+import type { ProjectDeploymentItem } from "@/types/deployments";
 
 const mockDeployment: ProjectDeploymentItem = {
   id: "dep-1",

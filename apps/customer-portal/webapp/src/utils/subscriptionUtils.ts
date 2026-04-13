@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { PROJECT_TYPE_LABELS } from "@constants/projectTypeConstants";
-import type { ActivityItem } from "@constants/projectDetailsConstants";
-import type { ProjectStatsResponse } from "@models/responses";
-import { convertMinutesToHours } from "@utils/projectDetails";
-import type { ProjectPermissions } from "@/types/subscriptionTypes";
+import type { ActivityItem } from "@/constants/projectDetailsConstants";
+import type { ProjectStatsResponse } from "@/types/projects";
+import { ProjectType } from "@/types/subscriptions";
+import type { ProjectPermissions } from "@/types/subscriptions";
+import { convertMinutesToHours } from "./projectDetails";
 
 /**
  * Restrictive defaults for unknown or unlisted project types.
@@ -51,7 +51,7 @@ export function getProjectPermissions(
   const label = projectTypeLabel ?? "";
 
   switch (label) {
-    case PROJECT_TYPE_LABELS.MANAGED_CLOUD_SUBSCRIPTION:
+    case ProjectType.MANAGED_CLOUD_SUBSCRIPTION:
       permissions.hasOperations = true;
       permissions.hasSR = true;
       permissions.hasCR = true;
@@ -64,7 +64,7 @@ export function getProjectPermissions(
       permissions.showServiceHoursAllocationsCard = true;
       break;
 
-    case PROJECT_TYPE_LABELS.CLOUD_SUPPORT:
+    case ProjectType.CLOUD_SUPPORT:
       permissions.hasOperations = true;
       permissions.hasSR = true;
       permissions.hasCR = false;
@@ -77,11 +77,11 @@ export function getProjectPermissions(
       permissions.showServiceHoursAllocationsCard = false;
       break;
 
-    case PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT:
-    case PROJECT_TYPE_LABELS.EVALUATION_SUBSCRIPTION:
+    case ProjectType.CLOUD_EVALUATION_SUPPORT:
+    case ProjectType.EVALUATION_SUBSCRIPTION:
       break;
 
-    case PROJECT_TYPE_LABELS.SUBSCRIPTION:
+    case ProjectType.SUBSCRIPTION:
       permissions.hasOperations = true;
       permissions.hasSR = true;
       permissions.hasCR = false;
@@ -127,8 +127,8 @@ export function shouldRestrictToPrimaryProductionDeployments(
   projectTypeLabel: string | null | undefined,
 ): boolean {
   return (
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_SUPPORT ||
-    projectTypeLabel === PROJECT_TYPE_LABELS.CLOUD_EVALUATION_SUPPORT
+    projectTypeLabel === ProjectType.CLOUD_SUPPORT ||
+    projectTypeLabel === ProjectType.CLOUD_EVALUATION_SUPPORT
   );
 }
 

@@ -23,8 +23,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CreateRegistryTokenRequest } from "@models/requests";
-import type { RegistryTokenCreationResponse } from "@models/responses";
+import type { CreateRegistryTokenRequest } from "@/types/registryTokens";
+import type { RegistryTokenCreationResponse } from "@/types/registryTokens";
 
 /**
  * Hook to create a registry token (POST /projects/:projectId/registry-tokens).

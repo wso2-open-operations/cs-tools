@@ -18,6 +18,7 @@ import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useSearchConversations } from "@api/useSearchConversations";
+import { SortOrder } from "@/types/common";
 import React, { type ReactNode } from "react";
 
 vi.mock("@asgardeo/react", () => ({
@@ -57,7 +58,7 @@ describe("useSearchConversations", () => {
   it("should have correct query key for conversations search", () => {
     const request = {
       pagination: { limit: 10, offset: 0 },
-      sortBy: { field: "updatedOn", order: "desc" as const },
+      sortBy: { field: "updatedOn", order: SortOrder.DESC },
     };
     renderHook(() => useSearchConversations("project-1", request), {
       wrapper,
@@ -78,7 +79,7 @@ describe("useSearchConversations", () => {
       () =>
         useSearchConversations("", {
           pagination: { limit: 5, offset: 0 },
-          sortBy: { field: "updatedOn", order: "desc" },
+          sortBy: { field: "updatedOn", order: SortOrder.DESC },
         }),
       { wrapper },
     );

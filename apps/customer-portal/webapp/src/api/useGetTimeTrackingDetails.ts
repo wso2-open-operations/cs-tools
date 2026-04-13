@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { TimeTrackingDetailsResponse } from "@models/responses";
+import type { TimeTrackingDetailsResponse } from "@/types/timeTracking";
 
 /**
  * Custom hook to fetch project time tracking details.

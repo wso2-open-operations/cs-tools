@@ -19,7 +19,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, it, expect } from "vitest";
 import { UpdateProductGrid } from "@update-cards/UpdateProductGrid";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 
 const renderWithRouter = (ui: ReactElement) =>
   render(<MemoryRouter>{ui}</MemoryRouter>);

@@ -25,7 +25,7 @@ import {
 import { useMemo, useEffect, useRef, useState, type JSX } from "react";
 import useGetCaseComments from "@api/useGetCaseComments";
 import useGetUserDetails from "@api/useGetUserDetails";
-import type { CaseComment } from "@models/responses";
+import type { CaseComment } from "@/types/cases";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 import { compareByCreatedOnThenId, formatCommentDate } from "@utils/support";
 import ActivityCommentInput from "@case-details-activity/ActivityCommentInput";

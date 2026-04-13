@@ -31,7 +31,7 @@ import {
   Play,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { Conversation } from "@models/responses";
+import type { Conversation } from "@/types/conversations";
 import {
   formatDateTime,
   getStatusColor,

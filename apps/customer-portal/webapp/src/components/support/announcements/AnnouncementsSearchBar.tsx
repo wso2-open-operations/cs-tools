@@ -31,7 +31,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 import { countListSearchAndFilters } from "@utils/support";
-import type { CaseMetadataResponse } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
 import type { AnnouncementFilterValues } from "@constants/supportConstants";
 import AnnouncementsFilters from "@components/support/announcements/AnnouncementsFilters";
 

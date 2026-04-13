@@ -30,7 +30,7 @@ import {
   alpha,
 } from "@wso2/oxygen-ui";
 import { type JSX, type ChangeEvent } from "react";
-import type { CaseSearchResponse, CaseListItem } from "@models/responses";
+import type { CaseSearchResponse, CaseListItem } from "@/types/cases";
 import {
   formatValue,
   getInitials,

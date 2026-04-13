@@ -26,7 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Clock } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";
 import OutstandingCasesSkeleton from "./OutstandingCasesSkeleton";
@@ -202,7 +202,7 @@ export default function OutstandingCasesList({
                   ) : null;
                 })()}
                 <Typography variant="caption" color="text.secondary">
-                  {formatRelativeTime(c.createdOn)}
+                  {formatRelativeTime(c.createdOn ?? undefined)}
                 </Typography>
               </Box>
             </Form.CardActions>

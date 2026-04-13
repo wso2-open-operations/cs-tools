@@ -34,7 +34,7 @@ import {
   type ChangeEvent,
   type JSX,
 } from "react";
-import type { ProductUpdate } from "@models/responses";
+import type { ProductUpdate } from "@/types/products";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useGetRecommendedUpdateLevels } from "@api/useGetRecommendedUpdateLevels";

@@ -24,7 +24,7 @@ import { useGetProducts } from "@api/useGetProducts";
 import { useSearchProductVersions } from "@api/useSearchProductVersions";
 import { usePostDeploymentProduct } from "@api/usePostDeploymentProduct";
 import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
-import type { DeploymentProductItem } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
 
 vi.mock("@api/usePostDeploymentProductsSearch");
 vi.mock("@api/useGetProducts");

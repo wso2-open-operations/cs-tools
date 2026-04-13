@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import UsageMetricTrendCard from "@components/project-details/usage-metrics/UsageMetricTrendCard";
-import type { UsageAggregatedMetricDefinition } from "@models/usageMetrics.types";
+import type { UsageAggregatedMetricDefinition } from "@/types/usage";
 
 vi.mock("@wso2/oxygen-ui-charts-react", () => ({
   LineChart: () => <div data-testid="line-chart" />,

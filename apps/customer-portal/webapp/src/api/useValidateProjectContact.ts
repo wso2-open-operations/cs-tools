@@ -18,8 +18,8 @@ import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type { ValidateContactRequest } from "@models/requests";
-import type { ValidateContactResponse } from "@models/responses";
+import type { ValidateContactRequest } from "@/types/users";
+import type { ValidateContactResponse } from "@/types/users";
 
 /**
  * Hook to validate a project contact email (POST /projects/:projectId/contacts/validate).

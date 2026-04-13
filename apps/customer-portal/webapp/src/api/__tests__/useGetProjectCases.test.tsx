@@ -18,6 +18,7 @@ import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import useGetProjectCases from "@api/useGetProjectCases";
+import { SortOrder } from "@/types/common";
 import React, { type JSX } from "react";
 
 // Mock @asgardeo/react
@@ -67,7 +68,7 @@ describe("useGetProjectCases", () => {
   });
 
   it("should have correct query options", () => {
-    const requestBody = { sortBy: { field: "createdOn", order: "desc" } };
+    const requestBody = { sortBy: { field: "createdOn", order: SortOrder.DESC } };
     renderHook(() => useGetProjectCases("project-1", requestBody as any), {
       wrapper,
     });
@@ -84,7 +85,7 @@ describe("useGetProjectCases", () => {
     const { result } = renderHook(
       () =>
         useGetProjectCases("", {
-          sortBy: { field: "createdOn", order: "desc" },
+          sortBy: { field: "createdOn", order: SortOrder.DESC },
         }),
       {
         wrapper,

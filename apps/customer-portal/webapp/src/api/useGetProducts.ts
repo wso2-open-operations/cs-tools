@@ -20,7 +20,7 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { PRODUCT_CLASS } from "@constants/commonConstants";
-import type { ProductsResponse } from "@models/responses";
+import type { ProductsResponse } from "@/types/products";
 
 /**
  * Fetches products list (GET /products).

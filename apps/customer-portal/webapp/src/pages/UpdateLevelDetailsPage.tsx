@@ -38,10 +38,7 @@ import { useState, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { usePostUpdateLevelsSearch } from "@api/usePostUpdateLevelsSearch";
 import { getUpdateTypeChipColor } from "@utils/updates";
-import type {
-  SecurityAdvisory,
-  UpdateDescriptionLevel,
-} from "@models/responses";
+import type { SecurityAdvisory, UpdateDescriptionLevel } from "@/types/updates";
 import PendingUpdatesListSkeleton from "@components/updates/pending-updates/PendingUpdatesListSkeleton";
 import EmptyState from "@components/common/empty-state/EmptyState";
 import Error500Page from "@components/common/error/Error500Page";

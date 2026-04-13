@@ -14,15 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export type ChangeRequestDecisionMode =
-  | "customerApproval"
-  | "customerReview"
-  | "none";
+import type { DeployedProductsResponse } from "@/types/deployments";
 
-export interface ChangeRequestWorkflowStage {
-  name: string;
-  description: string;
-  completed: boolean;
-  current: boolean;
-  disabled: boolean;
+/**
+ * Type guard for DeployedProductsResponse.
+ *
+ * @param {unknown} payload - The payload to check.
+ * @returns {payload is DeployedProductsResponse} True if the payload is a DeployedProductsResponse.
+ */
+export function isDeployedProductsResponse(
+  payload: unknown,
+): payload is DeployedProductsResponse {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    Array.isArray((payload as { deployedProducts?: unknown }).deployedProducts)
+  );
 }

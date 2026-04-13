@@ -25,7 +25,7 @@ import {
   Shield,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ComponentType } from "react";
-import { type DashboardMockStats } from "@models/responses";
+import type { DashboardMockStats } from "@/types/cases";
 import { colors } from "@wso2/oxygen-ui";
 
 // Valid color types for the stat card icons.

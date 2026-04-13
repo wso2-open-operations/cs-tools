@@ -35,7 +35,7 @@ import {
   ShieldAlert,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ComponentType, JSX } from "react";
-import type { Catalog, CatalogItem } from "@models/responses";
+import type { Catalog, CatalogItem } from "@/types/catalogs";
 
 export interface CatalogSelectorProps {
   catalogs: Catalog[] | undefined;

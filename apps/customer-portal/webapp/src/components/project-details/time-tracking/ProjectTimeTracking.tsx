@@ -31,7 +31,7 @@ import TimeTrackingCardSkeleton from "@time-tracking/TimeTrackingCardSkeleton";
 import TimeTrackingErrorState from "@time-tracking/TimeTrackingErrorState";
 import EmptyState from "@components/common/empty-state/EmptyState";
 
-import type { ProjectDetails } from "@models/responses";
+import type { ProjectDetails } from "@/types/projects";
 
 interface ProjectTimeTrackingProps {
   projectId: string;

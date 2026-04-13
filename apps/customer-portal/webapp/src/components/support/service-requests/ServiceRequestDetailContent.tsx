@@ -46,8 +46,8 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetCaseComments from "@api/useGetCaseComments";
 import useGetUserDetails from "@api/useGetUserDetails";
 import { usePostComment } from "@api/usePostComment";
-import type { CaseDetails } from "@models/responses";
-import type { CaseComment } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
+import type { CaseComment } from "@/types/cases";
 import {
   formatDateTime,
   formatRelativeTime,
@@ -225,7 +225,7 @@ export default function ServiceRequestDetailContent({
     const list = commentsData?.comments ?? [];
     return [...list].sort(
       (a, b) =>
-        new Date(a.createdOn).getTime() - new Date(b.createdOn).getTime(),
+        new Date(a.createdOn ?? "").getTime() - new Date(b.createdOn ?? "").getTime(),
     );
   }, [commentsData?.comments]);
 
@@ -247,7 +247,7 @@ export default function ServiceRequestDetailContent({
       entries.push({
         type: "created",
         label: "Service Request Created",
-        date: data.createdOn,
+        date: data.createdOn ?? "",
         actor: requestedBy ?? data?.engineerEmail ?? "System",
         desc: "Initial service request submitted",
       });
@@ -257,7 +257,7 @@ export default function ServiceRequestDetailContent({
       entries.push({
         type: "comment",
         label: "Comment Added",
-        date: c.createdOn,
+        date: c.createdOn ?? "",
         actor: c.createdBy ?? "Unknown",
         desc: "",
       });
@@ -269,7 +269,7 @@ export default function ServiceRequestDetailContent({
       entries.push({
         type: "status_changed",
         label: "Status Changed",
-        date: data.closedOn,
+        date: data.closedOn ?? "",
         actor: closedByLabel,
         desc: `Status changed to ${statusLabel ?? "Closed"}`,
       });
@@ -682,7 +682,7 @@ export default function ServiceRequestDetailContent({
                           color="text.secondary"
                           sx={{ display: "block" }}
                         >
-                          {comment.createdBy} • {formatRelativeTime(comment.createdOn)}
+                          {comment.createdBy} • {formatRelativeTime(comment.createdOn ?? "")}
                         </Typography>
                         {isPlainTextComment(comment.content ?? "") ? (
                           <Box

@@ -14,10 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type {
-  ChangeRequestStatsResponse,
-  ProjectCasesStats,
-} from "@models/responses";
+import type { ChangeRequestStatsResponse } from "@/types/changeRequests";
+import type { ProjectCasesStats } from "@/types/cases";
 
 /**
  * Whether the combined cases + change-request dashboard card is still loading data.

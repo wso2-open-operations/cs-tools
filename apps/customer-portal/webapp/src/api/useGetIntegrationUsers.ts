@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { IntegrationUser } from "@models/responses";
+import type { IntegrationUser } from "@/types/users";
 
 /**
  * Hook to fetch integration users for a project (GET /projects/:projectId/integration-users).

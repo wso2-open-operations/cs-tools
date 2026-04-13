@@ -37,7 +37,7 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useRegenerateRegistryToken } from "@api/useRegenerateRegistryToken";
-import type { RegistryToken } from "@models/responses";
+import type { RegistryToken } from "@/types/registryTokens";
 
 export interface RegenerateTokenModalProps {
   open: boolean;

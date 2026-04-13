@@ -19,7 +19,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DeploymentDocumentList from "@components/project-details/deployments/DeploymentDocumentList";
-import type { DeploymentDocument } from "@models/responses";
+import type { DeploymentDocument } from "@/types/deployments";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
 

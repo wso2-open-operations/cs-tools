@@ -18,7 +18,7 @@ import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { useFloatingNoveraVisibility } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 import { useGetCaseAttachments } from "@api/useGetCaseAttachments";
 import { useGetCallRequests } from "@api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";

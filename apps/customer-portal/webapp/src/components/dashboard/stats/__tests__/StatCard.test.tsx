@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StatCard } from "@components/dashboard/stats/StatCard";
+import { TrendDirection, TrendColor } from "@/types/common";
 
 // Mock useParams
 vi.mock("react-router", () => ({
@@ -109,8 +110,8 @@ describe("StatCard", () => {
   it("should render trend when provided", () => {
     const trend = {
       value: "12%",
-      direction: "up" as const,
-      color: "success" as const,
+      direction: TrendDirection.UP,
+      color: TrendColor.SUCCESS,
     };
     render(<StatCard {...defaultProps} trend={trend} />);
 
@@ -127,8 +128,8 @@ describe("StatCard", () => {
   it("should not render trend when showTrend is false", () => {
     const trend = {
       value: "12%",
-      direction: "up" as const,
-      color: "success" as const,
+      direction: TrendDirection.UP,
+      color: TrendColor.SUCCESS,
     };
     render(<StatCard {...defaultProps} trend={trend} showTrend={false} />);
 

@@ -30,15 +30,13 @@ import { useGetConversationMessages } from "@api/useGetConversationMessages";
 import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
 import { useChatWebSocket } from "@api/useChatWebSocket";
 import useGetProjectDetails from "@api/useGetProjectDetails";
-import type { SlotState } from "@models/responses";
+import type { SlotState } from "@/types/conversations";
 import { useAllDeploymentProducts } from "@hooks/useAllDeploymentProducts";
 import {
   DEFAULT_CONVERSATION_REGION,
   DEFAULT_CONVERSATION_TIER,
 } from "@constants/conversationConstants";
 import {
-  CHAT_SENDER_BOT,
-  CHAT_SENDER_USER,
   CHAT_TYPING_CHARS_PER_TICK,
   CHAT_TYPING_INTERVAL_MS,
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
@@ -51,7 +49,8 @@ import {
 } from "@utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/subscriptionUtils";
 import { htmlToPlainText } from "@utils/richTextEditor";
-import type { ChatNavState, Message } from "@models/chatTypes";
+import { ChatSender } from "@/types/conversations";
+import type { ChatNavState, Message } from "@/types/conversations";
 import ChatHeader from "@components/support/novera-ai-assistant/novera-chat-page/ChatHeader";
 import ChatInput from "@components/support/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@components/support/novera-ai-assistant/novera-chat-page/ChatMessageList";
@@ -130,7 +129,7 @@ export default function NoveraChatPage(): JSX.Element {
     const botWelcome: Message = {
       id: "1",
       text: NOVERA_INITIAL_WELCOME_TEXT,
-      sender: CHAT_SENDER_BOT,
+      sender: ChatSender.BOT,
       timestamp: new Date(),
     };
 
@@ -140,7 +139,7 @@ export default function NoveraChatPage(): JSX.Element {
         {
           id: "3",
           text: conversationResponse.message,
-          sender: CHAT_SENDER_BOT,
+          sender: ChatSender.BOT,
           timestamp: new Date(),
           showCreateCaseAction: conversationResponse.actions != null,
           slotState: conversationResponse.slotState,
@@ -152,7 +151,7 @@ export default function NoveraChatPage(): JSX.Element {
         msgs.unshift({
           id: "2",
           text: userMsg,
-          sender: CHAT_SENDER_USER,
+          sender: ChatSender.USER,
           timestamp: new Date(),
         });
       }
@@ -181,7 +180,7 @@ export default function NoveraChatPage(): JSX.Element {
         return {
           id: msg.id || `msg-${index}`,
           text: displayTextFromConversationContent(msg.content || "", isBot),
-          sender: isBot ? CHAT_SENDER_BOT : CHAT_SENDER_USER,
+          sender: isBot ? ChatSender.BOT : ChatSender.USER,
           timestamp: dateFromApiCreatedOn(msg.createdOn),
           showCreateCaseAction: false,
         };
@@ -410,7 +409,7 @@ export default function NoveraChatPage(): JSX.Element {
           }),
           () => ({
             id: `bot-${Date.now()}`,
-            sender: CHAT_SENDER_BOT,
+            sender: ChatSender.BOT,
             timestamp: new Date(),
             text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
             thinkingSteps: [],
@@ -527,13 +526,13 @@ export default function NoveraChatPage(): JSX.Element {
         {
           id: `user-${Date.now()}`,
           text,
-          sender: CHAT_SENDER_USER,
+          sender: ChatSender.USER,
           timestamp: new Date(),
         },
         {
           id: botMessageId,
           text: "",
-          sender: CHAT_SENDER_BOT,
+          sender: ChatSender.BOT,
           timestamp: new Date(),
           isLoading: true,
         },

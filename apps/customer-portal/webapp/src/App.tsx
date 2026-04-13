@@ -17,7 +17,6 @@
 import { type JSX } from "react";
 import { Route, Routes, Navigate } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
-import HomePage from "@pages/HomePage";
 import ProjectHub from "@pages/ProjectHub";
 import ProjectPage from "@pages/ProjectPage";
 import ProjectDetails from "@pages/ProjectDetails";
@@ -63,9 +62,6 @@ export default function App(): JSX.Element {
       <ErrorBannerProvider>
         <SuccessBannerProvider>
           <Routes>
-            {/* Public Route */}
-            <Route path="/home" element={<HomePage />} />
-
             {/* Error Routes */}
             <Route path="/401" element={<Error401Page />} />
             <Route path="/403" element={<Error403Page />} />

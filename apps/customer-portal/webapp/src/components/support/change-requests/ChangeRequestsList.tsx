@@ -17,7 +17,7 @@
 import { Box, Chip, Form, Typography, alpha, colors } from "@wso2/oxygen-ui";
 import { Calendar, Server, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { ChangeRequestItem } from "@models/responses";
+import type { ChangeRequestItem } from "@/types/changeRequests";
 import ChangeRequestsListSkeleton from "@components/support/change-requests/ChangeRequestsListSkeleton";
 import Error500Page from "@components/common/error/Error500Page";
 import EmptyIcon from "@components/common/empty-state/EmptyIcon";

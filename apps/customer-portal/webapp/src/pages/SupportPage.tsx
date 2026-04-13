@@ -35,7 +35,8 @@ import {
 } from "@constants/supportConstants";
 import { getProjectPermissions } from "@utils/subscriptionUtils";
 import { isS0Case } from "@utils/support";
-import type { ChatHistoryItem } from "@models/responses";
+import { SortOrder } from "@/types/common";
+import type { ChatHistoryItem } from "@/types/conversations";
 
 /**
  * SupportPage component to display case details for a project.
@@ -70,7 +71,7 @@ export default function SupportPage(): JSX.Element {
       filters: {
         caseTypes: [CaseType.DEFAULT_CASE],
       },
-      sortBy: { field: "createdOn", order: "desc" },
+      sortBy: { field: "createdOn", order: SortOrder.DESC },
     },
     {
       enabled: !!projectId,
@@ -83,7 +84,7 @@ export default function SupportPage(): JSX.Element {
     isError: isChatError,
   } = useSearchConversations(projectId || "", {
     pagination: { limit: SUPPORT_OVERVIEW_CHAT_LIMIT, offset: 0 },
-    sortBy: { field: "updatedOn", order: "desc" },
+    sortBy: { field: "updatedOn", order: SortOrder.DESC },
   });
 
   const { isLoading: isAuthLoading } = useAsgardeo();
@@ -99,9 +100,9 @@ export default function SupportPage(): JSX.Element {
     []
   ).map((c) => ({
     chatId: c.id,
-    chatNumber: c.number,
-    title: c.initialMessage || c.number,
-    startedTime: c.createdOn,
+    chatNumber: c.number ?? undefined,
+    title: c.initialMessage || c.number || "",
+    startedTime: c.createdOn ?? "",
     messages: c.messageCount,
     kbArticles: 0,
     status: c.state?.label ?? "Open",

@@ -33,7 +33,7 @@ import {
   type ChangeEvent,
   type JSX,
 } from "react";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import { formatUtcToLocal } from "@utils/support";
 
 export interface DeleteCallRequestModalProps {

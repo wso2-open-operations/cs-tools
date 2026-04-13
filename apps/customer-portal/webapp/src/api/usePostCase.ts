@@ -18,11 +18,9 @@ import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type {
-  CreateCaseRequest,
-  CreateServiceRequestPayload,
-} from "@models/requests";
-import type { CreateCaseResponse } from "@models/responses";
+import type { CreateCaseRequest } from "@/types/cases";
+import type { CreateServiceRequestPayload } from "@/types/catalogs";
+import type { CreateCaseResponse } from "@/types/cases";
 
 /**
  * Posts a new support case or service request to the backend.

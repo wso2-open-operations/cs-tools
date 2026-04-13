@@ -33,7 +33,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Code, X, Monitor, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type { CreateProjectContactRequest } from "@models/requests";
+import type { CreateProjectContactRequest } from "@/types/users";
 import { useValidateProjectContact } from "@api/useValidateProjectContact";
 
 type ContactRole = "portal_user" | "security_user" | "system_user";

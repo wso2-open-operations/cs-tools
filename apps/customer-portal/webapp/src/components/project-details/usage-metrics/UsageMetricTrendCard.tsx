@@ -17,7 +17,7 @@
 import { Box, Card, Typography, colors } from "@wso2/oxygen-ui";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import type { UsageAggregatedMetricDefinition } from "@models/usageMetrics.types";
+import type { UsageAggregatedMetricDefinition } from "@/types/usage";
 import { USAGE_LINE_CHART_MARGIN } from "@constants/usageMetricsConstants";
 import { UsageChartSurface } from "@components/project-details/usage-metrics/UsageChartSurface";
 

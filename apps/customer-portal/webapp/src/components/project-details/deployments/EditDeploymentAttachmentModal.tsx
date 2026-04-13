@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DeploymentDocument } from "@models/responses";
+import type { DeploymentDocument } from "@/types/deployments";
 import {
   Box,
   Button,

@@ -16,7 +16,7 @@
 
 import { Card, Box, Typography, Chip, useTheme } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { TimeCard } from "@models/responses";
+import type { TimeCard } from "@/types/timeTracking";
 import {
   formatMinutesAsHrMin,
   getTimeCardStateColorPath,

@@ -17,8 +17,8 @@ import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type { ConversationRequest } from "@models/requests";
-import type { ConversationResponse } from "@models/responses";
+import type { ConversationRequest } from "@/types/conversations";
+import type { ConversationResponse } from "@/types/conversations";
 
 /**
  * Posts a follow-up message to an existing conversation.

@@ -23,8 +23,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { PostDeploymentAttachmentRequest } from "@models/requests";
-import type { PostDeploymentAttachmentResponse } from "@models/responses";
+import type { PostDeploymentAttachmentRequest } from "@/types/deployments";
+import type { PostDeploymentAttachmentResponse } from "@/types/deployments";
 
 export interface PostDeploymentAttachmentVariables {
   deploymentId: string;

@@ -36,11 +36,8 @@ import {
   Calendar as CalendarIcon,
   Download,
 } from "@wso2/oxygen-ui-icons-react";
-import type {
-  ChangeRequestFilterValues,
-  ChangeRequestItem,
-} from "@models/responses";
-import type { ChangeRequestSearchRequest } from "@models/requests";
+import type { ChangeRequestFilterValues, ChangeRequestItem } from "@/types/changeRequests";
+import type { ChangeRequestSearchRequest } from "@/types/changeRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetChangeRequests, {
   useGetChangeRequestsInfinite,

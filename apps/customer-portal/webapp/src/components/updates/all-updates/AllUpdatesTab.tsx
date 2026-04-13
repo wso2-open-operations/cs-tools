@@ -39,10 +39,7 @@ import PendingUpdatesListSkeleton from "@components/updates/pending-updates/Pend
 import EmptyState from "@components/common/empty-state/EmptyState";
 import Error500Page from "@components/common/error/Error500Page";
 import UpdateLevelsReportModal from "@components/updates/all-updates/UpdateLevelsReportModal";
-import type {
-  ProductUpdateLevelEntry,
-  ProductUpdateLevelsResponse,
-} from "@models/responses";
+import type { ProductUpdateLevelEntry, ProductUpdateLevelsItem } from "@/types/updates";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/dropdownConstants";
 import { getUpdateLevelsReportData } from "@utils/updateLevelsReportPdf";
 
@@ -84,11 +81,11 @@ function isValidFilter(
 /**
  * Derives unique product names from product update levels (GET /updates/product-update-levels).
  *
- * @param {ProductUpdateLevelsResponse | undefined} data - Product update levels response.
+ * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
  * @returns {string[]} Sorted unique product names.
  */
 function getProductNamesFromProductLevels(
-  data: ProductUpdateLevelsResponse | undefined,
+  data: ProductUpdateLevelsItem[] | undefined,
 ): string[] {
   if (!data?.length) return [];
   const names = [...new Set(data.map((d) => d.productName))];
@@ -98,12 +95,12 @@ function getProductNamesFromProductLevels(
 /**
  * Derives version entries for a selected product.
  *
- * @param {ProductUpdateLevelsResponse | undefined} data - Product update levels response.
+ * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
  * @param {string} productName - Selected product.
  * @returns {ProductUpdateLevelEntry[]} Matching version entries.
  */
 function getVersionEntriesForProduct(
-  data: ProductUpdateLevelsResponse | undefined,
+  data: ProductUpdateLevelsItem[] | undefined,
   productName: string,
 ): ProductUpdateLevelEntry[] {
   if (!data?.length || !productName) return [];
@@ -114,13 +111,13 @@ function getVersionEntriesForProduct(
 /**
  * Returns sorted update levels for the selected product and version.
  *
- * @param {ProductUpdateLevelsResponse | undefined} data - Product update levels response.
+ * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
  * @param {string} productName - Selected product.
  * @param {string} productVersion - Selected version (productBaseVersion).
  * @returns {number[]} Sorted update levels.
  */
 function getUpdateLevelsForProductVersion(
-  data: ProductUpdateLevelsResponse | undefined,
+  data: ProductUpdateLevelsItem[] | undefined,
   productName: string,
   productVersion: string,
 ): number[] {

@@ -31,7 +31,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 import { countListSearchAndFilters } from "@utils/support";
-import type { CaseMetadataResponse, ChangeRequestFilterValues } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
+import type { ChangeRequestFilterValues } from "@/types/changeRequests";
 import ChangeRequestsFilters from "@components/support/change-requests/ChangeRequestsFilters";
 
 export interface ChangeRequestsSearchBarProps {

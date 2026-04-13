@@ -17,7 +17,7 @@
 import { colors } from "@wso2/oxygen-ui";
 import type { ComponentType } from "react";
 import { NULL_PLACEHOLDER } from "@constants/settingsConstants";
-import type { ProjectContact } from "@models/responses";
+import type { ProjectContact } from "@/types/users";
 import { Code, Crown, Monitor, Shield, Users } from "@wso2/oxygen-ui-icons-react";
 
 /** Priority: Admin > System User > Portal User (default). */

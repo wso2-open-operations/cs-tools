@@ -21,7 +21,7 @@ import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },

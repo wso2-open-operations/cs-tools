@@ -19,7 +19,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { usePostCaseClassifications } from "@api/usePostCaseClassifications";
-import type { CaseClassificationRequest } from "@models/requests";
+import type { CaseClassificationRequest } from "@/types/cases";
 
 const mockLogger = {
   debug: vi.fn(),

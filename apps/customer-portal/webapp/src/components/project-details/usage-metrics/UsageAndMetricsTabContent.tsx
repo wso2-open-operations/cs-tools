@@ -23,17 +23,17 @@ import TabBar from "@components/common/tab-bar/TabBar";
 import UsageOverviewPanel from "@components/project-details/usage-metrics/UsageOverviewPanel";
 import UsageEnvironmentProductsPanel from "@components/project-details/usage-metrics/UsageEnvironmentProductsPanel";
 import { USAGE_TIME_RANGE_LABELS } from "@constants/usageMetricsConstants";
-import type { UsageTimeRangePreset } from "@models/usageMetrics.types";
+import { UsageTimeRange } from "@/types/usage";
 import type { TabOption } from "@components/common/tab-bar/TabBar";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 
 /** Compute ISO date strings for the selected preset relative to today. */
-function resolveDateRange(preset: UsageTimeRangePreset): { startDate: string; endDate: string } {
+function resolveDateRange(preset: UsageTimeRange): { startDate: string; endDate: string } {
   const end = new Date();
   const start = new Date(end);
-  if (preset === "3m") {
+  if (preset === UsageTimeRange.THREE_MONTHS) {
     start.setMonth(start.getMonth() - 3);
-  } else if (preset === "6m") {
+  } else if (preset === UsageTimeRange.SIX_MONTHS) {
     start.setMonth(start.getMonth() - 6);
   } else {
     start.setFullYear(start.getFullYear() - 1);
@@ -51,7 +51,7 @@ function resolveDateRange(preset: UsageTimeRangePreset): { startDate: string; en
  */
 export default function UsageAndMetricsTabContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
-  const [timeRange, setTimeRange] = useState<UsageTimeRangePreset>("3m");
+  const [timeRange, setTimeRange] = useState<UsageTimeRange>(UsageTimeRange.THREE_MONTHS);
   const [innerTab, setInnerTab] = useState<string>("um-overview");
   const [expandedEnvironmentIds, setExpandedEnvironmentIds] = useState<Set<string>>(
     () => new Set(),
@@ -122,7 +122,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const handleCancelCustom = () => {
     setCustomStart(appliedCustomStart);
     setCustomEnd(appliedCustomEnd);
-    setTimeRange("3m"); // Revert to default or last valid maybe
+    setTimeRange(UsageTimeRange.THREE_MONTHS); // Revert to default or last valid maybe
   };
 
   const timeRangeSelector = (
@@ -144,7 +144,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
             Time Range:
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            {(["3m", "6m", "12m"] as UsageTimeRangePreset[]).map((preset) => {
+            {([UsageTimeRange.THREE_MONTHS, UsageTimeRange.SIX_MONTHS, UsageTimeRange.TWELVE_MONTHS] as UsageTimeRange[]).map((preset) => {
               const selected = timeRange === preset;
               return (
                 <Button
@@ -165,15 +165,15 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
             })}
             <Button
               size="small"
-              variant={timeRange === "custom" ? "contained" : "outlined"}
-              color={timeRange === "custom" ? "warning" : "inherit"}
-              onClick={() => setTimeRange("custom")}
+              variant={timeRange === UsageTimeRange.CUSTOM ? "contained" : "outlined"}
+              color={timeRange === UsageTimeRange.CUSTOM ? "warning" : "inherit"}
+              onClick={() => setTimeRange(UsageTimeRange.CUSTOM)}
               sx={{ textTransform: "none", minWidth: 48 }}
             >
               Custom
             </Button>
             
-            {timeRange === "custom" && (
+            {timeRange === UsageTimeRange.CUSTOM && (
               <Box sx={{ display: "flex", alignItems: "center", gap: 2, ml: 1 }}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <TextField

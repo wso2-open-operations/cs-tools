@@ -22,7 +22,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { useMemo } from "react";
-import type { CaseComment } from "@models/responses";
+import type { CaseComment } from "@/types/cases";
 import {
   getInitials,
   hasSingleCodeWrapper,

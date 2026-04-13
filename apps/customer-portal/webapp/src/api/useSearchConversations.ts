@@ -19,8 +19,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ConversationSearchRequest } from "@models/requests";
-import type { ConversationSearchResponse } from "@models/responses";
+import type { ConversationSearchRequest } from "@/types/conversations";
+import type { ConversationSearchResponse } from "@/types/conversations";
 
 /**
  * Fetches conversations for a project via POST /projects/:projectId/conversations/search.

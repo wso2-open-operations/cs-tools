@@ -30,7 +30,7 @@ import { File, Sparkles, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@constants/supportConstants";
 import { isS0SeverityLabel } from "@constants/dashboardConstants";
-import type { CaseMetadataResponse } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
 import { getSeverityColor } from "@utils/support";
 import Editor from "@components/common/rich-text-editor/Editor";
 

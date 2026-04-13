@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseAttachment } from "@models/responses";
+import type { CaseAttachment } from "@/types/cases";
 import {
   Box,
   Button,

@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { VulnerabilitiesMetaResponse } from "@models/responses";
+import type { VulnerabilitiesMetaResponse } from "@/types/security";
 
 /**
  * Fetches product vulnerabilities metadata (GET /products/vulnerabilities/meta).

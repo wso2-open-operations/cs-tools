@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useState } from "react";
 import type { JSX } from "react";
-import type { ChangeRequestItem } from "@models/responses";
+import type { ChangeRequestItem } from "@/types/changeRequests";
 import ChangeRequestsCalendarSkeleton from "@components/support/change-requests/ChangeRequestsCalendarSkeleton";
 import Error500Page from "@components/common/error/Error500Page";
 import {

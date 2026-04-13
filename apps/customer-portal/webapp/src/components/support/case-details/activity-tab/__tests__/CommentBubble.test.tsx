@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CommentBubble from "@case-details-activity/CommentBubble";
-import type { CaseComment } from "@models/responses";
+import type { CaseComment } from "@/types/cases";
 
 vi.mock("dompurify", () => ({
   default: {

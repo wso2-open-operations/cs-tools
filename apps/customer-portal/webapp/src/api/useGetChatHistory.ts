@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ChatHistoryResponse } from "@models/responses";
+import type { ChatHistoryResponse } from "@/types/conversations";
 
 /**
  * Fetches chat history for a project.

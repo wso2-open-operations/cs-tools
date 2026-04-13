@@ -35,6 +35,7 @@ import type { AnnouncementFilterValues } from "@constants/supportConstants";
 import AnnouncementsSearchBar from "@components/support/announcements/AnnouncementsSearchBar";
 import AnnouncementList from "@components/support/announcements/AnnouncementList";
 import { hasListSearchOrFilters } from "@utils/support";
+import { SortOrder } from "@/types/common";
 import AllCasesListSkeleton from "@components/support/all-cases/AllCasesListSkeleton";
 import DOMPurify from "dompurify";
 
@@ -50,7 +51,7 @@ export default function AnnouncementsPage(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AnnouncementFilterValues>({});
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -89,7 +90,7 @@ export default function AnnouncementsPage(): JSX.Element {
     setPage(value);
   };
 
-  const handleSortChange = (value: "desc" | "asc") => {
+  const handleSortChange = (value: SortOrder) => {
     setSortOrder(value);
     setPage(1);
   };
@@ -164,19 +165,19 @@ export default function AnnouncementsPage(): JSX.Element {
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="announcements-order-by-label">Order by</InputLabel>
-            <Select<"desc" | "asc">
+            <Select<SortOrder>
               labelId="announcements-order-by-label"
               id="announcements-order-by"
               value={sortOrder}
               label="Order by"
               onChange={(e) =>
-                handleSortChange(e.target.value as "desc" | "asc")
+                handleSortChange(e.target.value as SortOrder)
               }
             >
-              <MenuItem value="desc">
+              <MenuItem value={SortOrder.DESC}>
                 <Typography variant="body2">Newest first</Typography>
               </MenuItem>
-              <MenuItem value="asc">
+              <MenuItem value={SortOrder.ASC}>
                 <Typography variant="body2">Oldest first</Typography>
               </MenuItem>
             </Select>

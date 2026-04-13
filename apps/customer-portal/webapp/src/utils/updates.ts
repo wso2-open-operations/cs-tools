@@ -16,11 +16,7 @@
 
 import { UPDATES_STATS } from "@constants/updatesConstants";
 import type { StatCardColor } from "@constants/dashboardConstants";
-import type {
-  ProductUpdateLevelsResponse,
-  RecommendedUpdateLevelItem,
-  UpdatesStats,
-} from "@models/responses";
+import type { ProductUpdateLevelsItem, RecommendedUpdateLevelItem, UpdatesStats } from "@/types/updates";
 
 /**
  * Returns the StatCard-compatible chip colour for an update type.
@@ -158,12 +154,12 @@ export const getStatTooltipText = (
  * between recommended and product-update-levels responses.
  *
  * @param {RecommendedUpdateLevelItem} recommended - The recommended item (productName, productBaseVersion, endingUpdateLevel, recommendedUpdateLevel, etc.).
- * @param {ProductUpdateLevelsResponse} productLevels - The product update levels response.
+ * @param {ProductUpdateLevelsItem[]} productLevels - The product update levels response.
  * @returns {PendingUpdateLevelRow[]} Pending levels with type (security/regular).
  */
 export const getPendingUpdateLevels = (
   recommended: RecommendedUpdateLevelItem,
-  productLevels: ProductUpdateLevelsResponse | undefined,
+  productLevels: ProductUpdateLevelsItem[] | undefined,
 ): PendingUpdateLevelRow[] => {
   if (!productLevels) {
     return [];

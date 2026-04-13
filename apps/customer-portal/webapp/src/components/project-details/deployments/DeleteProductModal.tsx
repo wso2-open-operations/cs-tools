@@ -26,7 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, type JSX } from "react";
-import type { DeploymentProductItem } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
 
 export interface DeleteProductModalProps {
   open: boolean;

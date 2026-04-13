@@ -30,7 +30,7 @@ import {
 import { type ReactElement, type JSX } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import DOMPurify from "dompurify";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";

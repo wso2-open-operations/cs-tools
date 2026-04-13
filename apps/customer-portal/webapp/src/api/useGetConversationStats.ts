@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ConversationStats } from "@models/responses";
+import type { ConversationStats } from "@/types/conversations";
 
 export interface UseGetConversationStatsOptions {
   createdByMe?: boolean;

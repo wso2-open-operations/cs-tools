@@ -25,8 +25,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ChangeRequestSearchRequest } from "@models/requests";
-import type { ChangeRequestSearchResponse } from "@models/responses";
+import type { ChangeRequestSearchRequest } from "@/types/changeRequests";
+import type { ChangeRequestSearchResponse } from "@/types/changeRequests";
 
 export interface UseGetChangeRequestsOptions {
   enabled?: boolean;

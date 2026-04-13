@@ -31,7 +31,7 @@ import { type JSX, type ChangeEvent } from "react";
 import { getVulnerabilitySeverityColor } from "@utils/vulnerabilities";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import ProductVulnerabilitiesTableSkeleton from "@components/security/ProductVulnerabilitiesTableSkeleton";
-import type { ProductVulnerability } from "@models/responses";
+import type { ProductVulnerability } from "@/types/security";
 
 export interface ProductVulnerabilitiesListData {
   vulnerabilities: ProductVulnerability[];

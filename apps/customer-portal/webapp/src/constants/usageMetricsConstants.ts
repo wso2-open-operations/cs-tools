@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { UsageTimeRangePreset } from "@models/usageMetrics.types";
+import { UsageTimeRange } from "@/types/usage";
 
 export const USAGE_LINE_CHART_MARGIN = {
   top: 5,
@@ -23,9 +23,9 @@ export const USAGE_LINE_CHART_MARGIN = {
   bottom: 40,
 };
 
-export const USAGE_TIME_RANGE_LABELS: Record<UsageTimeRangePreset, string> = {
-  "3m": "Last 3 months",
-  "6m": "Last 6 months",
-  "12m": "Last 12 months",
-  custom: "Custom range",
+export const USAGE_TIME_RANGE_LABELS: Record<UsageTimeRange, string> = {
+  [UsageTimeRange.THREE_MONTHS]: "Last 3 months",
+  [UsageTimeRange.SIX_MONTHS]: "Last 6 months",
+  [UsageTimeRange.TWELVE_MONTHS]: "Last 12 months",
+  [UsageTimeRange.CUSTOM]: "Custom range",
 };

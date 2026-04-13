@@ -27,7 +27,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useState, type ChangeEvent, type JSX } from "react";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import { formatCallRequestPromptScheduledTime } from "@utils/support";
 
 export interface RejectCallRequestModalProps {

@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import ScheduledMaintenanceWindowCard from "../ScheduledMaintenanceWindowCard";
-import type { ChangeRequestDetails } from "@models/responses";
+import type { ChangeRequestDetails } from "@/types/changeRequests";
 
 const mockChangeRequest: ChangeRequestDetails = {
   id: "cr-001",

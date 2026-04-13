@@ -25,7 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, KeyboardEvent } from "react";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 import { getSeverityLegendColor } from "@constants/dashboardConstants";
 import {
   formatDateTime,

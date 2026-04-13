@@ -72,7 +72,6 @@ export default defineConfig({
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),
       "@hooks": fileURLToPath(new URL("./src/hooks", import.meta.url)),
       "@layouts": fileURLToPath(new URL("./src/layouts", import.meta.url)),
-      "@models": fileURLToPath(new URL("./src/models", import.meta.url)),
       "@pages": fileURLToPath(new URL("./src/pages", import.meta.url)),
       "@providers": fileURLToPath(new URL("./src/providers", import.meta.url)),
       "@time-tracking": fileURLToPath(

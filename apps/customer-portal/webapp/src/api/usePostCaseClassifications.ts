@@ -18,8 +18,8 @@ import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import type { CaseClassificationRequest } from "@models/requests";
-import type { CaseClassificationResponse } from "@models/responses";
+import type { CaseClassificationRequest } from "@/types/cases";
+import type { CaseClassificationResponse } from "@/types/cases";
 
 /**
  * Classifies case details based on chat history and environment context.

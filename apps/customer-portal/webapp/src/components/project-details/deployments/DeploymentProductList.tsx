@@ -15,7 +15,7 @@
 // under the License.
 
 import type { SelectedDeploymentProduct } from "@components/project-details/deployments/deploymentSelectionTypes";
-import { type DeploymentProductItem } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
 import { displayValue, formatProjectDate } from "@utils/projectDetails";
 import {
   Box,

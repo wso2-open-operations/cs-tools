@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 import { formatDateOnly } from "@utils/support";
 
 const mockCaseDetails: Partial<CaseDetails> = {

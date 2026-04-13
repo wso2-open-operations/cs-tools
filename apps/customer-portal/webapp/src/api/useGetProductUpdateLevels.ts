@@ -19,24 +19,24 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProductUpdateLevelsResponse } from "@models/responses";
+import type { ProductUpdateLevelsItem } from "@/types/updates";
 
 /**
  * Fetches product update levels from GET /updates/product-update-levels.
  *
- * @returns {UseQueryResult<ProductUpdateLevelsResponse, Error>} The query result.
+ * @returns {UseQueryResult<ProductUpdateLevelsItem[], Error>} The query result.
  */
 export function useGetProductUpdateLevels(): UseQueryResult<
-  ProductUpdateLevelsResponse,
+  ProductUpdateLevelsItem[],
   Error
 > {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  return useQuery<ProductUpdateLevelsResponse, Error>({
+  return useQuery<ProductUpdateLevelsItem[], Error>({
     queryKey: [ApiQueryKeys.PRODUCT_UPDATE_LEVELS],
-    queryFn: async (): Promise<ProductUpdateLevelsResponse> => {
+    queryFn: async (): Promise<ProductUpdateLevelsItem[]> => {
       logger.debug("Fetching product update levels");
 
       try {
@@ -62,7 +62,7 @@ export function useGetProductUpdateLevels(): UseQueryResult<
           );
         }
 
-        const data: ProductUpdateLevelsResponse = await response.json();
+        const data: ProductUpdateLevelsItem[] = await response.json();
         logger.debug("[useGetProductUpdateLevels] Data received:", data);
         return data;
       } catch (error) {

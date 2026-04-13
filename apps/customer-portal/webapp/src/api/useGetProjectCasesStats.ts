@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProjectCasesStats } from "@models/responses";
+import type { ProjectCasesStats } from "@/types/cases";
 import { CaseType } from "@constants/supportConstants";
 
 export { DASHBOARD_CASE_TYPE_LABELS } from "@constants/dashboardConstants";

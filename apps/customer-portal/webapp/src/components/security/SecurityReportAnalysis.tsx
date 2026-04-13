@@ -56,7 +56,9 @@ import { useNavigate, useParams } from "react-router";
 import { CaseType } from "@constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
-import type { AllCasesFilterValues, CaseListItem } from "@models/responses";
+import {
+  SortOrder,
+} from "@/types/common";
 import SecurityReportAnalysisSkeleton from "@components/security/SecurityReportAnalysisSkeleton";
 import TabBar from "@components/common/tab-bar/TabBar";
 import {
@@ -71,6 +73,7 @@ import {
   countListSearchAndFilters,
 } from "@utils/support";
 import DOMPurify from "dompurify";
+import type { AllCasesFilterValues, CaseListItem } from "@/types/cases";
 
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
@@ -88,7 +91,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const [sortField, setSortField] = useState<
     "createdOn" | "updatedOn" | "severity" | "state"
   >("createdOn");
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -179,7 +182,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     setPage(1);
   };
 
-  const handleSortChange = (value: "desc" | "asc") => {
+  const handleSortChange = (value: SortOrder) => {
     setSortOrder(value);
     setPage(1);
   };
@@ -431,13 +434,13 @@ const SecurityReportAnalysis = (): JSX.Element => {
               value={sortOrder}
               label="Sort"
               onChange={(e) =>
-                handleSortChange(e.target.value as "desc" | "asc")
+                handleSortChange(e.target.value as SortOrder)
               }
             >
-              <MenuItem value="desc">
+              <MenuItem value={SortOrder.DESC}>
                 <Typography variant="body2">Newest First</Typography>
               </MenuItem>
-              <MenuItem value="asc">
+              <MenuItem value={SortOrder.ASC}>
                 <Typography variant="body2">Oldest First</Typography>
               </MenuItem>
             </Select>

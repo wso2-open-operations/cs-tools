@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { UpdatesStatsGrid } from "@components/updates/stat-card-row/UpdatesStatsGrid";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 
 const createUpdateLevelItem = (overrides: Partial<RecommendedUpdateLevelItem> = {}): RecommendedUpdateLevelItem => ({
   productName: "product",

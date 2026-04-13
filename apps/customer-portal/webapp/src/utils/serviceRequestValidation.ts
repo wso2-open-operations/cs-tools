@@ -13,7 +13,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CatalogItemVariable } from "@models/responses";
+import type { CatalogItemVariable } from "@/types/catalogs";
 
 /** Attachment/File type variants from API (case-insensitive). */
 function isAttachmentType(type: string): boolean {

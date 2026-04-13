@@ -25,11 +25,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { DeploymentSearchRequest } from "@models/requests";
-import type {
-  ProjectDeploymentItem,
-  ProjectDeploymentsListResponse,
-} from "@models/responses";
+import type { DeploymentSearchRequest } from "@/types/deployments";
+import type { ProjectDeploymentItem, ProjectDeploymentsListResponse } from "@/types/deployments";
 
 const DEFAULT_PAGE_SIZE = 10;
 

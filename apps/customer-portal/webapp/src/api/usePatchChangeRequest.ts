@@ -23,8 +23,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { PatchChangeRequestRequest } from "@models/requests";
-import type { PatchChangeRequestResponse } from "@models/responses";
+import type { PatchChangeRequestRequest } from "@/types/changeRequests";
+import type { PatchChangeRequestResponse } from "@/types/changeRequests";
 
 /**
  * Hook to update change request planned start (PATCH /change-requests/:id).

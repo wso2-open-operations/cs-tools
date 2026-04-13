@@ -27,7 +27,7 @@ import type { JSX } from "react";
 import type { Contact } from "@constants/projectDetailsConstants";
 import ContactRow from "@components/project-details/project-overview/contact-info/ContactRow";
 import { colors } from "@wso2/oxygen-ui";
-import type { ProjectDetails } from "@models/responses";
+import type { ProjectDetails } from "@/types/projects";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 interface ContactInfoCardProps {

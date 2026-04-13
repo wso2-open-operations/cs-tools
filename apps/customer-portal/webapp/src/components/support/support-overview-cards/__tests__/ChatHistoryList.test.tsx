@@ -17,7 +17,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ChatHistoryList from "@components/support/support-overview-cards/ChatHistoryList";
-import type { ChatHistoryItem } from "@models/responses";
+import type { ChatHistoryItem } from "@/types/conversations";
 
 const mockItems: ChatHistoryItem[] = [
   {

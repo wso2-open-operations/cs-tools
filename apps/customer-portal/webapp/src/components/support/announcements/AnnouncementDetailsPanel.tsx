@@ -28,7 +28,7 @@ import {
 import DOMPurify from "dompurify";
 import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactElement } from "react";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 import CaseDetailsActionRow from "@components/support/case-details/header/CaseDetailsActionRow";
 import {
   formatUtcToLocalNoTimezone,

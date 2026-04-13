@@ -19,7 +19,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { usePostCallRequest } from "@api/usePostCallRequest";
-import type { CreateCallRequest } from "@models/requests";
+import type { CreateCallRequest } from "@/types/calls";
 
 const mockLogger = {
   debug: vi.fn(),

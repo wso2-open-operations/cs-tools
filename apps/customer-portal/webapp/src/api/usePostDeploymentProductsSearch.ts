@@ -26,13 +26,9 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { addApiHeaders } from "@utils/apiUtils";
-import type { DeployedProductSearchRequest } from "@models/requests";
-import type {
-  DeploymentProductItem,
-  DeployedProductsResponsePayload,
-  DeployedProductsResponse,
-} from "@models/responses";
-import { isDeployedProductsResponse } from "@models/responses";
+import type { DeployedProductSearchRequest } from "@/types/deployments";
+import type { DeploymentProductItem, DeployedProductsResponsePayload, DeployedProductsResponse } from "@/types/deployments";
+import { isDeployedProductsResponse } from "@/utils/deployments";
 
 const DEFAULT_PAGE_SIZE = 10;
 

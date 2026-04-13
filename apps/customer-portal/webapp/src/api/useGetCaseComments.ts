@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CaseCommentsResponse } from "@models/responses";
+import type { CaseCommentsResponse } from "@/types/cases";
 
 export interface UseGetCaseCommentsOptions {
   offset?: number;

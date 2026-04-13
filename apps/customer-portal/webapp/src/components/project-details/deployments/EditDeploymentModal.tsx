@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProjectDeploymentItem } from "@models/responses";
+import type { ProjectDeploymentItem } from "@/types/deployments";
 import {
   Box,
   Button,

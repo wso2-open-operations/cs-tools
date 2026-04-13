@@ -19,7 +19,7 @@ import { useNavigate } from "react-router";
 import type { JSX } from "react";
 import Error500Page from "@components/common/error/Error500Page";
 import EmptyState from "@components/common/empty-state/EmptyState";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 import { UpdateProductCard } from "@update-cards/UpdateProductCard";
 import { UpdateProductCardSkeleton } from "@update-cards/UpdateProductCardSkeleton";
 

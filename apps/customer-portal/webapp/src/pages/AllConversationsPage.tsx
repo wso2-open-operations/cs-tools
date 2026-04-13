@@ -38,15 +38,13 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useSearchConversations } from "@api/useSearchConversations";
 import { useGetConversationStats } from "@api/useGetConversationStats";
-import type {
-  AllConversationsFilterValues,
-  Conversation,
-} from "@models/responses";
+import type { AllConversationsFilterValues, Conversation } from "@/types/conversations";
 import type { AllConversationsStatKey } from "@constants/supportConstants";
 import AllConversationsStatCards from "@components/support/all-conversations/AllConversationsStatCards";
 import AllConversationsSearchBar from "@components/support/all-conversations/AllConversationsSearchBar";
 import AllConversationsList from "@components/support/all-conversations/AllConversationsList";
 import { hasListSearchOrFilters } from "@utils/support";
+import { SortOrder } from "@/types/common";
 
 /**
  * AllConversationsPage component to display all conversations with filters, search, and pagination.
@@ -67,7 +65,7 @@ export default function AllConversationsPage(): JSX.Element {
   const [sortField, setSortField] = useState<"createdOn" | "updatedOn">(
     "updatedOn",
   );
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -173,7 +171,7 @@ export default function AllConversationsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleSortChange = (value: "desc" | "asc") => {
+  const handleSortChange = (value: SortOrder) => {
     setSortOrder(value);
     setPage(1);
   };
@@ -264,19 +262,19 @@ export default function AllConversationsPage(): JSX.Element {
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="conversation-order-by-label">Order by</InputLabel>
-            <Select<"desc" | "asc">
+            <Select<SortOrder>
               labelId="conversation-order-by-label"
               id="conversation-order-by"
               value={sortOrder}
               label="Order by"
               onChange={(e) =>
-                handleSortChange(e.target.value as "desc" | "asc")
+                handleSortChange(e.target.value as SortOrder)
               }
             >
-              <MenuItem value="desc">
+              <MenuItem value={SortOrder.DESC}>
                 <Typography variant="body2">Newest first</Typography>
               </MenuItem>
-              <MenuItem value="asc">
+              <MenuItem value={SortOrder.ASC}>
                 <Typography variant="body2">Oldest first</Typography>
               </MenuItem>
             </Select>

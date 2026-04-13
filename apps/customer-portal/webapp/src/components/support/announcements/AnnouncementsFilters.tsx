@@ -24,7 +24,7 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type { CaseMetadataResponse } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
 import {
   ANNOUNCEMENT_FILTER_DEFINITIONS,
   type AnnouncementFilterValues,

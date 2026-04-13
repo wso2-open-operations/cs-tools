@@ -23,8 +23,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CreateDeploymentRequest } from "@models/requests";
-import type { CreateDeploymentResponse } from "@models/responses";
+import type { CreateDeploymentRequest } from "@/types/deployments";
+import type { CreateDeploymentResponse } from "@/types/deployments";
 
 /**
  * Hook to create a new deployment for a project.

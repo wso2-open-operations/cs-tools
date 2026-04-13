@@ -16,7 +16,7 @@
 
 import { Stack } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import CallRequestCard from "@case-details-calls/CallRequestCard";
 
 export interface CallRequestListProps {

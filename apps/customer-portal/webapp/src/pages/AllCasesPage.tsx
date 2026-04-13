@@ -42,12 +42,13 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 import { hasListSearchOrFilters, isS0Case } from "@utils/support";
 import { CaseType } from "@constants/supportConstants";
+import { SortOrder } from "@/types/common";
 import DOMPurify from "dompurify";
 import {
   getProjectPermissions,
   shouldExcludeS0,
 } from "@utils/subscriptionUtils";
-import type { AllCasesFilterValues } from "@models/responses";
+import type { AllCasesFilterValues } from "@/types/cases";
 import AllCasesStatCards from "@components/support/all-cases/AllCasesStatCards";
 import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
 import AllCasesList from "@components/support/all-cases/AllCasesList";
@@ -71,7 +72,7 @@ export default function AllCasesPage(): JSX.Element {
   const [sortField, setSortField] = useState<
     "createdOn" | "updatedOn" | "severity" | "state"
   >("createdOn");
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -224,7 +225,7 @@ export default function AllCasesPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleSortChange = (value: "desc" | "asc") => {
+  const handleSortChange = (value: SortOrder) => {
     setSortOrder(value);
     setPage(1);
   };
@@ -357,19 +358,19 @@ export default function AllCasesPage(): JSX.Element {
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="order-by-label">Order by</InputLabel>
-            <Select<"desc" | "asc">
+            <Select<SortOrder>
               labelId="order-by-label"
               id="order-by"
               value={sortOrder}
               label="Order by"
               onChange={(e) =>
-                handleSortChange(e.target.value as "desc" | "asc")
+                handleSortChange(e.target.value as SortOrder)
               }
             >
-              <MenuItem value="desc">
+              <MenuItem value={SortOrder.DESC}>
                 <Typography variant="body2">Newest first</Typography>
               </MenuItem>
-              <MenuItem value="asc">
+              <MenuItem value={SortOrder.ASC}>
                 <Typography variant="body2">Oldest first</Typography>
               </MenuItem>
             </Select>

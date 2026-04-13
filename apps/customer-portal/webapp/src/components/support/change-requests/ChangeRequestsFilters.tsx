@@ -24,10 +24,8 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type {
-  CaseMetadataResponse,
-  ChangeRequestFilterValues,
-} from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
+import type { ChangeRequestFilterValues } from "@/types/changeRequests";
 import {
   CHANGE_REQUEST_FILTER_DEFINITIONS,
   formatImpactLabel,

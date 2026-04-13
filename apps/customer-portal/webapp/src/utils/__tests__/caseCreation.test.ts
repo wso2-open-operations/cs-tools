@@ -27,7 +27,7 @@ import {
   isUnknownPlaceholderProductLabel,
   getBaseDeploymentOptions,
 } from "@utils/caseCreation";
-import type { DeploymentProductItem } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
 
 describe("caseCreation utils", () => {
   describe("normalizeProductLabel", () => {

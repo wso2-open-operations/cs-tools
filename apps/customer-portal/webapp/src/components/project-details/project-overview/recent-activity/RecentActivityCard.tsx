@@ -29,7 +29,7 @@ import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 import type { ActivityItem } from "@constants/projectDetailsConstants";
 import { getRecentActivityItems } from "@utils/subscriptionUtils";
-import type { ProjectStatsResponse } from "@models/responses";
+import type { ProjectStatsResponse } from "@/types/projects";
 
 interface RecentActivityCardProps {
   activity?: ProjectStatsResponse["recentActivity"];

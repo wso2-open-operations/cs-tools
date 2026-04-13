@@ -28,7 +28,7 @@ import { type JSX } from "react";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 import { TrendIndicator } from "@components/dashboard/stats/TrendIndicator";
 import { type StatCardColor } from "@constants/dashboardConstants";
-import { type TrendData } from "@models/responses";
+import type { TrendData } from "@/types/common";
 
 //Props for the StatCard component.
 interface StatCardProps {

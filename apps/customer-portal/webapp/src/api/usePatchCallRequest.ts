@@ -23,21 +23,20 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { PatchCallRequest } from "@models/requests";
-import type { CallRequestResponse } from "@models/responses";
+import type { PatchCallRequest, CreateCallResponse } from "@/types/calls";
 
 /**
  * Hook to update a call request (PATCH /cases/:caseId/call-requests/:id).
  *
  * @param {string} projectId - The ID of the project (used for cache invalidation).
  * @param {string} caseId - The ID of the case.
- * @returns {UseMutationResult<CallRequestResponse, Error, PatchCallRequest & { callRequestId: string }>} Mutation result.
+ * @returns {UseMutationResult<CreateCallResponse, Error, PatchCallRequest & { callRequestId: string }>} Mutation result.
  */
 export function usePatchCallRequest(
   projectId: string,
   caseId: string,
 ): UseMutationResult<
-  CallRequestResponse,
+  CreateCallResponse,
   Error,
   PatchCallRequest & { callRequestId: string }
 > {
@@ -47,13 +46,13 @@ export function usePatchCallRequest(
   const authFetch = useAuthApiClient();
 
   return useMutation<
-    CallRequestResponse,
+    CreateCallResponse,
     Error,
     PatchCallRequest & { callRequestId: string }
   >({
     mutationFn: async (
       payload: PatchCallRequest & { callRequestId: string },
-    ): Promise<CallRequestResponse> => {
+    ): Promise<CreateCallResponse> => {
       const { callRequestId, ...rest } = payload;
       const body: PatchCallRequest = {
         stateKey: rest.stateKey,
@@ -115,7 +114,7 @@ export function usePatchCallRequest(
           throw new Error(errorMessage);
         }
 
-        const data: CallRequestResponse = await response.json();
+        const data: CreateCallResponse = await response.json();
         logger.debug("[usePatchCallRequest] Call request updated:", data);
         return data;
       } catch (error) {

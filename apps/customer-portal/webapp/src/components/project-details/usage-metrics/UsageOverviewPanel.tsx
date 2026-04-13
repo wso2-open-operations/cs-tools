@@ -46,11 +46,8 @@ import usePostProjectInstancesMetricsSearch from "@api/usePostProjectInstancesMe
 import usePostDeploymentInstancesSearch from "@api/usePostDeploymentInstancesSearch";
 import usePostDeploymentInstancesUsagesSearch from "@api/usePostDeploymentInstancesUsagesSearch";
 import useGetProjectUsageStats from "@api/useGetProjectUsageStats";
-import type {
-  UsageAggregatedMetricDefinition,
-  UsageTrendRow,
-} from "@models/usageMetrics.types";
-import type { InstanceItem, InstanceUsageEntry, InstanceMetricEntry } from "@models/responses";
+import type { UsageAggregatedMetricDefinition, UsageTrendRow } from "@/types/usage";
+import type { InstanceItem, InstanceUsageEntry, InstanceMetricEntry } from "@/types/usage";
 import { colors as oxygenColors } from "@wso2/oxygen-ui";
 import UsageMetricTrendCard from "@components/project-details/usage-metrics/UsageMetricTrendCard";
 

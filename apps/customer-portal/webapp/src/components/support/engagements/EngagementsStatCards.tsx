@@ -21,7 +21,7 @@ import {
   CircleCheck,
   CircleAlert,
 } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectCasesStats } from "@models/responses";
+import type { ProjectCasesStats } from "@/types/cases";
 import SupportStatGrid from "@components/common/stat-grid/SupportStatGrid";
 import type { SupportStatConfig } from "@constants/supportConstants";
 import {

@@ -40,7 +40,8 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { CaseType } from "@constants/supportConstants";
 import { shouldExcludeS0 } from "@utils/subscriptionUtils";
 import { hasListSearchOrFilters } from "@utils/support";
-import type { AllCasesFilterValues } from "@models/responses";
+import type { AllCasesFilterValues } from "@/types/cases";
+import { SortOrder } from "@/types/common";
 import { isS0Case } from "@utils/support";
 import AllCasesList from "@components/support/all-cases/AllCasesList";
 import AllCasesSearchBar from "@components/support/all-cases/AllCasesSearchBar";
@@ -62,7 +63,7 @@ export default function EngagementsPage(): JSX.Element {
   const [sortField, setSortField] = useState<
     "createdOn" | "updatedOn" | "severity" | "state"
   >("createdOn");
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -182,7 +183,7 @@ export default function EngagementsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleSortChange = (value: "desc" | "asc") => {
+  const handleSortChange = (value: SortOrder) => {
     setSortOrder(value);
     setPage(1);
   };
@@ -268,19 +269,19 @@ export default function EngagementsPage(): JSX.Element {
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="sort-label">Order By</InputLabel>
-            <Select<"desc" | "asc">
+            <Select<SortOrder>
               labelId="sort-label"
               id="sort"
               value={sortOrder}
               label="Order By"
               onChange={(e) =>
-                handleSortChange(e.target.value as "desc" | "asc")
+                handleSortChange(e.target.value as SortOrder)
               }
             >
-              <MenuItem value="desc">
+              <MenuItem value={SortOrder.DESC}>
                 <Typography variant="body2">Newest First</Typography>
               </MenuItem>
-              <MenuItem value="asc">
+              <MenuItem value={SortOrder.ASC}>
                 <Typography variant="body2">Oldest First</Typography>
               </MenuItem>
             </Select>

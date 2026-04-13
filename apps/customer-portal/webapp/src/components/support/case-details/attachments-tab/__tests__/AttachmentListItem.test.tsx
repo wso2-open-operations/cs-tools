@@ -18,7 +18,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
-import type { CaseAttachment } from "@models/responses";
+import type { CaseAttachment } from "@/types/cases";
 
 const mockAttachment: CaseAttachment = {
   id: "att-1",

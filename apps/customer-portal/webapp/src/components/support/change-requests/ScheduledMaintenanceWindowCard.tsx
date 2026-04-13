@@ -23,7 +23,7 @@ import {
   colors,
 } from "@wso2/oxygen-ui";
 import { Calendar, Clock } from "@wso2/oxygen-ui-icons-react";
-import type { ChangeRequestDetails } from "@models/responses";
+import type { ChangeRequestDetails } from "@/types/changeRequests";
 import {
   formatChangeRequestDisplayDate,
   formatChangeRequestDuration,

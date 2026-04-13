@@ -20,7 +20,7 @@ import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { CALL_REQUEST_STATE_CANCELLED } from "@constants/supportConstants";
-import type { CaseMetadataResponse } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
 
 /**
  * Custom hook to fetch all filters (cases, conversations, change requests, etc.) for a specific project.

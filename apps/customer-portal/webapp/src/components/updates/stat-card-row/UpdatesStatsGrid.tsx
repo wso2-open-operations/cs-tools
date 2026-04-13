@@ -17,10 +17,7 @@
 import { Box, Chip, Grid, Skeleton, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { UPDATES_STATS } from "@constants/updatesConstants";
-import type {
-  RecommendedUpdateLevelItem,
-  UpdatesStats,
-} from "@models/responses";
+import type { RecommendedUpdateLevelItem, UpdatesStats } from "@/types/updates";
 import {
   aggregateUpdateStats,
   getStatTooltipText,

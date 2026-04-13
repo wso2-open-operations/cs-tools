@@ -18,7 +18,8 @@ import { Box, Paper, Typography, IconButton, alpha } from "@wso2/oxygen-ui";
 import { Bot, User, ThumbsUp, ThumbsDown } from "@wso2/oxygen-ui-icons-react";
 import ReactMarkdown from "react-markdown";
 import { type JSX, useEffect, useRef, useState } from "react";
-import type { Message } from "@models/chatTypes";
+import { ChatSender } from "@/types/conversations";
+import type { Message } from "@/types/conversations";
 import {
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
   NOVERA_DISPLAY_NAME,
@@ -170,7 +171,7 @@ export default function ChatMessageBubble({
   onThumbsUp,
   onThumbsDown,
 }: ChatMessageBubbleProps): JSX.Element {
-  const isUser = message.sender === "user";
+  const isUser = message.sender === ChatSender.USER;
   const [thumbsState, setThumbsState] = useState<"up" | "down" | null>(null);
   const hasFeedbackSelection = thumbsState !== null;
 

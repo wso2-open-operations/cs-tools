@@ -24,7 +24,7 @@ import {
   type ChangeEvent,
   type JSX,
 } from "react";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import {
   useGetCallRequests,
   CALL_REQUESTS_PAGE_SIZE,

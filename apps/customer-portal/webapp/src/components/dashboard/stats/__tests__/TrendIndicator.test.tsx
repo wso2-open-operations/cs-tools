@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TrendIndicator } from "@components/dashboard/stats/TrendIndicator";
+import { TrendDirection, TrendColor } from "@/types/common";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -57,8 +58,8 @@ describe("TrendIndicator", () => {
   it("should render up trend correctly", () => {
     const trend = {
       value: "12%",
-      direction: "up" as const,
-      color: "success" as const,
+      direction: TrendDirection.UP,
+      color: TrendColor.SUCCESS,
     };
     render(<TrendIndicator trend={trend} />);
 
@@ -70,8 +71,8 @@ describe("TrendIndicator", () => {
   it("should render down trend in error color", () => {
     const trend = {
       value: "5%",
-      direction: "down" as const,
-      color: "success" as const,
+      direction: TrendDirection.DOWN,
+      color: TrendColor.SUCCESS,
     };
     render(<TrendIndicator trend={trend} />);
 

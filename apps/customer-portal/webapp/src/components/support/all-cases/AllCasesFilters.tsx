@@ -24,11 +24,8 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX, UIEvent } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type {
-  CaseMetadataResponse,
-  AllCasesFilterValues,
-  ProjectDeploymentItem,
-} from "@models/responses";
+import type { CaseMetadataResponse, AllCasesFilterValues } from "@/types/cases";
+import type { ProjectDeploymentItem } from "@/types/deployments";
 import { SelectMenuLoadMoreRow } from "@components/common/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import {
   EMPTY_DROPDOWN_PLACEHOLDER,

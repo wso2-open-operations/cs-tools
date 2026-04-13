@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProjectSupportStats } from "@models/responses";
+import type { ProjectSupportStats } from "@/types/projects";
 import { CaseType } from "@constants/supportConstants";
 
 export interface UseGetProjectSupportStatsOptions {

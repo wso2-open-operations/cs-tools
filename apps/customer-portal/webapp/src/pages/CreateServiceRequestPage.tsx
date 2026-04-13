@@ -27,7 +27,7 @@ import {
 import { useNavigate, useParams, useLocation, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
-import type { ProjectDeploymentItem } from "@models/responses";
+import type { ProjectDeploymentItem } from "@/types/deployments";
 import {
   extractDeploymentProducts,
   usePostDeploymentProductsSearchInfinite,
@@ -62,7 +62,7 @@ import {
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/subscriptionUtils";
 import { htmlToPlainText } from "@utils/richTextEditor";
-import type { CreateServiceRequestPayload } from "@models/requests";
+import type { CreateServiceRequestPayload } from "@/types/catalogs";
 import CatalogSelector from "@components/support/service-requests/CatalogSelector";
 import VariableFormFields from "@components/support/service-requests/VariableFormFields";
 import UploadAttachmentModal from "@components/support/case-details/attachments-tab/UploadAttachmentModal";

@@ -31,10 +31,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { alpha, colors } from "@wso2/oxygen-ui";
 import { type ComponentType } from "react";
-import type {
-  CaseMetadataResponse,
-  ChangeRequestFilterValues,
-} from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
+import type { ChangeRequestFilterValues } from "@/types/changeRequests";
 import type { SupportStatConfig } from "@constants/supportConstants";
 
 /**

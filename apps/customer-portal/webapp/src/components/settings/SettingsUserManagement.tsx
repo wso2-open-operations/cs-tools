@@ -62,8 +62,8 @@ import {
   getRoleChipSx,
 } from "@utils/settings";
 import { getUserStatusColor } from "@utils/projectDetails";
-import type { CreateProjectContactRequest } from "@models/requests";
-import type { ProjectContact } from "@models/responses";
+import type { CreateProjectContactRequest } from "@/types/users";
+import type { ProjectContact } from "@/types/users";
 
 export interface SettingsUserManagementProps {
   projectId: string;

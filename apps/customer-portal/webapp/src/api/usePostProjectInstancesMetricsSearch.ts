@@ -18,8 +18,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { InstanceMetricsRequest } from "@models/requests";
-import type { InstanceMetricsResponse } from "@models/responses";
+import type { InstanceMetricsRequest } from "@/types/usage";
+import type { InstanceMetricsResponse } from "@/types/usage";
 
 /**
  * Searches instance metrics for a project within a date range.

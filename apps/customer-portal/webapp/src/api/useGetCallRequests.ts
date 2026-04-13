@@ -23,7 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
-import type { CallRequestsResponse } from "@models/responses";
+import type { CallRequestsResponse } from "@/types/calls";
 
 /** Page size for POST .../call-requests/search (must match backend max). */
 export const CALL_REQUESTS_PAGE_SIZE = 10;

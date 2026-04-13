@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import EditDeploymentModal from "@components/project-details/deployments/EditDeploymentModal";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchDeployment } from "@api/usePatchDeployment";
-import type { ProjectDeploymentItem } from "@models/responses";
+import type { ProjectDeploymentItem } from "@/types/deployments";
 
 vi.mock("@api/useGetProjectFilters");
 vi.mock("@api/usePatchDeployment");

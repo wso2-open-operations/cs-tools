@@ -19,8 +19,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProductVersionsSearchResponse } from "@models/responses";
-import type { ProductVersionsSearchRequest } from "@models/requests";
+import type { ProductVersionsSearchResponse } from "@/types/products";
+import type { ProductVersionsSearchRequest } from "@/types/products";
 
 /**
  * Fetches product versions (POST /products/:productId/versions/search).

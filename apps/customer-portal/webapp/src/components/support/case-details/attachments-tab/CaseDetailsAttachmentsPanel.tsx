@@ -21,7 +21,7 @@ import {
   useGetCaseAttachments,
   flattenCaseAttachments,
 } from "@api/useGetCaseAttachments";
-import type { CaseAttachment } from "@models/responses";
+import type { CaseAttachment } from "@/types/cases";
 import { useDeleteAttachment } from "@api/useDeleteAttachment";
 import { useGetAttachment } from "@api/useGetAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";

@@ -19,11 +19,7 @@ import {
   WS_CHOREO_OAUTH2_TOKEN,
   WS_CUSTOMER_PORTAL,
 } from "@/constants/apiConstants";
-import type {
-  ChatWebSocketEvent,
-  ChatWebSocketPayload,
-  UseChatWebSocketOptions,
-} from "@/models/chatTypes";
+import type { ChatWebSocketEvent, ChatWebSocketPayload, UseChatWebSocketOptions } from "@/types/conversations";
 import { useAsgardeo } from "@asgardeo/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

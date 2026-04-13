@@ -25,7 +25,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Calendar, Layers, Package, Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 import {
   formatDateTime,
   getAssignedEngineerLabel,

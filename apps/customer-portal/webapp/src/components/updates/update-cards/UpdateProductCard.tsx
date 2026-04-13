@@ -23,7 +23,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 import { UpdateCardHeader } from "@update-cards/UpdateCardHeader";
 import { UpdateCardLevels } from "@update-cards/UpdateCardLevels";
 import { UpdateCardBreakdown } from "@update-cards/UpdateCardBreakdown";

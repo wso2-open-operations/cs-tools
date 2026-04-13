@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { RegistryToken } from "@models/responses";
+import type { RegistryToken } from "@/types/registryTokens";
 
 /**
  * Hook to search registry tokens for a project (POST /projects/:projectId/registry-tokens/search).

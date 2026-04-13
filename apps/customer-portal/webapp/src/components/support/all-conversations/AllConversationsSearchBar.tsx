@@ -31,8 +31,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 import { countListSearchAndFilters } from "@utils/support";
-import type { CaseMetadataResponse } from "@models/responses";
-import type { AllConversationsFilterValues } from "@models/responses";
+import type { CaseMetadataResponse } from "@/types/cases";
+import type { AllConversationsFilterValues } from "@/types/conversations";
 import AllConversationsFilters from "./AllConversationsFilters";
 
 export interface AllConversationsSearchBarProps {

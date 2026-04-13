@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ChangeRequestDetails } from "@models/responses";
+import type { ChangeRequestDetails } from "@/types/changeRequests";
 
 /**
  * Fetches a single change request by id.

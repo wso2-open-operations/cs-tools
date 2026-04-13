@@ -34,6 +34,7 @@ import useGetChangeRequests from "@api/useGetChangeRequests";
 import { useGetProjectCasesStats } from "@api/useGetProjectCasesStats";
 import { useGetProjectChangeRequestsStats } from "@api/useGetProjectChangeRequestsStats";
 import { getProjectPermissions } from "@utils/subscriptionUtils";
+import { SortOrder } from "@/types/common";
 import ErrorIndicator from "@components/common/error-indicator/ErrorIndicator";
 
 /**
@@ -74,7 +75,7 @@ export default function OperationsPage(): JSX.Element {
     projectId || "",
     {
       filters: { caseTypes: [CaseType.SERVICE_REQUEST] },
-      sortBy: { field: "createdOn", order: "desc" },
+      sortBy: { field: "createdOn", order: SortOrder.DESC },
     },
     { enabled: !!projectId && isServiceRequestEnabled },
   );

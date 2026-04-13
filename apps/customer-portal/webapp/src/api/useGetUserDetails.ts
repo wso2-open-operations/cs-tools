@@ -17,7 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
-import { type UserDetails } from "@models/responses";
+import type { UserDetails } from "@/types/users";
 import { useLogger } from "@hooks/useLogger";
 
 /**

@@ -23,7 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { PostDeploymentProductRequest } from "@models/requests";
+import type { PostDeploymentProductRequest } from "@/types/deployments";
 
 export interface PostDeploymentProductVariables {
   deploymentId: string;

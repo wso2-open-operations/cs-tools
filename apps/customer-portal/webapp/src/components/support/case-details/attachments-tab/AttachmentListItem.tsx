@@ -32,7 +32,7 @@ import {
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { CaseAttachment } from "@models/responses";
+import type { CaseAttachment } from "@/types/cases";
 import { formatFileSize, getAttachmentFileCategory } from "@utils/support";
 
 export interface AttachmentListItemProps {

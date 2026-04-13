@@ -33,7 +33,8 @@ import {
 import { CheckCircle, Copy, Eye, EyeOff, X } from "@wso2/oxygen-ui-icons-react";
 import { useCreateRegistryToken } from "@api/useCreateRegistryToken";
 import { useGetIntegrationUsers } from "@api/useGetIntegrationUsers";
-import type { IntegrationUser } from "@models/responses";
+import type { IntegrationUser } from "@/types/users";
+import { RegistryTokenType } from "@/types/registryTokens";
 
 /** Allowed characters for robotName: alphanumeric + dashes. */
 const ROBOT_NAME_REGEX = /^[a-zA-Z0-9-]+$/;
@@ -42,7 +43,7 @@ export interface GenerateTokenModalProps {
   open: boolean;
   onClose: () => void;
   projectId: string;
-  tokenType: "User" | "Service";
+  tokenType: RegistryTokenType;
   isAdmin: boolean;
 }
 
@@ -73,7 +74,7 @@ export default function GenerateTokenModal({
   const {
     data: integrationUsers = [],
     isLoading: isLoadingUsers,
-  } = useGetIntegrationUsers(projectId, tokenType === "Service" && isAdmin);
+  } = useGetIntegrationUsers(projectId, tokenType === RegistryTokenType.SERVICE && isAdmin);
 
   function validateRobotName(value: string): string | null {
     if (!value.trim()) return "Token name is required.";
@@ -87,7 +88,7 @@ export default function GenerateTokenModal({
     setRobotNameError(nameErr);
 
     let userErr: string | null = null;
-    if (tokenType === "Service" && !selectedUser) {
+    if (tokenType === RegistryTokenType.SERVICE && !selectedUser) {
       userErr = "Please select an integration user for service tokens.";
     }
     setCreatedForError(userErr);
@@ -99,7 +100,7 @@ export default function GenerateTokenModal({
         robotName: robotName.trim(),
         tokenType,
         createdFor:
-          tokenType === "Service" && selectedUser
+          tokenType === RegistryTokenType.SERVICE && selectedUser
             ? selectedUser.email
             : undefined,
       },
@@ -153,7 +154,7 @@ export default function GenerateTokenModal({
       >
         {isSecretStep
           ? "Token Created Successfully"
-          : `Generate ${tokenType} Token`}
+          : `Generate ${tokenType === RegistryTokenType.SERVICE ? "Service" : "User"} Token`}
         <IconButton size="small" onClick={handleClose} aria-label="close">
           <X size={18} />
         </IconButton>
@@ -231,7 +232,7 @@ export default function GenerateTokenModal({
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              {tokenType === "User"
+              {tokenType === RegistryTokenType.USER
                 ? "Generate a personal registry token for WSO2 Updates 2.0 access. The token will be created for your account."
                 : "Generate a service registry token for automation and CI/CD pipelines. You must assign it to an integration user."}
             </Typography>
@@ -255,7 +256,7 @@ export default function GenerateTokenModal({
             />
 
             {/* Service token: select integration user */}
-            {tokenType === "Service" && (
+            {tokenType === RegistryTokenType.SERVICE && (
               <Autocomplete
                 options={integrationUsers}
                 getOptionLabel={(opt: IntegrationUser) => opt.email}

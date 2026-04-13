@@ -18,7 +18,7 @@ import { Box } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import SupportStatGrid from "@components/common/stat-grid/SupportStatGrid";
 import { SUPPORT_STAT_CONFIGS } from "@constants/supportConstants";
-import type { ProjectSupportStats } from "@models/responses";
+import type { ProjectSupportStats } from "@/types/projects";
 
 export interface CasesOverviewStatCardProps {
   isLoading: boolean;

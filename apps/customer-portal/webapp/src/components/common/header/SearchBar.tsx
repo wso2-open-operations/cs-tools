@@ -35,12 +35,13 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import useGetProjectCases from "@api/useGetProjectCases";
-import type { CaseListItem } from "@models/responses";
+import type { CaseListItem } from "@/types/cases";
 import AllCasesList from "@components/support/all-cases/AllCasesList";
 import AllCasesListSkeleton from "@components/support/all-cases/AllCasesListSkeleton";
 import SearchNoResultsIcon from "@components/common/empty-state/SearchNoResultsIcon";
 import Error500Page from "@components/common/error/Error500Page";
 import { isS0Case } from "@utils/support";
+import { SortOrder } from "@/types/common";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -76,7 +77,7 @@ export default function SearchBar({
   const baseRequest = useMemo(
     () => ({
       filters: { searchQuery: debouncedQuery },
-      sortBy: { field: "createdOn" as const, order: "desc" as const },
+      sortBy: { field: "createdOn" as const, order: SortOrder.DESC },
     }),
     [debouncedQuery],
   );

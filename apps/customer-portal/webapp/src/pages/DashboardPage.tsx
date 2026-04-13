@@ -31,6 +31,7 @@ import {
   DASHBOARD_STATS,
   SEVERITY_API_LABELS,
 } from "@constants/dashboardConstants";
+import { TrendDirection, TrendColor } from "@/types/common";
 import { CaseType } from "@constants/supportConstants";
 import {
   calculateProjectStats,
@@ -345,8 +346,8 @@ export default function DashboardPage(): JSX.Element {
           let trend:
             | {
                 value: string;
-                direction: "up" | "down";
-                color: "success" | "error" | "info" | "warning";
+                direction: TrendDirection;
+                color: TrendColor;
               }
             | undefined;
           let isCardLoading = false;
@@ -428,8 +429,8 @@ export default function DashboardPage(): JSX.Element {
                 const rate = changeRate.resolvedEngagements;
                 trend = {
                   value: `${rate >= 0 ? "+" : ""}${rate}%`,
-                  direction: rate >= 0 ? "up" : "down",
-                  color: rate >= 0 ? "success" : "error",
+                  direction: rate >= 0 ? TrendDirection.UP : TrendDirection.DOWN,
+                  color: rate >= 0 ? TrendColor.SUCCESS : TrendColor.ERROR,
                 };
               }
               break;
@@ -456,8 +457,8 @@ export default function DashboardPage(): JSX.Element {
                 const rate = changeRate.averageResponseTime;
                 trend = {
                   value: `${rate >= 0 ? "+" : ""}${rate}%`,
-                  direction: rate >= 0 ? "up" : "down",
-                  color: "success",
+                  direction: rate >= 0 ? TrendDirection.UP : TrendDirection.DOWN,
+                  color: TrendColor.SUCCESS,
                 };
               }
 

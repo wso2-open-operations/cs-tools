@@ -16,7 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { CaseDetails } from "@models/responses";
+import type { CaseDetails } from "@/types/cases";
 import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";

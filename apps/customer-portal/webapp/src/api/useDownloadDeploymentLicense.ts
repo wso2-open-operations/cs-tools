@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import type { DeploymentLicense } from "@models/responses";
+import type { DeploymentLicense } from "@/types/deployments";
 
 export interface DownloadDeploymentLicenseVariables {
   projectId: string;

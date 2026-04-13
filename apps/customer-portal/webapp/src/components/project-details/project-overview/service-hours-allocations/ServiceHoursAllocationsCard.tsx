@@ -24,7 +24,7 @@ import {
 import { Clock } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
-import type { ProjectDetails } from "@models/responses";
+import type { ProjectDetails } from "@/types/projects";
 import {
   formatProjectDate,
   formatServiceHoursDecimalAsHrMin,

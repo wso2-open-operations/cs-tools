@@ -19,8 +19,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { ProductVulnerabilitiesSearchRequest } from "@models/requests";
-import type { ProductVulnerabilitiesSearchResponse } from "@models/responses";
+import type { ProductVulnerabilitiesSearchRequest } from "@/types/security";
+import type { ProductVulnerabilitiesSearchResponse } from "@/types/security";
 
 /**
  * Searches product vulnerabilities (POST /products/vulnerabilities/search).

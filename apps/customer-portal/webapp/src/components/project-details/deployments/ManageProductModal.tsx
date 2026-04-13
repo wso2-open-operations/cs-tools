@@ -38,7 +38,8 @@ import {
   type JSX,
 } from "react";
 import { usePatchDeploymentProduct } from "@api/usePatchDeploymentProduct";
-import type { DeploymentProductItem, ProductUpdate } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
+import type { ProductUpdate } from "@/types/products";
 import UpdateHistoryTab, {
   type UpdateHistorySaveAction,
 } from "@components/project-details/deployments/UpdateHistoryTab";

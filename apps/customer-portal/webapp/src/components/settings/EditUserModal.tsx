@@ -30,7 +30,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Shield, X } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectContact } from "@models/responses";
+import type { ProjectContact } from "@/types/users";
 import { NULL_PLACEHOLDER } from "@constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@utils/settings";
 

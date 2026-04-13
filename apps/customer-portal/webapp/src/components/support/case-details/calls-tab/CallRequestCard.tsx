@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Clock, ExternalLink, Phone } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import type { CallRequest } from "@models/responses";
+import type { CallRequest } from "@/types/calls";
 import {
   formatCallRequestBackendDateTimeShort,
   formatUtcToLocal,

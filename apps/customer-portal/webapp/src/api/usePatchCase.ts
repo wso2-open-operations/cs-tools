@@ -23,7 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@api/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { PatchCaseRequest } from "@models/requests";
+import type { PatchCaseRequest } from "@/types/cases";
 
 /** Minimal response from PATCH /cases/:caseId. */
 export interface PatchCaseResponse {

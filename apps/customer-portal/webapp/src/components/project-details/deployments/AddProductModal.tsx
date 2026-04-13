@@ -44,7 +44,7 @@ import { paginatedSelectMenuListProps } from "@constants/dropdownConstants";
 import { useGetProducts } from "@api/useGetProducts";
 import { useSearchProductVersions } from "@api/useSearchProductVersions";
 import { usePostDeploymentProduct } from "@api/usePostDeploymentProduct";
-import type { ProductItem, ProductVersionItem } from "@models/responses";
+import type { ProductItem, ProductVersionItem } from "@/types/products";
 
 export interface AddProductModalProps {
   open: boolean;

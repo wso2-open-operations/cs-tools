@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
-import type { CaseAttachment } from "@models/responses";
+import type { CaseAttachment } from "@/types/cases";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
 

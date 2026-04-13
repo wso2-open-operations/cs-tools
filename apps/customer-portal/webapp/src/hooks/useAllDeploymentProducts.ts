@@ -22,7 +22,7 @@ import {
   createFetchWithMergedAuthHeaders,
   fetchDeploymentProductsAll,
 } from "@api/usePostDeploymentProductsSearch";
-import type { DeploymentProductItem } from "@models/responses";
+import type { DeploymentProductItem } from "@/types/deployments";
 
 interface DeploymentForProducts {
   id: string;

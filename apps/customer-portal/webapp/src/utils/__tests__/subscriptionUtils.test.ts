@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { PROJECT_TYPE_LABELS } from "@constants/projectTypeConstants";
+import { ProjectType as PROJECT_TYPE_LABELS } from "@/types/subscriptions";
 import {
   calculateProjectStats,
   getProjectPermissions,

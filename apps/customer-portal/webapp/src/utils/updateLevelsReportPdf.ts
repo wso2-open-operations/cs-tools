@@ -16,7 +16,7 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { UpdateLevelsSearchResponse } from "@models/responses";
+import type { UpdateLevelsSearchResponse } from "@/types/updates";
 
 export interface UpdateLevelsReportParams {
   productName: string;

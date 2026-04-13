@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { UpdateProductCard } from "@update-cards/UpdateProductCard";
-import type { RecommendedUpdateLevelItem } from "@models/responses";
+import type { RecommendedUpdateLevelItem } from "@/types/updates";
 
 const mockItem: RecommendedUpdateLevelItem = {
   productName: "WSO2 Identity Server",

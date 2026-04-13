@@ -17,7 +17,7 @@
 import { Box } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import SupportStatGrid from "@components/common/stat-grid/SupportStatGrid";
-import type { ProjectCasesStats } from "@models/responses";
+import type { ProjectCasesStats } from "@/types/cases";
 import {
   ALL_CASES_STAT_CONFIGS,
   getAllCasesFlattenedStats,

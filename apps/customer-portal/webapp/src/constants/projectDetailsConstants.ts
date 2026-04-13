@@ -25,7 +25,7 @@ import { User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { ElementType } from "react";
 import type { TabOption } from "@components/common/tab-bar/TabBar";
 import { colors } from "@wso2/oxygen-ui";
-import type { ProjectStatsResponse } from "@models/responses";
+import type { ProjectStatsResponse } from "@/types/projects";
 
 export interface Contact {
   role: string;

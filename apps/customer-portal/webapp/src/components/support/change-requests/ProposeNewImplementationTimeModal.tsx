@@ -32,7 +32,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { usePatchChangeRequest } from "@api/usePatchChangeRequest";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import type { ChangeRequestDetails } from "@models/responses";
+import type { ChangeRequestDetails } from "@/types/changeRequests";
 import {
   changeRequestToApiDatetime,
   changeRequestToDatetimeLocal,

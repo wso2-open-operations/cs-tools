@@ -17,7 +17,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { PendingUpdatesList } from "@components/updates/pending-updates/PendingUpdatesList";
-import type { UpdateLevelsSearchResponse } from "@models/responses";
+import type { UpdateLevelsSearchResponse } from "@/types/updates";
 
 const mockData: UpdateLevelsSearchResponse = {
   "7": {
