@@ -1,0 +1,52 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import type { AuditMetadata } from "@features/dashboard/types/common";
+
+// Enum for registry token types.
+export enum RegistryTokenType {
+  USER = "User",
+  SERVICE = "Service",
+}
+
+// Item type for a registry token permission.
+export type RegistryTokenPermission = { namespace: string };
+
+// Item type for a registry token.
+export type RegistryToken = AuditMetadata & {
+  id?: number;
+  name: string;
+  displayName?: string;
+  description: string;
+  tokenType?: RegistryTokenType;
+  createdFor?: string;
+  expiresAt?: number;
+  disable?: boolean;
+  duration?: number;
+  permissions?: RegistryTokenPermission[];
+};
+
+// Response type for creating a registry token.
+export type RegistryTokenCreationResponse = {
+  secret: string;
+};
+
+// Request type for creating a registry token.
+export type CreateRegistryTokenRequest = {
+  robotName: string;
+  tokenType: RegistryTokenType;
+  createdFor?: string;
+};
