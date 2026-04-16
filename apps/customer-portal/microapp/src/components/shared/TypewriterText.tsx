@@ -38,9 +38,8 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
   }, [fullText, animated]);
 
   return (
-    <>
+    <Box sx={{ "& p": { display: "inline", m: 0 } }}>
       <Markdown>{animated ? fullText.slice(0, cursor) : fullText}</Markdown>
-
       <Box
         sx={{
           display: pending || (animated && cursor < fullText.length) ? "inline-block" : "none",
@@ -53,11 +52,6 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
           animation: "blink 1s infinite",
         }}
       />
-
-      <style>{`
-        @keyframes blink { 50% { opacity: 0; } }
-        p { display: inline; margin: 0; }
-      `}</style>
-    </>
+    </Box>
   );
 }
