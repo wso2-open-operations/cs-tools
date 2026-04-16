@@ -38,7 +38,6 @@ export interface ChangeRequestDto {
   id: string;
   number: string;
   title: string;
-  description: string;
   createdBy: string;
   case: (EntityReference & { number: string }) | null;
   deployment: (EntityReference & { number: string }) | null;
