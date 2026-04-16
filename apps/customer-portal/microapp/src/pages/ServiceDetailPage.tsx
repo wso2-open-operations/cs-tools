@@ -20,7 +20,6 @@ import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import { Comment, CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
 import { useLayout } from "@context/layout";
-
 import { RichText, SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,6 +28,7 @@ import { cases } from "@src/services/cases";
 import { stripHtmlTags } from "@utils/others";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import DOMPurify from "dompurify";
 
 dayjs.extend(relativeTime);
 
@@ -183,7 +183,7 @@ export default function ServiceDetailPage() {
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
                   <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
-                    <RichText dangerouslySetInnerHTML={{ __html: content }} />
+                    <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
               </>

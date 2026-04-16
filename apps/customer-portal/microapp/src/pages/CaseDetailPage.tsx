@@ -29,6 +29,7 @@ import { useParams } from "react-router-dom";
 import ms from "ms";
 import { Comment } from "@components/features/detail";
 import { useFilters } from "../context/filters";
+import DOMPurify from "dompurify";
 
 dayjs.extend(relativeTime);
 
@@ -199,7 +200,7 @@ export default function CaseDetailPage() {
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
                   <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
-                    <RichText dangerouslySetInnerHTML={{ __html: content }} />
+                    <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
               </>

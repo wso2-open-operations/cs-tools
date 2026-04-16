@@ -25,6 +25,7 @@
     "@wso2/oxygen-ui-icons-react": "^0.2.1",
     "axios": "^1.13.2",
     "dayjs": "^1.11.19",
+    "dompurify": "^3.4.0",
     "formik": "^2.4.9",
     "jwt-decode": "^4.0.0",
     "motion": "^12.35.2",

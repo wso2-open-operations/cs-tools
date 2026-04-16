@@ -30,6 +30,7 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import EmptyState from "../components/shared/EmptyState";
 import { engagements } from "../services/engagements";
+import DOMPurify from "dompurify";
 
 dayjs.extend(relativeTime);
 
@@ -194,7 +195,7 @@ export default function EngagementDetailPage() {
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
                   <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
-                    <RichText dangerouslySetInnerHTML={{ __html: content }} />
+                    <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
               </>
