@@ -14,12 +14,65 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChangeEvent } from "react";
 import type {
   IdLabelRef,
   MetadataItem,
   PaginationResponse,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
+/** Security Center main tabs (URL `tab` query). */
+export enum SecurityTabId {
+  COMPONENTS = "components",
+  VULNERABILITIES = "vulnerabilities",
+}
+
+/** Report type discriminator for security cases. */
+export enum CaseReportType {
+  SECURITY = "security",
+}
+
+/** Keys for `ListStatGrid` stats on the Security page. */
+export enum SecurityStatKey {
+  totalVulnerabilities = "totalVulnerabilities",
+  activeSecurityReports = "activeSecurityReports",
+  resolvedSecurityReports = "resolvedSecurityReports",
+}
+
+/** My Reports vs All Reports on Security Report Analysis. */
+export enum SecurityReportViewMode {
+  MY = "my",
+  ALL = "all",
+}
+
+/** Sort field for security report cases list. */
+export enum SecurityReportCaseSortField {
+  createdOn = "createdOn",
+  updatedOn = "updatedOn",
+  severity = "severity",
+  state = "state",
+}
+
+/** Normalized severity token for chip colour helpers (API labels lowercased). */
+export enum VulnerabilitySeverityToken {
+  CRITICAL = "critical",
+  HIGH = "high",
+  MEDIUM = "medium",
+  LOW = "low",
+}
+
+/** Normalized status token for chip colour helpers. */
+export enum VulnerabilityStatusToken {
+  IN_PROGRESS = "in progress",
+  OPEN = "open",
+  RESOLVED = "resolved",
+}
+
+/** Severity dropdown option for product vulnerabilities filters. */
+export type VulnerabilitySelectOption = {
+  value: string | number;
+  label: string;
+};
 
 // Item type for a product vulnerability.
 export type ProductVulnerability = {
@@ -36,6 +89,49 @@ export type ProductVulnerability = {
   componentType?: string;
   updateLevel?: string;
   status?: { id: string | number; label: string } | null;
+};
+
+export type ProductVulnerabilitiesTableProps = {
+  onTotalRecordsChange?: (total: number) => void;
+  onError?: (isError: boolean) => void;
+  onVulnerabilityClick?: (vulnerability: { id: string }) => void;
+};
+
+export type ProductVulnerabilitiesFiltersProps = {
+  filters: Record<string, string | number>;
+  severityOptions?: VulnerabilitySelectOption[];
+  onFilterChange: (field: string, value: string | number) => void;
+};
+
+export type ProductVulnerabilitiesListData = {
+  vulnerabilities: ProductVulnerability[];
+  totalRecords: number;
+};
+
+export type ProductVulnerabilitiesListProps = {
+  isLoading: boolean;
+  isError?: boolean;
+  data: ProductVulnerabilitiesListData | undefined;
+  page: number;
+  rowsPerPage: number;
+  onPageChange: (event: unknown, newPage: number) => void;
+  onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onVulnerabilityClick?: (vulnerability: ProductVulnerability) => void;
+};
+
+export type ProductVulnerabilitiesTableHeaderProps = {
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  onFilterToggle: () => void;
+  isFiltersOpen: boolean;
+  activeFiltersCount: number;
+};
+
+export type VulnerabilityDetailsContentProps = {
+  data: ProductVulnerability | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onBack: () => void;
 };
 
 // Response type for product vulnerabilities metadata.
@@ -59,4 +155,3 @@ export type ProductVulnerabilitiesSearchFilters = {
 export type ProductVulnerabilitiesSearchRequest = SearchRequestBase & {
   filters?: ProductVulnerabilitiesSearchFilters;
 };
-

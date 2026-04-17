@@ -22,84 +22,83 @@ import {
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA } from "@features/dashboard/constants/dashboardConstants";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
-
-interface CasesTrendChartProps {
-  data: {
-    categories: Array<{
-      name: string;
-      value: number;
-    }>;
-    total: number;
-  };
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import { OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA } from "@/features/dashboard/constants/dashboard";
+import {
+  DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX,
+  DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
+  DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
+  DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS,
+} from "@/features/dashboard/constants/charts";
+import type { CasesTrendChartProps } from "@/features/dashboard/types/charts";
+import {
+  EMPTY_CASES_TREND_DATA,
+  buildEngagementsPieSlices,
+  formatEngagementsCenterTotal,
+  resolveEngagementsNumericTotal,
+} from "@features/dashboard/utils/dashboardCharts";
 
 /**
  * Displays the cases trend chart.
  *
- * `@param` props - Component props
+ * @param props - Component props
+ * @returns {JSX.Element} Outstanding Engagements chart.
  */
 export const CasesTrendChart = ({
   data,
   isLoading,
   isError,
 }: CasesTrendChartProps): JSX.Element => {
-  const chartSource = OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA;
-  const colorByLabel = new Map(
-    chartSource.map((item) => [item.name.toLowerCase(), item.color]),
+  // safe data
+  const safeData = data ?? EMPTY_CASES_TREND_DATA;
+  // error grey
+  const errorGrey = colors.grey?.[300] ?? "#D1D5DB";
+  // fallback grey
+  const fallbackGrey = colors.grey?.[500] ?? "#9CA3AF";
+  // chart data
+  const chartData = buildEngagementsPieSlices(
+    safeData,
+    Boolean(isLoading),
+    Boolean(isError),
+    errorGrey,
+    fallbackGrey,
   );
-  const fallbackColors = chartSource.map((item) => item.color);
 
-  const safeData =
-    data ??
-    ({
-      categories: [],
-      total: 0,
-    } as const);
+  // total
+  const total = resolveEngagementsNumericTotal(
+    Boolean(isError),
+    Boolean(isLoading),
+    safeData.total,
+  );
 
-  const chartData =
-    isLoading || isError
-      ? chartSource.map((item) => ({
-          name: item.name,
-          value: 0,
-          color:
-            isError && !isLoading
-              ? (colors.grey?.[300] ?? "#D1D5DB")
-              : item.color,
-        }))
-      : [
-          ...safeData.categories.map((category, index) => ({
-            name: category.name,
-            value: category.value,
-            color:
-              colorByLabel.get(category.name.toLowerCase()) ??
-              fallbackColors[index % fallbackColors.length] ??
-              (colors.grey?.[500] ?? "#9CA3AF"),
-          })),
-        ];
-
-  const total = !isError && !isLoading ? safeData.total : 0;
+  // center value
+  const centerValue = formatEngagementsCenterTotal(
+    Boolean(isError),
+    chartData.length,
+    total,
+  );
 
   return (
     <Card sx={{ p: 2, height: "100%" }}>
-      {/* Title */}
       <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
-        Outstanding Engagements
+        {DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS}
       </Typography>
       {isLoading ? (
         <>
           <Box
             sx={{
-              height: 240,
+              height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Skeleton variant="circular" width={160} height={160} />
+            <Skeleton
+              variant="circular"
+              width={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+              height={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+            />
           </Box>
           <Box
             sx={{
@@ -109,8 +108,13 @@ export const CasesTrendChart = ({
               mt: 2,
             }}
           >
-            {chartSource.map((_, index) => (
-              <Skeleton key={index} variant="rounded" width={80} height={20} />
+            {OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA.map((_, index) => (
+              <Skeleton
+                key={index}
+                variant="rounded"
+                width={DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX}
+                height={20}
+              />
             ))}
           </Box>
         </>
@@ -118,7 +122,7 @@ export const CasesTrendChart = ({
         <>
           <Box
             sx={{
-              height: 240,
+              height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
               position: "relative",
             }}
           >
@@ -162,7 +166,6 @@ export const CasesTrendChart = ({
                 </PieChart>
               </ResponsiveContainer>
             </Box>
-            {/* Center content: total value or error indicator */}
             <Box
               sx={{
                 position: "absolute",
@@ -176,23 +179,22 @@ export const CasesTrendChart = ({
               {isError ? (
                 <>
                   <Typography variant="h4" color="text.disabled">
-                    --
+                    {centerValue}
                   </Typography>
                   <Typography variant="caption" color="text.disabled">
-                    Total
+                    {DASHBOARD_CHART_CAPTION_TOTAL}
                   </Typography>
                 </>
               ) : (
                 <>
-                  <Typography variant="h4">
-                    {chartData.length > 0 ? total : "N/A"}
+                  <Typography variant="h4">{centerValue}</Typography>
+                  <Typography variant="caption">
+                    {DASHBOARD_CHART_CAPTION_TOTAL}
                   </Typography>
-                  <Typography variant="caption">Total</Typography>
                 </>
               )}
             </Box>
           </Box>
-          {/* Legend */}
           <ChartLegend
             data={chartData.map((item) => ({
               name: item.name,

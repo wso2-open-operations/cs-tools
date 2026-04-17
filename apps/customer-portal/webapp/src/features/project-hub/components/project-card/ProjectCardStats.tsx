@@ -30,14 +30,14 @@ import {
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { formatProjectDate } from "@features/project-hub/utils/projectCard";
-
-interface ProjectCardStatsProps {
-  activeChatsCount: number | undefined;
-  date: string;
-  activeCasesCount: number | undefined;
-  isError?: boolean;
-  isLoading?: boolean;
-}
+import {
+  PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS,
+  PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES,
+  PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL,
+  PROJECT_CARD_STATS_NULL_PLACEHOLDER,
+  PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL,
+} from "@features/project-hub/constants/projectHubConstants";
+import type { ProjectCardStatsProps } from "@features/project-hub/types/projectHub";
 
 /**
  * Component to render the stats section (cases, chats, date) for the Project Card.
@@ -71,16 +71,16 @@ export default function ProjectCardStats({
           >
             <CircleAlert size={16} />
             <Typography variant="body2" color="inherit">
-              Outstanding support cases
+              {PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL}
             </Typography>
           </Box>
           {isLoading ? (
             <Skeleton variant="text" width={20} />
           ) : isError ? (
-            <ErrorIndicator entityName="Outstanding support cases" />
+            <ErrorIndicator entityName={PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES} />
           ) : (
             <Typography variant="body2" color="primary">
-              {activeCasesCount ?? "--"}
+              {activeCasesCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
             </Typography>
           )}
         </Box>
@@ -95,16 +95,16 @@ export default function ProjectCardStats({
           >
             <MessageSquare size={16} />
             <Typography variant="body2" color="inherit">
-              Active Chats
+              {PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL}
             </Typography>
           </Box>
           {isLoading ? (
             <Skeleton variant="text" width={20} />
           ) : isError ? (
-            <ErrorIndicator entityName="Active Chats" />
+            <ErrorIndicator entityName={PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS} />
           ) : (
             <Typography variant="body2" color={colors.blue[500]}>
-              {activeChatsCount ?? "--"}
+              {activeChatsCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
             </Typography>
           )}
         </Box>
@@ -113,7 +113,7 @@ export default function ProjectCardStats({
         <Box display="flex" alignItems="center" gap={1} color="text.secondary">
           <Calendar size={16} />
           <Typography variant="body2" color="inherit">
-            {formatProjectDate(date) || "--"}
+            {formatProjectDate(date) || PROJECT_CARD_STATS_NULL_PLACEHOLDER}
           </Typography>
         </Box>
         <Divider sx={{ width: "100%" }} />

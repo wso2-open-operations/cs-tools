@@ -23,12 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { PostDeploymentProductRequest } from "@features/project-details/types/deployments";
-
-export interface PostDeploymentProductVariables {
-  deploymentId: string;
-  body: PostDeploymentProductRequest;
-}
+import type { PostDeploymentProductVariables } from "@features/project-details/types/projectDetailsApi";
 
 /**
  * Posts a product to a deployment (POST /deployments/:deploymentId/products).

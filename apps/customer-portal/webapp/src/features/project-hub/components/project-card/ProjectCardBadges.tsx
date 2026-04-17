@@ -17,11 +17,7 @@
 import { Box, Chip, Form } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { getSLAStatusColor } from "@features/project-details/utils/projectDetails";
-
-interface ProjectCardBadgesProps {
-  projectKey: string;
-  slaStatus: string;
-}
+import type { ProjectCardBadgesProps } from "@features/project-hub/types/projectHub";
 
 /**
  * Component to render the top badges for the Project Card.

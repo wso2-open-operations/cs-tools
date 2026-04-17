@@ -14,25 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsTabPanelsProps } from "@features/support/types/supportComponents";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { CaseDetails } from "@features/support/types/cases";
 import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 import CallsPanel from "@case-details-calls/CallsPanel";
-
-export interface CaseDetailsTabPanelsProps {
-  /** Resolved panel index (Activity=0 … Knowledge Base=4); accounts for hidden Calls tab. */
-  panelIndex: number;
-  caseId: string;
-  data?: CaseDetails;
-  isError?: boolean;
-  projectId?: string;
-  focusMode?: boolean;
-  isEngagement?: boolean;
-  isServiceRequest?: boolean;
-}
 
 /**
  * Renders the active tab panel for case details (Activity, Details, Attachments, Calls, Knowledge Base).

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { RecommendationsCardProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Card,
@@ -24,13 +25,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowUpRight, FileText, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import type { Recommendation } from "@features/support/types/conversations";
 
 const KB_BASE_URL = "https://support.wso2.com/kb?id=kb_article_view&sys_kb_id=";
-
-interface RecommendationsCardProps {
-  recommendations: Recommendation[];
-}
 
 /**
  * Displays knowledge base article recommendations from the Novera AI agent.

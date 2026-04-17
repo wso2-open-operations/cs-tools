@@ -14,23 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsHeaderProps } from "@features/support/types/supportComponents";
 import { Box, Chip, Stack, Typography, alpha } from "@wso2/oxygen-ui";
-import { type ReactElement, type ReactNode, type JSX } from "react";
-import { getSeverityLegendColor } from "@features/dashboard/constants/dashboardConstants";
+import { type ReactElement, type JSX } from "react";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import { formatValue, mapSeverityToDisplay } from "@features/support/utils/support";
 import { CaseDetailsHeaderSkeleton } from "@case-details/CaseDetailsSkeleton";
-
-export interface CaseDetailsHeaderProps {
-  caseNumber: string | null | undefined;
-  title: string | null | undefined;
-  severityLabel: string | null | undefined;
-  statusLabel: string | null | undefined;
-  statusChipIcon: ReactNode;
-  statusChipSx: Record<string, unknown>;
-  isLoading?: boolean;
-  /** When false, hides the severity (priority) chip — e.g. security report analysis. */
-  showSeverityChip?: boolean;
-}
 
 /**
  * Case details header: case number, severity, status chip, and title.

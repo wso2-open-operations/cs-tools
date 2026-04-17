@@ -14,15 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ImageFullscreenModalProps } from "@features/support/types/supportComponents";
 import { Box, Dialog, IconButton } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-
-export interface ImageFullscreenModalProps {
-  open: boolean;
-  imageSrc: string | null;
-  onClose: () => void;
-}
 
 /**
  * Fullscreen modal to display an image with close button.

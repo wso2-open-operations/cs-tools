@@ -16,6 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import { COMPONENT_ANALYSIS_PLACEHOLDER_MESSAGE } from "@features/security/constants/securityConstants";
 
 /**
  * Placeholder for Component Analysis view.
@@ -25,7 +26,7 @@ const ComponentAnalysis = (): JSX.Element => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="body2" color="text.secondary">
-        Component Analysis coming soon.
+        {COMPONENT_ANALYSIS_PLACEHOLDER_MESSAGE}
       </Typography>
     </Box>
   );

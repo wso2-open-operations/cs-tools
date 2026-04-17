@@ -39,12 +39,28 @@ import {
   XCircle,
   FileCheck,
 } from "@wso2/oxygen-ui-icons-react";
-import { type ComponentType } from "react";
-import type { ProjectSupportStats } from "@features/project-hub/types/projects";
+import type { ProjectCasesStats } from "@features/support/types/cases";
 import type {
-  ProjectCasesStats,
-  CaseMetadataResponse,
-} from "@features/support/types/cases";
+  AllCasesFilterDefinition,
+  AllConversationsFilterDefinition,
+  AnnouncementFilterDefinition,
+  CaseDetailsTabConfig,
+  CaseStatusAction,
+  CaseTypeObject,
+  SupportStatConfig,
+} from "@features/support/types/supportUiConfig";
+
+export type {
+  SupportStatConfig,
+  CaseDetailsTabConfig,
+  CaseStatusPaletteIntent,
+  CaseStatusAction,
+  AllCasesFilterDefinition,
+  AllConversationsFilterDefinition,
+  AnnouncementFilterValues,
+  AnnouncementFilterDefinition,
+  CaseTypeObject,
+} from "@features/support/types/supportUiConfig";
 
 // Chat actions for the history list.
 export const ChatAction = {
@@ -167,15 +183,6 @@ export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 // Initial limit for case attachments list.
 export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
 
-// Interface for support statistics card configuration.
-export interface SupportStatConfig<Key = keyof ProjectSupportStats> {
-  iconColor: "primary" | "secondary" | "success" | "error" | "info" | "warning";
-  icon: ComponentType<{ size?: number; color?: string }>;
-  key: Key;
-  label: string;
-  secondaryIcon?: ComponentType<{ size?: number; color?: string }>;
-}
-
 /**
  * Valid keys for all cases statistics.
  */
@@ -276,11 +283,6 @@ export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
 /**
  * Case details tab configuration (label + icon for Activity, Details, Attachments, etc.).
  */
-export interface CaseDetailsTabConfig {
-  label: string;
-  Icon: ComponentType<{ size?: number }>;
-}
-
 export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
   { label: "Activity", Icon: MessageSquare },
   { label: "Details", Icon: Info },
@@ -288,16 +290,6 @@ export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
   { label: "Calls (0)", Icon: Phone },
   { label: "Knowledge Base (0)", Icon: BookOpen },
 ];
-
-//Palette intent for case status action buttons.
-export type CaseStatusPaletteIntent = "error" | "warning" | "success" | "info";
-
-// Case status action (e.g. Escalate, Mark as Resolved) for the action row.
-export interface CaseStatusAction {
-  label: string;
-  Icon: ComponentType<{ size?: number }>;
-  paletteIntent: CaseStatusPaletteIntent;
-}
 
 // Case status actions shown in the case details action row. Close button last.
 export const CASE_STATUS_ACTIONS: CaseStatusAction[] = [
@@ -362,16 +354,6 @@ export const SERVICE_REQUEST_BULLET_ITEMS = [
 ] as const;
 
 /**
- * Interface for all cases filter configuration.
- */
-export interface AllCasesFilterDefinition {
-  id: string;
-  metadataKey: keyof CaseMetadataResponse;
-  filterKey: string;
-  useLabelAsValue?: boolean;
-}
-
-/**
  * Valid keys for all conversations statistics (no values yet).
  */
 export type AllConversationsStatKey =
@@ -400,15 +382,6 @@ export const ALL_CONVERSATIONS_STAT_CONFIGS: SupportStatConfig<AllConversationsS
     },
     { icon: Bot, iconColor: "info", key: "totalChats", label: "Total Chats" },
   ];
-
-/**
- * Interface for conversations filter configuration.
- */
-export interface AllConversationsFilterDefinition {
-  id: string;
-  metadataKey: keyof CaseMetadataResponse;
-  filterKey: string;
-}
 
 /**
  * Configuration for the all conversations filters (state only).
@@ -496,22 +469,9 @@ export const ANNOUNCEMENT_STAT_CONFIGS: SupportStatConfig<AnnouncementStatKey>[]
   ];
 
 /**
- * Filter values for announcements page.
- */
-export interface AnnouncementFilterValues {
-  [key: string]: string | undefined;
-  statusId?: string;
-}
-
-/**
  * Announcement filter definitions (status only).
  */
-export const ANNOUNCEMENT_FILTER_DEFINITIONS: Array<{
-  filterKey: string;
-  id: string;
-  metadataKey: keyof CaseMetadataResponse;
-  useLabelAsValue?: boolean;
-}> = [
+export const ANNOUNCEMENT_FILTER_DEFINITIONS: AnnouncementFilterDefinition[] = [
   {
     filterKey: "statusId",
     id: "status",
@@ -529,12 +489,6 @@ export type CommentType = (typeof CommentType)[keyof typeof CommentType];
 
 // Line count threshold for showing expand button in support activity section.
 export const COLLAPSE_LINE_THRESHOLD = 4;
-
-// Case type object interface.
-export interface CaseTypeObject {
-  id: string;
-  label: string;
-}
 
 // Case type input.
 export type CaseTypeInput = CaseTypeObject | string | null | undefined;

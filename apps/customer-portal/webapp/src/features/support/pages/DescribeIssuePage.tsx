@@ -31,7 +31,7 @@ import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useAllDeploymentProducts } from "@features/support/hooks/useAllDeploymentProducts";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { buildEnvProducts } from "@features/support/utils/caseCreation";
-import { filterDeploymentsForCaseCreation } from "@features/project-details/utils/permissions";
+import { filterDeploymentsForCaseCreation } from "@/utils/permission";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
 import type { ChatNavState } from "@features/support/types/conversations";
 

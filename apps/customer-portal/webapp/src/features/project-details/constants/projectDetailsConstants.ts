@@ -22,38 +22,42 @@ import {
   Server,
 } from "@wso2/oxygen-ui-icons-react";
 import { User, Shield } from "@wso2/oxygen-ui-icons-react";
-import type { ElementType } from "react";
 import type { TabOption } from "@components/tab-bar/TabBar";
 import { colors } from "@wso2/oxygen-ui";
-import type { ProjectStatsResponse } from "@features/project-hub/types/projects";
+import { ProjectDetailsTabId } from "@features/project-details/types/projectDetails";
+import type { Contact, Stat } from "@features/project-details/types/projectDetails";
+import type { UpdateHistoryFormData } from "@features/project-details/types/projectDetailsComponents";
 
-export interface Contact {
-  role: string;
-  email: string | null;
-  icon: ElementType<{ size?: number }>;
-  bgColor: string;
-}
+/** Generic placeholder when a project detail value is missing (labels, stats, documents). */
+export const PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY = "Not Available";
 
-export interface Stat {
-  label: string;
-  icon: ElementType<{ size?: number }>;
-  iconColor: "primary" | "success" | "warning";
-  key: keyof NonNullable<ProjectStatsResponse["projectStats"]>;
-}
+export const PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE =
+  PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY;
+
+export const PROJECT_DETAILS_INVALID_PROJECT_ID_MESSAGE =
+  "Invalid Project ID. Please check the URL.";
+
+/** Matches common image file extensions for deployment document icons. */
+export const DEPLOYMENT_DOCUMENT_IMAGE_FILE_REGEX =
+  /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
+
+/** Matches archive file extensions for deployment document icons. */
+export const DEPLOYMENT_DOCUMENT_ARCHIVE_FILE_REGEX =
+  /\.(zip|tar|gz|7z|rar|bz2)$/i;
 
 export const PROJECT_DETAILS_TABS: TabOption[] = [
   {
-    id: "overview",
+    id: ProjectDetailsTabId.OVERVIEW,
     label: "Overview",
     icon: Info,
   },
   {
-    id: "deployments",
+    id: ProjectDetailsTabId.DEPLOYMENTS,
     label: "Deployments",
     icon: Server,
   },
   {
-    id: "time-tracking",
+    id: ProjectDetailsTabId.TIME_TRACKING,
     label: "Time Tracking",
     icon: Clock,
   },
@@ -73,13 +77,6 @@ export const contacts: Contact[] = [
     bgColor: colors.purple[400],
   },
 ];
-
-export interface ActivityItem {
-  label: string;
-  value: string;
-  type?: "text" | "chip";
-  chipColor?: ProjectStatusChipColor;
-}
 
 export const statItems: Stat[] = [
   {
@@ -216,11 +213,10 @@ export const PRODUCT_SUPPORT_STATUS = {
 export type ProductSupportStatus =
   (typeof PRODUCT_SUPPORT_STATUS)[keyof typeof PRODUCT_SUPPORT_STATUS];
 
-export type ProjectStatusChipColor =
-  | "default"
-  | "primary"
-  | "secondary"
-  | "error"
-  | "info"
-  | "success"
-  | "warning";
+export type { ActivityItem, ProjectStatusChipColor } from "@features/project-details/types/projectDetails";
+
+export const UPDATE_HISTORY_INITIAL_FORM_DATA: UpdateHistoryFormData = {
+  updateLevel: "",
+  date: "",
+  details: "",
+};

@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { CatalogSearchResponse } from "@features/operations/types/catalogs";
+import type { CatalogSearchResponse } from "@features/operations/types/serviceRequests";
 
 /**
  * Searches catalogs for a deployed product (POST /deployments/products/:deployedProductId/catalogs/search).

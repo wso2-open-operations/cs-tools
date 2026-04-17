@@ -29,14 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useDeleteRegistryToken } from "@features/settings/api/useDeleteRegistryToken";
-import type { RegistryToken } from "@features/settings/types/registryTokens";
-
-export interface DeleteTokenModalProps {
-  open: boolean;
-  onClose: () => void;
-  projectId: string;
-  token: RegistryToken | null;
-}
+import type { DeleteTokenModalProps } from "@features/settings/types/settings";
 
 /**
  * Confirmation dialog for deleting a registry token.

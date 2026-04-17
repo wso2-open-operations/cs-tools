@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AllConversationsFiltersProps } from "@features/support/types/supportComponents";
 import {
   FormControl,
   Grid,
@@ -24,16 +25,9 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { AllConversationsFilterValues } from "@features/support/types/conversations";
 import { ALL_CONVERSATIONS_FILTER_DEFINITIONS } from "@features/support/constants/supportConstants";
 import { deriveFilterLabels } from "@features/support/utils/support";
-
-export interface AllConversationsFiltersProps {
-  filters: AllConversationsFilterValues;
-  filterMetadata: CaseMetadataResponse | undefined;
-  onFilterChange: (field: string, value: string) => void;
-}
 
 /**
  * AllConversationsFilters component to display filter dropdowns (state/outcome).

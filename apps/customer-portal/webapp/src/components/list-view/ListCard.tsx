@@ -26,7 +26,7 @@ import {
 import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, KeyboardEvent } from "react";
 import type { CaseListItem } from "@features/support/types/cases";
-import { getSeverityLegendColor } from "@features/dashboard/constants/dashboardConstants";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
   formatDateTime,
   getAssignedEngineerLabel,

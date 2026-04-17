@@ -20,10 +20,10 @@ import type {
   IdLabelRef,
   MetadataItem,
   SharedEnvContext,
-  TrendData,
   PaginationResponse,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
+import type { TrendData } from "@features/dashboard/types/stats";
 
 // Item type for severity level option for case creation form.
 export type SeverityLevelOption = {

@@ -50,9 +50,9 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import Error500Page from "@components/error/Error500Page";
 import useGetChangeRequestDetails from "@features/operations/api/useGetChangeRequestDetails";
 import { usePatchChangeRequest } from "@features/operations/api/usePatchChangeRequest";
-import ScheduledMaintenanceWindowCard from "@features/support/components/change-requests/ScheduledMaintenanceWindowCard";
-import ProposeNewImplementationTimeModal from "@features/support/components/change-requests/ProposeNewImplementationTimeModal";
-import ChangeRequestDetailsLoadingSkeleton from "@features/support/components/change-requests/ChangeRequestDetailsLoadingSkeleton";
+import ScheduledMaintenanceWindowCard from "@features/operations/components/change-requests/ScheduledMaintenanceWindowCard";
+import ProposeNewImplementationTimeModal from "@features/operations/components/change-requests/ProposeNewImplementationTimeModal";
+import ChangeRequestDetailsLoadingSkeleton from "@features/operations/components/change-requests/ChangeRequestDetailsLoadingSkeleton";
 import {
   buildChangeRequestWorkflowStages,
   generateChangeRequestDetailsPdf,
@@ -62,10 +62,10 @@ import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequ
 import { formatDateTime } from "@features/support/utils/support";
 import {
   formatImpactLabel,
-  getChangeRequestStateIcon,
   getChangeRequestImpactColorShades,
   getChangeRequestStateColorShades,
-} from "@features/operations/constants/changeRequestConstants";
+  getChangeRequestStateIcon,
+} from "@features/operations/utils/changeRequestUi";
 
 /**
  * ChangeRequestDetailsPage component to display detailed information about a change request.

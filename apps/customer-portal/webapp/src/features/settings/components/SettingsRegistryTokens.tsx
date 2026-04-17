@@ -60,94 +60,42 @@ import DeleteTokenModal from "./DeleteTokenModal";
 import RegenerateTokenModal from "./RegenerateTokenModal";
 import { useSearchRegistryTokens } from "@features/settings/api/useSearchRegistryTokens";
 import { type RegistryToken, RegistryTokenType } from "@features/settings/types/registryTokens";
-
-/** Placeholder for empty/null values. */
-const DASH = "--";
-
-export interface SettingsRegistryTokensProps {
-  projectId: string;
-  isAdmin: boolean;
-}
-
-/** Derive token status from its fields. */
-function getTokenStatus(
-  token: RegistryToken,
-): "Active" | "Expired" | "Revoked" {
-  if (token.disable) return "Revoked";
-  if (token.expiresAt && token.expiresAt > 0) {
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (token.expiresAt < nowSec) return "Expired";
-  }
-  return "Active";
-}
-
-/** Chip color for the token status. */
-function getStatusColor(
-  status: string,
-): "success" | "error" | "default" | "warning" {
-  switch (status) {
-    case "Active":
-      return "success";
-    case "Expired":
-      return "error";
-    case "Revoked":
-      return "default";
-    default:
-      return "warning";
-  }
-}
-
-/** Format a unix-seconds timestamp to DD/MM/YYYY. */
-function formatTimestamp(ts?: number): string {
-  if (!ts || ts <= 0) return "Never";
-  const d = new Date(ts * 1000);
-  return d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-/** Format ISO date string to DD/MM/YYYY. */
-function formatDate(iso?: string | null): string {
-  if (!iso) return DASH;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return DASH;
-  return d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-/** Parses the backend metadata description into a human-readable string. */
-function formatTokenDescription(rawDesc?: string): string {
-  if (!rawDesc) return DASH;
-
-  if (rawDesc.includes("##")) {
-    const parts = rawDesc.split("##");
-
-    if (parts.length >= 5) {
-      const tokenType = parts[2];
-      const createdFor = parts[3];
-      return `${tokenType} token for ${createdFor}`;
-    }
-
-    return "System generated token";
-  }
-
-  return rawDesc;
-}
-
-/** Check if a token expires within the next N days. */
-function expiresWithinDays(token: RegistryToken, days: number): boolean {
-  if (!token.expiresAt || token.expiresAt <= 0) return false;
-  if (token.disable) return false;
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (token.expiresAt < nowSec) return false;
-  const thresholdSec = nowSec + days * 86400;
-  return token.expiresAt <= thresholdSec;
-}
+import {
+  NULL_PLACEHOLDER,
+  REGISTRY_ADMIN_ALERT_BODY,
+  REGISTRY_ADMIN_ALERT_PREFIX,
+  REGISTRY_GENERATE_SERVICE_TOKEN,
+  REGISTRY_GENERATE_USER_TOKEN,
+  REGISTRY_MENU_DELETE,
+  REGISTRY_MENU_REGENERATE,
+  REGISTRY_PAGE_DESCRIPTION,
+  REGISTRY_PAGE_TITLE,
+  REGISTRY_SEARCH_PLACEHOLDER_SERVICE,
+  REGISTRY_SEARCH_PLACEHOLDER_USER,
+  REGISTRY_SERVICE_TOKENS_EMPTY,
+  REGISTRY_STAT_ACTIVE_LABEL,
+  REGISTRY_STAT_EXPIRING_LABEL,
+  REGISTRY_STAT_TOTAL_LABEL,
+  REGISTRY_SUBTAB_SERVICE_BASE,
+  REGISTRY_SUBTAB_USER_BASE,
+  REGISTRY_TOKEN_EXPIRY_WARNING_DAYS,
+  REGISTRY_USER_TOKENS_EMPTY,
+} from "@features/settings/constants/settingsConstants";
+import {
+  RegistryTokenDisplayStatus,
+  RegistryTokenSubTabId,
+  type SettingsRegistryTokensProps,
+} from "@features/settings/types/settings";
+import {
+  formatRegistrySubTabLabel,
+  formatRegistryTokenDescription,
+  formatRegistryTokenIsoDate,
+  formatRegistryTokenTimestamp,
+  getRegistryTokenDisplayStatus,
+  getRegistryTokenStatusChipColor,
+  registryTokenExpiresWithinDays,
+} from "@features/settings/utils/registryTokens";
+import { resolveRegistryTokenSubTabId } from "@features/settings/utils/settingsPage";
 
 /**
  * Registry Tokens settings tab: stat cards, sub-tabs (User/Service), search, table.
@@ -161,7 +109,9 @@ export default function SettingsRegistryTokens({
 }: SettingsRegistryTokensProps): JSX.Element {
   const theme = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
-  const [tokenTab, setTokenTab] = useState<string>("user");
+  const [tokenTab, setTokenTab] = useState<string>(
+    RegistryTokenSubTabId.USER,
+  );
 
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
   const [deleteToken, setDeleteToken] = useState<RegistryToken | null>(null);
@@ -190,13 +140,18 @@ export default function SettingsRegistryTokens({
 
   const stats = useMemo(() => {
     const active = allTokens.filter(
-      (t) => getTokenStatus(t) === "Active",
+      (t) =>
+        getRegistryTokenDisplayStatus(t) === RegistryTokenDisplayStatus.Active,
     ).length;
-    const revokedOrExpired = allTokens.filter(
-      (t) => getTokenStatus(t) === "Expired" || getTokenStatus(t) === "Revoked",
-    ).length;
+    const revokedOrExpired = allTokens.filter((t) => {
+      const s = getRegistryTokenDisplayStatus(t);
+      return (
+        s === RegistryTokenDisplayStatus.Expired ||
+        s === RegistryTokenDisplayStatus.Revoked
+      );
+    }).length;
     const expiringSoon = allTokens.filter((t) =>
-      expiresWithinDays(t, 7),
+      registryTokenExpiresWithinDays(t, REGISTRY_TOKEN_EXPIRY_WARNING_DAYS),
     ).length;
     return {
       total: allTokens.length,
@@ -209,15 +164,21 @@ export default function SettingsRegistryTokens({
   const subTabs = useMemo(() => {
     const tabs = [
       {
-        id: "user",
-        label: `User Tokens (${userTokens.length})`,
+        id: RegistryTokenSubTabId.USER,
+        label: formatRegistrySubTabLabel(
+          REGISTRY_SUBTAB_USER_BASE,
+          userTokens.length,
+        ),
         icon: User,
       },
     ];
     if (isAdmin) {
       tabs.push({
-        id: "service",
-        label: `Service Tokens (${serviceTokens.length})`,
+        id: RegistryTokenSubTabId.SERVICE,
+        label: formatRegistrySubTabLabel(
+          REGISTRY_SUBTAB_SERVICE_BASE,
+          serviceTokens.length,
+        ),
         icon: Server,
       });
     }
@@ -225,11 +186,14 @@ export default function SettingsRegistryTokens({
   }, [userTokens.length, serviceTokens.length, isAdmin]);
 
   const displayTokenTab = useMemo(
-    () => (subTabs.some((t) => t.id === tokenTab) ? tokenTab : "user"),
-    [subTabs, tokenTab],
+    () => resolveRegistryTokenSubTabId(tokenTab, isAdmin),
+    [tokenTab, isAdmin],
   );
 
-  const activeTokens = displayTokenTab === "user" ? userTokens : serviceTokens;
+  const activeTokens =
+    displayTokenTab === RegistryTokenSubTabId.USER
+      ? userTokens
+      : serviceTokens;
 
   const filteredTokens = useMemo(() => {
     if (!searchQuery.trim()) return activeTokens;
@@ -247,19 +211,19 @@ export default function SettingsRegistryTokens({
   const statCards = [
     {
       value: stats.total,
-      label: "Total Tokens",
+      label: REGISTRY_STAT_TOTAL_LABEL,
       icon: KeyRound,
       iconColor: "warning",
     },
     {
       value: stats.active,
-      label: "Active Tokens",
+      label: REGISTRY_STAT_ACTIVE_LABEL,
       icon: CheckCircle,
       iconColor: "success",
     },
     {
       value: stats.expiringSoon,
-      label: "Expiring Soon",
+      label: REGISTRY_STAT_EXPIRING_LABEL,
       icon: AlertCircle,
       iconColor: "error",
     },
@@ -288,8 +252,8 @@ export default function SettingsRegistryTokens({
             "& .MuiAlert-message": { fontWeight: 500 },
           }}
         >
-          <strong>Admin View:</strong>&nbsp; You can view and manage all tokens
-          across the organization.
+          <strong>{REGISTRY_ADMIN_ALERT_PREFIX}</strong>&nbsp;{" "}
+          {REGISTRY_ADMIN_ALERT_BODY}
         </Alert>
       )}
 
@@ -312,7 +276,7 @@ export default function SettingsRegistryTokens({
                         />
                       ) as any)
                     : error
-                      ? DASH
+                      ? NULL_PLACEHOLDER
                       : card.value.toString()
                 }
                 icon={<Icon />}
@@ -326,12 +290,10 @@ export default function SettingsRegistryTokens({
       {/* Header + description */}
       <Box>
         <Typography variant="h6" sx={{ mb: 0.5 }}>
-          Registry Tokens
+          {REGISTRY_PAGE_TITLE}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Manage registry tokens for WSO2 Updates 2.0. User tokens are for
-          individual access, while service tokens are for automation and CI/CD
-          pipelines.
+          {REGISTRY_PAGE_DESCRIPTION}
         </Typography>
       </Box>
 
@@ -355,9 +317,9 @@ export default function SettingsRegistryTokens({
           fullWidth
           size="small"
           placeholder={
-            displayTokenTab === "user"
-              ? "Search by user, token name..."
-              : "Search by token name, description..."
+            displayTokenTab === RegistryTokenSubTabId.USER
+              ? REGISTRY_SEARCH_PLACEHOLDER_USER
+              : REGISTRY_SEARCH_PLACEHOLDER_SERVICE
           }
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -374,7 +336,7 @@ export default function SettingsRegistryTokens({
           variant="contained"
           color="warning"
           startIcon={
-            displayTokenTab === "user" ? (
+            displayTokenTab === RegistryTokenSubTabId.USER ? (
               <KeyRound size={18} />
             ) : (
               <Monitor size={18} />
@@ -383,14 +345,14 @@ export default function SettingsRegistryTokens({
           sx={{ whiteSpace: "nowrap", pl: 3, pr: 3 }}
           onClick={() => setGenerateModalOpen(true)}
         >
-          {displayTokenTab === "user"
-            ? "Generate User Token"
-            : "Generate Service Token"}
+          {displayTokenTab === RegistryTokenSubTabId.USER
+            ? REGISTRY_GENERATE_USER_TOKEN
+            : REGISTRY_GENERATE_SERVICE_TOKEN}
         </Button>
       </Box>
 
       {/* User Tokens Table */}
-      {displayTokenTab === "user" && (
+      {displayTokenTab === RegistryTokenSubTabId.USER && (
         <TableContainer component={Paper} variant="outlined">
           <Table>
             <TableHead>
@@ -421,13 +383,13 @@ export default function SettingsRegistryTokens({
                 <TableRow>
                   <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
-                      No user tokens found.
+                      {REGISTRY_USER_TOKENS_EMPTY}
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredTokens.map((token) => {
-                  const status = getTokenStatus(token);
+                  const status = getRegistryTokenDisplayStatus(token);
                   return (
                     <TableRow key={token.id ?? token.name} hover>
                       <TableCell>
@@ -440,34 +402,34 @@ export default function SettingsRegistryTokens({
                       <TableCell>
                         <Box>
                           <Typography variant="body2">
-                            {token.createdFor ?? DASH}
+                            {token.createdFor ?? NULL_PLACEHOLDER}
                           </Typography>
                         </Box>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatDate(token.createdOn)}
+                          {formatRegistryTokenIsoDate(token.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">{DASH}</Typography>
+                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatTimestamp(token.expiresAt)}
+                          {formatRegistryTokenTimestamp(token.expiresAt)}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Chip
                           size="small"
                           label={status}
-                          color={getStatusColor(status)}
+                          color={getRegistryTokenStatusChipColor(status)}
                           variant="outlined"
                           sx={{ typography: "caption" }}
                         />
                       </TableCell>
                       <TableCell align="right">
-                        <Typography variant="body2">{DASH}</Typography>
+                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
                         <IconButton
@@ -491,7 +453,7 @@ export default function SettingsRegistryTokens({
       )}
 
       {/* Service Tokens Table */}
-      {displayTokenTab === "service" && isAdmin && (
+      {displayTokenTab === RegistryTokenSubTabId.SERVICE && isAdmin && (
         <TableContainer component={Paper} variant="outlined">
           <Table>
             <TableHead>
@@ -522,13 +484,13 @@ export default function SettingsRegistryTokens({
                 <TableRow>
                   <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
-                      No service tokens found.
+                      {REGISTRY_SERVICE_TOKENS_EMPTY}
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredTokens.map((token) => {
-                  const status = getTokenStatus(token);
+                  const status = getRegistryTokenDisplayStatus(token);
                   return (
                     <TableRow key={token.id ?? token.name} hover>
                       <TableCell>
@@ -538,35 +500,35 @@ export default function SettingsRegistryTokens({
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatTokenDescription(token.description)}
+                          {formatRegistryTokenDescription(token.description)}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Box>
                           <Typography variant="body2">
-                            {token.createdBy ?? DASH}
+                            {token.createdBy ?? NULL_PLACEHOLDER}
                           </Typography>
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">{DASH}</Typography>
+                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatTimestamp(token.expiresAt)}
+                          {formatRegistryTokenTimestamp(token.expiresAt)}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Chip
                           size="small"
                           label={status}
-                          color={getStatusColor(status)}
+                          color={getRegistryTokenStatusChipColor(status)}
                           variant="outlined"
                           sx={{ typography: "caption" }}
                         />
                       </TableCell>
                       <TableCell align="right">
-                        <Typography variant="body2">{DASH}</Typography>
+                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
                         <IconButton
@@ -610,7 +572,7 @@ export default function SettingsRegistryTokens({
           <ListItemIcon>
             <RefreshCw size={16} />
           </ListItemIcon>
-          <ListItemText>Regenerate Secret</ListItemText>
+          <ListItemText>{REGISTRY_MENU_REGENERATE}</ListItemText>
         </MenuItem>
         <MenuItem
           onClick={() => {
@@ -623,7 +585,7 @@ export default function SettingsRegistryTokens({
           <ListItemIcon sx={{ color: "error.main" }}>
             <Trash2 size={16} />
           </ListItemIcon>
-          <ListItemText>Delete Token</ListItemText>
+          <ListItemText>{REGISTRY_MENU_DELETE}</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -633,7 +595,7 @@ export default function SettingsRegistryTokens({
         onClose={() => setGenerateModalOpen(false)}
         projectId={projectId}
         tokenType={
-          displayTokenTab === "service"
+          displayTokenTab === RegistryTokenSubTabId.SERVICE
             ? RegistryTokenType.SERVICE
             : RegistryTokenType.USER
         }

@@ -17,20 +17,14 @@
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-interface ChartLegendProps {
-  data: { name: string; value: number; color: string }[];
-  isError?: boolean;
-  showValues?: boolean;
-}
+import type { ChartLegendProps } from "@/features/dashboard/types/charts";
 
 /**
  * ChartLegend component renders a legend for a chart.
  *
- * @param {Object} props - Component props
- * @param {ChartLegendData[]} props.data - An array of data items to display in the legend.
- * Each item should contain a label and a color.
- * @returns {JSX.Element} The chart legend element.
+ * @param props - Component props
+ * @param props.data - Rows with label, value, and color for each legend row.
+ * @returns {JSX.Element} Chart legend.
  */
 export const ChartLegend = ({
   data,

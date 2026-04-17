@@ -14,15 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { SelectedFileDisplayProps } from "@features/support/types/supportComponents";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { File, FileArchive } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { getAttachmentFileCategory } from "@features/support/utils/support";
-
-export interface SelectedFileDisplayProps {
-  fileName: string;
-  fileType: string;
-}
 
 /**
  * Displays selected file name with icon (FileArchive for zip/archive, File for others).

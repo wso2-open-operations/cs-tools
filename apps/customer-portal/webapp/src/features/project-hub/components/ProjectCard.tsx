@@ -23,18 +23,7 @@ import ProjectCardBadges from "@features/project-hub/components/project-card/Pro
 import ProjectCardInfo from "@features/project-hub/components/project-card/ProjectCardInfo";
 import ProjectCardStats from "@features/project-hub/components/project-card/ProjectCardStats";
 import { setLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
-
-// Props for the ProjectCard component.
-export interface ProjectCardProps {
-  date: string;
-  id: string;
-  activeCasesCount: number;
-  activeChatsCount: number;
-  onViewDashboard?: () => void;
-  projectKey: string;
-  slaStatus: string;
-  title: string;
-}
+import type { ProjectCardProps } from "@features/project-hub/types/projectHub";
 
 /**
  * ProjectCard component to display an overview of a project.

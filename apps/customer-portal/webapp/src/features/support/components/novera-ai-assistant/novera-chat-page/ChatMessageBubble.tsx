@@ -14,12 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatMessageBubbleProps } from "@features/support/types/supportComponents";
 import { Box, Paper, Typography, IconButton, alpha } from "@wso2/oxygen-ui";
 import { Bot, User, ThumbsUp, ThumbsDown } from "@wso2/oxygen-ui-icons-react";
 import ReactMarkdown from "react-markdown";
 import { type JSX, useEffect, useRef, useState } from "react";
 import { ChatSender } from "@features/support/types/conversations";
-import type { Message } from "@features/support/types/conversations";
 import {
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
   NOVERA_DISPLAY_NAME,
@@ -69,13 +69,6 @@ function isSafeHref(href: string | undefined): href is string {
   } catch {
     return false;
   }
-}
-
-interface ChatMessageBubbleProps {
-  message: Message;
-  onCreateCase?: () => void;
-  onThumbsUp?: (messageId: string) => void;
-  onThumbsDown?: (messageId: string) => void;
 }
 
 /** Typography mapping for markdown elements (bot messages). */

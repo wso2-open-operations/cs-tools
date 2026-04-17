@@ -20,11 +20,9 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { CaseCommentsResponse } from "@features/support/types/cases";
+import type { UseGetCaseCommentsOptions } from "@features/support/types/supportApi";
 
-export interface UseGetCaseCommentsOptions {
-  offset?: number;
-  limit?: number;
-}
+export type { UseGetCaseCommentsOptions };
 
 /**
  * Fetches comments for a case.

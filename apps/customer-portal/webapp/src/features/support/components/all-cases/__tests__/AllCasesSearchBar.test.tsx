@@ -16,15 +16,14 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import AllCasesSearchBar from "@features/support/components/all-cases/AllCasesSearchBar";
+import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
-// Mock AllCasesFilters to simplify
-vi.mock("../AllCasesFilters", () => ({
-  default: () => <div data-testid="all-cases-filters" />,
+vi.mock("@components/list-view/ListFilters", () => ({
+  default: () => <div data-testid="list-filters" />,
 }));
 
-describe("AllCasesSearchBar", () => {
+describe("ListSearchPanel", () => {
   const theme = createTheme();
   const mockOnSearchChange = vi.fn();
   const mockOnFilterChange = vi.fn();
@@ -43,7 +42,7 @@ describe("AllCasesSearchBar", () => {
   it("should render the search input", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesSearchBar
+        <ListSearchPanel
           searchTerm=""
           onSearchChange={mockOnSearchChange}
           isFiltersOpen={false}
@@ -64,7 +63,7 @@ describe("AllCasesSearchBar", () => {
   it("should call onSearchChange when typing", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesSearchBar
+        <ListSearchPanel
           searchTerm=""
           onSearchChange={mockOnSearchChange}
           isFiltersOpen={false}
@@ -87,7 +86,7 @@ describe("AllCasesSearchBar", () => {
     const mockOnFiltersToggle = vi.fn();
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesSearchBar
+        <ListSearchPanel
           searchTerm=""
           onSearchChange={mockOnSearchChange}
           isFiltersOpen={false}
@@ -111,7 +110,7 @@ describe("AllCasesSearchBar", () => {
 
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesSearchBar
+        <ListSearchPanel
           searchTerm=""
           onSearchChange={mockOnSearchChange}
           isFiltersOpen={false}

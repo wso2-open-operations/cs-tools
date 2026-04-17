@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ConversationSummaryProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -28,10 +29,6 @@ import { type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import useGetConversationSummary from "@features/support/api/useGetConversationSummary";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-
-export interface ConversationSummaryProps {
-  conversationId?: string;
-}
 
 /**
  * Sidebar component showing conversation summary and tips.

@@ -35,17 +35,8 @@ import { useCreateRegistryToken } from "@features/settings/api/useCreateRegistry
 import { useGetIntegrationUsers } from "@features/settings/api/useGetIntegrationUsers";
 import type { IntegrationUser } from "@features/settings/types/users";
 import { RegistryTokenType } from "@features/settings/types/registryTokens";
-
-/** Allowed characters for robotName: alphanumeric + dashes. */
-const ROBOT_NAME_REGEX = /^[a-zA-Z0-9-]+$/;
-
-export interface GenerateTokenModalProps {
-  open: boolean;
-  onClose: () => void;
-  projectId: string;
-  tokenType: RegistryTokenType;
-  isAdmin: boolean;
-}
+import { REGISTRY_TOKEN_ROBOT_NAME_REGEX } from "@features/settings/constants/settingsConstants";
+import type { GenerateTokenModalProps } from "@features/settings/types/settings";
 
 /**
  * Modal dialog for generating a new registry token.
@@ -81,7 +72,7 @@ export default function GenerateTokenModal({
 
   function validateRobotName(value: string): string | null {
     if (!value.trim()) return "Token name is required.";
-    if (!ROBOT_NAME_REGEX.test(value))
+    if (!REGISTRY_TOKEN_ROBOT_NAME_REGEX.test(value))
       return "Only alphanumeric characters and dashes are allowed.";
     return null;
   }

@@ -16,17 +16,7 @@
 
 import { Grid, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-/**
- * Props for the UpdateCardBreakdown component.
- */
-interface UpdateCardBreakdownProps {
-  installedRegular: number;
-  installedSecurity: number;
-  pendingRegular: number;
-  pendingSecurity: number;
-  totalPending: number;
-}
+import type { UpdateCardBreakdownProps } from "@features/updates/types/updates";
 
 /**
  * Component to display installed and pending update breakdowns.

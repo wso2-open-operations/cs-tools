@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { EscalationBannerProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -23,14 +24,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { FileText, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-interface EscalationBannerProps {
-  visible: boolean;
-  onCreateCase: () => void;
-  isLoading?: boolean;
-  /** When true, Create Case button is disabled (e.g. product options failed to load). */
-  isCreateCaseDisabled?: boolean;
-}
 
 const NOVERA_PROSE =
   "Thank you for describing the issue. To provide more targeted assistance:\n\n1. What WSO2 product and version are you using?\n2. Is this in a production or non-production environment?\n3. Can you provide more details about when this issue occurs?";

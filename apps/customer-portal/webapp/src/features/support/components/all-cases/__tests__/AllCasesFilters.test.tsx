@@ -16,17 +16,17 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import AllCasesFilters from "@features/support/components/all-cases/AllCasesFilters";
+import ListFilters from "@components/list-view/ListFilters";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 const mockCaseMetadata = {
-  statuses: [{ id: "1", label: "Open" }],
+  caseStates: [{ id: "1", label: "Open" }],
   severities: [{ id: "2", label: "High" }],
   issueTypes: [{ id: "3", label: "Incident" }],
   deploymentTypes: [{ id: "4", label: "Production" }],
 };
 
-describe("AllCasesFilters", () => {
+describe("ListFilters", () => {
   const theme = createTheme();
   const mockOnFilterChange = vi.fn();
   const defaultFilters = {
@@ -43,7 +43,7 @@ describe("AllCasesFilters", () => {
   it("should render all filter select components", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesFilters
+        <ListFilters
           filters={defaultFilters}
           filterMetadata={mockCaseMetadata}
           onFilterChange={mockOnFilterChange}
@@ -62,7 +62,7 @@ describe("AllCasesFilters", () => {
   it("should call onFilterChange when a filter is changed", async () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesFilters
+        <ListFilters
           filters={defaultFilters}
           filterMetadata={mockCaseMetadata}
           onFilterChange={mockOnFilterChange}

@@ -17,31 +17,14 @@
 import { Box, Card, CardContent, Typography, Skeleton } from "@wso2/oxygen-ui";
 import { Clock } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { ProjectDetails } from "@features/project-hub/types/projects";
+import { PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE } from "@features/project-details/constants/projectDetailsConstants";
+import type { ServiceHoursAllocationsCardProps } from "@features/project-details/types/projectDetailsComponents";
 import {
   formatProjectDate,
   formatServiceHoursDecimalAsHrMin,
 } from "@features/project-details/utils/projectDetails";
+import { formatServiceHoursAllocationDisplay } from "@features/project-details/utils/serviceHoursFormat";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-
-export interface ServiceHoursAllocationsCardProps {
-  project?: ProjectDetails | null;
-  isLoading?: boolean;
-  isError?: boolean;
-}
-
-const NOT_AVAILABLE = "Not Available";
-
-function formatHoursDisplay(
-  consumed: number | undefined,
-  total: number | undefined,
-): string {
-  if (consumed == null && total == null) return NOT_AVAILABLE;
-  const c = Number(consumed ?? 0);
-  const t = Number(total ?? 0);
-  const pct = t === 0 ? 0 : Math.round((c / t) * 100);
-  return `${formatServiceHoursDecimalAsHrMin(c)}/${formatServiceHoursDecimalAsHrMin(t)} (${pct}%)`;
-}
 
 function formatRemaining(value: number | undefined): string {
   return formatServiceHoursDecimalAsHrMin(value);
@@ -58,13 +41,13 @@ export default function ServiceHoursAllocationsCard({
   isLoading,
   isError,
 }: ServiceHoursAllocationsCardProps): JSX.Element {
-  const queryDisplay = formatHoursDisplay(
+  const queryDisplay = formatServiceHoursAllocationDisplay(
     project?.consumedQueryHours,
     project?.totalQueryHours,
   );
   const queryRemaining = formatRemaining(project?.remainingQueryHours);
 
-  const onboardingDisplay = formatHoursDisplay(
+  const onboardingDisplay = formatServiceHoursAllocationDisplay(
     project?.consumedOnboardingHours,
     project?.totalOnboardingHours,
   );
@@ -74,7 +57,7 @@ export default function ServiceHoursAllocationsCard({
   const onboardingExpiry =
     project?.onboardingExpiryDate?.trim() && project.onboardingExpiryDate
       ? formatProjectDate(project.onboardingExpiryDate)
-      : NOT_AVAILABLE;
+      : PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE;
 
   return (
     <Card sx={{ height: "100%" }}>

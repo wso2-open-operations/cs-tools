@@ -33,13 +33,26 @@ import { usePatchProject } from "@features/settings/api/usePatchProject";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { setNoveraChatEnabled } from "@features/settings/utils/settingsStorage";
-
-interface SettingsAiAssistantProps {
-  projectId: string;
-  canEdit?: boolean;
-}
-
-type PatchSuccessKind = "novera" | "kb";
+import {
+  SETTINGS_AI_ADMIN_ONLY_HINT,
+  SETTINGS_AI_BEST_PRACTICES_ITEMS,
+  SETTINGS_AI_BEST_PRACTICES_TITLE,
+  SETTINGS_AI_CAPABILITIES_SECTION_TITLE,
+  SETTINGS_AI_DISABLED_CAPABILITIES_LABEL,
+  SETTINGS_AI_ENABLED_CAPABILITIES_LABEL,
+  SETTINGS_AI_HEADER_BODY,
+  SETTINGS_AI_HEADER_TITLE,
+  SETTINGS_AI_KB_DESCRIPTION,
+  SETTINGS_AI_KB_LABEL,
+  SETTINGS_AI_NOVERA_DESCRIPTION,
+  SETTINGS_AI_NOVERA_LABEL,
+  SETTINGS_AI_PATCH_ERROR,
+} from "@features/settings/constants/settingsConstants";
+import {
+  AiAssistantPatchSuccessKind,
+  type SettingsAiAssistantProps,
+} from "@features/settings/types/settings";
+import { getAiAssistantPatchSuccessMessage } from "@features/settings/utils/settingsPage";
 
 /**
  * AI Assistant settings: Novera chat and Smart Knowledge Base suggestions (hasKbReferences).
@@ -90,7 +103,7 @@ export default function SettingsAiAssistant({
   }, [projectHasAgent]);
 
   const notifyPatchSuccess = useCallback(
-    async (kind: PatchSuccessKind) => {
+    async (kind: AiAssistantPatchSuccessKind) => {
       const refreshed = await refetchProjects();
       const refreshedProject = refreshed.data?.pages
         ?.flatMap((page) => page.projects ?? [])
@@ -102,11 +115,7 @@ export default function SettingsAiAssistant({
       } else if (projectDetails?.hasAgent !== undefined) {
         setNoveraChatEnabled(projectDetails.hasAgent);
       }
-      const messages: Record<PatchSuccessKind, string> = {
-        novera: "AI Chat Assistant (Novera) was updated successfully.",
-        kb: "Smart Knowledge Base suggestions were updated successfully.",
-      };
-      showSuccess(messages[kind]);
+      showSuccess(getAiAssistantPatchSuccessMessage(kind));
     },
     [projectDetails, projectId, refetchProjects, showSuccess],
   );
@@ -116,7 +125,7 @@ export default function SettingsAiAssistant({
       showError(
         err instanceof Error
           ? err.message
-          : "Failed to update AI assistant settings.",
+          : SETTINGS_AI_PATCH_ERROR,
       );
     },
     [showError],
@@ -132,7 +141,7 @@ export default function SettingsAiAssistant({
       }
       patchProject.mutate(checked ? { hasAgent: true } : { hasAgent: false }, {
         onSuccess: () => {
-          void notifyPatchSuccess("novera");
+          void notifyPatchSuccess(AiAssistantPatchSuccessKind.NOVERA);
         },
         onError: (err) => {
           handlePatchError(err);
@@ -155,7 +164,7 @@ export default function SettingsAiAssistant({
         { hasKbReferences: checked },
         {
           onSuccess: () => {
-            void notifyPatchSuccess("kb");
+            void notifyPatchSuccess(AiAssistantPatchSuccessKind.KB);
           },
           onError: (err) => {
             handlePatchError(err);
@@ -203,12 +212,10 @@ export default function SettingsAiAssistant({
           </Paper>
           <Box sx={{ flex: 1 }}>
             <Typography variant="h6" color="text.primary" sx={{ mb: 0.5 }}>
-              AI-Powered Support Assistant
+              {SETTINGS_AI_HEADER_TITLE}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Configure Novera, your intelligent support assistant. Enable or
-              disable specific AI capabilities based on your team&apos;s needs.
-              Changes take effect immediately.
+              {SETTINGS_AI_HEADER_BODY}
             </Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -221,7 +228,7 @@ export default function SettingsAiAssistant({
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  {enabledCount} capabilities enabled
+                  {SETTINGS_AI_ENABLED_CAPABILITIES_LABEL(enabledCount)}
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -234,7 +241,7 @@ export default function SettingsAiAssistant({
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  {disabledCount} capabilities disabled
+                  {SETTINGS_AI_DISABLED_CAPABILITIES_LABEL(disabledCount)}
                 </Typography>
               </Box>
             </Box>
@@ -244,7 +251,7 @@ export default function SettingsAiAssistant({
 
       <Box>
         <Typography variant="h6" color="text.primary" sx={{ mb: 2 }}>
-          Support Capabilities
+          {SETTINGS_AI_CAPABILITIES_SECTION_TITLE}
         </Typography>
         {!canEdit && (
           <Typography
@@ -252,7 +259,7 @@ export default function SettingsAiAssistant({
             color="text.secondary"
             sx={{ mb: 1.5, fontStyle: "italic" }}
           >
-            Only customer admins can update AI assistant settings.
+            {SETTINGS_AI_ADMIN_ONLY_HINT}
           </Typography>
         )}
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -276,7 +283,7 @@ export default function SettingsAiAssistant({
                 >
                   <Bot size={20} color={colors.orange[600]} />
                   <Typography variant="body1" id="ai-chat-assistant-label">
-                    AI Chat Assistant (Novera)
+                    {SETTINGS_AI_NOVERA_LABEL}
                   </Typography>
                   <Chip
                     label={noveraEnabled ? "Active" : "Inactive"}
@@ -287,8 +294,7 @@ export default function SettingsAiAssistant({
                   />
                 </Box>
                 <Typography variant="body2" color="text.secondary">
-                  Enable AI-powered chat assistant to help with troubleshooting
-                  before creating cases
+                  {SETTINGS_AI_NOVERA_DESCRIPTION}
                 </Typography>
               </Box>
               <FormControlLabel
@@ -336,7 +342,7 @@ export default function SettingsAiAssistant({
                   >
                     <Bot size={20} color={colors.orange[600]} />
                     <Typography variant="body1" id="kb-suggestions-label">
-                      Smart Knowledge Base Suggestions
+                      {SETTINGS_AI_KB_LABEL}
                     </Typography>
                     <Chip
                       label={kbReferencesEnabled ? "Active" : "Inactive"}
@@ -347,8 +353,7 @@ export default function SettingsAiAssistant({
                     />
                   </Box>
                   <Typography variant="body2" color="text.secondary">
-                    Get AI-powered article recommendations based on your issue
-                    description
+                    {SETTINGS_AI_KB_DESCRIPTION}
                   </Typography>
                 </Box>
                 <FormControlLabel
@@ -396,31 +401,16 @@ export default function SettingsAiAssistant({
           </Paper>
           <Box>
             <Typography variant="h6" color="text.primary" sx={{ mb: 1 }}>
-              AI Best Practices
+              {SETTINGS_AI_BEST_PRACTICES_TITLE}
             </Typography>
             <Box component="ul" sx={{ m: 0, pl: 2.5, "& li": { mb: 0.5 } }}>
-              <li>
-                <Typography variant="body2" color="text.secondary">
-                  Enable AI Chat Assistant to reduce case creation time by 60%
-                </Typography>
-              </li>
-              <li>
-                <Typography variant="body2" color="text.secondary">
-                  Smart suggestions help users find relevant knowledge base
-                  articles
-                </Typography>
-              </li>
-              <li>
-                <Typography variant="body2" color="text.secondary">
-                  Automatic categorization improves case routing and faster
-                  resolution
-                </Typography>
-              </li>
-              <li>
-                <Typography variant="body2" color="text.secondary">
-                  AI insights help identify patterns and prevent recurring issues
-                </Typography>
-              </li>
+              {SETTINGS_AI_BEST_PRACTICES_ITEMS.map((item) => (
+                <li key={item}>
+                  <Typography variant="body2" color="text.secondary">
+                    {item}
+                  </Typography>
+                </li>
+              ))}
             </Box>
           </Box>
         </Box>

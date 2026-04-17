@@ -19,13 +19,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import type { DownloadDeploymentLicenseVariables } from "@features/project-details/types/projectDetailsApi";
 import type { DeploymentLicense } from "@features/project-details/types/deployments";
-
-export interface DownloadDeploymentLicenseVariables {
-  projectId: string;
-  deploymentId: string;
-  deploymentName: string;
-}
 
 /**
  * Hook to download a license for a deployment (POST /projects/:projectId/deployments/:deploymentId/license).

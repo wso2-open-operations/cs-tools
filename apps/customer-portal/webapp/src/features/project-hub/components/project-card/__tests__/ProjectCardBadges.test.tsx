@@ -18,6 +18,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ProjectCardBadges from "@features/project-hub/components/project-card/ProjectCardBadges";
 
+vi.mock("@features/project-details/utils/projectDetails", () => ({
+  getSLAStatusColor: (): "primary" => "primary",
+}));
+
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
   Box: ({ children, display, justifyContent, alignItems }: any) => (

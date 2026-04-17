@@ -17,7 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import UpdateLevelsReportModal from "@features/updates/components/all-updates/UpdateLevelsReportModal";
-import type { UpdateLevelsReportData } from "@features/updates/utils/updateLevelsReportPdf";
+import type { UpdateLevelsReportData } from "@features/updates/types/updates";
 
 const mockReportData: UpdateLevelsReportData = {
   generatedStr: "February 23, 2026 at 8:00 PM",

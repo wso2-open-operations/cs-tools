@@ -48,7 +48,24 @@ import useGetProjectContacts from "@features/settings/api/useGetProjectContacts"
 import { usePostProjectContact } from "@features/settings/api/usePostProjectContact";
 import { useDeleteProjectContact } from "@features/settings/api/useDeleteProjectContact";
 import { usePatchProjectContact } from "@features/settings/api/usePatchProjectContact";
-import { NULL_PLACEHOLDER, ROLE_CONFIG } from "@features/settings/constants/settingsConstants";
+import {
+  NULL_PLACEHOLDER,
+  ROLE_CONFIG,
+  SETTINGS_USER_ADD_BUTTON_LABEL,
+  SETTINGS_USER_ADD_ERROR,
+  SETTINGS_USER_EDIT_TOOLTIP,
+  SETTINGS_USER_EMPTY_MESSAGE,
+  SETTINGS_USER_INVITE_SUCCESS,
+  SETTINGS_USER_REMOVE_ERROR,
+  SETTINGS_USER_REMOVE_SUCCESS,
+  SETTINGS_USER_REMOVE_TOOLTIP,
+  SETTINGS_USER_ROLE_PERMISSIONS_TITLE,
+  SETTINGS_USER_SEARCH_PLACEHOLDER,
+  SETTINGS_USER_SECURITY_UPDATE_SUCCESS,
+  SETTINGS_USER_SYSTEM_NOT_SECURITY_ERROR,
+  SETTINGS_USER_TABLE_HEADERS,
+  SETTINGS_USER_UPDATE_ERROR,
+} from "@features/settings/constants/settingsConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -64,12 +81,7 @@ import {
 import { getUserStatusColor } from "@features/project-details/utils/projectDetails";
 import type { CreateProjectContactRequest } from "@features/settings/types/users";
 import type { ProjectContact } from "@features/settings/types/users";
-
-export interface SettingsUserManagementProps {
-  projectId: string;
-  /** When false, hide Add User and Delete user buttons. Default true for backward compatibility. */
-  canAddOrRemoveUsers?: boolean;
-}
+import type { SettingsUserManagementProps } from "@features/settings/types/settings";
 
 /**
  * User management section: stat cards, search, table, role permissions.
@@ -122,10 +134,10 @@ export default function SettingsUserManagement({
       postContact.mutate(data, {
         onSuccess: () => {
           setIsAddModalOpen(false);
-          showSuccess("Invitation sent successfully");
+          showSuccess(SETTINGS_USER_INVITE_SUCCESS);
         },
         onError: (err) => {
-          showError(err?.message ?? "Failed to add user. Please try again.");
+          showError(err?.message ?? SETTINGS_USER_ADD_ERROR);
         },
       });
     },
@@ -138,10 +150,10 @@ export default function SettingsUserManagement({
     deleteContact.mutate(removeTarget.email, {
       onSuccess: () => {
         setRemoveTarget(null);
-        showSuccess("User removed successfully");
+        showSuccess(SETTINGS_USER_REMOVE_SUCCESS);
       },
       onError: (err) => {
-        showError(err?.message ?? "Failed to remove user. Please try again.");
+        showError(err?.message ?? SETTINGS_USER_REMOVE_ERROR);
       },
     });
   }, [removeTarget, deleteContact, showSuccess, showError]);
@@ -150,7 +162,7 @@ export default function SettingsUserManagement({
     (next: { isSecurityContact: boolean }) => {
       if (!editTarget?.email) return;
       if (editTarget.isCsIntegrationUser) {
-        showError("System Users cannot be security contacts.");
+        showError(SETTINGS_USER_SYSTEM_NOT_SECURITY_ERROR);
         return;
       }
       patchContact.mutate(
@@ -158,12 +170,10 @@ export default function SettingsUserManagement({
         {
           onSuccess: () => {
             setEditTarget(null);
-            showSuccess("Security contact updated");
+            showSuccess(SETTINGS_USER_SECURITY_UPDATE_SUCCESS);
           },
           onError: (err) => {
-            showError(
-              err?.message ?? "Failed to update user. Please try again.",
-            );
+            showError(err?.message ?? SETTINGS_USER_UPDATE_ERROR);
           },
         },
       );
@@ -186,7 +196,7 @@ export default function SettingsUserManagement({
         <TextField
           fullWidth
           size="small"
-          placeholder="Search users by name, email, or role..."
+          placeholder={SETTINGS_USER_SEARCH_PLACEHOLDER}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           InputProps={{
@@ -205,7 +215,7 @@ export default function SettingsUserManagement({
             onClick={() => setIsAddModalOpen(true)}
             sx={{ whiteSpace: "nowrap" }}
           >
-            Add User
+            {SETTINGS_USER_ADD_BUTTON_LABEL}
           </Button>
         )}
       </Box>
@@ -215,11 +225,13 @@ export default function SettingsUserManagement({
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>User</TableCell>
-              <TableCell>Role</TableCell>
-              <TableCell>Status</TableCell>
+              <TableCell>{SETTINGS_USER_TABLE_HEADERS.user}</TableCell>
+              <TableCell>{SETTINGS_USER_TABLE_HEADERS.role}</TableCell>
+              <TableCell>{SETTINGS_USER_TABLE_HEADERS.status}</TableCell>
               {canAddOrRemoveUsers && (
-                <TableCell align="right">Actions</TableCell>
+                <TableCell align="right">
+                  {SETTINGS_USER_TABLE_HEADERS.actions}
+                </TableCell>
               )}
             </TableRow>
           </TableHead>
@@ -277,7 +289,7 @@ export default function SettingsUserManagement({
                   sx={{ py: 3 }}
                 >
                   <Typography variant="body2" color="text.secondary">
-                    No users found.
+                    {SETTINGS_USER_EMPTY_MESSAGE}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -358,7 +370,7 @@ export default function SettingsUserManagement({
                         }}
                       >
                         {!contact.isCsIntegrationUser && (
-                          <Tooltip title="Edit user">
+                          <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
                             <span>
                               <IconButton
                                 size="small"
@@ -370,7 +382,7 @@ export default function SettingsUserManagement({
                             </span>
                           </Tooltip>
                         )}
-                        <Tooltip title="Remove user">
+                        <Tooltip title={SETTINGS_USER_REMOVE_TOOLTIP}>
                           <span>
                             <IconButton
                               size="small"
@@ -406,7 +418,7 @@ export default function SettingsUserManagement({
           sx={{ mb: 4, display: "flex", alignItems: "center", gap: 1 }}
         >
           <Shield size={20} color={theme.palette.text.primary} />
-          Role Permissions
+          {SETTINGS_USER_ROLE_PERMISSIONS_TITLE}
         </Typography>
         <Grid container spacing={2}>
           {ROLE_CONFIG.map((role) => {

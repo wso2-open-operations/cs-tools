@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseAttachment } from "@features/support/types/cases";
+import type { EditCaseAttachmentModalProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -36,15 +36,6 @@ import {
   type JSX,
 } from "react";
 import { usePatchCaseAttachment } from "@features/support/api/usePatchCaseAttachment";
-
-export interface EditCaseAttachmentModalProps {
-  open: boolean;
-  attachment: CaseAttachment | null;
-  caseId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-}
 
 /**
  * Modal for editing a case attachment (name only).

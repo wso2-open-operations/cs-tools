@@ -23,15 +23,14 @@ import {
 } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { RecommendedUpdateLevelItem } from "@features/updates/types/updates";
+import type { UpdateProductCardProps } from "@features/updates/types/updates";
+import {
+  formatViewPendingUpdatesButtonLabel,
+  resolveUpdateCardHeaderStatusColor,
+} from "@features/updates/utils/updates";
 import { UpdateCardHeader } from "@update-cards/UpdateCardHeader";
 import { UpdateCardLevels } from "@update-cards/UpdateCardLevels";
 import { UpdateCardBreakdown } from "@update-cards/UpdateCardBreakdown";
-
-export interface UpdateProductCardProps {
-  item: RecommendedUpdateLevelItem;
-  onViewPendingUpdates?: () => void;
-}
 
 /**
  * Card component to display update status for a specific product.
@@ -60,7 +59,7 @@ export function UpdateProductCard({
       ? (startingUpdateLevel / recommendedUpdateLevel) * 100
       : 0;
   const isHealthy = percentage >= 50;
-  const statusColor = isHealthy ? "info" : "warning";
+  const statusColor = resolveUpdateCardHeaderStatusColor(isHealthy);
 
   const installedRegular = installedUpdatesCount;
   const installedSecurity = installedSecurityUpdatesCount;
@@ -113,7 +112,7 @@ export function UpdateProductCard({
             textTransform: "none",
           }}
         >
-          View {pendingLevels} Pending Updates
+          {formatViewPendingUpdatesButtonLabel(pendingLevels)}
         </Button>
       </CardContent>
     </Card>

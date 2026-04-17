@@ -20,7 +20,8 @@ import { Grid, Stack } from "@wso2/oxygen-ui";
 import { FileText, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import CasesOverviewStatCard from "@features/support/components/cases-overview-stats/CasesOverviewStatCard";
-import SupportOverviewCard from "@features/support/components/SupportOverviewCard";
+import SupportOverviewCard from "@features/support/components/support-overview-cards/SupportOverviewCard";
+import { SupportOverviewIconVariant } from "@features/support/types/supportOverview";
 import OutstandingCasesList from "@features/support/components/support-overview-cards/OutstandingCasesList";
 import ChatHistoryList from "@features/support/components/support-overview-cards/ChatHistoryList";
 import { useGetProjectSupportStats } from "@features/support/api/useGetProjectSupportStats";
@@ -33,9 +34,9 @@ import {
   SUPPORT_OVERVIEW_CHAT_LIMIT,
   CaseType,
 } from "@features/support/constants/supportConstants";
-import { getProjectPermissions } from "@features/project-details/utils/permissions";
+import { getProjectPermissions } from "@/utils/permission";
 import { isS0Case } from "@features/support/utils/support";
-import { SortOrder } from "@features/dashboard/types/common";
+import { SortOrder } from "@/types/common";
 import type { ChatHistoryItem } from "@features/support/types/conversations";
 
 /**
@@ -50,8 +51,9 @@ export default function SupportPage(): JSX.Element {
   const supportPath = `/projects/${projectId}/support`;
 
   const { data: project } = useGetProjectDetails(projectId || "");
-  const includeS0InSupportMetrics =
-    getProjectPermissions(project?.type?.label).includeS0InSupportMetrics;
+  const includeS0InSupportMetrics = getProjectPermissions(
+    project?.type?.label,
+  ).includeS0InSupportMetrics;
 
   const {
     data: stats,
@@ -135,7 +137,7 @@ export default function SupportPage(): JSX.Element {
             title="Outstanding Cases"
             subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} support tickets`}
             icon={FileText}
-            iconVariant="orange"
+            iconVariant={SupportOverviewIconVariant.Orange}
             footerButtons={[
               {
                 label: "View my cases",
@@ -171,7 +173,7 @@ export default function SupportPage(): JSX.Element {
             title="Chat History"
             subtitle="Recent Novera conversations"
             icon={MessageSquare}
-            iconVariant="blue"
+            iconVariant={SupportOverviewIconVariant.Blue}
             footerButtons={[
               {
                 label: "View my chat history",
@@ -205,9 +207,12 @@ export default function SupportPage(): JSX.Element {
                       }
 
                       if (action === "resume") {
-                        navigate(`/projects/${projectId}/support/chat/${chatId}`, {
-                          state: { chatNumber: summary.chatNumber },
-                        });
+                        navigate(
+                          `/projects/${projectId}/support/chat/${chatId}`,
+                          {
+                            state: { chatNumber: summary.chatNumber },
+                          },
+                        );
                       } else {
                         navigate(
                           `/projects/${projectId}/support/conversations/${chatId}`,

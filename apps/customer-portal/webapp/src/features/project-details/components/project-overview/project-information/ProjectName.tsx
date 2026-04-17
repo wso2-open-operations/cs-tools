@@ -17,13 +17,7 @@
 import { Box, Typography, Chip, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-
-interface ProjectNameProps {
-  name: string;
-  projectKey: string;
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import type { ProjectNameProps } from "@features/project-details/types/projectDetailsComponents";
 
 const ProjectName = ({
   name,

@@ -35,11 +35,11 @@ vi.mock("@api/useGetProjectCases", () => ({
   }),
 }));
 
-vi.mock("@features/support/components/AllCasesList", () => ({
+vi.mock("@components/list-view/ListItems", () => ({
   default: () => <div data-testid="all-cases-list" />,
 }));
 
-vi.mock("@features/support/components/all-cases/AllCasesListSkeleton", () => ({
+vi.mock("@components/list-view/ListSkeleton", () => ({
   default: () => <div data-testid="all-cases-list-skeleton" />,
 }));
 

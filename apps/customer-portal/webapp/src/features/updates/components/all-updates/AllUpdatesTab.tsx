@@ -40,95 +40,35 @@ import EmptyState from "@components/empty-state/EmptyState";
 import Error500Page from "@components/error/Error500Page";
 import UpdateLevelsReportModal from "@features/updates/components/all-updates/UpdateLevelsReportModal";
 import type {
-  ProductUpdateLevelEntry,
-  ProductUpdateLevelsItem,
+  AllUpdatesTabFilterState,
+  AllUpdatesTabSearchParams,
 } from "@features/updates/types/updates";
+import {
+  ALL_UPDATES_END_LEVEL_LABEL,
+  ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE,
+  ALL_UPDATES_IDLE_HINT,
+  ALL_UPDATES_PRODUCT_LABEL,
+  ALL_UPDATES_SEARCH_BUTTON_LABEL,
+  ALL_UPDATES_SEARCH_ERROR_MESSAGE,
+  ALL_UPDATES_SECTION_TITLE,
+  ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER,
+  ALL_UPDATES_SELECT_PRODUCT_PLACEHOLDER,
+  ALL_UPDATES_SELECT_VERSION_PLACEHOLDER,
+  ALL_UPDATES_START_LEVEL_LABEL,
+  ALL_UPDATES_TAB_INITIAL_FILTER,
+  ALL_UPDATES_VERSION_LABEL,
+  ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL,
+  ALL_UPDATES_EMPTY_SEARCH_MESSAGE,
+} from "@features/updates/constants/updatesConstants";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@features/shared/constants/dropdownConstants";
 import { getUpdateLevelsReportData } from "@features/updates/utils/updateLevelsReportPdf";
-
-export interface AllUpdatesTabFilterState {
-  productName: string;
-  productVersion: string;
-  startLevel: string;
-  endLevel: string;
-}
-
-const INITIAL_FILTER: AllUpdatesTabFilterState = {
-  productName: "",
-  productVersion: "",
-  startLevel: "",
-  endLevel: "",
-};
-
-function isValidFilter(
-  f: AllUpdatesTabFilterState,
-): { valid: true; start: number; end: number } | { valid: false } {
-  const start = Number(f.startLevel);
-  const end = Number(f.endLevel);
-  if (
-    !f.productName ||
-    !f.productVersion ||
-    f.startLevel === "" ||
-    f.endLevel === "" ||
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    start < 0 ||
-    end < 0 ||
-    start > end
-  ) {
-    return { valid: false };
-  }
-  return { valid: true, start, end };
-}
-
-/**
- * Derives unique product names from product update levels (GET /updates/product-update-levels).
- *
- * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
- * @returns {string[]} Sorted unique product names.
- */
-function getProductNamesFromProductLevels(
-  data: ProductUpdateLevelsItem[] | undefined,
-): string[] {
-  if (!data?.length) return [];
-  const names = [...new Set(data.map((d) => d.productName))];
-  return names.sort();
-}
-
-/**
- * Derives version entries for a selected product.
- *
- * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
- * @param {string} productName - Selected product.
- * @returns {ProductUpdateLevelEntry[]} Matching version entries.
- */
-function getVersionEntriesForProduct(
-  data: ProductUpdateLevelsItem[] | undefined,
-  productName: string,
-): ProductUpdateLevelEntry[] {
-  if (!data?.length || !productName) return [];
-  const item = data.find((d) => d.productName === productName);
-  return item?.productUpdateLevels ?? [];
-}
-
-/**
- * Returns sorted update levels for the selected product and version.
- *
- * @param {ProductUpdateLevelsItem[] | undefined} data - Product update levels response.
- * @param {string} productName - Selected product.
- * @param {string} productVersion - Selected version (productBaseVersion).
- * @returns {number[]} Sorted update levels.
- */
-function getUpdateLevelsForProductVersion(
-  data: ProductUpdateLevelsItem[] | undefined,
-  productName: string,
-  productVersion: string,
-): number[] {
-  const entries = getVersionEntriesForProduct(data, productName);
-  const entry = entries.find((e) => e.productBaseVersion === productVersion);
-  if (!entry?.updateLevels?.length) return [];
-  return [...entry.updateLevels].sort((a, b) => a - b);
-}
+import {
+  getNextAllUpdatesFilterAfterChange,
+  getProductNamesFromProductLevels,
+  getUpdateLevelsForProductVersion,
+  getVersionEntriesForProduct,
+  validateAllUpdatesFilter,
+} from "@features/updates/utils/allUpdatesTab";
 
 /**
  * AllUpdatesTab displays a filter section and search results for update levels.
@@ -142,14 +82,10 @@ export default function AllUpdatesTab(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
 
   const [filter, setFilter] =
-    useState<AllUpdatesTabFilterState>(INITIAL_FILTER);
+    useState<AllUpdatesTabFilterState>(ALL_UPDATES_TAB_INITIAL_FILTER);
   const [reportModalOpen, setReportModalOpen] = useState(false);
-  const [searchParams, setSearchParams] = useState<{
-    productName: string;
-    productVersion: string;
-    startingUpdateLevel: number;
-    endingUpdateLevel: number;
-  } | null>(null);
+  const [searchParams, setSearchParams] =
+    useState<AllUpdatesTabSearchParams | null>(null);
 
   const {
     data: productLevelsData,
@@ -203,26 +139,15 @@ export default function AllUpdatesTab(): JSX.Element {
     (field: keyof AllUpdatesTabFilterState) =>
       (e: SelectChangeEvent<string>) => {
         const value = e.target.value;
-        setFilter((prev) => {
-          const next = { ...prev, [field]: value };
-          if (field === "productName") {
-            next.productVersion = "";
-            next.startLevel = "";
-            next.endLevel = "";
-          } else if (field === "productVersion") {
-            next.startLevel = "";
-            next.endLevel = "";
-          } else if (field === "startLevel") {
-            next.endLevel = "";
-          }
-          return next;
-        });
+        setFilter((prev) =>
+          getNextAllUpdatesFilterAfterChange(prev, field, value),
+        );
       },
     [],
   );
 
   const handleSearch = useCallback(() => {
-    const result = isValidFilter(filter);
+    const result = validateAllUpdatesFilter(filter);
     if (!result.valid) return;
     setSearchParams({
       productName: filter.productName,
@@ -269,7 +194,7 @@ export default function AllUpdatesTab(): JSX.Element {
     setReportModalOpen(true);
   }, [reportData]);
 
-  const canSearch = isValidFilter(filter).valid;
+  const canSearch = validateAllUpdatesFilter(filter).valid;
 
   const canViewReport = !!reportData;
 
@@ -286,7 +211,7 @@ export default function AllUpdatesTab(): JSX.Element {
       >
         <Error500Page style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Could not load filter options. Please try again later.
+          {ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE}
         </Typography>
       </Box>
     );
@@ -297,7 +222,7 @@ export default function AllUpdatesTab(): JSX.Element {
       <Card variant="outlined" sx={{ borderRadius: 0 }}>
         <CardContent sx={{ p: 3 }}>
           <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
-            Search Update Levels
+            {ALL_UPDATES_SECTION_TITLE}
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -307,22 +232,22 @@ export default function AllUpdatesTab(): JSX.Element {
                 disabled={isProductLevelsLoading}
               >
                 <InputLabel id="all-updates-product-label">
-                  Product Name *
+                  {ALL_UPDATES_PRODUCT_LABEL}
                 </InputLabel>
                 <Select
                   labelId="all-updates-product-label"
                   id="all-updates-product"
                   value={filter.productName}
-                  label="Product Name *"
+                  label={ALL_UPDATES_PRODUCT_LABEL}
                   onChange={handleFilterChange("productName")}
                 >
                   <MenuItem value="" disabled>
                     <Typography variant="body2">
                       {isProductLevelsLoading
-                        ? "Select Product"
+                        ? ALL_UPDATES_SELECT_PRODUCT_PLACEHOLDER
                         : productNames.length === 0
                           ? EMPTY_DROPDOWN_PLACEHOLDER
-                          : "Select Product"}
+                          : ALL_UPDATES_SELECT_PRODUCT_PLACEHOLDER}
                     </Typography>
                   </MenuItem>
                   {productNames.map((name) => (
@@ -340,24 +265,24 @@ export default function AllUpdatesTab(): JSX.Element {
                 disabled={isProductLevelsLoading || !filter.productName}
               >
                 <InputLabel id="all-updates-version-label">
-                  Product Version *
+                  {ALL_UPDATES_VERSION_LABEL}
                 </InputLabel>
                 <Select
                   labelId="all-updates-version-label"
                   id="all-updates-version"
                   value={filter.productVersion}
-                  label="Product Version *"
+                  label={ALL_UPDATES_VERSION_LABEL}
                   onChange={handleFilterChange("productVersion")}
                 >
                   <MenuItem value="" disabled>
                     <Typography variant="body2">
                       {!filter.productName
-                        ? "Select Version"
+                        ? ALL_UPDATES_SELECT_VERSION_PLACEHOLDER
                         : isProductLevelsLoading
-                          ? "Select Version"
+                          ? ALL_UPDATES_SELECT_VERSION_PLACEHOLDER
                           : versionEntries.length === 0
                             ? EMPTY_DROPDOWN_PLACEHOLDER
-                            : "Select Version"}
+                            : ALL_UPDATES_SELECT_VERSION_PLACEHOLDER}
                     </Typography>
                   </MenuItem>
                   {versionEntries.map((v) => (
@@ -380,22 +305,22 @@ export default function AllUpdatesTab(): JSX.Element {
                 disabled={!filter.productVersion}
               >
                 <InputLabel id="all-updates-start-label">
-                  Starting Update Level *
+                  {ALL_UPDATES_START_LEVEL_LABEL}
                 </InputLabel>
                 <Select
                   labelId="all-updates-start-label"
                   id="all-updates-start"
                   value={filter.startLevel}
-                  label="Starting Update Level *"
+                  label={ALL_UPDATES_START_LEVEL_LABEL}
                   onChange={handleFilterChange("startLevel")}
                 >
                   <MenuItem value="" disabled>
                     <Typography variant="body2">
                       {!filter.productVersion
-                        ? "Select Level"
+                        ? ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER
                         : startLevelOptions.length === 0
                           ? EMPTY_DROPDOWN_PLACEHOLDER
-                          : "Select Level"}
+                          : ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER}
                     </Typography>
                   </MenuItem>
                   {startLevelOptions.map((level) => (
@@ -409,22 +334,22 @@ export default function AllUpdatesTab(): JSX.Element {
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={!filter.startLevel}>
                 <InputLabel id="all-updates-end-label">
-                  Ending Update Level *
+                  {ALL_UPDATES_END_LEVEL_LABEL}
                 </InputLabel>
                 <Select
                   labelId="all-updates-end-label"
                   id="all-updates-end"
                   value={filter.endLevel}
-                  label="Ending Update Level *"
+                  label={ALL_UPDATES_END_LEVEL_LABEL}
                   onChange={handleFilterChange("endLevel")}
                 >
                   <MenuItem value="" disabled>
                     <Typography variant="body2">
                       {!filter.startLevel
-                        ? "Select Level"
+                        ? ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER
                         : endLevelOptions.length === 0
                           ? EMPTY_DROPDOWN_PLACEHOLDER
-                          : "Select Level"}
+                          : ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER}
                     </Typography>
                   </MenuItem>
                   {endLevelOptions.map((level) => (
@@ -443,7 +368,7 @@ export default function AllUpdatesTab(): JSX.Element {
               onClick={handleSearch}
               disabled={!canSearch || isSearchLoading}
             >
-              Search
+              {ALL_UPDATES_SEARCH_BUTTON_LABEL}
             </Button>
             <Button
               variant="outlined"
@@ -452,7 +377,7 @@ export default function AllUpdatesTab(): JSX.Element {
               onClick={handleViewReport}
               disabled={!canViewReport}
             >
-              View Report
+              {ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL}
             </Button>
           </Stack>
         </CardContent>
@@ -461,8 +386,7 @@ export default function AllUpdatesTab(): JSX.Element {
       {!searchParams ? (
         <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            Select product, version, and update level range, then click Search
-            to view updates.
+            {ALL_UPDATES_IDLE_HINT}
           </Typography>
         </Paper>
       ) : isSearchLoading ? (
@@ -479,11 +403,11 @@ export default function AllUpdatesTab(): JSX.Element {
         >
           <Error500Page style={{ width: 200, height: "auto" }} />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Failed to load update levels. Please try again.
+            {ALL_UPDATES_SEARCH_ERROR_MESSAGE}
           </Typography>
         </Box>
       ) : searchData && Object.keys(searchData).length === 0 ? (
-        <EmptyState description="No update levels found for the selected criteria." />
+        <EmptyState description={ALL_UPDATES_EMPTY_SEARCH_MESSAGE} />
       ) : (
         <PendingUpdatesList
           data={searchData ?? null}

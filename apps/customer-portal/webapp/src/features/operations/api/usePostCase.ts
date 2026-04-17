@@ -19,7 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import type { CreateCaseRequest } from "@features/support/types/cases";
-import type { CreateServiceRequestPayload } from "@features/operations/types/catalogs";
+import type { CreateServiceRequestPayload } from "@features/operations/types/serviceRequests";
 import type { CreateCaseResponse } from "@features/support/types/cases";
 
 /**

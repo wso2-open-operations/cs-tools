@@ -20,11 +20,9 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { ConversationStats } from "@features/support/types/conversations";
+import type { UseGetConversationStatsOptions } from "@features/support/types/supportApi";
 
-export interface UseGetConversationStatsOptions {
-  createdByMe?: boolean;
-  enabled?: boolean;
-}
+export type { UseGetConversationStatsOptions };
 
 /**
  * Custom hook to fetch conversation statistics for a project.

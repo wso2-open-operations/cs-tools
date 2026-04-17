@@ -27,29 +27,17 @@ import {
   Paper,
   TablePagination,
 } from "@wso2/oxygen-ui";
-import { type JSX, type ChangeEvent } from "react";
+import { type JSX } from "react";
 import { getVulnerabilitySeverityColor } from "@features/security/utils/vulnerabilities";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import ProductVulnerabilitiesTableSkeleton from "@features/security/components/ProductVulnerabilitiesTableSkeleton";
-import type { ProductVulnerability } from "@features/security/types/security";
-
-export interface ProductVulnerabilitiesListData {
-  vulnerabilities: ProductVulnerability[];
-  totalRecords: number;
-}
-
-interface ProductVulnerabilitiesListProps {
-  isLoading: boolean;
-  isError?: boolean;
-  data: ProductVulnerabilitiesListData | undefined;
-  page: number;
-  rowsPerPage: number;
-  onPageChange: (event: unknown, newPage: number) => void;
-  onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  onVulnerabilityClick?: (vulnerability: ProductVulnerability) => void;
-}
-
-const COLUMN_COUNT = 6;
+import {
+  PRODUCT_VULNERABILITIES_EMPTY_MESSAGE,
+  PRODUCT_VULNERABILITIES_FETCH_ERROR_MESSAGE,
+  PRODUCT_VULNERABILITIES_TABLE_COLUMN_COUNT,
+  PRODUCT_VULNERABILITIES_TABLE_PAGINATION_OPTIONS,
+} from "@features/security/constants/securityConstants";
+import type { ProductVulnerabilitiesListProps } from "@features/security/types/security";
 
 /**
  * Renders the Product Vulnerabilities table list.
@@ -84,7 +72,10 @@ const ProductVulnerabilitiesList = ({
               <ProductVulnerabilitiesTableSkeleton rowsPerPage={rowsPerPage} />
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} align="center">
+                <TableCell
+                  colSpan={PRODUCT_VULNERABILITIES_TABLE_COLUMN_COUNT}
+                  align="center"
+                >
                   <Box
                     sx={{
                       display: "flex",
@@ -95,15 +86,18 @@ const ProductVulnerabilitiesList = ({
                   >
                     <ErrorIndicator entityName="vulnerabilities" />
                     <Typography variant="body2" color="error">
-                      Failed to fetch product vulnerabilities
+                      {PRODUCT_VULNERABILITIES_FETCH_ERROR_MESSAGE}
                     </Typography>
                   </Box>
                 </TableCell>
               </TableRow>
             ) : !data || !data.vulnerabilities?.length ? (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} align="center">
-                  No vulnerabilities found.
+                <TableCell
+                  colSpan={PRODUCT_VULNERABILITIES_TABLE_COLUMN_COUNT}
+                  align="center"
+                >
+                  {PRODUCT_VULNERABILITIES_EMPTY_MESSAGE}
                 </TableCell>
               </TableRow>
             ) : (
@@ -172,7 +166,7 @@ const ProductVulnerabilitiesList = ({
         onPageChange={onPageChange}
         rowsPerPage={rowsPerPage}
         onRowsPerPageChange={onRowsPerPageChange}
-        rowsPerPageOptions={[5, 10, 25, 50]}
+        rowsPerPageOptions={[...PRODUCT_VULNERABILITIES_TABLE_PAGINATION_OPTIONS]}
       />
     </>
   );

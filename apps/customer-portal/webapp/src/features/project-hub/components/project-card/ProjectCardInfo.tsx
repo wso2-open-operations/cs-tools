@@ -18,12 +18,14 @@
 import { Box, Form } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { ClampedTextWithTooltip } from "@features/project-hub/components/project-card/ClampedTextWithTooltip";
-
-interface ProjectCardInfoProps {
-  title: string;
-}
-
-const TITLE_BLOCK_HEIGHT = "3.2rem";
+import {
+  PROJECT_CARD_INFO_TITLE_BLOCK_HEIGHT,
+  PROJECT_CARD_STATS_NULL_PLACEHOLDER,
+} from "@features/project-hub/constants/projectHubConstants";
+import {
+  ClampedTextVariant,
+  type ProjectCardInfoProps,
+} from "@features/project-hub/types/projectHub";
 
 /**
  * Renders the project card title (no description on hub cards).
@@ -34,17 +36,19 @@ const TITLE_BLOCK_HEIGHT = "3.2rem";
 export default function ProjectCardInfo({
   title,
 }: ProjectCardInfoProps): JSX.Element {
-  const displayTitle = title || "--";
+  const displayTitle = title || PROJECT_CARD_STATS_NULL_PLACEHOLDER;
 
   return (
     <Form.CardHeader
       sx={{ pt: 1.5 }}
       title={
-        <Box sx={{ height: TITLE_BLOCK_HEIGHT, overflow: "hidden" }}>
+        <Box
+          sx={{ height: PROJECT_CARD_INFO_TITLE_BLOCK_HEIGHT, overflow: "hidden" }}
+        >
           <ClampedTextWithTooltip
             text={displayTitle}
             lineClamp={2}
-            variant="h6"
+            variant={ClampedTextVariant.H6}
             sx={{ mb: 1 }}
           />
         </Box>

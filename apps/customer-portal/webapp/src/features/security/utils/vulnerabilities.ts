@@ -14,26 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Vulnerability severity levels. */
-export const VulnerabilitySeverity = {
-  CRITICAL: "critical",
-  HIGH: "high",
-  MEDIUM: "medium",
-  LOW: "low",
-} as const;
-
-export type VulnerabilitySeverity =
-  (typeof VulnerabilitySeverity)[keyof typeof VulnerabilitySeverity];
-
-/** Vulnerability status values. */
-export const VulnerabilityStatus = {
-  IN_PROGRESS: "in progress",
-  OPEN: "open",
-  RESOLVED: "resolved",
-} as const;
-
-export type VulnerabilityStatus =
-  (typeof VulnerabilityStatus)[keyof typeof VulnerabilityStatus];
+import {
+  VulnerabilitySeverityToken,
+  VulnerabilityStatusToken,
+} from "@features/security/types/security";
 
 /**
  * Returns the Oxygen UI color path for vulnerability severity.
@@ -44,13 +28,13 @@ export type VulnerabilityStatus =
 export const getVulnerabilitySeverityColor = (severity?: string): string => {
   const normalized = severity?.toLowerCase().trim() || "";
   switch (normalized) {
-    case VulnerabilitySeverity.CRITICAL:
+    case VulnerabilitySeverityToken.CRITICAL:
       return "error.main";
-    case VulnerabilitySeverity.HIGH:
+    case VulnerabilitySeverityToken.HIGH:
       return "warning.main";
-    case VulnerabilitySeverity.MEDIUM:
+    case VulnerabilitySeverityToken.MEDIUM:
       return "text.disabled";
-    case VulnerabilitySeverity.LOW:
+    case VulnerabilitySeverityToken.LOW:
       return "info.main";
     default:
       return "text.secondary";
@@ -67,11 +51,11 @@ export const getVulnerabilitySeverityColor = (severity?: string): string => {
 export const getVulnerabilityStatusColor = (status?: string): string => {
   const normalized = status?.toLowerCase().trim() || "";
   switch (normalized) {
-    case VulnerabilityStatus.IN_PROGRESS:
+    case VulnerabilityStatusToken.IN_PROGRESS:
       return "warning.main";
-    case VulnerabilityStatus.OPEN:
+    case VulnerabilityStatusToken.OPEN:
       return "info.main";
-    case VulnerabilityStatus.RESOLVED:
+    case VulnerabilityStatusToken.RESOLVED:
       return "success.main";
     default:
       return "text.secondary";

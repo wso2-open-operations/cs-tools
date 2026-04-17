@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { RequestCallModalProps } from "@features/support/types/supportComponents";
 import {
   Alert,
   Box,
@@ -45,7 +46,6 @@ import {
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { usePostCallRequest } from "@features/support/api/usePostCallRequest";
 import { usePatchCallRequest } from "@features/support/api/usePatchCallRequest";
-import type { CallRequest } from "@features/support/types/calls";
 import { CALL_REQUEST_STATE_PENDING_ON_WSO2 } from "@features/support/constants/supportConstants";
 import {
   callRequestApiPreferredTimeToDatetimeLocal,
@@ -69,20 +69,6 @@ const INITIAL_FORM = {
   notes: "",
 };
 const MAX_PREFERRED_TIMES = 3;
-
-export interface RequestCallModalProps {
-  open: boolean;
-  projectId: string;
-  caseId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-  /** When provided, modal opens in edit mode with pre-filled values. */
-  editCall?: CallRequest;
-  userTimeZone?: string;
-  /** Minutes after now (from project filters × case severity) before first schedulable slot. */
-  severityAllocationMinutes?: number;
-}
 
 /**
  * Modal for requesting a call for a case.

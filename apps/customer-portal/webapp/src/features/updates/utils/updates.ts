@@ -14,38 +14,70 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { UPDATES_STATS } from "@features/updates/constants/updatesConstants";
-import type { StatCardColor } from "@features/dashboard/constants/dashboardConstants";
-import type {
-  ProductUpdateLevelsItem,
-  RecommendedUpdateLevelItem,
-  UpdatesStats,
+import { UPDATES_NULL_PLACEHOLDER } from "@features/updates/constants/updatesConstants";
+import type { StatCardColor } from "@/features/dashboard/constants/dashboard";
+import {
+  UpdatePendingLevelType,
+  UpdateProductCardHeaderStatus,
+  UpdatesStatKey,
+  type PendingUpdateLevelRow,
+  type ProductUpdateLevelsItem,
+  type RecommendedUpdateLevelItem,
+  type UpdatesStatConfigItem,
+  type UpdatesStats,
 } from "@features/updates/types/updates";
+
+/** @deprecated Prefer importing {@link UPDATES_NULL_PLACEHOLDER} from constants. */
+export const NULL_PLACEHOLDER = UPDATES_NULL_PLACEHOLDER;
 
 /**
  * Returns the StatCard-compatible chip colour for an update type.
- * "security" maps to "error" (red); all other types (e.g. "regular") map to "success" (green).
  *
- * @param {string} updateType - The update type string from the API.
+ * @param updateType - The update type string from the API.
  * @returns {StatCardColor} The chip colour token.
  */
 export const getUpdateTypeChipColor = (updateType: string): StatCardColor => {
-  if (updateType === "security") return "error";
-  return "success";
+  switch (updateType) {
+    case "security":
+      return "error";
+    default:
+      return "success";
+  }
 };
 
-/** Pending update level row for display. */
-export interface PendingUpdateLevelRow {
-  updateLevel: number;
-  updateType: "security" | "regular";
+/**
+ * Resolves header / progress colour from “healthy” heuristic.
+ *
+ * @param isHealthy - Whether the product is at least halfway to recommended.
+ * @returns {UpdateProductCardHeaderStatus} MUI colour token.
+ */
+export function resolveUpdateCardHeaderStatusColor(
+  isHealthy: boolean,
+): UpdateProductCardHeaderStatus {
+  switch (isHealthy) {
+    case true:
+      return UpdateProductCardHeaderStatus.Info;
+    case false:
+      return UpdateProductCardHeaderStatus.Warning;
+  }
 }
 
-export const NULL_PLACEHOLDER = "--";
+/**
+ * Label for the product card CTA to open pending updates.
+ *
+ * @param pendingLevels - Count of pending levels.
+ * @returns {string} Button label text.
+ */
+export function formatViewPendingUpdatesButtonLabel(
+  pendingLevels: number,
+): string {
+  return `View ${pendingLevels} Pending Updates`;
+}
 
 /**
  * Aggregates recommended update level data into summary statistics.
  *
- * @param {RecommendedUpdateLevelItem[] | undefined} data - The raw update level data.
+ * @param data - The raw update level data.
  * @returns {UpdatesStats | undefined} The aggregated statistics.
  */
 export const aggregateUpdateStats = (
@@ -95,8 +127,8 @@ export const aggregateUpdateStats = (
 /**
  * Gets the display value for a specific statistic ID from aggregated data.
  *
- * @param {UpdatesStats | undefined} aggregatedData - The aggregated statistics.
- * @param {keyof UpdatesStats} id - The ID of the statistic to retrieve.
+ * @param aggregatedData - The aggregated statistics.
+ * @param id - The ID of the statistic to retrieve.
  * @returns {string | number} The display value.
  */
 export const getStatValue = (
@@ -104,16 +136,16 @@ export const getStatValue = (
   id: keyof UpdatesStats,
 ): string | number => {
   if (!aggregatedData) {
-    return NULL_PLACEHOLDER;
+    return UPDATES_NULL_PLACEHOLDER;
   }
 
   const val = aggregatedData[id];
   if (val === null || val === undefined) {
-    return NULL_PLACEHOLDER;
+    return UPDATES_NULL_PLACEHOLDER;
   }
 
   if (typeof val === "object") {
-    return NULL_PLACEHOLDER;
+    return UPDATES_NULL_PLACEHOLDER;
   }
 
   return val as string | number;
@@ -122,43 +154,44 @@ export const getStatValue = (
 /**
  * Gets the tooltip text for a stat card, including breakdown info if applicable.
  *
- * @param {(typeof UPDATES_STATS)[number]} stat - The stat card definition.
- * @param {UpdatesStats | undefined} aggregatedData - The aggregated statistics.
+ * @param stat - The stat card definition.
+ * @param aggregatedData - The aggregated statistics.
  * @returns {string} The tooltip text.
  */
 export const getStatTooltipText = (
-  stat: (typeof UPDATES_STATS)[number],
+  stat: UpdatesStatConfigItem,
   aggregatedData: UpdatesStats | undefined,
 ): string => {
   if (!aggregatedData) {
     return stat.tooltipText;
   }
 
-  if (
-    stat.id === "totalUpdatesInstalled" &&
-    aggregatedData.totalUpdatesInstalledBreakdown
-  ) {
-    const { regular, security } = aggregatedData.totalUpdatesInstalledBreakdown;
-    return `${stat.tooltipText} (${regular} Regular • ${security} Security)`;
+  switch (stat.id) {
+    case UpdatesStatKey.TotalUpdatesInstalled:
+      if (aggregatedData.totalUpdatesInstalledBreakdown) {
+        const { regular, security } =
+          aggregatedData.totalUpdatesInstalledBreakdown;
+        return `${stat.tooltipText} (${regular} Regular • ${security} Security)`;
+      }
+      return stat.tooltipText;
+    case UpdatesStatKey.TotalUpdatesPending:
+      if (aggregatedData.totalUpdatesPendingBreakdown) {
+        const { regular, security } =
+          aggregatedData.totalUpdatesPendingBreakdown;
+        return `${stat.tooltipText} (${regular} Regular • ${security} Security)`;
+      }
+      return stat.tooltipText;
+    default:
+      return stat.tooltipText;
   }
-
-  if (
-    stat.id === "totalUpdatesPending" &&
-    aggregatedData.totalUpdatesPendingBreakdown
-  ) {
-    const { regular, security } = aggregatedData.totalUpdatesPendingBreakdown;
-    return `${stat.tooltipText} (${regular} Regular • ${security} Security)`;
-  }
-
-  return stat.tooltipText;
 };
 
 /**
  * Computes pending update levels by matching productName and productBaseVersion
  * between recommended and product-update-levels responses.
  *
- * @param {RecommendedUpdateLevelItem} recommended - The recommended item (productName, productBaseVersion, endingUpdateLevel, recommendedUpdateLevel, etc.).
- * @param {ProductUpdateLevelsItem[]} productLevels - The product update levels response.
+ * @param recommended - The recommended item.
+ * @param productLevels - The product update levels response.
  * @returns {PendingUpdateLevelRow[]} Pending levels with type (security/regular).
  */
 export const getPendingUpdateLevels = (
@@ -201,6 +234,9 @@ export const getPendingUpdateLevels = (
 
   return pendingLevels.map((level, index) => ({
     updateLevel: level,
-    updateType: index < securityCount ? "security" : "regular",
+    updateType:
+      index < securityCount
+        ? UpdatePendingLevelType.Security
+        : UpdatePendingLevelType.Regular,
   }));
 };

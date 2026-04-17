@@ -33,13 +33,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { Printer, X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, type JSX } from "react";
-import { generateUpdateLevelsReportPdf, type UpdateLevelsReportData } from "@features/updates/utils/updateLevelsReportPdf";
-
-export interface UpdateLevelsReportModalProps {
-  open: boolean;
-  reportData: UpdateLevelsReportData | null;
-  onClose: () => void;
-}
+import { generateUpdateLevelsReportPdf } from "@features/updates/utils/updateLevelsReportPdf";
+import type { UpdateLevelsReportModalProps } from "@features/updates/types/updates";
 
 /**
  * Modal that displays the Update Levels Report.

@@ -23,13 +23,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { PatchDeploymentProductRequest } from "@features/project-details/types/deployments";
-
-export interface PatchDeploymentProductVariables {
-  deploymentId: string;
-  productId: string;
-  body: PatchDeploymentProductRequest;
-}
+import type { PatchDeploymentProductVariables } from "@features/project-details/types/projectDetailsApi";
 
 /**
  * Patches a product in a deployment (PATCH /deployments/:deploymentId/products/:productId).

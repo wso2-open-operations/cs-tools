@@ -18,3 +18,36 @@ export const DEFAULT_CONVERSATION_REGION = "EU";
 
 /** Default tier for conversations and case classification APIs. TODO: Replace with dynamic values when multi-tier support is added. */
 export const DEFAULT_CONVERSATION_TIER = "Tier 1";
+
+// --- All conversations list --------------------------------------------------
+
+/** `ErrorIndicator` entity name for failed load state. */
+export const ALL_CONVERSATIONS_LIST_ERROR_ENTITY_NAME = "conversations";
+
+export const ALL_CONVERSATIONS_LIST_ERROR_MESSAGE =
+  "Failed to load conversations. Please try again.";
+
+export const ALL_CONVERSATIONS_LIST_EMPTY_REFINED_MESSAGE =
+  "No conversations found. Try adjusting your filters or search query.";
+
+export const ALL_CONVERSATIONS_LIST_EMPTY_DEFAULT_MESSAGE =
+  "No conversations yet.";
+
+/** Empty-state / search illustration width (px). */
+export const ALL_CONVERSATIONS_LIST_ILLUSTRATION_WIDTH_PX = 200;
+
+/** Empty-state illustration bottom margin (px). */
+export const ALL_CONVERSATIONS_LIST_ILLUSTRATION_MARGIN_BOTTOM_PX = 16;
+
+/** Empty-state vertical padding (MUI spacing). */
+export const ALL_CONVERSATIONS_LIST_EMPTY_CONTAINER_PY = 6;
+
+export const ALL_CONVERSATIONS_LIST_ACTION_VIEW_LABEL = "View";
+
+export const ALL_CONVERSATIONS_LIST_ACTION_RESUME_LABEL = "Resume";
+
+export const ALL_CONVERSATIONS_LIST_MESSAGE_SINGULAR = "message";
+
+export const ALL_CONVERSATIONS_LIST_MESSAGE_PLURAL = "messages";
+
+export const ALL_CONVERSATIONS_LIST_CREATED_BY_PREFIX = "Created by ";

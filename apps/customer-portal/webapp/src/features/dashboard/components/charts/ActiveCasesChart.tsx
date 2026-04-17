@@ -24,151 +24,152 @@ import {
 import type { JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
-import { ACTIVE_CASES_CHART_DATA } from "@features/dashboard/constants/dashboardConstants";
-
-export type OperationsChartMode = "srAndCr" | "srOnly";
-
-interface ActiveCasesChartProps {
-  data: {
-    serviceRequests: number;
-    changeRequests: number;
-    total: number;
-  };
-  isLoading?: boolean;
-  isError?: boolean;
-  variant?: OperationsChartMode;
-}
+import {
+  DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES,
+  DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX,
+  DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
+  DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
+  DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS,
+} from "@/features/dashboard/constants/charts";
+import {
+  OperationsChartMode,
+  type ActiveCasesChartProps,
+} from "@/features/dashboard/types/charts";
+import {
+  EMPTY_ACTIVE_CASES_DATA,
+  buildActiveCasesLegendRows,
+  buildActiveCasesPieSlices,
+  formatActiveCasesCenterTotal,
+  resolveActiveCasesSeriesConfig,
+} from "@features/dashboard/utils/dashboardCharts";
 
 /**
  * Renders the Active Cases chart.
  *
  * @param data - Dataset used to render the chart.
  * @param isLoading - Indicates whether the chart is in a loading state.
- * @returns A JSX element that displays the Active Cases chart.
+ * @returns {JSX.Element} Active Cases chart.
  */
 export const ActiveCasesChart = ({
   data,
   isLoading,
   isError,
-  variant = "srAndCr",
+  variant = OperationsChartMode.SrAndCr,
 }: ActiveCasesChartProps): JSX.Element => {
-  const safeData = data ?? {
-    serviceRequests: 0,
-    changeRequests: 0,
-    total: 0,
-  };
-
-  const seriesConfig =
-    variant === "srOnly"
-      ? ACTIVE_CASES_CHART_DATA.filter((item) => item.key === "serviceRequests")
-      : ACTIVE_CASES_CHART_DATA;
-
-  const chartData = isError
-    ? seriesConfig.map((item) => ({
-        name: item.name,
-        value: 1,
-        color: colors.grey?.[300] ?? "#D1D5DB",
-      }))
-    : isLoading
-      ? []
-      : seriesConfig.map((item) => ({
-          name: item.name,
-          value: safeData[item.key as keyof typeof safeData] ?? 0,
-          color: item.color,
-        }));
+  // safe data
+  const safeData = data ?? EMPTY_ACTIVE_CASES_DATA;
+  // series config
+  const seriesConfig = resolveActiveCasesSeriesConfig(variant);
+  // error grey
+  const errorGrey = colors.grey?.[300] ?? "#D1D5DB";
+  // chart data
+  const chartData = buildActiveCasesPieSlices(
+    seriesConfig,
+    safeData,
+    Boolean(isLoading),
+    Boolean(isError),
+    errorGrey,
+  );
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
-      {/* Title */}
       <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
-        Outstanding Operations
+        {DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS}
       </Typography>
-      {/* Chart state */}
       {isLoading ? (
         <Box
           sx={{
-            height: 240,
+            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Skeleton variant="circular" width={160} height={160} />
+          <Skeleton
+            variant="circular"
+            width={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+            height={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+          />
         </Box>
       ) : (
         <Box
           sx={{
-            height: 240,
+            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
             position: "relative",
             opacity: isError ? 0.3 : 1,
             filter: isError ? "grayscale(1)" : "none",
             "& *:focus": { outline: "none" },
           }}
         >
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart
-                legend={{ show: false }}
-                tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
-              >
-                <Pie
-                  data={chartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={0}
-                  minAngle={15}
-                  dataKey="value"
-                  nameKey="name"
-                  startAngle={90}
-                  endAngle={-270}
-                  label={false}
-                  labelLine={false}
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.color}
-                      stroke="none"
-                    />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Center content (Total count or Error indicator) */}
-            <Box
-              sx={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                textAlign: "center",
-                pointerEvents: "none",
-              }}
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart
+              legend={{ show: false }}
+              tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
             >
-              {isError ? (
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                  }}
-                >
-                  <ErrorIndicator entityName="active cases" />
-                  <Typography variant="caption">Total</Typography>
-                </Box>
-              ) : (
-                <>
-                  <Typography variant="h4">
-                    {data ? safeData.total : "N/A"}
-                  </Typography>
-                  <Typography variant="caption">Total</Typography>
-                </>
-              )}
-            </Box>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={0}
+                minAngle={15}
+                dataKey="value"
+                nameKey="name"
+                startAngle={90}
+                endAngle={-270}
+                label={false}
+                labelLine={false}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.color}
+                    stroke="none"
+                  />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+          <Box
+            sx={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              textAlign: "center",
+              pointerEvents: "none",
+            }}
+          >
+            {isError ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <ErrorIndicator
+                  entityName={DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES}
+                />
+                <Typography variant="caption">
+                  {DASHBOARD_CHART_CAPTION_TOTAL}
+                </Typography>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="h4">
+                  {formatActiveCasesCenterTotal(Boolean(data), safeData.total)}
+                </Typography>
+                <Typography variant="caption">
+                  {DASHBOARD_CHART_CAPTION_TOTAL}
+                </Typography>
+              </>
+            )}
           </Box>
+        </Box>
       )}
-      {/* Loading state */}
       {isLoading ? (
         <Box
           sx={{
@@ -179,16 +180,17 @@ export const ActiveCasesChart = ({
           }}
         >
           {seriesConfig.map((_, i) => (
-            <Skeleton key={i} variant="rounded" width={80} height={20} />
+            <Skeleton
+              key={i}
+              variant="rounded"
+              width={DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX}
+              height={20}
+            />
           ))}
         </Box>
       ) : (
         <ChartLegend
-          data={seriesConfig.map((item) => ({
-            name: item.name,
-            value: safeData[item.key as keyof typeof safeData] ?? 0,
-            color: item.color,
-          }))}
+          data={buildActiveCasesLegendRows(seriesConfig, safeData)}
           isError={isError}
           showValues
         />

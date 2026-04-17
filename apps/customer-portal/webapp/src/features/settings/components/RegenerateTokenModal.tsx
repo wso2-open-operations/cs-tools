@@ -31,14 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { CheckCircle, Copy, Eye, EyeOff, X } from "@wso2/oxygen-ui-icons-react";
 import { useRegenerateRegistryToken } from "@features/settings/api/useRegenerateRegistryToken";
-import type { RegistryToken } from "@features/settings/types/registryTokens";
-
-export interface RegenerateTokenModalProps {
-  open: boolean;
-  onClose: () => void;
-  projectId: string;
-  token: RegistryToken | null;
-}
+import type { RegenerateTokenModalProps } from "@features/settings/types/settings";
 
 /**
  * Confirmation + secret display dialog for regenerating a registry token secret.

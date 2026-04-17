@@ -30,17 +30,9 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Shield, X } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectContact } from "@features/settings/types/users";
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
-
-export interface EditUserModalProps {
-  open: boolean;
-  contact: ProjectContact | null;
-  isSubmitting?: boolean;
-  onClose: () => void;
-  onSubmit: (next: { isSecurityContact: boolean }) => void;
-}
+import type { EditUserModalProps } from "@features/settings/types/settings";
 
 /**
  * Admin-only modal for editing an existing contact.

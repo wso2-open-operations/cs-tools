@@ -16,6 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import { SECURITY_ADVISORIES_PLACEHOLDER_MESSAGE } from "@features/security/constants/securityConstants";
 
 /**
  * Placeholder for Security Advisories table.
@@ -25,7 +26,7 @@ const SecurityAdvisoriesTable = (): JSX.Element => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="body2" color="text.secondary">
-        Security Advisories table coming soon.
+        {SECURITY_ADVISORIES_PLACEHOLDER_MESSAGE}
       </Typography>
     </Box>
   );

@@ -47,7 +47,7 @@ import {
   formatChatHistoryForClassification,
   buildEnvProducts,
 } from "@features/support/utils/caseCreation";
-import { filterDeploymentsForCaseCreation } from "@features/project-details/utils/permissions";
+import { filterDeploymentsForCaseCreation } from "@/utils/permission";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
 import { ChatSender } from "@features/support/types/conversations";
 import type { ChatNavState, Message } from "@features/support/types/conversations";
@@ -386,111 +386,106 @@ export default function NoveraChatPage(): JSX.Element {
 
   const { connect, sendUserMessage } = useChatWebSocket({
     onEvent: (event) => {
-      if (event.type === "conversation_created") {
-        const nextConversationId = String(event.conversationId ?? "");
-        if (nextConversationId) {
-          setConversationId(nextConversationId);
-          if (!urlConversationId && projectId) {
-            navigate(
-              `/projects/${projectId}/support/chat/${nextConversationId}`,
-              {
-                replace: true,
-              },
-            );
+      switch (event.type) {
+        case "conversation_created": {
+          const nextConversationId = String(event.conversationId ?? "");
+          if (nextConversationId) {
+            setConversationId(nextConversationId);
+            if (!urlConversationId && projectId) {
+              navigate(
+                `/projects/${projectId}/support/chat/${nextConversationId}`,
+                {
+                  replace: true,
+                },
+              );
+            }
           }
+          break;
         }
-        return;
-      }
-
-      if (event.type === "thinking_start") {
-        upsertActiveBotMessage(
-          (msg) => ({
+        case "thinking_start": {
+          upsertActiveBotMessage(
+            (msg) => ({
+              ...msg,
+              isLoading: false,
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+            () => ({
+              id: `bot-${Date.now()}`,
+              sender: ChatSender.BOT,
+              timestamp: new Date(),
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+          );
+          break;
+        }
+        case "thinking_step": {
+          const label = String(event.label ?? event.step ?? "Working...");
+          upsertActiveBotMessage((msg) => ({
             ...msg,
             isLoading: false,
-            text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
-            thinkingSteps: [],
-            thinkingLabel: null,
-            isStreaming: false,
-          }),
-          () => ({
-            id: `bot-${Date.now()}`,
-            sender: ChatSender.BOT,
-            timestamp: new Date(),
-            text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
-            thinkingSteps: [],
-            thinkingLabel: null,
-            isStreaming: false,
-          }),
-        );
-        return;
-      }
-
-      if (event.type === "thinking_step") {
-        const label = String(event.label ?? event.step ?? "Working...");
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          thinkingSteps: [...(msg.thinkingSteps ?? []), label],
-          thinkingLabel: label,
-        }));
-        return;
-      }
-
-      if (event.type === "thinking_end") {
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          thinkingLabel: msg.thinkingLabel,
-        }));
-        return;
-      }
-
-      if (event.type === "token") {
-        const token = String(event.content ?? "");
-        const cleaned = sanitizeStreamToken(token);
-        if (cleaned.length > 0) {
-          for (const part of splitTokenForTyping(
-            cleaned,
-            TYPING_CHARS_PER_TICK,
-          )) {
+            thinkingSteps: [...(msg.thinkingSteps ?? []), label],
+            thinkingLabel: label,
+          }));
+          break;
+        }
+        case "thinking_end":
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            thinkingLabel: msg.thinkingLabel,
+          }));
+          break;
+        case "token": {
+          const token = String(event.content ?? "");
+          const cleaned = sanitizeStreamToken(token);
+          if (cleaned.length === 0) {
+            break;
+          }
+          for (const part of splitTokenForTyping(cleaned, TYPING_CHARS_PER_TICK)) {
             tokenQueueRef.current.push(part);
           }
+          break;
         }
-        return;
-      }
-
-      if (event.type === "final") {
-        const payload = (event.payload ?? {}) as Record<string, unknown>;
-        const finalMessage = getFinalMessageFromPayload(payload);
-        const nextConversationId = String(payload.conversationId ?? "");
-        if (nextConversationId) {
-          setConversationId(nextConversationId);
-          if (!urlConversationId && projectId) {
-            navigate(
-              `/projects/${projectId}/support/chat/${nextConversationId}`,
-              {
-                replace: true,
-              },
-            );
+        case "final": {
+          const payload = (event.payload ?? {}) as Record<string, unknown>;
+          const finalMessage = getFinalMessageFromPayload(payload);
+          const nextConversationId = String(payload.conversationId ?? "");
+          if (nextConversationId) {
+            setConversationId(nextConversationId);
+            if (!urlConversationId && projectId) {
+              navigate(
+                `/projects/${projectId}/support/chat/${nextConversationId}`,
+                {
+                  replace: true,
+                },
+              );
+            }
           }
+          pendingFinalRef.current = { payload, finalMessage };
+          flushPendingFinalIfReady();
+          break;
         }
-        pendingFinalRef.current = { payload, finalMessage };
-        flushPendingFinalIfReady();
-        return;
-      }
-
-      if (event.type === "error") {
-        pendingFinalRef.current = null;
-        tokenQueueRef.current = [];
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          isError: true,
-          text: String(event.message ?? "Something went wrong"),
-          thinkingSteps: [],
-          isStreaming: false,
-        }));
-        setIsSending(false);
+        case "error":
+          pendingFinalRef.current = null;
+          tokenQueueRef.current = [];
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            isError: true,
+            text: String(event.message ?? "Something went wrong"),
+            thinkingSteps: [],
+            isStreaming: false,
+          }));
+          setIsSending(false);
+          break;
+        default:
+          break;
       }
     },
     onError: () => {

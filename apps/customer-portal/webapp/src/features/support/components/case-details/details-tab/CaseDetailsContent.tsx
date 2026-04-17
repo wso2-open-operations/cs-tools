@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsContentProps } from "@features/support/types/supportComponents";
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { useFloatingNoveraVisibility } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
-import type { CaseDetails } from "@features/support/types/cases";
 import { useGetCaseAttachments } from "@features/support/api/useGetCaseAttachments";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -40,19 +40,6 @@ import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
 import CaseDetailsTabs from "@case-details/CaseDetailsTabs";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import CaseDetailsSkeleton from "@case-details/CaseDetailsSkeleton";
-
-export interface CaseDetailsContentProps {
-  data: CaseDetails | undefined;
-  isLoading: boolean;
-  isError: boolean;
-  caseId: string;
-  onBack: () => void;
-  onOpenRelatedCase?: () => void;
-  projectId?: string;
-  hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
-  isServiceRequest?: boolean;
-}
 
 /**
  * CaseDetailsContent displays case header and details in a layout similar to the template.

@@ -19,17 +19,9 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
+import type { ConversationSummaryResponse } from "@features/support/types/supportApi";
 
-/**
- * Response type for conversation summary API.
- */
-export interface ConversationSummaryResponse {
-  accountId: string;
-  conversationId: string;
-  messagesExchanged: number;
-  troubleshootingAttempts: number;
-  kbArticlesReviewed: number;
-}
+export type { ConversationSummaryResponse };
 
 /**
  * Fetch conversation summary for a specific conversation.

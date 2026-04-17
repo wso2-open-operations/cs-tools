@@ -14,6 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  PROJECT_CARD_DATE_CREATED_PREFIX,
+  PROJECT_CARD_DATE_LOCALE,
+} from "@features/project-hub/constants/projectHubConstants";
+
 /**
  * Formats a date string into "Created DD MMM YYYY" format.
  * Example: "2026-01-17 09:06:14" -> "Created 17 Jan 2026"
@@ -33,11 +38,13 @@ export const formatProjectDate = (dateString: string): string => {
     }
 
     const day = date.getDate();
-    const month = date.toLocaleString("en-US", { month: "short" });
+    const month = date.toLocaleString(PROJECT_CARD_DATE_LOCALE, {
+      month: "short",
+    });
     const year = date.getFullYear();
 
-    return `Created ${day} ${month} ${year}`;
-  } catch (error) {
+    return `${PROJECT_CARD_DATE_CREATED_PREFIX}${day} ${month} ${year}`;
+  } catch {
     return dateString;
   }
 };

@@ -18,7 +18,7 @@ import { Box, Skeleton } from "@wso2/oxygen-ui";
 import { useEffect, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import useGetMetadata from "@api/useGetMetadata";
-import UsageAndMetricsTabContent from "@features/project-details/components/usage-metrics/UsageAndMetricsTabContent";
+import UsageAndMetricsTabContent from "@features/usage-metrics/components/UsageAndMetricsTabContent";
 
 /**
  * Standalone Usage & Metrics page (sidebar navigation).

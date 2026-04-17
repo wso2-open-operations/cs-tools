@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
   CircularProgress,
@@ -31,11 +32,6 @@ import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
 import { CommentType } from "@features/support/constants/supportConstants";
-
-export interface ActivityCommentInputProps {
-  caseId: string;
-  caseStatus?: string | null;
-}
 
 /**
  * Input row with rich-text editor and send button.

@@ -16,51 +16,23 @@
 
 import { Grid } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import {
-  ActiveCasesChart,
-  type OperationsChartMode,
-} from "@features/dashboard/components/charts/ActiveCasesChart";
+import { ActiveCasesChart } from "@features/dashboard/components/charts/ActiveCasesChart";
 import { CasesTrendChart } from "@features/dashboard/components/charts/CasesTrendChart";
 import { OutstandingIncidentsChart } from "@features/dashboard/components/charts/OutstandingIncidentsChart";
-
-interface ChartLayoutProps {
-  outstandingCases: {
-    low: number;
-    medium: number;
-    high: number;
-    critical: number;
-    catastrophic: number;
-    total: number;
-  };
-  activeCases: {
-    serviceRequests: number;
-    changeRequests: number;
-    total: number;
-  };
-  engagements: {
-    categories: Array<{
-      name: string;
-      value: number;
-    }>;
-    total: number;
-  };
-  isLoading?: boolean;
-  isErrorOutstanding?: boolean;
-  isErrorActiveCases?: boolean;
-  isErrorEngagements?: boolean;
-  excludeS0?: boolean;
-  showOperationsChart?: boolean;
-  operationsChartMode?: OperationsChartMode;
-}
+import {
+  OperationsChartMode,
+  type ChartLayoutProps,
+} from "@features/dashboard/types/charts";
+import { DASHBOARD_CHART_SPAN } from "@/features/dashboard/constants/charts";
 
 /**
  * ChartLayout displays outstanding support cases, optional outstanding operations, and engagements.
  *
- * @param {ChartLayoutProps} props - Component props
- * @param {Object} props.outstandingCases - Severity counts for Outstanding Support Cases chart.
- * @param {Object} props.activeCases - Counts for Outstanding Operations chart.
- * @param {boolean} props.isLoading - Flag indicating if the data is loading.
- * @returns {JSX.Element} The chart layout element.
+ * @param props - Component props
+ * @param props.outstandingCases - Severity counts for Outstanding Support Cases chart.
+ * @param props.activeCases - Counts for Outstanding Operations chart.
+ * @param props.isLoading - Flag indicating if the data is loading.
+ * @returns {JSX.Element} Chart grid for the dashboard.
  */
 const ChartLayout = ({
   outstandingCases,
@@ -72,15 +44,14 @@ const ChartLayout = ({
   excludeS0 = false,
   engagements,
   showOperationsChart = true,
-  operationsChartMode = "srAndCr",
+  operationsChartMode = OperationsChartMode.SrAndCr,
 }: ChartLayoutProps): JSX.Element => {
   const chartSpan = showOperationsChart
-    ? { xs: 12 as const, md: 4 as const }
+    ? DASHBOARD_CHART_SPAN
     : { xs: 12 as const, md: 6 as const };
 
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>
-      {/* Outstanding Incidents */}
       <Grid size={chartSpan}>
         <OutstandingIncidentsChart
           data={outstandingCases}
@@ -101,7 +72,6 @@ const ChartLayout = ({
         </Grid>
       )}
 
-      {/* Cases Trend */}
       <Grid size={chartSpan}>
         <CasesTrendChart
           data={engagements}

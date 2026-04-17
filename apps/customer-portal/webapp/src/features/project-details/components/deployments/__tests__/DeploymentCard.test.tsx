@@ -21,7 +21,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import DeploymentCard from "@features/project-details/components/deployments/DeploymentCard";
-import type { SelectedDeploymentProduct } from "@features/project-details/components/deployments/deploymentSelectionTypes";
+import type { SelectedDeploymentProduct } from "@features/project-details/types/deployments";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 
 const mockDeployment: ProjectDeploymentItem = {
@@ -35,13 +35,16 @@ const mockDeployment: ProjectDeploymentItem = {
   type: { id: "3", label: "Staging" },
 };
 
-vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => ({
-  usePostDeploymentProductsSearchAll: () => ({
-    data: [],
-    isLoading: false,
-    isError: false,
+vi.mock(
+  "@features/project-details/api/usePostDeploymentProductsSearch",
+  () => ({
+    usePostDeploymentProductsSearchAll: () => ({
+      data: [],
+      isLoading: false,
+      isError: false,
+    }),
   }),
-}));
+);
 
 vi.mock("@features/project-details/api/useGetProducts", () => ({
   useGetProducts: () => ({ data: [], isLoading: false, isError: false }),
@@ -89,9 +92,12 @@ vi.mock("@features/project-details/api/usePatchDeployment", () => ({
   }),
 }));
 
-vi.mock("@features/project-details/components/deployments/EditDeploymentModal", () => ({
-  default: () => null,
-}));
+vi.mock(
+  "@features/project-details/components/deployments/EditDeploymentModal",
+  () => ({
+    default: () => null,
+  }),
+);
 
 vi.mock(
   "@features/project-details/components/deployments/DeleteDeploymentModal",

@@ -42,7 +42,7 @@ import ListSkeleton from "@components/list-view/ListSkeleton";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
 import Error500Page from "@components/error/Error500Page";
 import { isS0Case } from "@features/support/utils/support";
-import { SortOrder } from "@features/dashboard/types/common";
+import { SortOrder } from "@/types/common";
 
 const SEARCH_DEBOUNCE_MS = 300;
 

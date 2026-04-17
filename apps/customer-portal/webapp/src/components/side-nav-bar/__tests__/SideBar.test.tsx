@@ -17,11 +17,9 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import SideBar from "@components/side-nav-bar/SideBar";
-import {
-  APP_SHELL_NAV_ITEMS,
-  type AppShellNavItem,
-} from "@features/project-hub/constants/appLayoutConstants";
-import { ProjectType as PROJECT_TYPE_LABELS } from "@features/project-details/types/subscriptions";
+import { APP_SHELL_NAV_ITEMS } from "@features/project-hub/constants/appLayoutConstants";
+import type { AppShellNavItem } from "@features/project-hub/types/appLayout";
+import { ProjectType as PROJECT_TYPE_LABELS } from "@/types/permission";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => {

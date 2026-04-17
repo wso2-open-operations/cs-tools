@@ -22,7 +22,7 @@ import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { ProjectCasesStats } from "@features/support/types/cases";
 import { CaseType } from "@features/support/constants/supportConstants";
 
-export { DASHBOARD_CASE_TYPE_LABELS } from "@features/dashboard/constants/dashboardConstants";
+export { DASHBOARD_CASE_TYPE_LABELS } from "@/features/dashboard/constants/dashboard";
 
 export interface UseGetProjectCasesStatsOptions {
   incidentId?: string;

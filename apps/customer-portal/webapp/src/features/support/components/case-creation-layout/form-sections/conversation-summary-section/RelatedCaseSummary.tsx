@@ -14,18 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { RelatedCaseSummaryProps } from "@features/support/types/supportComponents";
 import { Box, Divider, Paper, Typography } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { stripHtml } from "@features/support/utils/support";
-
-export interface RelatedCaseSummaryProps {
-  /** Related case number (e.g. CS0438826). */
-  number: string;
-  /** Related case title. */
-  title: string;
-  description: string;
-}
 
 /**
  * Sidebar component showing related case details when creating a case from "Open Related Case".

@@ -18,7 +18,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ContactRow from "@features/project-details/components/project-overview/contact-info/ContactRow";
 import { User } from "@wso2/oxygen-ui-icons-react";
-import type { Contact } from "@features/project-details/constants/projectDetailsConstants";
+import type { Contact } from "@features/project-details/types/projectDetails";
 
 // Mock @wso2/oxygen-ui components
 vi.mock("@wso2/oxygen-ui", () => ({

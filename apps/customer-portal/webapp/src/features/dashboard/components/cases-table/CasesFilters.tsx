@@ -24,23 +24,12 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX, UIEvent } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type { FilterField } from "@components/filter-panel/FilterPopover";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import {
   EMPTY_DROPDOWN_PLACEHOLDER,
   paginatedSelectMenuListProps,
 } from "@features/shared/constants/dropdownConstants";
-
-/**
- * Select-specific FilterField that ensures only select-type fields are passed.
- */
-type SelectFilterField = FilterField & { type: "select" };
-
-export interface CasesFiltersProps {
-  filters: Record<string, string | number | undefined>;
-  filterFields: SelectFilterField[];
-  onFilterChange: (field: string, value: string | number) => void;
-}
+import type { CasesFiltersProps } from "@/features/dashboard/types/casesTable";
 
 /**
  * CasesFilters component to display filter dropdowns.
@@ -53,6 +42,7 @@ export default function CasesFilters({
   filterFields,
   onFilterChange,
 }: CasesFiltersProps): JSX.Element {
+  // handle select change
   const handleSelectChange =
     (field: string) => (event: SelectChangeEvent<string | number>) => {
       const val = event.target.value;
@@ -107,8 +97,10 @@ export default function CasesFilters({
                   </Typography>
                 </MenuItem>
                 {options.map((option) => {
-                  const label = typeof option === "string" ? option : option.label;
-                  const value = typeof option === "string" ? option : option.value;
+                  const label =
+                    typeof option === "string" ? option : option.label;
+                  const value =
+                    typeof option === "string" ? option : option.value;
                   return (
                     <MenuItem key={value} value={value}>
                       <Typography variant="body2">{label}</Typography>
@@ -118,9 +110,9 @@ export default function CasesFilters({
                 <SelectMenuLoadMoreRow
                   visible={Boolean(
                     field.onLoadMore &&
-                      field.hasMore &&
-                      field.isFetchingMore &&
-                      options.length > 0,
+                    field.hasMore &&
+                    field.isFetchingMore &&
+                    options.length > 0,
                   )}
                 />
               </Select>

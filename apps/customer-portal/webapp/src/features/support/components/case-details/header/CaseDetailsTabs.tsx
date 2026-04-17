@@ -14,21 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsTabsProps } from "@features/support/types/supportComponents";
 import { CASE_DETAILS_TABS } from "@features/support/constants/supportConstants";
 import { Box, Button, Tab, Tabs } from "@wso2/oxygen-ui";
 import { Maximize2, Minimize2 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-export interface CaseDetailsTabsProps {
-  value: number;
-  onChange: (_e: unknown, newValue: number) => void;
-  focusMode?: boolean;
-  onFocusModeToggle?: () => void;
-  attachmentCount?: number;
-  callCount?: number;
-  hideCallsTab?: boolean;
-  hideKnowledgeBaseTab?: boolean;
-}
 
 /**
  * Tab bar for case details: Activity, Details, Attachments, Calls, Knowledge Base.

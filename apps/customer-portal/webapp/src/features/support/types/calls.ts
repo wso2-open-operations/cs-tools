@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { IdLabelRef, PaginationResponse } from "@features/dashboard/types/common";
+import type { IdLabelRef, PaginationResponse } from "@/types/common";
 
 // Request type for patching a call request.
 export type PatchCallRequest = {

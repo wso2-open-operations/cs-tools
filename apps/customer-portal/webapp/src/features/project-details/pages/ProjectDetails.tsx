@@ -15,12 +15,16 @@
 // under the License.
 
 import { Box, Typography, Grid } from "@wso2/oxygen-ui";
-import { useParams, useOutletContext } from "react-router";
+import { useParams } from "react-router";
 import { useState, useEffect, useMemo, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import TabBar from "@components/tab-bar/TabBar";
-import { PROJECT_DETAILS_TABS } from "@features/project-details/constants/projectDetailsConstants";
-import { getProjectPermissions } from "@features/project-details/utils/permissions";
+import {
+  PROJECT_DETAILS_INVALID_PROJECT_ID_MESSAGE,
+  PROJECT_DETAILS_TABS,
+} from "@features/project-details/constants/projectDetailsConstants";
+import { ProjectDetailsTabId } from "@features/project-details/types/projectDetails";
+import { getProjectPermissions } from "@/utils/permission";
 import ProjectInformationCard from "@features/project-details/components/ProjectInformationCard";
 import ProjectStatisticsCard from "@features/project-details/components/ProjectStatisticsCard";
 import ContactInfoCard from "@features/project-details/components/project-overview/contact-info/ContactInfoCard";
@@ -32,6 +36,10 @@ import { useGetProjectStat } from "@features/project-details/api/useGetProjectSt
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
+import {
+  filterProjectDetailsTabsByPermissions,
+  getProjectDetailsLoadingState,
+} from "@features/project-details/utils/projectDetailsPage";
 
 /**
  * ProjectDetails component.
@@ -39,15 +47,15 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
  * @returns {JSX.Element} The ProjectDetails component.
  */
 export default function ProjectDetails(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<string>("overview");
+  const [activeTab, setActiveTab] = useState<string>(
+    ProjectDetailsTabId.OVERVIEW,
+  );
 
   const { projectId } = useParams<{ projectId: string }>();
 
   const logger = useLogger();
   const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
-
-  useOutletContext<{ sidebarCollapsed: boolean }>();
 
   const { data: projectsData } = useInfiniteProjects({ enabled: true });
   const allProjects = flattenProjectPages(projectsData);
@@ -62,8 +70,7 @@ export default function ProjectDetails(): JSX.Element {
     error: projectError,
   } = useGetProjectDetails(projectId || "");
 
-  const projectTypeLabel =
-    currentProject?.type?.label ?? project?.type?.label;
+  const projectTypeLabel = currentProject?.type?.label ?? project?.type?.label;
 
   const {
     data: stats,
@@ -71,12 +78,15 @@ export default function ProjectDetails(): JSX.Element {
     error: statsError,
   } = useGetProjectStat(projectId || "");
 
-  const isDetailsLoading =
-    isAuthLoading ||
-    isProjectFetching ||
-    isStatsFetching ||
-    (!project && !projectError) ||
-    (!stats && !statsError);
+  const isDetailsLoading = getProjectDetailsLoadingState({
+    isAuthLoading,
+    isProjectFetching,
+    isStatsFetching,
+    project,
+    projectError,
+    stats,
+    statsError,
+  });
 
   useEffect(() => {
     if (isDetailsLoading) {
@@ -103,30 +113,33 @@ export default function ProjectDetails(): JSX.Element {
 
   const visibleTabs = useMemo(
     () =>
-      PROJECT_DETAILS_TABS.filter((tab) => {
-        if (tab.id === "deployments" && !permissions.hasDeployments) {
-          return false;
-        }
-        if (tab.id === "time-tracking" && !permissions.hasTimeLogs) {
-          return false;
-        }
-        return true;
-      }),
-    [permissions.hasDeployments, permissions.hasTimeLogs],
+      filterProjectDetailsTabsByPermissions(PROJECT_DETAILS_TABS, permissions),
+    [permissions],
   );
+  const effectiveTab = useMemo(() => {
+    const tabIds = visibleTabs.map((tab) => tab.id);
+    if (activeTab && tabIds.includes(activeTab)) {
+      return activeTab;
+    }
+    return ProjectDetailsTabId.OVERVIEW;
+  }, [activeTab, visibleTabs]);
 
-  const effectiveTab = visibleTabs.some((t) => t.id === activeTab)
-    ? activeTab
-    : "overview";
+  useEffect(() => {
+    const tabIds = visibleTabs.map((t) => t.id);
+    if (activeTab && !tabIds.includes(activeTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset when permissions hide current tab
+      setActiveTab(ProjectDetailsTabId.OVERVIEW);
+    }
+  }, [visibleTabs, activeTab]);
 
   const renderContent = () => {
     switch (effectiveTab) {
-      case "overview":
+      case ProjectDetailsTabId.OVERVIEW:
         if (!projectId) {
           return (
             <Box sx={{ p: 3, textAlign: "center" }}>
               <Typography color="error">
-                Invalid Project ID. Please check the URL.
+                {PROJECT_DETAILS_INVALID_PROJECT_ID_MESSAGE}
               </Typography>
             </Box>
           );
@@ -170,13 +183,13 @@ export default function ProjectDetails(): JSX.Element {
             </Grid>
           </Box>
         );
-      case "deployments":
+      case ProjectDetailsTabId.DEPLOYMENTS:
         return (
           <Box>
             <ProjectDeployments projectId={projectId ?? ""} />
           </Box>
         );
-      case "time-tracking":
+      case ProjectDetailsTabId.TIME_TRACKING:
         return (
           <ProjectTimeTracking
             projectId={projectId || ""}

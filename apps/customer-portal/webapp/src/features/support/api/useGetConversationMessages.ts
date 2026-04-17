@@ -24,10 +24,9 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { ConversationMessagesResponse } from "@features/support/types/conversations";
+import type { UseGetConversationMessagesOptions } from "@features/support/types/supportApi";
 
-export interface UseGetConversationMessagesOptions {
-  pageSize?: number;
-}
+export type { UseGetConversationMessagesOptions };
 
 /**
  * Fetches conversation messages using GET /conversations/{conversationId}/messages

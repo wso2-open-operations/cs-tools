@@ -26,6 +26,10 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import { addApiHeaders } from "@/utils/apiUtils";
+import type {
+  UsePostDeploymentProductsSearchAllOptions,
+  UsePostDeploymentProductsSearchInfiniteOptions,
+} from "@features/project-details/types/projectDetailsApi";
 import type { DeployedProductSearchRequest } from "@features/project-details/types/deployments";
 import type {
   DeploymentProductItem,
@@ -204,12 +208,6 @@ export async function fetchDeploymentProductsAll(params: {
   return results;
 }
 
-export interface UsePostDeploymentProductsSearchInfiniteOptions {
-  request?: DeployedProductSearchRequest;
-  pageSize?: number;
-  enabled?: boolean;
-}
-
 /**
  * Search products of a deployment with server pagination.
  * Use when the UI should load 10 first, then load more on scroll/pagination.
@@ -270,12 +268,6 @@ export function usePostDeploymentProductsSearchInfinite(
     enabled: enabled && !!deploymentId && isSignedIn && !isAuthLoading,
     staleTime: 5 * 60 * 1000,
   });
-}
-
-export interface UsePostDeploymentProductsSearchAllOptions {
-  request?: DeployedProductSearchRequest;
-  pageSize?: number;
-  enabled?: boolean;
 }
 
 /**

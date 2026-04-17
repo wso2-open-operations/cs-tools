@@ -44,34 +44,16 @@ import { paginatedSelectMenuListProps } from "@features/shared/constants/dropdow
 import { useGetProducts } from "@features/project-details/api/useGetProducts";
 import { useSearchProductVersions } from "@features/project-details/api/useSearchProductVersions";
 import { usePostDeploymentProduct } from "@features/project-details/api/usePostDeploymentProduct";
-import type { ProductItem, ProductVersionItem } from "@features/project-details/types/products";
-
-export interface AddProductModalProps {
-  open: boolean;
-  deploymentId: string;
-  projectId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-}
-
-const INITIAL_FORM = {
-  productId: "",
-  versionId: "",
-  cores: "",
-  tps: "",
-  description: "",
-};
-
-/**
- * Helper to parse and validate a numeric string value.
- * Returns a valid number or undefined if invalid.
- */
-function parseValidNumber(value: string): number | undefined {
-  if (!value || !value.trim()) return undefined;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : undefined;
-}
+import type {
+  ProductItem,
+  ProductVersionItem,
+} from "@features/project-details/types/products";
+import {
+  ADD_PRODUCT_MODAL_INITIAL_FORM,
+  parseValidNumber,
+  type AddProductModalFormState,
+} from "@features/project-details/utils/addProductModal";
+import type { AddProductModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Modal for adding a WSO2 product to a deployment environment.
@@ -88,7 +70,9 @@ export default function AddProductModal({
   onSuccess,
   onError,
 }: AddProductModalProps): JSX.Element {
-  const [form, setForm] = useState(INITIAL_FORM);
+  const [form, setForm] = useState<AddProductModalFormState>(() => ({
+    ...ADD_PRODUCT_MODAL_INITIAL_FORM,
+  }));
   const [productOffset, setProductOffset] = useState(0);
   const [versionOffset, setVersionOffset] = useState(0);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -112,7 +96,7 @@ export default function AddProductModal({
   }, [products, versions]);
 
   const resetModalState = useCallback(() => {
-    setForm(INITIAL_FORM);
+    setForm({ ...ADD_PRODUCT_MODAL_INITIAL_FORM });
     setProductOffset(0);
     setProducts([]);
     setVersionOffset(0);

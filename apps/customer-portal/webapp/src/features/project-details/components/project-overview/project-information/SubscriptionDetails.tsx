@@ -30,13 +30,7 @@ import {
 } from "@features/project-details/utils/projectDetails";
 import { SUBSCRIPTION_STATUS } from "@features/project-details/constants/projectDetailsConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-
-interface SubscriptionDetailsProps {
-  startDate?: string | null;
-  endDate?: string | null;
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import type { SubscriptionDetailsProps } from "@features/project-details/types/projectDetailsComponents";
 
 const SubscriptionDetails = ({
   startDate,

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { DeleteAttachmentModalProps } from "@features/support/types/supportComponents";
 import {
   Button,
   CircularProgress,
@@ -26,14 +27,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, type JSX } from "react";
-
-export interface DeleteAttachmentModalProps {
-  open: boolean;
-  attachmentName: string | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  isDeleting?: boolean;
-}
 
 /**
  * Confirmation modal before deleting an attachment.

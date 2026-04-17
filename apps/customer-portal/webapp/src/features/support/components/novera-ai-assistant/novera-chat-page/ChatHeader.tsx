@@ -14,16 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatHeaderProps } from "@features/support/types/supportComponents";
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-interface ChatHeaderProps {
-  onBack: () => void;
-  onCreateCase?: () => void;
-  isCreateCaseLoading?: boolean;
-  chatNumber?: string;
-}
 
 /**
  * Renders the header section for the Novera Chat page.

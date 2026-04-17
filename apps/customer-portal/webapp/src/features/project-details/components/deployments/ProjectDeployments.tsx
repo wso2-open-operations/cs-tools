@@ -30,14 +30,15 @@ import {
   Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectedDeploymentProduct } from "@features/project-details/components/deployments/deploymentSelectionTypes";
+import type { SelectedDeploymentProduct } from "@features/project-details/types/deployments";
+import type { ProjectDeploymentsProps } from "@features/project-details/types/projectDetailsComponents";
+import {
+  buildServiceRequestCreateSearchParams,
+  clampDeploymentsPage,
+} from "@features/project-details/utils/deployments";
 import { Plus, Server } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
-
-export interface ProjectDeploymentsProps {
-  projectId: string;
-}
 
 /**
  * Displays deployment environments for a project.
@@ -64,8 +65,7 @@ export default function ProjectDeployments({
   const totalPages =
     totalRecords != null ? Math.ceil(totalRecords / PAGE_SIZE) : 0;
 
-  const clampedPage =
-    totalPages > 0 ? Math.min(Math.max(page, 1), totalPages) : 1;
+  const clampedPage = clampDeploymentsPage(page, totalPages);
   const currentPageIndex = Math.max(0, clampedPage - 1);
   const currentDeployments =
     deploymentsQuery.data?.pages?.[currentPageIndex]?.deployments ?? [];
@@ -87,12 +87,7 @@ export default function ProjectDeployments({
     if (!deploymentsQuery.hasNextPage) return;
     if (deploymentsQuery.isFetchingNextPage) return;
     void deploymentsQuery.fetchNextPage();
-  }, [
-    projectId,
-    clampedPage,
-    isPageLoaded,
-    deploymentsQuery,
-  ]);
+  }, [projectId, clampedPage, isPageLoaded, deploymentsQuery]);
 
   const handleOpenModal = () => setIsModalOpen(true);
   const handleCloseModal = () => setIsModalOpen(false);
@@ -122,10 +117,7 @@ export default function ProjectDeployments({
 
   const handleCreateServiceRequest = useCallback(() => {
     if (!selectedProduct || !projectId) return;
-    const q = new URLSearchParams({
-      deploymentId: selectedProduct.deploymentId,
-      productId: selectedProduct.productItemId,
-    });
+    const q = buildServiceRequestCreateSearchParams(selectedProduct);
     navigate(
       `/projects/${projectId}/support/service-requests/create?${q.toString()}`,
     );
@@ -174,8 +166,8 @@ export default function ProjectDeployments({
           {totalRecords != null ? (
             <>
               Showing {Math.min(clampedPage * PAGE_SIZE, totalRecords)} of{" "}
-              {totalRecords}{" "}
-              deployment environment{totalRecords !== 1 ? "s" : ""}
+              {totalRecords} deployment environment
+              {totalRecords !== 1 ? "s" : ""}
             </>
           ) : (
             <>
@@ -183,10 +175,7 @@ export default function ProjectDeployments({
             </>
           )}
           {selectedProduct ? (
-            <Typography
-              component="span"
-              sx={{ color: "primary.main", ml: 1 }}
-            >
+            <Typography component="span" sx={{ color: "primary.main", ml: 1 }}>
               · 1 product selected
             </Typography>
           ) : null}

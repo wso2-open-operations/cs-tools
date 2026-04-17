@@ -14,16 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsSkeletonProps } from "@features/support/types/supportComponents";
 import { Box, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-export interface CaseDetailsSkeletonProps {
-  /** When true, hides the action row (manage status section). */
-  hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
-  /** When true, omits engineer avatar/name skeleton (security report analysis). */
-  hideAssignedEngineer?: boolean;
-}
 
 /**
  * Header-only skeleton: case ID, severity, status chip, and title.

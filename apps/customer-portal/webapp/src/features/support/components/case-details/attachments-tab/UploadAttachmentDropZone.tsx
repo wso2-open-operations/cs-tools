@@ -14,17 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { UploadAttachmentDropZoneProps } from "@features/support/types/supportComponents";
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { Upload } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-export interface UploadAttachmentDropZoneProps {
-  dragOver: boolean;
-  onDrop: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDragLeave: () => void;
-  onChooseFile: () => void;
-}
 
 /**
  * Drag-and-drop zone with "Choose file" button for attachment upload.

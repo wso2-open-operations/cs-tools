@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsActionRowProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -64,24 +65,6 @@ function getActionButtonSx(
     },
     textTransform: "none",
   };
-}
-
-export interface CaseDetailsActionRowProps {
-  assignedEngineer: unknown;
-  engineerInitials: string;
-  statusLabel?: string | null;
-  /** When case is closed, used to hide "Open Related Case" after 2 months. */
-  closedOn?: string | null;
-  onOpenRelatedCase?: () => void;
-  /** Project ID for useGetProjectFilters and usePatchCase. */
-  projectId?: string;
-  /** Case ID for PATCH case state. */
-  caseId?: string;
-  isLoading?: boolean;
-  showOnlyEngineer?: boolean;
-  /** When true, hides assigned engineer (e.g. security report analysis). */
-  hideAssignedEngineer?: boolean;
-  restrictToCloseOnly?: boolean;
 }
 
 /**

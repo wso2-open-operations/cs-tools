@@ -32,6 +32,28 @@ import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
 import Error500Page from "@components/error/Error500Page";
+import {
+  PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE,
+  PROJECT_HUB_EMPTY_DEFAULT_TITLE,
+  PROJECT_HUB_EMPTY_SEARCH_SUBTITLE,
+  PROJECT_HUB_EMPTY_SEARCH_TITLE,
+  PROJECT_HUB_ERROR_SUBTITLE,
+  PROJECT_HUB_ERROR_TITLE,
+  PROJECT_HUB_PROJECTS_PAGE_SIZE,
+  PROJECT_HUB_REDIRECT_LOADER_MESSAGE,
+  PROJECT_HUB_SEARCH_DEBOUNCE_MS,
+  PROJECT_HUB_SEARCH_PLACEHOLDER,
+  PROJECT_HUB_SKELETON_CARD_COUNT,
+} from "@features/project-hub/constants/projectHubConstants";
+import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
+import {
+  resolveProjectHubContentView,
+  resolveProjectHubHeaderSubtitle,
+  resolveProjectHubHeaderTitle,
+  shouldHideProjectHubHeaderBlock,
+  shouldShowProjectHubSearchBar,
+  shouldShowProjectHubSearchOnlyLayout,
+} from "@features/project-hub/utils/projectHub";
 
 /**
  * ProjectHub component.
@@ -45,10 +67,11 @@ export default function ProjectHub(): JSX.Element {
   const { isLoading: isAuthLoading } = useAsgardeo();
   useGetMetadata();
   const [searchQuery, setSearchQuery] = useState<string>("");
-  // Use debounce hook
-  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
+  const debouncedSearchQuery = useDebouncedValue(
+    searchQuery,
+    PROJECT_HUB_SEARCH_DEBOUNCE_MS,
+  );
 
-  // Fetch projects with infinite query
   const {
     data,
     isLoading,
@@ -58,13 +81,12 @@ export default function ProjectHub(): JSX.Element {
     isFetchingNextPage,
   } = useInfiniteProjects({
     searchQuery: debouncedSearchQuery || undefined,
-    pageSize: 20,
+    pageSize: PROJECT_HUB_PROJECTS_PAGE_SIZE,
   });
 
   const projects = useMemo(() => flattenProjectPages(data), [data]);
   const totalRecords = getTotalRecords(data);
 
-  // Auto-fetch all pages when searching to show all results
   useEffect(() => {
     if (
       debouncedSearchQuery &&
@@ -98,7 +120,6 @@ export default function ProjectHub(): JSX.Element {
     projects.length === 1 &&
     !searchQuery;
 
-  // Navigate to dashboard if there is only one project
   useEffect(() => {
     if (isRedirectingToSingleProject) {
       navigate(`/projects/${projects[0].id}/dashboard`, { replace: true });
@@ -125,185 +146,200 @@ export default function ProjectHub(): JSX.Element {
     }
   }, [projects.length, logger]);
 
-  const renderContent = () => {
-    const centeredLoader = (message: string): JSX.Element => (
-      <Box
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 2,
-        }}
-      >
-        <LinearProgress
-          color="warning"
-          sx={{ width: "80%", maxWidth: 400, height: 4 }}
-        />
-        <Typography variant="body2" color="text.secondary">
-          {message}
-        </Typography>
-      </Box>
-    );
+  const hasSearchQuery = Boolean(searchQuery.trim());
 
-    if (isRedirectingToSingleProject) {
-      return centeredLoader("Redirecting, this may take a moment…");
-    }
+  const contentView = useMemo(
+    () =>
+      resolveProjectHubContentView(
+        isRedirectingToSingleProject,
+        isAuthLoading,
+        isLoading,
+        isError,
+        totalRecords,
+        searchQuery,
+        projects.length,
+      ),
+    [
+      isAuthLoading,
+      isError,
+      isLoading,
+      isRedirectingToSingleProject,
+      projects.length,
+      searchQuery,
+      totalRecords,
+    ],
+  );
 
-    if (isAuthLoading) return null;
+  const showSearchBar = shouldShowProjectHubSearchBar(
+    totalRecords,
+    searchQuery,
+  );
+  const showOnlySearchBar = shouldShowProjectHubSearchOnlyLayout(
+    totalRecords,
+    searchQuery,
+    isLoading,
+    isAuthLoading,
+    isError,
+  );
+  const hideHeaderBlock = shouldHideProjectHubHeaderBlock(
+    isError,
+    isLoading,
+    isAuthLoading,
+    projects.length,
+    searchQuery,
+  );
 
-    if (isLoading) {
-      return (
-        <Box
-          sx={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "center",
-            gap: 3,
-            maxWidth: 1800,
-            mx: "auto",
-            width: "100%",
-          }}
-        >
-          {[...Array(3)].map((_, index) => (
-            <Box
-              key={index}
-              sx={{
-                flex: {
-                  xs: "1 1 100%",
-                  sm: "0 1 calc(50% - 24px)",
-                  md: "0 1 calc(33.33% - 24px)",
-                  lg: "0 1 calc(25% - 24px)",
-                  xl: "0 1 calc(20% - 24px)",
-                },
-                maxWidth: {
-                  xs: "100%",
-                  sm: 400,
-                },
-                minWidth: 300,
-              }}
-            >
-              <ProjectCardSkeleton />
-            </Box>
-          ))}
-        </Box>
-      );
-    }
+  const headerTitle = resolveProjectHubHeaderTitle(totalRecords, hasSearchQuery);
+  const headerSubtitle = resolveProjectHubHeaderSubtitle(
+    totalRecords,
+    hasSearchQuery,
+  );
 
-    if (isError) {
-      return (
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-            py: 10,
-          }}
-        >
-          <Error500Page />
-          <Typography variant="h4">Something Went Wrong</Typography>
-          <Typography variant="subtitle2" color="text.secondary">
-            We couldn&apos;t load the data right now. Please try again or
-            refresh the page.
-          </Typography>
-        </Box>
-      );
-    }
+  const centeredLoader = (message: string): JSX.Element => (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 2,
+      }}
+    >
+      <LinearProgress
+        color="warning"
+        sx={{ width: "80%", maxWidth: 400, height: 4 }}
+      />
+      <Typography variant="body2" color="text.secondary">
+        {message}
+      </Typography>
+    </Box>
+  );
 
-    // If totalRecords > 4 and no search query, don't show anything (search bar is above)
-    if (totalRecords > 4 && !searchQuery) {
-      return null;
-    }
-
-    // If no projects found (either from search or initially)
-    if (projects.length === 0) {
-      return (
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-            py: 10,
-          }}
-        >
-          {searchQuery ? (
-            <SearchNoResultsIcon style={{ width: 200, height: "auto" }} />
-          ) : (
-            <EmptyIcon />
-          )}
-          <Typography variant={searchQuery ? "subtitle2" : "h4"}>
-            {searchQuery ? "No Projects Found" : "No Projects Yet"}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {searchQuery
-              ? "Try adjusting your search query"
-              : "Projects will appear here once they are created or assigned to you"}
-          </Typography>
-        </Box>
-      );
-    }
-
-    // Show project cards (when totalRecords <= 2 or when searching)
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "center",
-          gap: 3,
-          maxWidth: 1800,
-          mx: "auto",
-          width: "100%",
-        }}
-      >
-        {/* project card wrapper */}
-        {projects.map((project) => (
-          <Box
-            key={project.id}
-            sx={{
-              flex: {
-                xs: "1 1 100%",
-                sm: "0 1 calc(50% - 24px)",
-                md: "0 1 calc(33.33% - 24px)",
-                lg: "0 1 calc(25% - 24px)",
-                xl: "0 1 calc(20% - 24px)",
-              },
-              maxWidth: {
-                xs: "100%",
-                sm: 400,
-              },
-              minWidth: 300,
-            }}
-          >
-            <ProjectCard
-              id={project.id}
-              projectKey={project.key}
-              slaStatus={project.slaStatus}
-              title={project.name}
-              date={project.createdOn}
-              activeCasesCount={project.activeCasesCount}
-              activeChatsCount={project.activeChatsCount}
-            />
-          </Box>
-        ))}
-      </Box>
-    );
+  const cardGridWrapperSx = {
+    flex: {
+      xs: "1 1 100%",
+      sm: "0 1 calc(50% - 24px)",
+      md: "0 1 calc(33.33% - 24px)",
+      lg: "0 1 calc(25% - 24px)",
+      xl: "0 1 calc(20% - 24px)",
+    },
+    maxWidth: {
+      xs: "100%",
+      sm: 400,
+    },
+    minWidth: 300,
   };
 
-  // Determine whether to show the search bar
-  const showSearchBar = totalRecords > 4 || searchQuery;
-  const showOnlySearchBar =
-    totalRecords > 4 &&
-    !searchQuery &&
-    !isLoading &&
-    !isAuthLoading &&
-    !isError;
+  const renderMainContent = (): JSX.Element | null => {
+    switch (contentView) {
+      case ProjectHubContentView.REDIRECT_LOADER:
+        return centeredLoader(PROJECT_HUB_REDIRECT_LOADER_MESSAGE);
+      case ProjectHubContentView.AUTH_PENDING:
+        return null;
+      case ProjectHubContentView.LOADING_SKELETONS:
+        return (
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: 3,
+              maxWidth: 1800,
+              mx: "auto",
+              width: "100%",
+            }}
+          >
+            {[...Array(PROJECT_HUB_SKELETON_CARD_COUNT)].map((_, index) => (
+              <Box key={index} sx={cardGridWrapperSx}>
+                <ProjectCardSkeleton />
+              </Box>
+            ))}
+          </Box>
+        );
+      case ProjectHubContentView.ERROR:
+        return (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 2,
+              py: 10,
+            }}
+          >
+            <Error500Page />
+            <Typography variant="h4">{PROJECT_HUB_ERROR_TITLE}</Typography>
+            <Typography variant="subtitle2" color="text.secondary">
+              {PROJECT_HUB_ERROR_SUBTITLE}
+            </Typography>
+          </Box>
+        );
+      case ProjectHubContentView.NO_GRID:
+        return null;
+      case ProjectHubContentView.EMPTY_STATE:
+        return (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 2,
+              py: 10,
+            }}
+          >
+            {hasSearchQuery ? (
+              <SearchNoResultsIcon style={{ width: 200, height: "auto" }} />
+            ) : (
+              <EmptyIcon />
+            )}
+            <Typography variant={hasSearchQuery ? "subtitle2" : "h4"}>
+              {hasSearchQuery
+                ? PROJECT_HUB_EMPTY_SEARCH_TITLE
+                : PROJECT_HUB_EMPTY_DEFAULT_TITLE}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {hasSearchQuery
+                ? PROJECT_HUB_EMPTY_SEARCH_SUBTITLE
+                : PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE}
+            </Typography>
+          </Box>
+        );
+      case ProjectHubContentView.PROJECT_LIST:
+        return (
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: 3,
+              maxWidth: 1800,
+              mx: "auto",
+              width: "100%",
+            }}
+          >
+            {projects.map((project) => (
+              <Box key={project.id} sx={cardGridWrapperSx}>
+                <ProjectCard
+                  id={project.id}
+                  projectKey={project.key}
+                  slaStatus={project.slaStatus}
+                  title={project.name}
+                  date={project.createdOn}
+                  activeCasesCount={project.activeCasesCount}
+                  activeChatsCount={project.activeChatsCount}
+                />
+              </Box>
+            ))}
+          </Box>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <Box
@@ -326,13 +362,7 @@ export default function ProjectHub(): JSX.Element {
           px: 2,
         }}
       >
-        {!(
-          isError ||
-          (!isLoading &&
-            !isAuthLoading &&
-            projects.length === 0 &&
-            !searchQuery)
-        ) && (
+        {!hideHeaderBlock && (
           <Box
             sx={{
               display: "flex",
@@ -342,7 +372,6 @@ export default function ProjectHub(): JSX.Element {
               pb: 1,
             }}
           >
-            {/* project hub title */}
             <Box
               sx={{
                 mb: 1,
@@ -352,25 +381,17 @@ export default function ProjectHub(): JSX.Element {
               }}
             >
               <FolderOpen size={28} />
-              <Typography variant="h4">
-                {totalRecords > 4 && !searchQuery
-                  ? `You have ${totalRecords} projects`
-                  : "Select Your Project"}
-              </Typography>
+              <Typography variant="h4">{headerTitle}</Typography>
             </Box>
 
-            {/* project hub subtitle */}
             <Typography
               variant="subtitle2"
               color="text.secondary"
               sx={{ maxWidth: 600 }}
             >
-              {totalRecords > 4 && !searchQuery
-                ? "Please use the search bar below to find your project"
-                : "Choose a project to access your support cases, chat history, and dashboard"}
+              {headerSubtitle}
             </Typography>
 
-            {/* Search bar - show when totalRecords > 4 */}
             {showSearchBar && (
               <Box
                 sx={{
@@ -381,7 +402,7 @@ export default function ProjectHub(): JSX.Element {
               >
                 <TextField
                   fullWidth
-                  placeholder="Search projects..."
+                  placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   InputProps={{
@@ -406,7 +427,7 @@ export default function ProjectHub(): JSX.Element {
               py: 1,
             }}
           >
-            {renderContent()}
+            {renderMainContent()}
           </Box>
         )}
       </Box>

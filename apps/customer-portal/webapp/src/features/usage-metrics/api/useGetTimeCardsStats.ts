@@ -20,14 +20,7 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { ProjectTimeTrackingStats } from "@features/usage-metrics/types/timeTracking";
-
-export interface UseGetTimeCardsStatsParams {
-  projectId: string;
-  /** Start date in YYYY-MM-DD format. */
-  startDate: string;
-  /** End date in YYYY-MM-DD format. */
-  endDate: string;
-}
+import type { UseGetTimeCardsStatsParams } from "@features/usage-metrics/types/usageMetrics";
 
 /**
  * Fetches time card statistics for a project within a date range.

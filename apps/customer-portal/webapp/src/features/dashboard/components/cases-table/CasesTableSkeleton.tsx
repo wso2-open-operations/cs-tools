@@ -16,11 +16,13 @@
 
 import { Box, TableCell, TableRow, Skeleton } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import type { CasesTableSkeletonProps } from "@/features/dashboard/types/casesTable";
 
-interface CasesTableSkeletonProps {
-  rowsPerPage: number;
-}
-
+/**
+ * Skeleton rows for the cases table loading state.
+ *
+ * @returns {JSX.Element} Table body skeleton fragment
+ */
 const CasesTableSkeleton = ({
   rowsPerPage,
 }: CasesTableSkeletonProps): JSX.Element => {

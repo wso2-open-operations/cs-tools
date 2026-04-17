@@ -16,38 +16,17 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { UpdateLevelsSearchResponse } from "@features/updates/types/updates";
+import type {
+  UpdateLevelsReportData,
+  UpdateLevelsReportParams,
+  UpdateLevelsReportTableRow,
+} from "@features/updates/types/updates";
 
-export interface UpdateLevelsReportParams {
-  productName: string;
-  productVersion: string;
-  startLevel: number;
-  endLevel: number;
-  data: UpdateLevelsSearchResponse;
-}
-
-export interface UpdateLevelsReportTableRow {
-  levelKey: string;
-  typeLabel: string;
-  updatesCount: number;
-  releaseDate: string;
-  applied: string;
-}
-
-export interface UpdateLevelsReportData {
-  generatedStr: string;
-  productName: string;
-  productVersion: string;
-  startLevel: number;
-  endLevel: number;
-  securityCount: number;
-  regularCount: number;
-  mixedCount: number;
-  totalUpdates: number;
-  levelCount: number;
-  levelsRange: string;
-  tableRows: UpdateLevelsReportTableRow[];
-}
+export type {
+  UpdateLevelsReportData,
+  UpdateLevelsReportParams,
+  UpdateLevelsReportTableRow,
+};
 
 /**
  * Formats a Unix timestamp (ms) as "MMM DD, YYYY" in UTC.

@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { UpdateCardHeader } from "@update-cards/UpdateCardHeader";
+import { UpdateProductCardHeaderStatus } from "@features/updates/types/updates";
 
 describe("UpdateCardHeader", () => {
   it("renders product name and version", () => {
@@ -25,7 +26,7 @@ describe("UpdateCardHeader", () => {
         productName="Test Product"
         productBaseVersion="1.2.3"
         percentage={75}
-        statusColor="info"
+        statusColor={UpdateProductCardHeaderStatus.Info}
       />,
     );
     expect(screen.getByText("Test Product")).toBeDefined();
@@ -38,7 +39,7 @@ describe("UpdateCardHeader", () => {
         productName="Test Product"
         productBaseVersion="1.2.3"
         percentage={75}
-        statusColor="info"
+        statusColor={UpdateProductCardHeaderStatus.Info}
       />,
     );
     expect(screen.getByText("75% Updated")).toBeDefined();
@@ -50,7 +51,7 @@ describe("UpdateCardHeader", () => {
         productName="Test Product"
         productBaseVersion="1.2.3"
         percentage={66.666}
-        statusColor="info"
+        statusColor={UpdateProductCardHeaderStatus.Info}
       />,
     );
     expect(screen.getByText("67% Updated")).toBeDefined();

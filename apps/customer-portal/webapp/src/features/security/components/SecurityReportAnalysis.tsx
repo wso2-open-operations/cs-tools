@@ -27,7 +27,7 @@ import { useNavigate, useParams } from "react-router";
 import { CaseType } from "@features/support/constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
-import { SortOrder } from "@features/dashboard/types/common";
+import { SortOrder } from "@/types/common";
 import SecurityReportAnalysisSkeleton from "@features/security/components/SecurityReportAnalysisSkeleton";
 import TabBar from "@components/tab-bar/TabBar";
 import ListSearchBar from "@components/list-view/ListSearchBar";
@@ -36,35 +36,53 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListCard from "@components/list-view/ListCard";
 import { countListSearchAndFilters } from "@features/support/utils/support";
-import type { AllCasesFilterValues, CaseListItem } from "@features/support/types/cases";
-import type { CaseMetadataResponse } from "@features/support/types/cases";
-
-const SECURITY_FILTER_DEFINITIONS = [
-  {
-    id: "status",
-    filterKey: "statusId",
-    metadataKey: "caseStates",
-  },
-];
+import type {
+  AllCasesFilterValues,
+  CaseListItem,
+  CaseMetadataResponse,
+} from "@features/support/types/cases";
+import {
+  SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL,
+  SECURITY_REPORT_ANALYSIS_EMPTY_MESSAGE,
+  SECURITY_REPORT_ANALYSIS_PAGE_SIZE,
+  SECURITY_REPORT_ANALYSIS_SUBTITLE,
+  SECURITY_REPORT_ANALYSIS_TITLE,
+  SECURITY_REPORT_ENTITY_LABEL,
+  SECURITY_REPORT_FILTER_DEFINITIONS,
+  SECURITY_REPORT_SEARCH_PLACEHOLDER,
+  SECURITY_REPORT_SORT_OPTIONS,
+  SECURITY_REPORT_VIEW_TABS,
+} from "@features/security/constants/securityConstants";
+import {
+  SecurityReportCaseSortField,
+  SecurityReportViewMode,
+} from "@features/security/types/security";
+import {
+  parseSecurityReportCaseSortField,
+  parseSecurityReportViewMode,
+} from "@features/security/utils/securityPage";
 
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
+ *
  * @returns {JSX.Element}
  */
 const SecurityReportAnalysis = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
-  const [viewMode, setViewMode] = useState<"my" | "all">("all");
+  const [viewMode, setViewMode] = useState<SecurityReportViewMode>(
+    SecurityReportViewMode.ALL,
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortField, setSortField] = useState<
-    "createdOn" | "updatedOn" | "severity" | "state"
-  >("createdOn");
+  const [sortField, setSortField] = useState<SecurityReportCaseSortField>(
+    SecurityReportCaseSortField.createdOn,
+  );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = SECURITY_REPORT_ANALYSIS_PAGE_SIZE;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
@@ -72,7 +90,8 @@ const SecurityReportAnalysis = (): JSX.Element => {
     () => ({
       filters: {
         caseTypes: [CaseType.SECURITY_REPORT_ANALYSIS],
-        createdByMe: viewMode === "my" ? true : undefined,
+        createdByMe:
+          viewMode === SecurityReportViewMode.MY ? true : undefined,
         statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
@@ -108,7 +127,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const paginatedCases = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
     return displayedCases.slice(startIndex, startIndex + pageSize);
-  }, [displayedCases, page]);
+  }, [displayedCases, page, pageSize]);
 
   const totalPages = Math.ceil(totalItems / pageSize);
 
@@ -143,10 +162,8 @@ const SecurityReportAnalysis = (): JSX.Element => {
     setPage(1);
   };
 
-  const handleSortFieldChange = (
-    value: "createdOn" | "updatedOn" | "severity" | "state",
-  ) => {
-    setSortField(value);
+  const handleSortFieldChange = (value: string) => {
+    setSortField(parseSecurityReportCaseSortField(value));
     setPage(1);
   };
 
@@ -154,11 +171,10 @@ const SecurityReportAnalysis = (): JSX.Element => {
     setPage(value);
   };
 
-  const reportViewTabs = useMemo(
-    () => [
-      { id: "my", label: "My Reports" },
-      { id: "all", label: "All Reports" },
-    ],
+  const reportViewTabs = useMemo(() => [...SECURITY_REPORT_VIEW_TABS], []);
+
+  const sortFieldOptions = useMemo(
+    () => [...SECURITY_REPORT_SORT_OPTIONS],
     [],
   );
 
@@ -173,7 +189,6 @@ const SecurityReportAnalysis = (): JSX.Element => {
         gap: 3,
       }}
     >
-      {/* Header */}
       <Box
         sx={{
           display: "flex",
@@ -185,18 +200,25 @@ const SecurityReportAnalysis = (): JSX.Element => {
       >
         <Box>
           <Typography variant="h5" color="text.primary" sx={{ mb: 0.5 }}>
-            Security Report Analysis
+            {SECURITY_REPORT_ANALYSIS_TITLE}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Security vulnerability reports uploaded for analysis
+            {SECURITY_REPORT_ANALYSIS_SUBTITLE}
           </Typography>
         </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            flexWrap: "wrap",
+          }}
+        >
           <TabBar
             tabs={reportViewTabs}
             activeTab={viewMode}
             onTabChange={(tabId) => {
-              setViewMode(tabId as "my" | "all");
+              setViewMode(parseSecurityReportViewMode(tabId));
               setPage(1);
             }}
             sx={{ mb: 0, height: 32 }}
@@ -208,14 +230,13 @@ const SecurityReportAnalysis = (): JSX.Element => {
             onClick={handleCreateReport}
             size="small"
           >
-            Create
+            {SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL}
           </Button>
         </Box>
       </Box>
 
-      {/* Search + Filters */}
       <ListSearchBar
-        searchPlaceholder="Search reports by case number, title, or description..."
+        searchPlaceholder={SECURITY_REPORT_SEARCH_PLACEHOLDER}
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         isFiltersOpen={isFiltersOpen}
@@ -224,12 +245,12 @@ const SecurityReportAnalysis = (): JSX.Element => {
         onClearFilters={handleClearFilters}
         filtersContent={
           <ListFiltersPanel
-            filterDefinitions={SECURITY_FILTER_DEFINITIONS}
+            filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}
             filters={filters}
             resolveOptions={(def) => {
-              const raw = (filterMetadata as CaseMetadataResponse | undefined)?.[
-                def.metadataKey as keyof CaseMetadataResponse
-              ];
+              const raw = (
+                filterMetadata as CaseMetadataResponse | undefined
+              )?.[def.metadataKey as keyof CaseMetadataResponse];
               if (!Array.isArray(raw)) return [];
               return raw.map((item: { label: string; id: string }) => ({
                 label: item.label,
@@ -241,35 +262,24 @@ const SecurityReportAnalysis = (): JSX.Element => {
         }
       />
 
-      {/* Results count + sort */}
       <ListResultsBar
         shownCount={paginatedCases.length}
         totalCount={totalItems}
-        entityLabel="reports"
-        sortFieldOptions={[
-          { value: "createdOn", label: "Created date" },
-          { value: "updatedOn", label: "Updated date" },
-          { value: "severity", label: "Severity" },
-          { value: "state", label: "State" },
-        ]}
+        entityLabel={SECURITY_REPORT_ENTITY_LABEL}
+        sortFieldOptions={sortFieldOptions}
         sortField={sortField}
-        onSortFieldChange={(v) =>
-          handleSortFieldChange(
-            v as "createdOn" | "updatedOn" | "severity" | "state",
-          )
-        }
+        onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
       />
 
-      {/* Reports list */}
       <Box>
         {isLoading ? (
           <SecurityReportAnalysisSkeleton />
         ) : paginatedCases.length === 0 ? (
           <Box sx={{ textAlign: "center", py: 6 }}>
             <Typography variant="body1" color="text.secondary">
-              No reports found.
+              {SECURITY_REPORT_ANALYSIS_EMPTY_MESSAGE}
             </Typography>
           </Box>
         ) : (

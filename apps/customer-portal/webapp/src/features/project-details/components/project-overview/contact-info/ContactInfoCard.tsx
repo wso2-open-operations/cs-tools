@@ -24,17 +24,11 @@ import {
 } from "@wso2/oxygen-ui";
 import { Users, User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { Contact } from "@features/project-details/constants/projectDetailsConstants";
+import type { Contact } from "@features/project-details/types/projectDetails";
 import ContactRow from "@features/project-details/components/project-overview/contact-info/ContactRow";
 import { colors } from "@wso2/oxygen-ui";
-import type { ProjectDetails } from "@features/project-hub/types/projects";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-
-interface ContactInfoCardProps {
-  project?: ProjectDetails;
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import type { ContactInfoCardProps } from "@features/project-details/types/projectDetailsComponents";
 
 const ContactInfoCard = ({
   project,

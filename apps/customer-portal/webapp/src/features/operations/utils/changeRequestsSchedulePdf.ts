@@ -20,7 +20,7 @@ import type {
   ChangeRequestItem,
   ChangeRequestStats,
 } from "@features/operations/types/changeRequests";
-import { formatImpactLabel } from "@features/operations/constants/changeRequestConstants";
+import { formatImpactLabel } from "@features/operations/utils/changeRequestUi";
 
 /**
  * Formats a date string for display in the PDF.

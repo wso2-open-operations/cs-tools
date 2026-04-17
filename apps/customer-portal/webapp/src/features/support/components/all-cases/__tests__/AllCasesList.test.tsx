@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import AllCasesList from "@features/support/components/AllCasesList";
+import ListItems from "@components/list-view/ListItems";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 const mockCases = [
@@ -72,13 +72,17 @@ vi.mock("@features/support/utils/support", () => ({
   stripHtml: vi.fn((html) => html),
 }));
 
-describe("AllCasesList", () => {
+describe("ListItems", () => {
   const theme = createTheme();
 
   it("should render the list of cases", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesList cases={mockCases.slice(0, 2)} isLoading={false} />
+        <ListItems
+          cases={mockCases.slice(0, 2)}
+          isLoading={false}
+          entityName="cases"
+        />
       </ThemeProvider>,
     );
 
@@ -91,7 +95,7 @@ describe("AllCasesList", () => {
   it("should render 'No cases found' when the list is empty", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesList cases={[]} isLoading={false} />
+        <ListItems cases={[]} isLoading={false} entityName="cases" />
       </ThemeProvider>,
     );
 
@@ -101,7 +105,12 @@ describe("AllCasesList", () => {
   it("should show search empty state when list is empty and refined", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesList cases={[]} isLoading={false} hasListRefinement />
+        <ListItems
+          cases={[]}
+          isLoading={false}
+          hasListRefinement
+          entityName="cases"
+        />
       </ThemeProvider>,
     );
 
@@ -115,11 +124,11 @@ describe("AllCasesList", () => {
   it("should render skeletons when loading", () => {
     render(
       <ThemeProvider theme={theme}>
-        <AllCasesList cases={[]} isLoading={true} />
+        <ListItems cases={[]} isLoading={true} entityName="cases" />
       </ThemeProvider>,
     );
 
-    // AllCasesListSkeleton renders 5 skeletons
+    // ListSkeleton renders skeleton rows
     const skeletons = screen.getAllByTestId("Skeleton");
     expect(skeletons.length).toBeGreaterThan(0);
   });

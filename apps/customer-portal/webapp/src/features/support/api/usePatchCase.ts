@@ -24,15 +24,9 @@ import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { PatchCaseRequest } from "@features/support/types/cases";
+import type { PatchCaseResponse } from "@features/support/types/supportApi";
 
-/** Minimal response from PATCH /cases/:caseId. */
-export interface PatchCaseResponse {
-  id: string;
-  updatedOn: string;
-  updatedBy?: string;
-  state?: { id: number; label: string };
-  type?: { id: string; name: string };
-}
+export type { PatchCaseResponse };
 
 /**
  * Hook to update a case state (PATCH /cases/:caseId).

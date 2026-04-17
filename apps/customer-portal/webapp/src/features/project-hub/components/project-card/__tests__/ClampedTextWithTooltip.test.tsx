@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { ClampedTextWithTooltip } from "@features/project-hub/components/project-card/ClampedTextWithTooltip";
+import { ClampedTextVariant } from "@features/project-hub/types/projectHub";
 
 vi.mock("@wso2/oxygen-ui", async () => {
   const actual = await vi.importActual<typeof import("@wso2/oxygen-ui")>(
@@ -56,7 +57,11 @@ describe("ClampedTextWithTooltip", () => {
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(20);
 
     renderWithTheme(
-      <ClampedTextWithTooltip text="Short" lineClamp={2} variant="h6" />,
+      <ClampedTextWithTooltip
+        text="Short"
+        lineClamp={2}
+        variant={ClampedTextVariant.H6}
+      />,
     );
 
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
@@ -71,7 +76,11 @@ describe("ClampedTextWithTooltip", () => {
       "Very Long Project Title That Should Trigger Truncation And Tooltip";
 
     renderWithTheme(
-      <ClampedTextWithTooltip text={full} lineClamp={1} variant="h6" />,
+      <ClampedTextWithTooltip
+        text={full}
+        lineClamp={1}
+        variant={ClampedTextVariant.H6}
+      />,
     );
 
     expect(screen.getByRole("tooltip")).toHaveTextContent(full);

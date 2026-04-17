@@ -26,15 +26,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectContact } from "@features/settings/types/users";
-
-export interface RemoveUserModalProps {
-  open: boolean;
-  contact: ProjectContact | null;
-  isDeleting?: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}
+import type { RemoveUserModalProps } from "@features/settings/types/settings";
 
 /**
  * Confirmation modal before removing a user from the project.

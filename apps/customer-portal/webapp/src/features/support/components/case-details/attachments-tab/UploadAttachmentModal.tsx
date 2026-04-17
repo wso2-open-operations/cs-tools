@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { UploadAttachmentModalProps } from "@features/support/types/supportComponents";
 import {
   Alert,
   Button,
@@ -57,17 +58,6 @@ function ensureExtension(fileName: string, extension: string): string {
     return fileName;
   }
   return `${fileName}${extension}`;
-}
-
-export interface UploadAttachmentModalProps {
-  open: boolean;
-  /** Case ID for case attachment upload. */
-  caseId?: string;
-  /** Deployment ID for deployment document upload. */
-  deploymentId?: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onSelect?: (file: File, attachmentName?: string) => void;
 }
 
 /**

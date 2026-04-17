@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CallRequestCardProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -28,7 +29,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { Clock, ExternalLink, Phone } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import type { CallRequest } from "@features/support/types/calls";
 import {
   formatCallRequestBackendDateTimeShort,
   formatUtcToLocal,
@@ -40,15 +40,6 @@ import {
   CALL_REQUEST_STATE_NOTES_PENDING_ID,
   CallRequestStatus,
 } from "@features/support/constants/supportConstants";
-
-export interface CallRequestCardProps {
-  call: CallRequest;
-  userTimeZone?: string;
-  onEditClick?: (call: CallRequest) => void;
-  onDeleteClick?: (call: CallRequest) => void;
-  onApproveClick?: (call: CallRequest) => void;
-  onRejectClick?: (call: CallRequest) => void;
-}
 
 /** Renders preferred times in the selected scheduling timezone for UI display. */
 function formatPreferredTimes(

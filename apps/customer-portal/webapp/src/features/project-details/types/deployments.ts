@@ -19,7 +19,7 @@ import type {
   IdLabelRef,
   PaginationResponse,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
 import type { ProductUpdate } from "@features/project-details/types/products";
 
 // Item type for a product deployed in an environment.
@@ -34,7 +34,7 @@ export type DeploymentProduct = {
   releasedDate: string;
   endOfLifeDate: string;
   updateLevel: string;
-}
+};
 
 // Item type for a document attached to a deployment.
 export type DeploymentDocument = {
@@ -50,7 +50,7 @@ export type DeploymentDocument = {
   createdBy?: string;
   content?: string | null;
   downloadUrl?: string;
-}
+};
 
 // Response type for GET /deployments/:deploymentId/attachments.
 export type DeploymentAttachmentsResponse = PaginationResponse & {
@@ -62,7 +62,7 @@ export type PostDeploymentAttachmentResponse = AuditMetadata & {
   id: string;
   downloadUrl: string;
   size: number;
-}
+};
 
 // Enum for deployment status.
 export enum DeploymentStatus {
@@ -82,7 +82,7 @@ export type Deployment = {
   documents: DeploymentDocument[];
   deployedAt: string;
   uptimePercent: number;
-}
+};
 
 // Response type for project deployments list.
 export type ProjectDeploymentsListResponse = PaginationResponse & {
@@ -99,7 +99,7 @@ export type ProjectDeploymentItem = AuditMetadata & {
   type: IdLabelRef;
   deployedProductCount?: number;
   instanceCount?: number;
-}
+};
 
 // Response type for GET /deployments/:deploymentId/products.
 export type DeployedProductsResponse = PaginationResponse & {
@@ -110,7 +110,6 @@ export type DeployedProductsResponse = PaginationResponse & {
 export type DeployedProductsResponsePayload =
   | DeploymentProductItem[]
   | DeployedProductsResponse;
-
 
 // Item type for a deployment product instance.
 export type DeploymentProductInstance = AuditMetadata & {
@@ -137,12 +136,12 @@ export type DeploymentProductItem = AuditMetadata & {
   updates?: ProductUpdate[] | null;
   instanceCount?: number;
   instances?: DeploymentProductInstance[] | null;
-}
+};
 
 // Response type for creating a deployment.
 export type CreateDeploymentResponse = AuditMetadata & {
   id: string;
-}
+};
 
 // Item type for subscription data within license response.
 export type SubscriptionData = {
@@ -152,13 +151,13 @@ export type SubscriptionData = {
   clientId: string;
   clientSecret: string;
   secrets: string;
-}
+};
 
 // Response type for license details.
 export type DeploymentLicense = {
   subscriptionData: SubscriptionData;
   signature: string;
-}
+};
 
 // Request type for posting a deployment attachment.
 export type PostDeploymentAttachmentRequest = {
@@ -166,7 +165,7 @@ export type PostDeploymentAttachmentRequest = {
   type: string;
   content: string;
   description?: string;
-}
+};
 
 // Item type for deployment product update levels.
 export type DeploymentProductUpdate = {
@@ -182,7 +181,7 @@ export type PatchDeploymentProductRequest = {
   description?: string;
   active?: boolean;
   updates?: DeploymentProductUpdate[];
-}
+};
 
 // Request type for posting a deployment product.
 export type PostDeploymentProductRequest = {
@@ -192,14 +191,14 @@ export type PostDeploymentProductRequest = {
   cores?: number;
   tps?: number;
   description?: string;
-}
+};
 
 // Request type for creating a deployment.
 export type CreateDeploymentRequest = {
   deploymentTypeKey: number;
   description: string;
   name: string;
-}
+};
 
 // Request type for patching a deployment.
 export type PatchDeploymentRequest = {
@@ -207,14 +206,14 @@ export type PatchDeploymentRequest = {
   description?: string;
   name?: string;
   typeKey?: number;
-}
+};
 
 // Filter type for consumption statistics.
 export type ConsumptionFilter = {
   include?: boolean;
   startDate?: string;
   endDate?: string;
-}
+};
 
 // Filter type for searching deployments.
 export type DeploymentSearchFilters = {
@@ -234,4 +233,10 @@ export type DeployedProductSearchFilters = {
 // Request type for searching deployed products.
 export type DeployedProductSearchRequest = SearchRequestBase & {
   filters?: DeployedProductSearchFilters;
+};
+
+/** One deployment product row selected for quick service request creation. */
+export type SelectedDeploymentProduct = {
+  deploymentId: string;
+  productItemId: string;
 };

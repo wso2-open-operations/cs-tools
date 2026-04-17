@@ -14,7 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate, useSearchParams, useLocation } from "react-router";
+import {
+  useParams,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+} from "react-router";
 import {
   useState,
   useMemo,
@@ -29,17 +34,17 @@ import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
-import { hasListSearchOrFilters, isS0Case } from "@features/support/utils/support";
+import {
+  hasListSearchOrFilters,
+  isS0Case,
+} from "@features/support/utils/support";
 import {
   CaseType,
   ALL_CASES_STAT_CONFIGS,
   getAllCasesFlattenedStats,
 } from "@features/support/constants/supportConstants";
-import { SortOrder } from "@features/dashboard/types/common";
-import {
-  getProjectPermissions,
-  shouldExcludeS0,
-} from "@features/project-details/utils/permissions";
+import { SortOrder } from "@/types/common";
+import { getProjectPermissions, shouldExcludeS0 } from "@/utils/permission";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 import ListPageHeader from "@components/list-view/ListPageHeader";
@@ -94,10 +99,13 @@ export default function AllCasesPage(): JSX.Element {
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
   // Fetch deployments for the deployment filter (10 at a time)
-  const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(projectId || "", {
-    pageSize: 10,
-    enabled: !!projectId,
-  });
+  const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
+    projectId || "",
+    {
+      pageSize: 10,
+      enabled: !!projectId,
+    },
+  );
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
@@ -118,8 +126,9 @@ export default function AllCasesPage(): JSX.Element {
         statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-        deploymentId:
-          permissions.hasDeployments ? filters.deploymentId || undefined : undefined,
+        deploymentId: permissions.hasDeployments
+          ? filters.deploymentId || undefined
+          : undefined,
         searchQuery: searchTerm.trim() || undefined,
         createdByMe: createdByMe || undefined,
       },
@@ -128,7 +137,14 @@ export default function AllCasesPage(): JSX.Element {
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortField, sortOrder, createdByMe, permissions.hasDeployments],
+    [
+      filters,
+      searchTerm,
+      sortField,
+      sortOrder,
+      createdByMe,
+      permissions.hasDeployments,
+    ],
   );
 
   // Fetch all cases using infinite query (runs in parallel with stats when projectId and auth are ready)

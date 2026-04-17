@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DeploymentDocument } from "@features/project-details/types/deployments";
 import {
   displayValue,
   formatProjectDate,
@@ -44,9 +43,6 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { useGetAttachment } from "@api/useGetAttachment";
 
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
-const ARCHIVE_EXT = /\.(zip|tar|gz|7z|rar|bz2)$/i;
-
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
@@ -57,10 +53,15 @@ import {
 } from "@features/project-details/api/useInfiniteDeploymentDocuments";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-
-interface DeploymentDocumentListProps {
-  deploymentId: string;
-}
+import {
+  DEPLOYMENT_DOCUMENT_ARCHIVE_FILE_REGEX,
+  DEPLOYMENT_DOCUMENT_IMAGE_FILE_REGEX,
+  PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
+} from "@features/project-details/constants/projectDetailsConstants";
+import type {
+  DeploymentDocumentListProps,
+  DeploymentDocumentRowProps,
+} from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Renders the list of documents for a deployment with Add Document button.
@@ -259,17 +260,11 @@ function DocumentsSkeleton(): JSX.Element {
   );
 }
 
-interface DocumentRowProps {
-  doc: DeploymentDocument;
-  deploymentId: string;
-  onError: (message: string) => void;
-}
-
 function DocumentRow({
   doc,
   deploymentId,
   onError,
-}: DocumentRowProps): JSX.Element {
+}: DeploymentDocumentRowProps): JSX.Element {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const { downloadAttachment, isDownloading, downloadingId } =
@@ -277,16 +272,18 @@ function DocumentRow({
   const deleteAttachment = useDeleteAttachment();
   const sizeBytes = doc.sizeBytes ?? doc.size ?? 0;
   const dateStr = formatProjectDate(doc.uploadedAt ?? doc.createdOn ?? "");
-  const emptyVal = "Not Available";
-  const name = displayValue(doc.name, emptyVal);
-  const uploadedBy = displayValue(doc.uploadedBy ?? doc.createdBy, emptyVal);
+  const name = displayValue(doc.name, PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY);
+  const uploadedBy = displayValue(
+    doc.uploadedBy ?? doc.createdBy,
+    PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
+  );
   const sizeStr = formatBytes(sizeBytes);
   const category = doc.category;
 
   const fileType = useMemo(() => {
     const ext = name.split(".").pop() ?? "";
-    if (IMAGE_EXT.test(`.${ext}`)) return "image";
-    if (ARCHIVE_EXT.test(`.${ext}`)) return "archive";
+    if (DEPLOYMENT_DOCUMENT_IMAGE_FILE_REGEX.test(`.${ext}`)) return "image";
+    if (DEPLOYMENT_DOCUMENT_ARCHIVE_FILE_REGEX.test(`.${ext}`)) return "archive";
     return "text";
   }, [name]);
 

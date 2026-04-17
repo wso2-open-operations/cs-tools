@@ -26,20 +26,9 @@ import {
 import { Info } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-import { type StatCardColor } from "@features/dashboard/constants/dashboardConstants";
-import { NULL_PLACEHOLDER } from "@features/updates/utils/updates";
-
-//Props for the StatCard component.
-interface StatCardProps {
-  label: string;
-  value?: string | number;
-  icon: JSX.Element;
-  iconColor: StatCardColor;
-  tooltipText: string;
-  isLoading?: boolean;
-  isError?: boolean;
-  extraContent?: JSX.Element;
-}
+import type { StatCardColor } from "@/features/dashboard/constants/dashboard";
+import type { StatCardProps } from "@features/updates/types/updates";
+import { UPDATES_NULL_PLACEHOLDER } from "@features/updates/constants/updatesConstants";
 
 /**
  * Component to display a single statistic card for updates.
@@ -109,7 +98,7 @@ export const StatCard = ({
             ) : isError ? (
               <ErrorIndicator entityName={label.toLowerCase()} />
             ) : (
-              (value ?? NULL_PLACEHOLDER)
+              (value ?? UPDATES_NULL_PLACEHOLDER)
             )}
           </Typography>
         </Box>

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatHistoryListProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -28,7 +29,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot, Clock, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { ChatHistoryItem } from "@features/support/types/conversations";
 import { ChatAction } from "@features/support/constants/supportConstants";
 import {
   getChatActionColor,
@@ -40,13 +40,6 @@ import {
 import ChatHistorySkeleton from "@features/support/components/support-overview-cards/ChatHistorySkeleton";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
-
-export interface ChatHistoryListProps {
-  items: ChatHistoryItem[];
-  isLoading?: boolean;
-  isError?: boolean;
-  onItemAction?: (chatId: string, action: ChatAction) => void;
-}
 
 /**
  * Renders a list of chat history rows for the support overview card.

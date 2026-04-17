@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { RejectCallRequestModalProps } from "@features/support/types/supportComponents";
 import {
   Button,
   CircularProgress,
@@ -27,16 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useState, type ChangeEvent, type JSX } from "react";
-import type { CallRequest } from "@features/support/types/calls";
 import { formatCallRequestPromptScheduledTime } from "@features/support/utils/support";
-
-export interface RejectCallRequestModalProps {
-  open: boolean;
-  call: CallRequest | null;
-  onClose: () => void;
-  onConfirm: (reason: string) => void;
-  isRejecting?: boolean;
-}
 
 /**
  * Confirmation modal for rejecting a "Pending on Customer" call request.

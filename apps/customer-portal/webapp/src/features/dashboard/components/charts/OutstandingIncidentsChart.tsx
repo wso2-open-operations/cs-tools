@@ -24,21 +24,22 @@ import {
 import type { JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
-import { OUTSTANDING_INCIDENTS_CHART_DATA } from "@features/dashboard/constants/dashboardConstants";
-
-interface OutstandingIncidentsChartProps {
-  data: {
-    low: number;
-    medium: number;
-    high: number;
-    critical: number;
-    catastrophic: number;
-    total: number;
-  };
-  isLoading?: boolean;
-  isError?: boolean;
-  excludeS0?: boolean;
-}
+import {
+  DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_ERROR_ENTITY_OUTSTANDING_CASES,
+  DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_INCIDENTS_PX,
+  DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
+  DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
+  DASHBOARD_CHART_TITLE_OUTSTANDING_CASES,
+} from "@/features/dashboard/constants/charts";
+import type { OutstandingIncidentsChartProps } from "@/features/dashboard/types/charts";
+import {
+  EMPTY_OUTSTANDING_INCIDENTS_DATA,
+  buildOutstandingIncidentsLegendRows,
+  buildOutstandingIncidentsPieSlices,
+  formatOutstandingIncidentsCenterTotal,
+  resolveOutstandingIncidentsChartSource,
+} from "@features/dashboard/utils/dashboardCharts";
 
 /**
  * Displays the Outstanding Incidents chart.
@@ -46,7 +47,7 @@ interface OutstandingIncidentsChartProps {
  * @param props - Component props
  * @param props.data - Array of data points for outstanding incidents.
  * @param props.isLoading - Flag indicating if the chart data is still loading.
- * @returns JSX.Element rendering the Outstanding Incidents chart.
+ * @returns {JSX.Element} Outstanding Incidents chart.
  */
 export const OutstandingIncidentsChart = ({
   data,
@@ -54,57 +55,46 @@ export const OutstandingIncidentsChart = ({
   isError,
   excludeS0 = false,
 }: OutstandingIncidentsChartProps): JSX.Element => {
-  const safeData = data ?? {
-    low: 0,
-    medium: 0,
-    high: 0,
-    critical: 0,
-    catastrophic: 0,
-    total: 0,
-  };
+  // safe data
+  const safeData = data ?? EMPTY_OUTSTANDING_INCIDENTS_DATA;
+  // chart source
+  const chartSource = resolveOutstandingIncidentsChartSource(excludeS0);
+  // error grey
+  const errorGrey = colors.grey?.[300] ?? "#D1D5DB";
 
-  const chartSource = excludeS0
-    ? OUTSTANDING_INCIDENTS_CHART_DATA.filter(
-        (item) => item.key !== "catastrophic",
-      )
-    : OUTSTANDING_INCIDENTS_CHART_DATA;
-
-  const chartData = isError
-    ? chartSource.map((item) => ({
-        name: item.displayName,
-        value: 1,
-        color: colors.grey?.[300] ?? "#D1D5DB",
-      }))
-    : isLoading
-      ? []
-      : chartSource.map((item) => ({
-          name: item.displayName,
-          value: safeData[item.key as keyof typeof safeData] ?? 0,
-          color: item.color,
-        }));
+  // chart data
+  const chartData = buildOutstandingIncidentsPieSlices(
+    chartSource,
+    safeData,
+    Boolean(isLoading),
+    Boolean(isError),
+    errorGrey,
+  );
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
-      {/* Title */}
       <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
-        Outstanding Support Cases
+        {DASHBOARD_CHART_TITLE_OUTSTANDING_CASES}
       </Typography>
-      {/* Chart state */}
       {isLoading ? (
         <Box
           sx={{
-            height: 240,
+            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Skeleton variant="circular" width={160} height={160} />
+          <Skeleton
+            variant="circular"
+            width={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+            height={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
+          />
         </Box>
       ) : (
         <Box
           sx={{
-            height: 240,
+            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
             position: "relative",
             opacity: isError ? 0.3 : 1,
             filter: isError ? "grayscale(1)" : "none",
@@ -141,7 +131,6 @@ export const OutstandingIncidentsChart = ({
               </Pie>
             </PieChart>
           </ResponsiveContainer>
-          {/* Center content (Total count or Error indicator) */}
           <Box
             sx={{
               position: "absolute",
@@ -160,21 +149,29 @@ export const OutstandingIncidentsChart = ({
                   alignItems: "center",
                 }}
               >
-                <ErrorIndicator entityName="outstanding cases" />
-                <Typography variant="caption">Total</Typography>
+                <ErrorIndicator
+                  entityName={DASHBOARD_CHART_ERROR_ENTITY_OUTSTANDING_CASES}
+                />
+                <Typography variant="caption">
+                  {DASHBOARD_CHART_CAPTION_TOTAL}
+                </Typography>
               </Box>
             ) : (
               <>
                 <Typography variant="h4">
-                  {data ? safeData.total : "N/A"}
+                  {formatOutstandingIncidentsCenterTotal(
+                    Boolean(data),
+                    safeData.total,
+                  )}
                 </Typography>
-                <Typography variant="caption">Total</Typography>
+                <Typography variant="caption">
+                  {DASHBOARD_CHART_CAPTION_TOTAL}
+                </Typography>
               </>
             )}
           </Box>
         </Box>
       )}
-      {/* Loading state */}
       {isLoading ? (
         <Box
           sx={{
@@ -185,16 +182,17 @@ export const OutstandingIncidentsChart = ({
           }}
         >
           {chartSource.map((_, i) => (
-            <Skeleton key={i} variant="rounded" width={60} height={20} />
+            <Skeleton
+              key={i}
+              variant="rounded"
+              width={DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_INCIDENTS_PX}
+              height={20}
+            />
           ))}
         </Box>
       ) : (
         <ChartLegend
-          data={chartSource.map((item) => ({
-            name: item.displayName,
-            value: safeData[item.key as keyof typeof safeData] ?? 0,
-            color: item.color,
-          }))}
+          data={buildOutstandingIncidentsLegendRows(chartSource, safeData)}
           isError={isError}
           showValues
         />

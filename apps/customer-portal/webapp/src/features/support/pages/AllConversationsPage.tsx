@@ -14,7 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate, useSearchParams, useLocation } from "react-router";
+import {
+  useParams,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+} from "react-router";
 import {
   useState,
   useMemo,
@@ -27,7 +32,10 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useSearchConversations } from "@features/support/api/useSearchConversations";
 import { useGetConversationStats } from "@features/support/api/useGetConversationStats";
-import type { AllConversationsFilterValues, Conversation } from "@features/support/types/conversations";
+import type {
+  AllConversationsFilterValues,
+  Conversation,
+} from "@features/support/types/conversations";
 import {
   ALL_CONVERSATIONS_STAT_CONFIGS,
   ALL_CONVERSATIONS_FILTER_DEFINITIONS,
@@ -40,9 +48,12 @@ import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
-import AllConversationsList from "@features/support/components/AllConversationsList";
-import { hasListSearchOrFilters, countListSearchAndFilters } from "@features/support/utils/support";
-import { SortOrder } from "@features/dashboard/types/common";
+import AllConversationsList from "@features/support/components/all-conversations/AllConversationsList";
+import {
+  hasListSearchOrFilters,
+  countListSearchAndFilters,
+} from "@features/support/utils/support";
+import { SortOrder } from "@/types/common";
 
 /**
  * AllConversationsPage component to display all conversations with filters, search, and pagination.
@@ -85,7 +96,15 @@ export default function AllConversationsPage(): JSX.Element {
         order: sortOrder,
       },
     }),
-    [searchTerm, filters.stateId, page, pageSize, sortField, sortOrder, createdByMe],
+    [
+      searchTerm,
+      filters.stateId,
+      page,
+      pageSize,
+      sortField,
+      sortOrder,
+      createdByMe,
+    ],
   );
 
   const {
@@ -223,9 +242,9 @@ export default function AllConversationsPage(): JSX.Element {
             filterDefinitions={ALL_CONVERSATIONS_FILTER_DEFINITIONS}
             filters={filters}
             resolveOptions={(def) => {
-              const raw = (filterMetadata as CaseMetadataResponse | undefined)?.[
-                def.metadataKey as keyof CaseMetadataResponse
-              ];
+              const raw = (
+                filterMetadata as CaseMetadataResponse | undefined
+              )?.[def.metadataKey as keyof CaseMetadataResponse];
               if (!Array.isArray(raw)) return [];
               return raw.map((item: { label: string; id: string }) => ({
                 label: item.label,

@@ -47,7 +47,7 @@ import { useAllDeploymentProducts } from "@features/support/hooks/useAllDeployme
 import { useChatWebSocket } from "@features/support/api/useChatWebSocket";
 import type { Message } from "@features/support/types/conversations";
 import { buildEnvProducts } from "@features/support/utils/caseCreation";
-import { filterDeploymentsForCaseCreation } from "@features/project-details/utils/permissions";
+import { filterDeploymentsForCaseCreation } from "@/utils/permission";
 import { getFinalMessageFromPayload } from "@features/support/utils/chat";
 import { NOVERA_ANALYZING_PLACEHOLDER_TEXT } from "@features/support/constants/chatConstants";
 import { ChatSender } from "@features/support/types/conversations";
@@ -139,110 +139,110 @@ export default function NoveraFloatingChat(): JSX.Element | null {
 
   const { connect, sendUserMessage } = useChatWebSocket({
     onEvent: (event) => {
-      if (event.type === "conversation_created") {
-        const nextConversationId = String(event.conversationId ?? "");
-        if (nextConversationId) {
-          setConversationId(nextConversationId);
+      switch (event.type) {
+        case "conversation_created": {
+          const nextConversationId = String(event.conversationId ?? "");
+          if (nextConversationId) {
+            setConversationId(nextConversationId);
+          }
+          break;
         }
-        return;
-      }
-
-      if (event.type === "thinking_start") {
-        upsertActiveBotMessage(
-          (msg) => ({
+        case "thinking_start":
+          upsertActiveBotMessage(
+            (msg) => ({
+              ...msg,
+              isLoading: false,
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+            () => ({
+              id: `bot-${Date.now()}`,
+              sender: ChatSender.BOT,
+              timestamp: new Date(),
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+          );
+          break;
+        case "thinking_step": {
+          const label = String(event.label ?? event.step ?? "Working...");
+          upsertActiveBotMessage((msg) => ({
             ...msg,
             isLoading: false,
-            text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
-            thinkingSteps: [],
-            thinkingLabel: null,
-            isStreaming: false,
-          }),
-          () => ({
-            id: `bot-${Date.now()}`,
-            sender: ChatSender.BOT,
-            timestamp: new Date(),
-            text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
-            thinkingSteps: [],
-            thinkingLabel: null,
-            isStreaming: false,
-          }),
-        );
-        return;
-      }
-
-      if (event.type === "thinking_step") {
-        const label = String(event.label ?? event.step ?? "Working...");
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          thinkingSteps: [...(msg.thinkingSteps ?? []), label],
-          thinkingLabel: label,
-        }));
-        return;
-      }
-
-      if (event.type === "thinking_end") {
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          thinkingLabel: msg.thinkingLabel,
-        }));
-        return;
-      }
-
-      if (event.type === "token") {
-        const token = String(event.content ?? "");
-        if (!token) return;
-        const activeId = botMessageIdRef.current;
-        if (!activeId) return;
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === activeId
-              ? {
-                  ...msg,
-                  text: `${msg.text ?? ""}${token}`,
-                  isLoading: false,
-                  isStreaming: true,
-                }
-              : msg,
-          ),
-        );
-        return;
-      }
-
-      if (event.type === "final") {
-        const payload = (event.payload ?? {}) as Record<string, unknown>;
-        const finalMessage = getFinalMessageFromPayload(payload);
-        const nextConversationId = String(payload.conversationId ?? "");
-        if (nextConversationId) {
-          setConversationId(nextConversationId);
+            thinkingSteps: [...(msg.thinkingSteps ?? []), label],
+            thinkingLabel: label,
+          }));
+          break;
         }
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          isError: false,
-          text: finalMessage || msg.text,
-          thinkingSteps: [],
-          thinkingLabel: null,
-          isStreaming: false,
-        }));
-        setIsSending(false);
-        return;
-      }
-
-      if (event.type === "error") {
-        upsertActiveBotMessage((msg) => ({
-          ...msg,
-          isLoading: false,
-          isError: true,
-          text: String(
-            event.message ?? "Something went wrong. Please try again.",
-          ),
-          thinkingSteps: [],
-          thinkingLabel: null,
-          isStreaming: false,
-        }));
-        setIsSending(false);
+        case "thinking_end":
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            thinkingLabel: msg.thinkingLabel,
+          }));
+          break;
+        case "token": {
+          const token = String(event.content ?? "");
+          if (!token) {
+            break;
+          }
+          const activeId = botMessageIdRef.current;
+          if (!activeId) {
+            break;
+          }
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === activeId
+                ? {
+                    ...msg,
+                    text: `${msg.text ?? ""}${token}`,
+                    isLoading: false,
+                    isStreaming: true,
+                  }
+                : msg,
+            ),
+          );
+          break;
+        }
+        case "final": {
+          const payload = (event.payload ?? {}) as Record<string, unknown>;
+          const finalMessage = getFinalMessageFromPayload(payload);
+          const nextConversationId = String(payload.conversationId ?? "");
+          if (nextConversationId) {
+            setConversationId(nextConversationId);
+          }
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            isError: false,
+            text: finalMessage || msg.text,
+            thinkingSteps: [],
+            thinkingLabel: null,
+            isStreaming: false,
+          }));
+          setIsSending(false);
+          break;
+        }
+        case "error":
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            isError: true,
+            text: String(
+              event.message ?? "Something went wrong. Please try again.",
+            ),
+            thinkingSteps: [],
+            thinkingLabel: null,
+            isStreaming: false,
+          }));
+          setIsSending(false);
+          break;
+        default:
+          break;
       }
     },
     onError: () => {

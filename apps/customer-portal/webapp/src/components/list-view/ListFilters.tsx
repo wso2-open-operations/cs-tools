@@ -32,7 +32,7 @@ import {
   paginatedSelectMenuListProps,
 } from "@features/shared/constants/dropdownConstants";
 import { ALL_CASES_FILTER_DEFINITIONS } from "@features/support/constants/supportConstants";
-import { isS0SeverityLabel } from "@features/dashboard/constants/dashboardConstants";
+import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
 import { deriveFilterLabels, mapSeverityToDisplay } from "@features/support/utils/support";
 
 export interface ListFiltersProps {

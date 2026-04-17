@@ -15,93 +15,37 @@
 // under the License.
 
 import { type JSX, useMemo } from "react";
-import {
-  Briefcase,
-  Clock,
-  CircleCheck,
-  CircleAlert,
-} from "@wso2/oxygen-ui-icons-react";
-import type { ProjectCasesStats } from "@features/support/types/cases";
 import ListStatGrid from "@components/list-view/ListStatGrid";
-import type { SupportStatConfig } from "@features/support/constants/supportConstants";
 import {
-  SUPPORT_STATE_AWAITING_INFO,
-  SUPPORT_STATE_CLOSED,
-  SUPPORT_STATE_WAITING_ON_WSO2,
-} from "@features/support/constants/supportConstants";
-
-type EngagementsStatKey = "total" | "active" | "completed" | "onHold";
-
-export interface EngagementsStatCardsProps {
-  stats?: ProjectCasesStats;
-  isLoading: boolean;
-  isError: boolean;
-}
+  ENGAGEMENTS_STAT_CARDS_CONFIG,
+  ENGAGEMENTS_STAT_GRID_ENTITY_NAME,
+} from "@/features/engagements/constants/engagements";
+import type {
+  EngagementsStatCardsProps,
+  EngagementsStatKey,
+} from "@features/engagements/types/engagements";
+import { computeEngagementsStatValues } from "@features/engagements/utils/engagements";
 
 /**
- * EngagementsStatCards displays key metrics for engagements (total, active, completed, on hold).
+ * Key metrics for engagements (total, active, completed, on hold).
  *
- * @param {EngagementsStatCardsProps} props - Component props.
- * @returns {JSX.Element} The rendered stat cards.
+ * @param props - Stats payload and loading/error flags.
+ * @returns {JSX.Element} Stat card grid.
  */
 export default function EngagementsStatCards({
   stats,
   isLoading,
   isError,
 }: EngagementsStatCardsProps): JSX.Element {
-  const configs: SupportStatConfig<EngagementsStatKey>[] = useMemo(() => {
-    return [
-      {
-        icon: Briefcase,
-        iconColor: "primary",
-        key: "total",
-        label: "Total Engagements",
-      },
-      {
-        icon: Clock,
-        iconColor: "info",
-        key: "active",
-        label: "Active Engagements",
-      },
-      {
-        icon: CircleCheck,
-        iconColor: "success",
-        key: "completed",
-        label: "Completed",
-      },
-      {
-        icon: CircleAlert,
-        iconColor: "warning",
-        key: "onHold",
-        label: "On Hold",
-      },
-    ];
-  }, []);
-
-  const flattened = useMemo((): Partial<Record<EngagementsStatKey, number>> => {
-    const completed =
-      stats?.stateCount?.find((s) => s.label === SUPPORT_STATE_CLOSED)?.count ??
-      0;
-    const onHold =
-      (stats?.stateCount?.find((s) => s.label === SUPPORT_STATE_AWAITING_INFO)
-        ?.count ?? 0) +
-      (stats?.stateCount?.find((s) => s.label === SUPPORT_STATE_WAITING_ON_WSO2)
-        ?.count ?? 0);
-    return {
-      total: stats?.totalCount ?? 0,
-      active: stats?.activeCount ?? 0,
-      completed,
-      onHold,
-    };
-  }, [stats]);
+  const flattened = useMemo(() => computeEngagementsStatValues(stats), [stats]);
 
   return (
     <ListStatGrid<EngagementsStatKey>
       isLoading={isLoading}
-      configs={configs}
+      configs={ENGAGEMENTS_STAT_CARDS_CONFIG}
       stats={flattened}
       isError={isError}
-      entityName="engagement statistics"
+      entityName={ENGAGEMENTS_STAT_GRID_ENTITY_NAME}
       itemSize={{ xs: 12, sm: 6, md: 3 }}
     />
   );

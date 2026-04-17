@@ -31,31 +31,38 @@ import {
   Select,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Code, X, Monitor, Shield } from "@wso2/oxygen-ui-icons-react";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-import type { CreateProjectContactRequest } from "@features/settings/types/users";
 import { useValidateProjectContact } from "@features/settings/api/useValidateProjectContact";
-
-type ContactRole = "portal_user" | "security_user" | "system_user";
-
-const ROLES: { id: ContactRole; label: string; Icon: typeof Code }[] = [
-  { id: "portal_user", label: "Portal User", Icon: Monitor },
-  { id: "security_user", label: "Security User", Icon: Shield },
-  { id: "system_user", label: "System User", Icon: Code },
-];
-
-/** Basic email format validation: local@domain.tld */
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-type ModalStep = "email" | "details";
-
-export interface AddUserModalProps {
-  open: boolean;
-  projectId: string;
-  onClose: () => void;
-  onSubmit: (data: CreateProjectContactRequest) => void;
-  isSubmitting?: boolean;
-}
+import {
+  ADD_USER_DETAILS_INTRO,
+  ADD_USER_EMAIL_INVALID_CONTACT_ERROR,
+  ADD_USER_EMAIL_INVALID_ERROR,
+  ADD_USER_EMAIL_LABEL,
+  ADD_USER_EMAIL_PLACEHOLDER,
+  ADD_USER_EMAIL_REGEX,
+  ADD_USER_EMAIL_REQUIRED_ERROR,
+  ADD_USER_EMAIL_STEP_DESCRIPTION,
+  ADD_USER_EMAIL_VALIDATE_ERROR,
+  ADD_USER_FIRST_NAME_LABEL,
+  ADD_USER_FIRST_NAME_PLACEHOLDER,
+  ADD_USER_LAST_NAME_LABEL,
+  ADD_USER_LAST_NAME_PLACEHOLDER,
+  ADD_USER_MODAL_BACK,
+  ADD_USER_MODAL_CANCEL,
+  ADD_USER_MODAL_NEXT,
+  ADD_USER_MODAL_SENDING,
+  ADD_USER_MODAL_SEND_INVITATION,
+  ADD_USER_MODAL_TITLE,
+  ADD_USER_MODAL_VALIDATING,
+  ADD_USER_ROLE_OPTIONS,
+  ADD_USER_TYPE_LABEL,
+} from "@features/settings/constants/settingsConstants";
+import {
+  AddUserContactRole,
+  AddUserModalStep,
+  type AddUserModalProps,
+} from "@features/settings/types/settings";
 
 /**
  * Two-step modal to add a new user (contact) to the project.
@@ -72,24 +79,26 @@ export default function AddUserModal({
   onSubmit,
   isSubmitting = false,
 }: AddUserModalProps): JSX.Element {
-  const [step, setStep] = useState<ModalStep>("email");
+  const [step, setStep] = useState<AddUserModalStep>(AddUserModalStep.EMAIL);
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [role, setRole] = useState<ContactRole>("portal_user");
+  const [role, setRole] = useState<AddUserContactRole>(
+    AddUserContactRole.PORTAL_USER,
+  );
   const [isExistingContact, setIsExistingContact] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   const validateContact = useValidateProjectContact(projectId);
 
   const resetForm = useCallback(() => {
-    setStep("email");
+    setStep(AddUserModalStep.EMAIL);
     setEmail("");
     setEmailError("");
     setFirstName("");
     setLastName("");
-    setRole("portal_user");
+    setRole(AddUserContactRole.PORTAL_USER);
     setIsExistingContact(false);
   }, []);
 
@@ -114,12 +123,12 @@ export default function AddUserModal({
     setEmailError("");
 
     if (!trimmedEmail) {
-      setEmailError("Email address is required");
+      setEmailError(ADD_USER_EMAIL_REQUIRED_ERROR);
       emailInputRef.current?.focus();
       return;
     }
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address (e.g. user@company.com)");
+    if (!ADD_USER_EMAIL_REGEX.test(trimmedEmail)) {
+      setEmailError(ADD_USER_EMAIL_INVALID_ERROR);
       emailInputRef.current?.focus();
       return;
     }
@@ -129,7 +138,9 @@ export default function AddUserModal({
       {
         onSuccess: (data) => {
           if (!data.isContactValid) {
-            setEmailError(data.message || "This email cannot be added.");
+            setEmailError(
+              data.message || ADD_USER_EMAIL_INVALID_CONTACT_ERROR,
+            );
             return;
           }
           // Pre-fill fields if the contact already exists (deactivated)
@@ -138,29 +149,27 @@ export default function AddUserModal({
             setLastName(data.contactDetails.lastName ?? "");
             setRole(
               data.contactDetails.isCsIntegrationUser
-                ? "system_user"
-                : "portal_user",
+                ? AddUserContactRole.SYSTEM_USER
+                : AddUserContactRole.PORTAL_USER,
             );
             setIsExistingContact(true);
           } else {
             setIsExistingContact(false);
           }
-          setStep("details");
+          setStep(AddUserModalStep.DETAILS);
         },
         onError: (err) => {
-          setEmailError(
-            err.message || "Email validation failed. Please try again.",
-          );
+          setEmailError(err.message || ADD_USER_EMAIL_VALIDATE_ERROR);
         },
       },
     );
   }, [email, validateContact]);
 
   const handleBackToEmail = useCallback(() => {
-    setStep("email");
+    setStep(AddUserModalStep.EMAIL);
     setFirstName("");
     setLastName("");
-    setRole("portal_user");
+    setRole(AddUserContactRole.PORTAL_USER);
     setIsExistingContact(false);
   }, []);
 
@@ -175,17 +184,17 @@ export default function AddUserModal({
       contactEmail: trimmedEmail,
       contactFirstName: trimmedFirst,
       contactLastName: trimmedLast,
-      isCsIntegrationUser: role === "system_user",
-      isSecurityContact: role === "security_user",
+      isCsIntegrationUser: role === AddUserContactRole.SYSTEM_USER,
+      isSecurityContact: role === AddUserContactRole.SECURITY_USER,
     });
   }, [firstName, lastName, email, role, onSubmit]);
 
   const isDetailsValid = firstName.trim().length > 0 && email.trim().length > 0;
-  const selectedRole = ROLES.find((r) => r.id === role);
+  const selectedRole = ADD_USER_ROLE_OPTIONS.find((r) => r.id === role);
 
   const handleRoleChange = useCallback(
-    (event: SelectChangeEvent<ContactRole>) => {
-      setRole(event.target.value as ContactRole);
+    (event: SelectChangeEvent<AddUserContactRole>) => {
+      setRole(event.target.value as AddUserContactRole);
     },
     [],
   );
@@ -216,10 +225,10 @@ export default function AddUserModal({
       >
         <X size={18} />
       </IconButton>
-      <DialogTitle id="add-user-modal-title">Add New User</DialogTitle>
+      <DialogTitle id="add-user-modal-title">{ADD_USER_MODAL_TITLE}</DialogTitle>
 
       {/* ─── Email validation ─── */}
-      {step === "email" && (
+      {step === AddUserModalStep.EMAIL && (
         <>
           <DialogContent>
             <Typography
@@ -228,7 +237,7 @@ export default function AddUserModal({
               color="text.secondary"
               sx={{ mb: 2 }}
             >
-              Enter the email address of the user you want to add
+              {ADD_USER_EMAIL_STEP_DESCRIPTION}
             </Typography>
 
             <Box>
@@ -236,7 +245,7 @@ export default function AddUserModal({
                 htmlFor="add-user-email"
                 sx={{ display: "block", mb: 1, fontSize: "0.875rem" }}
               >
-                Email Address{" "}
+                {ADD_USER_EMAIL_LABEL}{" "}
                 <span style={{ color: "var(--oxygen-palette-error-main)" }}>
                   *
                 </span>
@@ -246,7 +255,7 @@ export default function AddUserModal({
                 id="add-user-email"
                 type="email"
                 fullWidth
-                placeholder="user@company.com"
+                placeholder={ADD_USER_EMAIL_PLACEHOLDER}
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -281,7 +290,7 @@ export default function AddUserModal({
               onClick={handleClose}
               disabled={validateContact.isPending}
             >
-              Cancel
+              {ADD_USER_MODAL_CANCEL}
             </Button>
             <Button
               variant="contained"
@@ -294,18 +303,20 @@ export default function AddUserModal({
                 ) : undefined
               }
             >
-              {validateContact.isPending ? "Validating..." : "Next"}
+              {validateContact.isPending
+                ? ADD_USER_MODAL_VALIDATING
+                : ADD_USER_MODAL_NEXT}
             </Button>
           </DialogActions>
         </>
       )}
 
       {/* ─── Full name, email (read-only), role ─── */}
-      {step === "details" && (
+      {step === AddUserModalStep.DETAILS && (
         <>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Send an invitation to a new user to access the portal
+              {ADD_USER_DETAILS_INTRO}
             </Typography>
 
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -314,7 +325,7 @@ export default function AddUserModal({
                   htmlFor="add-user-firstname"
                   sx={{ display: "block", mb: 1, fontSize: "0.875rem" }}
                 >
-                  First Name{" "}
+                  {ADD_USER_FIRST_NAME_LABEL}{" "}
                   <span style={{ color: "var(--oxygen-palette-error-main)" }}>
                     *
                   </span>
@@ -322,7 +333,7 @@ export default function AddUserModal({
                 <Input
                   id="add-user-firstname"
                   fullWidth
-                  placeholder="Enter first name"
+                  placeholder={ADD_USER_FIRST_NAME_PLACEHOLDER}
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   disabled={isSubmitting || isExistingContact}
@@ -334,12 +345,12 @@ export default function AddUserModal({
                   htmlFor="add-user-lastname"
                   sx={{ display: "block", mb: 1, fontSize: "0.875rem" }}
                 >
-                  Last Name
+                  {ADD_USER_LAST_NAME_LABEL}
                 </InputLabel>
                 <Input
                   id="add-user-lastname"
                   fullWidth
-                  placeholder="Enter last name"
+                  placeholder={ADD_USER_LAST_NAME_PLACEHOLDER}
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   disabled={isSubmitting || isExistingContact}
@@ -351,7 +362,7 @@ export default function AddUserModal({
                   htmlFor="add-user-email-readonly"
                   sx={{ display: "block", mb: 1, fontSize: "0.875rem" }}
                 >
-                  Email Address
+                  {ADD_USER_EMAIL_LABEL}
                 </InputLabel>
                 <Input
                   id="add-user-email-readonly"
@@ -363,12 +374,14 @@ export default function AddUserModal({
               </Box>
 
               <FormControl fullWidth size="medium">
-                <InputLabel id="add-user-role-label">User Type</InputLabel>
-                <Select<ContactRole>
+                <InputLabel id="add-user-role-label">
+                  {ADD_USER_TYPE_LABEL}
+                </InputLabel>
+                <Select<AddUserContactRole>
                   labelId="add-user-role-label"
                   id="add-user-role"
                   value={role}
-                  label="User Type"
+                  label={ADD_USER_TYPE_LABEL}
                   onChange={handleRoleChange}
                   disabled={isSubmitting || isExistingContact}
                   renderValue={() => {
@@ -385,7 +398,7 @@ export default function AddUserModal({
                     );
                   }}
                 >
-                  {ROLES.map((r) => {
+                  {ADD_USER_ROLE_OPTIONS.map((r) => {
                     const RoleIcon = r.Icon;
                     return (
                       <MenuItem key={r.id} value={r.id}>
@@ -408,7 +421,7 @@ export default function AddUserModal({
               onClick={handleBackToEmail}
               disabled={isSubmitting}
             >
-              Back
+              {ADD_USER_MODAL_BACK}
             </Button>
             <Button
               variant="contained"
@@ -416,7 +429,9 @@ export default function AddUserModal({
               onClick={handleSubmit}
               disabled={!isDetailsValid || isSubmitting}
             >
-              {isSubmitting ? "Sending..." : "Send Invitation"}
+              {isSubmitting
+                ? ADD_USER_MODAL_SENDING
+                : ADD_USER_MODAL_SEND_INVITATION}
             </Button>
           </DialogActions>
         </>

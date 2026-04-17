@@ -17,6 +17,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
+import { OperationsChartMode } from "@/features/dashboard/types/charts";
 
 // Mock child components
 vi.mock("../ActiveCasesChart", () => ({
@@ -126,7 +127,10 @@ describe("ChartLayout", () => {
 
   it("should pass operationsChartMode to ActiveCasesChart", () => {
     render(
-      <ChartLayout {...mockProps} operationsChartMode="srOnly" />,
+      <ChartLayout
+        {...mockProps}
+        operationsChartMode={OperationsChartMode.SrOnly}
+      />,
     );
 
     expect(screen.getByTestId("active-cases-chart")).toHaveAttribute(

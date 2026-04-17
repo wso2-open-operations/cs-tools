@@ -37,6 +37,33 @@ vi.mock("@hooks/useLogger", () => ({
   }),
 }));
 
+vi.mock("@/utils/useAuthApiClient", () => ({
+  useAuthApiClient: () =>
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/timetracking")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            timeLogs: [
+              {
+                id: "1",
+                badges: [],
+                description: "Working on case #123",
+                user: null,
+                role: null,
+                date: null,
+                hours: null,
+              },
+            ],
+          }),
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+}));
+
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {

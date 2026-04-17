@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
- 
-import type { PaginationResponse, SearchRequestBase } from "@features/dashboard/types/common";
+
+import type { PaginationResponse, SearchRequestBase } from "@/types/common";
 
 // Item type for a product from GET /products.
 export type ProductItem = {
@@ -22,7 +22,7 @@ export type ProductItem = {
   label?: string;
   name?: string;
   class?: string;
-}
+};
 
 // Item type for a product version from POST /products/:productId/versions/search.
 export type ProductVersionItem = {
@@ -33,7 +33,7 @@ export type ProductVersionItem = {
   supportEolDate?: string;
   earliestPossibleSupportEolDate?: string;
   product?: { id: string; label: string };
-}
+};
 
 // Response type for products list.
 export type ProductsResponse = PaginationResponse & {
@@ -50,7 +50,7 @@ export type ProductUpdate = {
   updateLevel: number;
   date: string;
   details?: string | null;
-}
+};
 
 // Request type for searching product versions.
 export type ProductVersionsSearchRequest = SearchRequestBase;

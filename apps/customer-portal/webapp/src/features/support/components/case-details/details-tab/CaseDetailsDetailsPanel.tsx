@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsDetailsPanelProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -38,8 +39,7 @@ import {
 import { type ReactElement, type JSX } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import DOMPurify from "dompurify";
-import type { CaseDetails } from "@features/support/types/cases";
-import { getSeverityLegendColor } from "@features/dashboard/constants/dashboardConstants";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
 import Error500Page from "@components/error/Error500Page";
@@ -56,13 +56,6 @@ import {
   isSecurityReportAnalysisType,
   stripHtml,
 } from "@features/support/utils/support";
-
-export interface CaseDetailsDetailsPanelProps {
-  data: CaseDetails | undefined;
-  isError: boolean;
-  isEngagement?: boolean;
-  isServiceRequest?: boolean;
-}
 
 /**
  * CaseDetailsDetailsPanel displays case overview, product & environment, and customer information

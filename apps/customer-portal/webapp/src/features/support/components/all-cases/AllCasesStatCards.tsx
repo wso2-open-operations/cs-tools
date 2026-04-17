@@ -14,21 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AllCasesStatCardsProps } from "@features/support/types/supportComponents";
 import { Box } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import SupportStatGrid from "@components/stat-grid/SupportStatGrid";
-import type { ProjectCasesStats } from "@features/support/types/cases";
 import {
   ALL_CASES_STAT_CONFIGS,
   getAllCasesFlattenedStats,
 } from "@features/support/constants/supportConstants";
-
-export interface AllCasesStatCardsProps {
-  isLoading: boolean;
-  isError?: boolean;
-  stats: ProjectCasesStats | undefined;
-  statEntityName?: string;
-}
 
 /**
  * AllCasesStatCards component to display 4 stat cards for case statistics.

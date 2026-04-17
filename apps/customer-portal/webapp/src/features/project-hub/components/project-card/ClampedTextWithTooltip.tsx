@@ -3,7 +3,6 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
-//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -17,13 +16,10 @@
 
 import { Tooltip, Typography } from "@wso2/oxygen-ui";
 import { type JSX, useRef, useState, useEffect } from "react";
-
-export interface ClampedTextWithTooltipProps {
-  text: string;
-  lineClamp: number;
-  variant?: "h6" | "body2";
-  sx?: Record<string, unknown>;
-}
+import {
+  ClampedTextVariant,
+  type ClampedTextWithTooltipProps,
+} from "@features/project-hub/types/projectHub";
 
 /**
  * Renders a clampable line with optional tooltip when truncated.
@@ -34,7 +30,7 @@ export interface ClampedTextWithTooltipProps {
 export function ClampedTextWithTooltip({
   text,
   lineClamp,
-  variant = "body2",
+  variant = ClampedTextVariant.BODY2,
   sx = {},
 }: ClampedTextWithTooltipProps): JSX.Element {
   const ref = useRef<HTMLParagraphElement>(null);

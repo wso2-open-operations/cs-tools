@@ -33,10 +33,13 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <div data-testid="skeleton" data-variant={variant}></div>
   ),
   colors: {
-    common: { white: "#FFFFFF" },
     blue: { 500: "#3B82F6" },
+    brown: { 500: "#795548" },
+    common: { white: "#FFFFFF" },
     green: { 500: "#22C55E" },
+    grey: { 300: "#D1D5DB", 500: "#9CA3AF" },
     orange: { 500: "#F97316" },
+    purple: { 500: "#A855F7" },
     red: { 500: "#EF4444" },
     yellow: { 600: "#EAB308" },
   },

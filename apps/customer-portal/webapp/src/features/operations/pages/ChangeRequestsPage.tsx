@@ -23,35 +23,46 @@ import {
   type ChangeEvent,
 } from "react";
 import { Box, Button, CircularProgress, Stack } from "@wso2/oxygen-ui";
-import {
-  FileText,
-  Calendar as CalendarIcon,
-  Download,
-} from "@wso2/oxygen-ui-icons-react";
+import { Download } from "@wso2/oxygen-ui-icons-react";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
-import type { ChangeRequestSearchRequest } from "@features/operations/types/changeRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetChangeRequests, {
   useGetChangeRequestsInfinite,
 } from "@features/operations/api/useGetChangeRequests";
 import { useGetProjectChangeRequestStats } from "@features/operations/api/useGetProjectChangeRequestStats";
 import {
+  CHANGE_REQUEST_FILTER_DEFINITIONS,
   CHANGE_REQUEST_STAT_CONFIGS,
-  formatImpactLabel,
-} from "@features/operations/constants/changeRequestConstants";
-import { CHANGE_REQUEST_FILTER_DEFINITIONS } from "@features/operations/constants/changeRequestConstants";
-import type { CaseMetadataResponse } from "@features/support/types/cases";
+} from "@features/operations/constants/operationsConstants";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
-import ChangeRequestsList from "@features/operations/components/ChangeRequestsList";
-import ChangeRequestsCalendarView from "@features/support/components/change-requests/ChangeRequestsCalendarView";
+import ChangeRequestsList from "@features/operations/components/change-requests/ChangeRequestsList";
+import ChangeRequestsCalendarView from "@features/operations/components/change-requests/ChangeRequestsCalendarView";
 import TabBar from "@components/tab-bar/TabBar";
 import { generateChangeRequestsSchedulePdf } from "@features/operations/utils/changeRequestsSchedulePdf";
 import { hasListSearchOrFilters, countListSearchAndFilters } from "@features/support/utils/support";
+import { ChangeRequestsViewMode } from "@features/operations/types/changeRequests";
+import {
+  CHANGE_REQUESTS_ENTITY_LABEL,
+  CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL,
+  CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION,
+  CHANGE_REQUESTS_PAGE_TITLE,
+  CHANGE_REQUESTS_SEARCH_PLACEHOLDER,
+  CHANGE_REQUESTS_VIEW_TABS_CONFIG,
+  OPERATIONS_LIST_BACK_LABEL,
+  OPERATIONS_LIST_PAGE_SIZE,
+} from "@features/operations/constants/operationsConstants";
+import {
+  buildChangeRequestSearchRequest,
+  flattenChangeRequestInfinitePages,
+  getOperationsNavSegment,
+  resolveChangeRequestFilterListOptions,
+} from "@features/operations/utils/operationsPages";
 
 /**
  * ChangeRequestsPage component to display all change requests with stats, filters, and search.
@@ -63,22 +74,20 @@ export default function ChangeRequestsPage(): JSX.Element {
   const location = useLocation();
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
   const { projectId } = useParams<{ projectId: string }>();
-  const basePath = location.pathname.includes("/operations/")
-    ? "operations"
-    : "support";
+  const navSegment = getOperationsNavSegment(location.pathname);
 
-  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [viewMode, setViewMode] = useState<ChangeRequestsViewMode>(
+    ChangeRequestsViewMode.List,
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<ChangeRequestFilterValues>({});
   const [page, setPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
-  const pageSize = 10;
+  const pageSize = OPERATIONS_LIST_PAGE_SIZE;
 
-  // Fetch filter metadata (deployments etc.)
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
-  // Fetch change request stats from API
   const {
     data: stats,
     isLoading: isStatsLoading,
@@ -87,24 +96,13 @@ export default function ChangeRequestsPage(): JSX.Element {
     enabled: !!projectId,
   });
 
-  // Build API request (following cases listing pattern)
-  const changeRequestSearchRequest = useMemo<
-    Omit<ChangeRequestSearchRequest, "pagination">
-  >(
-    () => ({
-      filters: {
-        searchQuery: searchTerm.trim() || undefined,
-        stateKeys: filters.stateId ? [Number(filters.stateId)] : undefined,
-        impactKey: filters.impactId ? Number(filters.impactId) : undefined,
-      },
-    }),
+  const changeRequestSearchRequest = useMemo(
+    () => buildChangeRequestSearchRequest(filters, searchTerm),
     [searchTerm, filters],
   );
 
-  // Fetch change requests from API - different approaches for list vs calendar
   const offset = (page - 1) * pageSize;
 
-  // List view: use regular query with pagination
   const {
     data: listData,
     isLoading: isListLoading,
@@ -115,11 +113,10 @@ export default function ChangeRequestsPage(): JSX.Element {
     offset,
     pageSize,
     {
-      enabled: !!projectId && viewMode === "list",
+      enabled: !!projectId && viewMode === ChangeRequestsViewMode.List,
     },
   );
 
-  // Infinite query to fetch all data in batches (enabled for calendar view or export)
   const {
     data: infiniteData,
     isLoading: isInfiniteLoading,
@@ -131,14 +128,15 @@ export default function ChangeRequestsPage(): JSX.Element {
     projectId || "",
     changeRequestSearchRequest,
     {
-      enabled: !!projectId && (viewMode === "calendar" || isExporting),
+      enabled:
+        !!projectId &&
+        (viewMode === ChangeRequestsViewMode.Calendar || isExporting),
     },
   );
 
-  // Auto-fetch all pages for calendar view and export
   useEffect(() => {
     if (
-      (viewMode === "calendar" || isExporting) &&
+      (viewMode === ChangeRequestsViewMode.Calendar || isExporting) &&
       hasNextPage &&
       !isFetchingNextPage
     ) {
@@ -146,62 +144,53 @@ export default function ChangeRequestsPage(): JSX.Element {
     }
   }, [viewMode, isExporting, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Combine data based on view mode
   const changeRequests = useMemo(() => {
-    if (viewMode === "list") {
+    if (viewMode === ChangeRequestsViewMode.List) {
       return listData?.changeRequests || [];
-    } else {
-      // Flatten all pages for calendar view
-      return (
-        infiniteData?.pages.flatMap(
-          (page: { changeRequests: ChangeRequestItem[] }) =>
-            page.changeRequests,
-        ) || []
-      );
     }
+    return flattenChangeRequestInfinitePages(infiniteData?.pages);
   }, [viewMode, listData, infiniteData]);
 
   const isLoading =
-    viewMode === "list"
+    viewMode === ChangeRequestsViewMode.List
       ? isListLoading
       : isInfiniteLoading || isFetchingNextPage;
-  const isError = viewMode === "list" ? isListError : isInfiniteError;
+  const isError =
+    viewMode === ChangeRequestsViewMode.List ? isListError : isInfiniteError;
   const totalRecords =
-    viewMode === "list"
+    viewMode === ChangeRequestsViewMode.List
       ? listData?.totalRecords || 0
       : infiniteData?.pages[0]?.totalRecords || 0;
   const totalPages = Math.ceil(totalRecords / pageSize);
 
-  // Handle export completion when all data is fetched
   useEffect(() => {
-    if (isExporting) {
-      if (isInfiniteError) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!isExporting) return;
+    if (isInfiniteError) {
+      queueMicrotask(() => {
         setIsExporting(false);
-      } else if (
-        !isInfiniteLoading &&
-        !isStatsLoading &&
-        !hasNextPage &&
-        !isFetchingNextPage &&
-        infiniteData &&
-        stats
-      ) {
-        // Success case - all data fetched
-        const allChangeRequests =
-          infiniteData.pages.flatMap(
-            (page: { changeRequests: ChangeRequestItem[] }) =>
-              page.changeRequests,
-          ) || [];
-        generateChangeRequestsSchedulePdf(allChangeRequests, stats);
-        setTimeout(() => setIsExporting(false), 0);
-      }
+      });
+      return;
+    }
+    if (
+      !isInfiniteLoading &&
+      !isStatsLoading &&
+      !hasNextPage &&
+      !isFetchingNextPage &&
+      infiniteData &&
+      stats
+    ) {
+      const allChangeRequests =
+        flattenChangeRequestInfinitePages(infiniteData.pages) || [];
+      generateChangeRequestsSchedulePdf(allChangeRequests, stats);
+      queueMicrotask(() => {
+        setIsExporting(false);
+      });
     }
   }, [
     isExporting,
     isInfiniteLoading,
     isInfiniteError,
     isStatsLoading,
-    isStatsError,
     hasNextPage,
     isFetchingNextPage,
     infiniteData,
@@ -232,20 +221,14 @@ export default function ChangeRequestsPage(): JSX.Element {
   };
 
   const handleChangeRequestClick = (item: ChangeRequestItem): void => {
-    navigate(`/projects/${projectId}/${basePath}/change-requests/${item.id}`);
+    navigate(
+      `/projects/${projectId}/${navSegment}/change-requests/${item.id}`,
+    );
   };
 
   const handleExportSchedule = () => {
     setIsExporting(true);
   };
-
-  const viewTabs = useMemo(
-    () => [
-      { id: "list", label: "List View", icon: FileText },
-      { id: "calendar", label: "Calendar View", icon: CalendarIcon },
-    ],
-    [],
-  );
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
 
@@ -265,16 +248,18 @@ export default function ChangeRequestsPage(): JSX.Element {
       disabled={isExporting}
       sx={{ mt: { xs: 0, sm: 4 } }}
     >
-      {isExporting ? "Exporting..." : "Export Schedule"}
+      {isExporting
+        ? CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL
+        : CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL}
     </Button>
   );
 
   return (
     <Stack spacing={3}>
       <ListPageHeader
-        title="All Change Requests"
-        description="Track and manage deployment changes and updates"
-        backLabel="Back"
+        title={CHANGE_REQUESTS_PAGE_TITLE}
+        description={CHANGE_REQUESTS_PAGE_DESCRIPTION}
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={exportButton}
       />
@@ -290,7 +275,7 @@ export default function ChangeRequestsPage(): JSX.Element {
       </Box>
 
       <ListSearchBar
-        searchPlaceholder="Search change requests by number, title, or description..."
+        searchPlaceholder={CHANGE_REQUESTS_SEARCH_PLACEHOLDER}
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         isFiltersOpen={isFiltersOpen}
@@ -301,17 +286,9 @@ export default function ChangeRequestsPage(): JSX.Element {
           <ListFiltersPanel
             filterDefinitions={CHANGE_REQUEST_FILTER_DEFINITIONS}
             filters={filters}
-            resolveOptions={(def) => {
-              const raw = (filterMetadata as CaseMetadataResponse | undefined)?.[
-                def.metadataKey as keyof CaseMetadataResponse
-              ];
-              if (!Array.isArray(raw)) return [];
-              return raw.map((item: { label: string; id: string }) => ({
-                label:
-                  def.id === "impact" ? formatImpactLabel(item.label) : item.label,
-                value: item.id,
-              }));
-            }}
+            resolveOptions={(def) =>
+              resolveChangeRequestFilterListOptions(def, filterMetadata)
+            }
             onFilterChange={handleFilterChange}
             gridSize={{ xs: 12, sm: 6, md: 4 }}
           />
@@ -321,13 +298,13 @@ export default function ChangeRequestsPage(): JSX.Element {
       <ListResultsBar
         shownCount={changeRequests.length}
         totalCount={totalRecords}
-        entityLabel="change requests"
+        entityLabel={CHANGE_REQUESTS_ENTITY_LABEL}
         rightContent={
           <TabBar
-            tabs={viewTabs}
+            tabs={CHANGE_REQUESTS_VIEW_TABS_CONFIG}
             activeTab={viewMode}
             onTabChange={(tabId) => {
-              setViewMode(tabId as "list" | "calendar");
+              setViewMode(tabId as ChangeRequestsViewMode);
               setPage(1);
             }}
             sx={{ mb: 0, height: 32 }}
@@ -335,7 +312,7 @@ export default function ChangeRequestsPage(): JSX.Element {
         }
       />
 
-      {viewMode === "list" ? (
+      {viewMode === ChangeRequestsViewMode.List ? (
         <>
           <ChangeRequestsList
             changeRequests={changeRequests}

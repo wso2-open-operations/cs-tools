@@ -14,13 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CallsEmptyStateProps } from "@features/support/types/supportComponents";
 import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
-
-export interface CallsEmptyStateProps {
-  action?: React.ReactNode;
-}
 
 /**
  * Renders the empty state for the calls panel.

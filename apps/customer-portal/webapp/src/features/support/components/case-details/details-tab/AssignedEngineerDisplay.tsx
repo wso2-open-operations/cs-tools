@@ -14,14 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AssignedEngineerDisplayProps } from "@features/support/types/supportComponents";
 import { Avatar, Stack, Typography, colors } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import type { AssignedEngineerValue } from "@features/support/utils/support";
 import { formatValue, getInitials } from "@features/support/utils/support";
-
-export interface AssignedEngineerDisplayProps {
-  assignedEngineer: AssignedEngineerValue;
-}
 
 /**
  * Displays the assigned engineer with Avatar (initials) and name.

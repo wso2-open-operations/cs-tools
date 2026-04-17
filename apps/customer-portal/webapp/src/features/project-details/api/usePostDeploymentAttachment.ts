@@ -23,13 +23,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { PostDeploymentAttachmentRequest } from "@features/project-details/types/deployments";
+import type { PostDeploymentAttachmentVariables } from "@features/project-details/types/projectDetailsApi";
 import type { PostDeploymentAttachmentResponse } from "@features/project-details/types/deployments";
-
-export interface PostDeploymentAttachmentVariables {
-  deploymentId: string;
-  body: PostDeploymentAttachmentRequest;
-}
 
 /**
  * Posts an attachment to a deployment (POST /deployments/:deploymentId/attachments).

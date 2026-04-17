@@ -17,15 +17,13 @@
 import { useCallback, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
-import { Siren, Package } from "@wso2/oxygen-ui-icons-react";
 import SecurityStats from "@features/security/components/SecurityStats";
 import TabBar from "@components/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@features/security/components/ProductVulnerabilitiesTable";
 import SecurityReportAnalysis from "@features/security/components/SecurityReportAnalysis";
-import {
-  SecurityTab,
-  type SecurityTabType,
-} from "@features/security/constants/securityConstants";
+import { SECURITY_PAGE_TABS } from "@features/security/constants/securityConstants";
+import { SecurityTabId } from "@features/security/types/security";
+import { parseSecurityTabQueryParam } from "@features/security/utils/securityPage";
 
 const SecurityPage = (): JSX.Element => {
   const navigate = useNavigate();
@@ -33,12 +31,7 @@ const SecurityPage = (): JSX.Element => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const tabParam = searchParams.get("tab");
-  const isValidTab = Object.values(SecurityTab).includes(
-    tabParam as SecurityTabType,
-  );
-  const activeTab = isValidTab
-    ? (tabParam as SecurityTabType)
-    : SecurityTab.COMPONENTS;
+  const activeTab = parseSecurityTabQueryParam(tabParam);
 
   const handleTabChange = useCallback(
     (tabId: string) => {
@@ -56,36 +49,19 @@ const SecurityPage = (): JSX.Element => {
     [navigate, projectId],
   );
 
-  // 3. Define tabs using Enum values
-  const tabs = useMemo(
-    () => [
-      {
-        id: SecurityTab.COMPONENTS,
-        label: "Component Analysis",
-        icon: Package,
-      },
-      {
-        id: SecurityTab.VULNERABILITIES,
-        label: "Security Report Analysis",
-        icon: Siren,
-      },
-    ],
-    [],
-  );
+  const tabs = useMemo(() => [...SECURITY_PAGE_TABS], []);
 
-  // 4. Content Switcher function
   const renderTabContent = () => {
     switch (activeTab) {
-      case SecurityTab.COMPONENTS:
+      case SecurityTabId.COMPONENTS:
         return (
           <ProductVulnerabilitiesTable
             onVulnerabilityClick={handleVulnerabilityClick}
           />
         );
-      case SecurityTab.VULNERABILITIES:
+      case SecurityTabId.VULNERABILITIES:
         return <SecurityReportAnalysis />;
       default:
-        // Optional: Default to first tab if URL is messy
         return (
           <ProductVulnerabilitiesTable
             onVulnerabilityClick={handleVulnerabilityClick}

@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import {
   Box,
   Button,
@@ -40,15 +39,7 @@ import {
 } from "react";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchDeployment } from "@features/project-details/api/usePatchDeployment";
-
-export interface EditDeploymentModalProps {
-  open: boolean;
-  deployment: ProjectDeploymentItem | null;
-  projectId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-}
+import type { EditDeploymentModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 const INITIAL_FORM = {
   name: "",

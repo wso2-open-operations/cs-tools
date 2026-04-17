@@ -16,15 +16,7 @@
 
 import { Box, Grid, Paper, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-/**
- * Props for the UpdateCardLevels component.
- */
-interface UpdateCardLevelsProps {
-  startingUpdateLevel: number;
-  recommendedUpdateLevel: number;
-  pendingLevels: number;
-}
+import type { UpdateCardLevelsProps } from "@features/updates/types/updates";
 
 /**
  * Component to display level highlights (Current, Latest, Pending).

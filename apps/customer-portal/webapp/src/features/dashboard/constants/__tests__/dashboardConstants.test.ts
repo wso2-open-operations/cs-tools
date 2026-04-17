@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { getCaseTypeChipConfig } from "@features/dashboard/constants/dashboardConstants";
+import { getCaseTypeChipConfig } from "@features/dashboard/utils/dashboard";
 
 describe("getCaseTypeChipConfig", () => {
   it("returns null for empty or undefined label", () => {

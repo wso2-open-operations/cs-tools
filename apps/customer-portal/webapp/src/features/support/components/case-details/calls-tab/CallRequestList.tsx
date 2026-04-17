@@ -14,19 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CallRequestListProps } from "@features/support/types/supportComponents";
 import { Stack } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { CallRequest } from "@features/support/types/calls";
 import CallRequestCard from "@case-details-calls/CallRequestCard";
-
-export interface CallRequestListProps {
-  requests: CallRequest[];
-  userTimeZone?: string;
-  onEditClick?: (call: CallRequest) => void;
-  onDeleteClick?: (call: CallRequest) => void;
-  onApproveClick?: (call: CallRequest) => void;
-  onRejectClick?: (call: CallRequest) => void;
-}
 
 /**
  * Renders a list of call request cards.

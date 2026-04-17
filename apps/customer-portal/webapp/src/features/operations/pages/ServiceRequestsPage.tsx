@@ -14,7 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate, useSearchParams, useLocation } from "react-router";
+import {
+  useParams,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+} from "react-router";
 import {
   useState,
   useMemo,
@@ -30,17 +35,17 @@ import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
-import { hasListSearchOrFilters, isS0Case } from "@features/support/utils/support";
+import {
+  hasListSearchOrFilters,
+  isS0Case,
+} from "@features/support/utils/support";
 import {
   CaseType,
   ALL_CASES_STAT_CONFIGS,
   getAllCasesFlattenedStats,
 } from "@features/support/constants/supportConstants";
-import {
-  getProjectPermissions,
-  shouldExcludeS0,
-} from "@features/project-details/utils/permissions";
-import { SortOrder } from "@features/dashboard/types/common";
+import { getProjectPermissions, shouldExcludeS0 } from "@/utils/permission";
+import { SortOrder } from "@/types/common";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 import ListPageHeader from "@components/list-view/ListPageHeader";
@@ -49,6 +54,25 @@ import ListPagination from "@components/list-view/ListPagination";
 import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import ListItems from "@components/list-view/ListItems";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import { ServiceRequestCaseSortField } from "@features/operations/types/serviceRequests";
+import {
+  OPERATIONS_LIST_BACK_LABEL,
+  OPERATIONS_LIST_PAGE_SIZE,
+  SERVICE_REQUESTS_ENTITY_LABEL,
+  SERVICE_REQUESTS_NEW_BUTTON_LABEL,
+  SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL,
+  SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE,
+  SERVICE_REQUESTS_PAGE_TITLE_ALL,
+  SERVICE_REQUESTS_PAGE_TITLE_MINE,
+  SERVICE_REQUESTS_SEARCH_PLACEHOLDER,
+  SERVICE_REQUESTS_SORT_FIELD_OPTIONS,
+  SERVICE_REQUESTS_STAT_ENTITY_NAME,
+  SERVICE_REQUESTS_ERROR_ENTITY_NAME,
+} from "@features/operations/constants/operationsConstants";
+import {
+  buildServiceRequestsPageCaseSearchRequest,
+  getOperationsNavSegment,
+} from "@features/operations/utils/operationsPages";
 
 /**
  * ServiceRequestsPage lists service requests using the same filters, sort,
@@ -62,20 +86,18 @@ export default function ServiceRequestsPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
-  const basePath = location.pathname.includes("/operations/")
-    ? "operations"
-    : "support";
+  const navSegment = getOperationsNavSegment(location.pathname);
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortField, setSortField] = useState<
-    "createdOn" | "updatedOn" | "severity" | "state"
-  >("createdOn");
+  const [sortField, setSortField] = useState<ServiceRequestCaseSortField>(
+    ServiceRequestCaseSortField.CreatedOn,
+  );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = OPERATIONS_LIST_PAGE_SIZE;
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
@@ -97,10 +119,13 @@ export default function ServiceRequestsPage(): JSX.Element {
   }, [projectDetailsReady, project]);
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
-  const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(projectId || "", {
-    pageSize: 10,
-    enabled: !!projectId,
-  });
+  const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
+    projectId || "",
+    {
+      pageSize: 10,
+      enabled: !!projectId,
+    },
+  );
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
@@ -115,21 +140,14 @@ export default function ServiceRequestsPage(): JSX.Element {
   });
 
   const caseSearchRequest = useMemo(
-    () => ({
-      filters: {
-        caseTypes: [CaseType.SERVICE_REQUEST],
-        statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
-        severityId: filters.severityId ? Number(filters.severityId) : undefined,
-        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-        deploymentId: filters.deploymentId || undefined,
-        searchQuery: searchTerm.trim() || undefined,
-        createdByMe: createdByMe || undefined,
-      },
-      sortBy: {
-        field: sortField,
-        order: sortOrder,
-      },
-    }),
+    () =>
+      buildServiceRequestsPageCaseSearchRequest(
+        filters,
+        searchTerm,
+        sortField,
+        sortOrder,
+        createdByMe,
+      ),
     [filters, searchTerm, sortField, sortOrder, createdByMe],
   );
 
@@ -223,10 +241,8 @@ export default function ServiceRequestsPage(): JSX.Element {
     setPage(1);
   };
 
-  const handleSortFieldChange = (
-    value: "createdOn" | "updatedOn" | "severity" | "state",
-  ) => {
-    setSortField(value);
+  const handleSortFieldChange = (value: string) => {
+    setSortField(value as ServiceRequestCaseSortField);
     setPage(1);
   };
 
@@ -251,7 +267,7 @@ export default function ServiceRequestsPage(): JSX.Element {
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
 
   const handleNewServiceRequest = () => {
-    navigate(`/projects/${projectId}/${basePath}/service-requests/create`);
+    navigate(`/projects/${projectId}/${navSegment}/service-requests/create`);
   };
 
   if (isCasesError) {
@@ -264,9 +280,9 @@ export default function ServiceRequestsPage(): JSX.Element {
             sx={{ mb: 2 }}
             variant="text"
           >
-            Back
+            {OPERATIONS_LIST_BACK_LABEL}
           </Button>
-          <ErrorIndicator entityName="service requests" size="medium" />
+          <ErrorIndicator entityName={SERVICE_REQUESTS_ERROR_ENTITY_NAME} size="medium" />
         </Box>
       </Stack>
     );
@@ -280,20 +296,24 @@ export default function ServiceRequestsPage(): JSX.Element {
       onClick={handleNewServiceRequest}
       sx={{ mt: { xs: 0, sm: 4 } }}
     >
-      New Service Request
+      {SERVICE_REQUESTS_NEW_BUTTON_LABEL}
     </Button>
   );
 
   return (
     <Stack spacing={3}>
       <ListPageHeader
-        title={createdByMe ? "My Service Requests" : "All Service Requests"}
+        title={
+          createdByMe
+            ? SERVICE_REQUESTS_PAGE_TITLE_MINE
+            : SERVICE_REQUESTS_PAGE_TITLE_ALL
+        }
         description={
           createdByMe
-            ? "Manage and track your service requests"
-            : "Manage deployments, operations, infrastructure change, and service configurations"
+            ? SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE
+            : SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL
         }
-        backLabel="Back"
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={newRequestButton}
       />
@@ -302,7 +322,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         <ListStatGrid
           isLoading={isStatsLoading}
           isError={isStatsError}
-          entityName="service request"
+          entityName={SERVICE_REQUESTS_STAT_ENTITY_NAME}
           configs={ALL_CASES_STAT_CONFIGS}
           stats={getAllCasesFlattenedStats(stats)}
         />
@@ -310,7 +330,7 @@ export default function ServiceRequestsPage(): JSX.Element {
 
       <ListSearchPanel
         searchTerm={searchTerm}
-        searchPlaceholder="Search service requests by ID, title, or description..."
+        searchPlaceholder={SERVICE_REQUESTS_SEARCH_PLACEHOLDER}
         onSearchChange={handleSearchChange}
         isFiltersOpen={isFiltersOpen}
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
@@ -340,19 +360,10 @@ export default function ServiceRequestsPage(): JSX.Element {
       <ListResultsBar
         shownCount={paginatedCases.length}
         totalCount={totalItems}
-        entityLabel="service requests"
-        sortFieldOptions={[
-          { value: "createdOn", label: "Created on" },
-          { value: "updatedOn", label: "Updated on" },
-          { value: "severity", label: "Severity" },
-          { value: "state", label: "State" },
-        ]}
+        entityLabel={SERVICE_REQUESTS_ENTITY_LABEL}
+        sortFieldOptions={SERVICE_REQUESTS_SORT_FIELD_OPTIONS}
         sortField={sortField}
-        onSortFieldChange={(v) =>
-          handleSortFieldChange(
-            v as "createdOn" | "updatedOn" | "severity" | "state",
-          )
-        }
+        onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
       />
@@ -362,10 +373,10 @@ export default function ServiceRequestsPage(): JSX.Element {
         isLoading={isCasesAreaLoading && !isCasesError}
         isError={isCasesError}
         hasListRefinement={listHasRefinement}
-        entityName="service requests"
+        entityName={SERVICE_REQUESTS_ENTITY_LABEL}
         onCaseClick={(c) =>
           navigate(
-            `/projects/${projectId}/${basePath}/service-requests/${c.id}`,
+            `/projects/${projectId}/${navSegment}/service-requests/${c.id}`,
           )
         }
       />

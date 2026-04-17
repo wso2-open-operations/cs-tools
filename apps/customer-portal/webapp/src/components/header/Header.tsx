@@ -24,7 +24,7 @@ import Actions from "@components/header/Actions";
 import SearchBar from "@components/header/SearchBar";
 import ProjectSwitcher from "@components/header/ProjectSwitcher";
 import { useAsgardeo } from "@asgardeo/react";
-import { shouldExcludeS0 } from "@features/project-details/utils/permissions";
+import { shouldExcludeS0 } from "@/utils/permission";
 import { setLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
 
 interface HeaderProps {

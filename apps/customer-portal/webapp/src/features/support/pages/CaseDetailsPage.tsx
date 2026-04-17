@@ -21,7 +21,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetCaseDetails from "@features/support/api/useGetCaseDetails";
 import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
 import { isSecurityReportAnalysisType } from "@features/support/utils/support";
-import { SecurityTab } from "@features/security/constants/securityConstants";
+import { SecurityTabId } from "@features/security/types/security";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 
 /**
@@ -99,11 +99,11 @@ export default function CaseDetailsPage(): JSX.Element {
       caseDetailsWithFlag?.isSecurityReport === true ||
       isSecurityReportAnalysisType(data?.type) ||
       isSecurityReportAnalysisRoute ||
-      queryTab === SecurityTab.VULNERABILITIES;
+      queryTab === SecurityTabId.VULNERABILITIES;
 
     if (isSecurityReport) {
       navigate(
-        `/projects/${projectId}/security-center?tab=${SecurityTab.VULNERABILITIES}`,
+        `/projects/${projectId}/security-center?tab=${SecurityTabId.VULNERABILITIES}`,
       );
     } else {
       navigate(ROUTE_PREVIOUS_PAGE);

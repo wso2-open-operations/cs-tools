@@ -839,7 +839,7 @@ describe("support utils", () => {
       expect(result).toContain("https://cdn.example.com/att.png");
     });
 
-    it("should use same-origin .iix as img src and keep download URL as fallback attr", () => {
+    it("should use same-origin .iix as img src without adding a download URL fallback attr", () => {
       const html =
         '<img src="https://wso2sndev.wso2.com/att456.iix" alt="inline">';
       const attachments = [
@@ -850,8 +850,8 @@ describe("support utils", () => {
       ];
       const result = replaceInlineImageSources(html, attachments);
       expect(result).toContain('src="https://wso2sndev.wso2.com/att456.iix"');
-      expect(result).toContain("data-inline-download-url=");
-      expect(result).toContain("sys_attachment.do");
+      expect(result).not.toContain("data-inline-download-url=");
+      expect(result).not.toContain("sys_attachment.do");
     });
 
     it("should handle single-quoted src", () => {

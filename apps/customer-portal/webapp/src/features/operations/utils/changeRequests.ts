@@ -19,9 +19,9 @@ import autoTable from "jspdf-autotable";
 import {
   CHANGE_REQUEST_STATE_ORDER,
   ChangeRequestStates,
-  resolveChangeRequestCanonicalState,
   type ChangeRequestState,
-} from "@features/operations/constants/changeRequestConstants";
+} from "@features/operations/constants/operationsConstants";
+import { resolveChangeRequestCanonicalState } from "@features/operations/utils/changeRequestUi";
 import type { ChangeRequestDetails, ChangeRequestStats, ChangeRequestStatsResponse } from "@features/operations/types/changeRequests";
 import type { CaseComment } from "@features/support/types/cases";
 import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequests";

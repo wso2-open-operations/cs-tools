@@ -44,14 +44,7 @@ import { usePostCreateDeployment } from "@features/project-details/api/usePostCr
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import ErrorBanner from "@components/error-banner/ErrorBanner";
-
-export interface AddDeploymentModalProps {
-  open: boolean;
-  projectId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-}
+import type { AddDeploymentModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 const INITIAL_FORM = {
   name: "",

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
 import {
   Box,
   CircularProgress,
@@ -34,16 +35,6 @@ import {
 import type { JSX } from "react";
 import type { CaseAttachment } from "@features/support/types/cases";
 import { formatFileSize, getAttachmentFileCategory } from "@features/support/utils/support";
-
-export interface AttachmentListItemProps {
-  attachment: CaseAttachment;
-  onDownload: (attachment: CaseAttachment) => void;
-  onDelete?: (attachment: CaseAttachment) => void;
-  onEdit?: (attachment: CaseAttachment) => void;
-  hideDescription?: boolean;
-  /** When true, the download action shows a spinner and is disabled. */
-  isDownloadLoading?: boolean;
-}
 
 // TODO: Use attachment category enum when introduced (see support.ts AttachmentFileCategory).
 function getAttachmentIcon(att: CaseAttachment): JSX.Element {

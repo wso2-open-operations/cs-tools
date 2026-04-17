@@ -26,15 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, type JSX } from "react";
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
-
-export interface DeleteDeploymentModalProps {
-  open: boolean;
-  deployment: ProjectDeploymentItem | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  isDeleting?: boolean;
-}
+import type { DeleteDeploymentModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Confirmation modal before deleting a deployment.

@@ -22,12 +22,14 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import ProductVulnerabilitiesTableHeader from "@features/security/components/ProductVulnerabilitiesTableHeader";
 import ProductVulnerabilitiesFilters from "@features/security/components/ProductVulnerabilitiesFilters";
 import ProductVulnerabilitiesList from "@features/security/components/ProductVulnerabilitiesList";
-
-export interface ProductVulnerabilitiesTableProps {
-  onTotalRecordsChange?: (total: number) => void;
-  onError?: (isError: boolean) => void;
-  onVulnerabilityClick?: (vulnerability: { id: string }) => void;
-}
+import {
+  PRODUCT_VULNERABILITIES_DEFAULT_ROWS_PER_PAGE,
+  PRODUCT_VULNERABILITIES_SEARCH_DEBOUNCE_MS,
+} from "@features/security/constants/securityConstants";
+import type { ProductVulnerabilitiesTableProps } from "@features/security/types/security";
+import {
+  countProductVulnerabilityTableActiveFilters,
+} from "@features/security/utils/productVulnerabilitiesTable";
 
 /**
  * Product Vulnerabilities table using the same structure as the dashboard outstanding cases table.
@@ -40,11 +42,16 @@ const ProductVulnerabilitiesTable = ({
   onVulnerabilityClick,
 }: ProductVulnerabilitiesTableProps): JSX.Element => {
   const [searchInput, setSearchInput] = useState("");
-  const debouncedSearch = useDebouncedValue(searchInput, 350);
+  const debouncedSearch = useDebouncedValue(
+    searchInput,
+    PRODUCT_VULNERABILITIES_SEARCH_DEBOUNCE_MS,
+  );
   const [filters, setFilters] = useState<Record<string, string | number>>({});
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(
+    PRODUCT_VULNERABILITIES_DEFAULT_ROWS_PER_PAGE,
+  );
 
   const { data: metaData } = useGetVulnerabilitiesMetaData();
   const severityOptions = useMemo(
@@ -112,39 +119,10 @@ const ProductVulnerabilitiesTable = ({
     setPage(0);
   };
 
-  const activeFilterFields = useMemo(
-    () => [
-      {
-        id: "severityId",
-        label: "Severity",
-        options: severityOptions.map((opt) => ({
-          value: opt.value,
-          label: opt.label,
-        })),
-      },
-    ],
-    [severityOptions],
-  );
-
-  const appliedFilters = useMemo(() => {
-    const result: Record<string, string | number> = {};
-    for (const [key, value] of Object.entries(filters)) {
-      if (!value) continue;
-      if (key === "severityId") {
-        const label = severityOptions.find((o) => o.value === value)?.label;
-        result[key] = label ?? String(value);
-      } else {
-        result[key] = String(value);
-      }
-    }
-    return result;
-  }, [filters, severityOptions]);
-
   const activeFilterCount = useMemo(
     () =>
-      (searchInput.trim() ? 1 : 0) +
-      activeFilterFields.filter((f) => appliedFilters[f.id]).length,
-    [activeFilterFields, appliedFilters, searchInput],
+      countProductVulnerabilityTableActiveFilters(searchInput, filters),
+    [filters, searchInput],
   );
 
   return (

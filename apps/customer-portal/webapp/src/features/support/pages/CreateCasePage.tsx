@@ -70,12 +70,13 @@ import {
   CaseSeverityLevel,
   CaseType,
 } from "@features/support/constants/supportConstants";
-import { SecurityTab } from "@features/security/constants/securityConstants";
+import { SecurityTabId } from "@features/security/types/security";
 import {
   filterDeploymentsForCaseCreation,
   shouldExcludeS0,
+  shouldForceSeverityS4,
   shouldRestrictToPrimaryProductionDeployments,
-} from "@features/project-details/utils/permissions";
+} from "@/utils/permission";
 import {
   escapeHtml,
   htmlToPlainText,
@@ -83,6 +84,10 @@ import {
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type {
+  ChatMessageForClassification,
+  RelatedCaseState,
+} from "@features/support/types/createCasePage";
 
 const DEFAULT_CASE_TITLE = "Support case";
 const DEFAULT_CASE_DESCRIPTION = "Please describe your issue here.";
@@ -105,25 +110,11 @@ function buildRelatedCaseDescriptionHtml(rawDescription?: string): string {
   return `${RELATED_DESCRIPTION_PREFIX_HTML}${normalizedBody}`;
 }
 
-interface ChatMessageForClassification {
-  text: string;
-  sender: string;
-}
-
 /**
  * CreateCasePage component to review and edit AI-generated case details.
  *
  * @returns {JSX.Element} The rendered CreateCasePage.
  */
-export interface RelatedCaseState {
-  parentCaseId?: string;
-  number: string;
-  title: string;
-  description: string;
-  deploymentId?: string;
-  deploymentLabel?: string;
-}
-
 export default function CreateCasePage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -146,6 +137,9 @@ export default function CreateCasePage(): JSX.Element {
     useGetProjectDetails(projectId || "");
   const excludeS0 = projectDetails
     ? shouldExcludeS0(projectDetails.type?.label)
+    : false;
+  const forceSeverityS4 = projectDetails
+    ? shouldForceSeverityS4(projectDetails.type?.label)
     : false;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
@@ -480,6 +474,18 @@ export default function CreateCasePage(): JSX.Element {
     relatedCase,
     severityLevelsList,
   ]);
+
+  // For Development Support: lock severity to S4 (Low).
+  useEffect(() => {
+    if (!forceSeverityS4) return;
+    if (isFiltersLoading || !severityLevelsList.length) return;
+    const s4Level = severityLevelsList.find(
+      (s) => s.label === CaseSeverity.LOW,
+    );
+    if (s4Level) {
+      setSeverity(s4Level.id);
+    }
+  }, [forceSeverityS4, isFiltersLoading, severityLevelsList]);
 
   // When opening a related case, prefill title, description (with prefix), and deployment from parent.
   const hasRelatedCaseInitializedRef = useRef(false);
@@ -818,7 +824,7 @@ export default function CreateCasePage(): JSX.Element {
         // Refetch security vulnerabilities if this was a security report
         if (isCreatedSecurityReport) {
           navigate(
-            `/projects/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTab.VULNERABILITIES}`,
+            `/projects/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTabId.VULNERABILITIES}`,
           );
         } else {
           navigate(`/projects/${projectId}/support/cases/${caseId}`);
@@ -939,6 +945,7 @@ export default function CreateCasePage(): JSX.Element {
             relatedCaseNumber={relatedCase?.number ?? ""}
             isSecurityReport={isSecurityReport}
             excludeS0={excludeS0}
+            isSeverityDisabled={forceSeverityS4}
           />
 
           {/* form actions container */}

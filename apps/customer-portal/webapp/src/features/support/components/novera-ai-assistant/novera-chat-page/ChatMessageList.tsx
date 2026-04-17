@@ -14,27 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatMessageListProps } from "@features/support/types/supportComponents";
 import { Box, Skeleton } from "@wso2/oxygen-ui";
-import {
-  type JSX,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useRef,
-} from "react";
+import { type JSX, useCallback, useEffect, useRef } from "react";
 import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
 import LoadingDotsBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
-import type { Message } from "@features/support/types/conversations";
-
-interface ChatMessageListProps {
-  messages: Message[];
-  messagesEndRef: RefObject<HTMLDivElement | null>;
-  onCreateCase?: () => void;
-  onThumbsUp?: (messageId: string) => void;
-  onThumbsDown?: (messageId: string) => void;
-  onFetchOlder?: () => void;
-  isFetchingOlder?: boolean;
-}
 
 /**
  * Renders the list of chat messages.

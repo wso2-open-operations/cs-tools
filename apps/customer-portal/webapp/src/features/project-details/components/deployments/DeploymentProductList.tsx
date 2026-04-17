@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { SelectedDeploymentProduct } from "@features/project-details/components/deployments/deploymentSelectionTypes";
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 import {
   displayValue,
@@ -51,13 +50,10 @@ import ErrorBanner from "@components/error-banner/ErrorBanner";
 import AddProductModal from "@features/project-details/components/deployments/AddProductModal";
 import ManageProductModal from "@features/project-details/components/deployments/ManageProductModal";
 import DeleteProductModal from "@features/project-details/components/deployments/DeleteProductModal";
-
-interface DeploymentProductListProps {
-  deploymentId: string;
-  projectId: string;
-  selectedProduct: SelectedDeploymentProduct | null;
-  onToggleProductSelect: (deploymentId: string, productItemId: string) => void;
-}
+import type {
+  DeploymentProductItemRowProps,
+  DeploymentProductListProps,
+} from "@features/project-details/types/projectDetailsComponents";
 
 function ProductsSkeleton(): JSX.Element {
   return (
@@ -324,16 +320,6 @@ export default function DeploymentProductList({
   );
 }
 
-interface ProductItemRowProps {
-  item: DeploymentProductItem;
-  deploymentId: string;
-  isSelected: boolean;
-  onToggleSelect: () => void;
-  onEdit: () => void;
-  onDelete: (item: DeploymentProductItem) => void;
-  isDeleting: boolean;
-}
-
 function ProductItemRow({
   item,
   isSelected,
@@ -341,7 +327,7 @@ function ProductItemRow({
   onEdit,
   onDelete,
   isDeleting,
-}: ProductItemRowProps): JSX.Element {
+}: DeploymentProductItemRowProps): JSX.Element {
   const emptyVal = "Not Available";
   const name = displayValue(item.product?.label, emptyVal);
   const versionLabel =

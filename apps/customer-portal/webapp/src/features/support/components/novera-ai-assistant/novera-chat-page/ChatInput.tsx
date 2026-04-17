@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -26,16 +27,6 @@ import { Send, PanelTopClose, FileText } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import Editor from "@components/rich-text-editor/Editor";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
-
-interface ChatInputProps {
-  inputValue: string;
-  setInputValue: (value: string) => void;
-  onSend: () => void;
-  onCreateCase?: () => void;
-  isSending?: boolean;
-  isCreateCaseLoading?: boolean;
-  resetTrigger?: number;
-}
 
 const CHAT_PLACEHOLDER = "Type your message...";
 

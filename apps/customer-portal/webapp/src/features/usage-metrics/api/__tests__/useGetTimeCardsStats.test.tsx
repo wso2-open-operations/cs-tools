@@ -37,6 +37,25 @@ vi.mock("@hooks/useLogger", () => ({
   }),
 }));
 
+vi.mock("@/utils/useAuthApiClient", () => ({
+  useAuthApiClient: () =>
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/stats/time-cards")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            totalHours: 400,
+            billableHours: 400,
+            nonBillableHours: 0,
+          }),
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+}));
+
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {

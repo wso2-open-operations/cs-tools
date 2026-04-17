@@ -18,7 +18,7 @@ import type {
   IdLabelRef,
   PaginationResponse,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
 
 // Item type for basic project definition returned in search list responses.
 export type ProjectListItem = {

@@ -16,7 +16,8 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import SupportOverviewCard from "@features/support/components/SupportOverviewCard";
+import SupportOverviewCard from "@features/support/components/support-overview-cards/SupportOverviewCard";
+import { SupportOverviewIconVariant } from "@features/support/types/supportOverview";
 
 const MockIcon = () => <span data-testid="mock-icon">Icon</span>;
 
@@ -49,7 +50,7 @@ describe("SupportOverviewCard", () => {
         title="Chat History"
         subtitle="Recent conversations"
         icon={MockIcon}
-        iconVariant="blue"
+        iconVariant={SupportOverviewIconVariant.Blue}
         footerButtonLabel="View all chat history"
         onFooterClick={onFooterClick}
       >

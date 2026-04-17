@@ -14,6 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type {
+  MissingTimezoneDialogProps,
+  MissingTimezoneDialogVariant,
+} from "@features/support/types/supportComponents";
+
+export type { MissingTimezoneDialogVariant };
 import {
   Button,
   Dialog,
@@ -24,16 +30,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { Clock } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-export type MissingTimezoneDialogVariant = "informational" | "required";
-
-export interface MissingTimezoneDialogProps {
-  open: boolean;
-  onClose: () => void;
-  /** Called when user clicks the "Set Time Zone" button. */
-  onSetTimeZone: () => void;
-  variant?: MissingTimezoneDialogVariant;
-}
 
 /**
  * Dialog shown when the user has no time zone configured on their profile.

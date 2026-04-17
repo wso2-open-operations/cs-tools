@@ -16,20 +16,12 @@
 
 import { Box, Card, CardContent } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-import type { ProjectDetails } from "@features/project-hub/types/projects";
 import { formatProjectDate } from "@features/project-details/utils/projectDetails";
+import type { ProjectInformationCardProps } from "@features/project-details/types/projectDetailsComponents";
 import ProjectHeader from "@features/project-details/components/project-overview/project-information/ProjectHeader";
 import ProjectName from "@features/project-details/components/project-overview/project-information/ProjectName";
 import ProjectMetadata from "@features/project-details/components/project-overview/project-information/ProjectMetadata";
 import SubscriptionDetails from "@features/project-details/components/project-overview/project-information/SubscriptionDetails";
-
-interface ProjectInformationCardProps {
-  project?: ProjectDetails;
-  slaStatus: string;
-  isLoading?: boolean;
-  isError?: boolean;
-}
 
 const ProjectInformationCard = ({
   project,

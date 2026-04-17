@@ -41,11 +41,13 @@ const mockProductUpdateLevelsResponse = [
   },
 ];
 
-const mockAuthFetch = vi.fn().mockResolvedValue({
-  ok: true,
-  json: () => Promise.resolve(mockProductUpdateLevelsResponse),
-  status: 200,
-} as Response);
+const { mockAuthFetch } = vi.hoisted(() => ({
+  mockAuthFetch: vi.fn(),
+}));
+
+vi.mock("@/utils/useAuthApiClient", () => ({
+  useAuthApiClient: () => mockAuthFetch,
+}));
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({

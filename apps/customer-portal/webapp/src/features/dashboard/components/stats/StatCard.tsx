@@ -27,23 +27,8 @@ import { Info } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { TrendIndicator } from "@features/dashboard/components/stats/TrendIndicator";
-import { type StatCardColor } from "@features/dashboard/constants/dashboardConstants";
-import type { TrendData } from "@features/dashboard/types/common";
-
-//Props for the StatCard component.
-interface StatCardProps {
-  label: string;
-  value: string | number;
-  icon: JSX.Element;
-  iconColor: StatCardColor;
-  tooltipText: string;
-  trend?: TrendData;
-  /** When false, hides the trend indicator (e.g. for Total/Active Engagements). */
-  showTrend?: boolean;
-  isLoading?: boolean;
-  isError?: boolean;
-  isTrendError?: boolean;
-}
+import { type StatCardColor } from "@features/dashboard/types/dashboard";
+import type { StatCardProps } from "@features/dashboard/types/stats";
 
 /**
  * Component to display a single statistic card.

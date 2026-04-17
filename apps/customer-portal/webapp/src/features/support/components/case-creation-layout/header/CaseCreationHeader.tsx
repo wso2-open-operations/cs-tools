@@ -14,17 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseCreationHeaderProps } from "@features/support/types/supportComponents";
 import { Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-
-export interface CaseCreationHeaderProps {
-  onBack?: () => void;
-  hideAiChip?: boolean;
-  backLabel?: string;
-  subtitle?: string;
-  title?: string;
-}
 
 /**
  * Header section for the Case Creation page.

@@ -23,7 +23,6 @@ import {
   TextField,
   Typography,
   alpha,
-  type Theme,
 } from "@wso2/oxygen-ui";
 import { SquarePen, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -39,85 +38,19 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useGetRecommendedUpdateLevels } from "@features/updates/api/useGetRecommendedUpdateLevels";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
-
-function updatesHistoryErrorMessage(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : "Failed to save update history.";
-}
-
-/** Which update-history mutation is in flight (for footer / button labels). */
-export type UpdateHistorySaveAction = "add" | "delete" | "edit";
-
-export interface UpdateHistoryTabProps {
-  updates: ProductUpdate[];
-  productName: string;
-  productVersion: string;
-  isLoading?: boolean;
-  onSaveUpdates: (updates: ProductUpdate[]) => Promise<void>;
-  onFormStateChange?: (state: {
-    canAdd: boolean;
-    isSaving: boolean;
-    saveAction: UpdateHistorySaveAction | null;
-    handleAdd: () => void;
-  } | null) => void;
-}
-
-interface UpdateFormData {
-  updateLevel: string;
-  date: string;
-  details: string;
-}
-
-const INITIAL_FORM: UpdateFormData = {
-  updateLevel: "",
-  date: "",
-  details: "",
-};
-
-function updateHistoryEntryBackground(theme: Theme): string {
-  return alpha(
-    theme.palette.text.secondary,
-    theme.palette.mode === "dark" ? 0.22 : 0.12,
-  );
-}
-
-/** Visible outline on history cards and section rules in light / dark mode. */
-function updateHistoryOutlineColor(theme: Theme): string {
-  return theme.palette.mode === "dark"
-    ? alpha(theme.palette.common.white, 0.28)
-    : alpha(theme.palette.common.black, 0.12);
-}
-
-/**
- * Placeholder layout while recommended levels or update-level search is loading.
- *
- * @returns {JSX.Element} Skeleton block for the add-update form.
- */
-function AddNewUpdateSectionSkeleton(): JSX.Element {
-  return (
-    <Box
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-    >
-      <Skeleton variant="text" width={140} height={28} />
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 2,
-        }}
-      >
-        <Skeleton variant="rounded" width="100%" height={40} />
-        <Skeleton variant="rounded" width="100%" height={40} />
-      </Box>
-      <Skeleton variant="rounded" width="100%" height={72} />
-    </Box>
-  );
-}
+import UpdateHistoryAddSectionSkeleton from "@features/project-details/components/deployments/update-history/UpdateHistoryAddSectionSkeleton";
+import {
+  getUpdateHistoryEntryBackground,
+  getUpdateHistoryErrorMessage,
+  getUpdateHistoryOutlineColor,
+} from "@features/project-details/utils/updateHistory";
+import { UPDATE_HISTORY_INITIAL_FORM_DATA } from "@features/project-details/constants/projectDetailsConstants";
+import type {
+  UpdateHistoryFormData,
+  UpdateHistorySaveAction,
+  UpdateHistoryTabProps,
+  UpdateHistoryTimelineItemProps,
+} from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Displays update history timeline and allows adding/editing/deleting updates.
@@ -133,7 +66,9 @@ export default function UpdateHistoryTab({
   onSaveUpdates,
   onFormStateChange,
 }: UpdateHistoryTabProps): JSX.Element {
-  const [form, setForm] = useState<UpdateFormData>(INITIAL_FORM);
+  const [form, setForm] = useState<UpdateHistoryFormData>(
+    UPDATE_HISTORY_INITIAL_FORM_DATA,
+  );
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [saveInFlight, setSaveInFlight] =
     useState<UpdateHistorySaveAction | null>(null);
@@ -221,7 +156,7 @@ export default function UpdateHistoryTab({
   }, [sortedUpdates]);
 
   const handleFormChange =
-    (field: keyof UpdateFormData) => (e: ChangeEvent<HTMLInputElement>) => {
+    (field: keyof UpdateHistoryFormData) => (e: ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setForm((prev) => ({ ...prev, [field]: value }));
     };
@@ -241,10 +176,10 @@ export default function UpdateHistoryTab({
     setSaveInFlight("add");
     try {
       await onSaveUpdates([...updates, newUpdate]);
-      setForm(INITIAL_FORM);
+      setForm(UPDATE_HISTORY_INITIAL_FORM_DATA);
       showSuccess("Update history entry added successfully.");
     } catch (error) {
-      showError(updatesHistoryErrorMessage(error));
+      showError(getUpdateHistoryErrorMessage(error));
     } finally {
       setSaveInFlight(null);
     }
@@ -293,7 +228,7 @@ export default function UpdateHistoryTab({
         await onSaveUpdates(newUpdates);
         showSuccess("Update history entry deleted successfully.");
       } catch (error) {
-        showError(updatesHistoryErrorMessage(error));
+        showError(getUpdateHistoryErrorMessage(error));
       } finally {
         setSaveInFlight(null);
       }
@@ -318,7 +253,7 @@ export default function UpdateHistoryTab({
         setEditingIndex(null);
         showSuccess("Update history entry updated successfully.");
       } catch (error) {
-        showError(updatesHistoryErrorMessage(error));
+        showError(getUpdateHistoryErrorMessage(error));
       } finally {
         setSaveInFlight(null);
       }
@@ -438,7 +373,7 @@ export default function UpdateHistoryTab({
       <Box
         sx={{
           borderTop: 1,
-          borderColor: (theme) => updateHistoryOutlineColor(theme),
+          borderColor: (theme) => getUpdateHistoryOutlineColor(theme),
           pt: 3,
           display: "flex",
           flexDirection: "column",
@@ -446,7 +381,7 @@ export default function UpdateHistoryTab({
         }}
       >
         {isAddUpdateSectionLoading ? (
-          <AddNewUpdateSectionSkeleton />
+          <UpdateHistoryAddSectionSkeleton />
         ) : (
           <>
             <Typography
@@ -534,24 +469,10 @@ export default function UpdateHistoryTab({
   );
 }
 
-interface TimelineItemProps {
-  update: ProductUpdate;
-  isEditing: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-  onSave: (edited: ProductUpdate) => void;
-  onCancelEdit: () => void;
-  formatDate: (dateStr: string) => string;
-  isSaving: boolean;
-  availableUpdateLevels: number[];
-  showUpdateLevelSkeleton: boolean;
-  showEditFormSkeleton: boolean;
-}
-
 /**
  * Single timeline item displaying an update entry.
  *
- * @param {TimelineItemProps} props - update data and event handlers.
+ * @param {UpdateHistoryTimelineItemProps} props - update data and event handlers.
  * @returns {JSX.Element} The timeline item component.
  */
 function TimelineItem({
@@ -566,7 +487,7 @@ function TimelineItem({
   availableUpdateLevels,
   showUpdateLevelSkeleton,
   showEditFormSkeleton,
-}: TimelineItemProps): JSX.Element {
+}: UpdateHistoryTimelineItemProps): JSX.Element {
   const [editForm, setEditForm] = useState<ProductUpdate>(update);
 
   useEffect(() => {
@@ -632,14 +553,14 @@ function TimelineItem({
       <Box
         sx={{
           flex: 1,
-          bgcolor: (theme) => updateHistoryEntryBackground(theme),
+          bgcolor: (theme) => getUpdateHistoryEntryBackground(theme),
           color: "text.primary",
           p: 2,
           position: "relative",
           ml: -1,
           border: 1,
           borderStyle: "solid",
-          borderColor: (theme) => updateHistoryOutlineColor(theme),
+          borderColor: (theme) => getUpdateHistoryOutlineColor(theme),
         }}
       >
         <Box
@@ -652,14 +573,14 @@ function TimelineItem({
             borderTop: "6px solid transparent",
             borderBottom: "6px solid transparent",
             borderRight: (theme) =>
-              `8px solid ${updateHistoryEntryBackground(theme)}`,
+              `8px solid ${getUpdateHistoryEntryBackground(theme)}`,
             transform: "translateX(-100%)",
           }}
         />
         {isEditing ? (
           showEditFormSkeleton ? (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <AddNewUpdateSectionSkeleton />
+              <UpdateHistoryAddSectionSkeleton />
               <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <Button
                   variant="outlined"
@@ -873,7 +794,7 @@ function UpdateHistorySkeleton(): JSX.Element {
       <Box
         sx={{
           borderTop: 1,
-          borderColor: (theme) => updateHistoryOutlineColor(theme),
+          borderColor: (theme) => getUpdateHistoryOutlineColor(theme),
           pt: 3,
         }}
       >

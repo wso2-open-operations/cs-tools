@@ -19,9 +19,10 @@ import { Box, Grid, Stack, Typography } from "@wso2/oxygen-ui";
 import { useNavigate, useParams } from "react-router";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import ListStatGrid from "@components/list-view/ListStatGrid";
-import SupportOverviewCard from "@features/support/components/SupportOverviewCard";
+import SupportOverviewCard from "@features/support/components/support-overview-cards/SupportOverviewCard";
+import { SupportOverviewIconVariant } from "@features/support/types/supportOverview";
 import OutstandingCasesList from "@features/support/components/support-overview-cards/OutstandingCasesList";
-import OutstandingChangeRequestsList from "@features/support/components/support-overview-cards/OutstandingChangeRequestsList";
+import OutstandingChangeRequestsList from "@features/operations/components/change-requests/OutstandingChangeRequestsList";
 import {
   OPERATIONS_STAT_CONFIGS,
   OPERATIONS_OVERVIEW_LIST_LIMIT,
@@ -33,9 +34,23 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { useGetProjectChangeRequestsStats } from "@features/dashboard/api/useGetProjectChangeRequestsStats";
-import { getProjectPermissions } from "@features/project-details/utils/permissions";
-import { SortOrder } from "@features/dashboard/types/common";
+import { getProjectPermissions } from "@/utils/permission";
+import { SortOrder } from "@/types/common";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import {
+  OPERATIONS_HUB_CARD_TITLE_CR,
+  OPERATIONS_HUB_CARD_TITLE_SR,
+  OPERATIONS_HUB_FOOTER_VIEW_ALL_CR,
+  OPERATIONS_HUB_FOOTER_VIEW_ALL_SR,
+  OPERATIONS_HUB_FOOTER_VIEW_MINE,
+  OPERATIONS_HUB_HEADER_ACTION_CREATE_SR,
+  OPERATIONS_HUB_PROJECT_ERROR_MESSAGE,
+  OPERATIONS_HUB_STAT_ENTITY_NAME,
+} from "@features/operations/constants/operationsConstants";
+import {
+  formatOperationsOverviewChangeRequestsSubtitle,
+  formatOperationsOverviewServiceRequestsSubtitle,
+} from "@features/operations/utils/operationsPages";
 
 /**
  * OperationsPage component. Displays operations statistics,
@@ -130,7 +145,6 @@ export default function OperationsPage(): JSX.Element {
   const srReady = !isServiceRequestEnabled || srStats !== undefined;
   const crReady = !isChangeRequestEnabled || crStats !== undefined;
 
-  // Avoid an empty stats flash before project type is known (enables correct queries).
   const stats: Partial<Record<OperationsStatKey, number>> | undefined =
     !permissionsReady
       ? undefined
@@ -179,12 +193,19 @@ export default function OperationsPage(): JSX.Element {
 
   const loadingOverviewGridSize = { xs: 12, lg: 6 };
 
+  const srOverviewSubtitle = formatOperationsOverviewServiceRequestsSubtitle(
+    OPERATIONS_OVERVIEW_LIST_LIMIT,
+  );
+  const crOverviewSubtitle = formatOperationsOverviewChangeRequestsSubtitle(
+    OPERATIONS_OVERVIEW_LIST_LIMIT,
+  );
+
   if (projectLoadFailed) {
     return (
       <Box sx={{ textAlign: "center", py: 6 }}>
         <ErrorIndicator entityName="project" size="medium" />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Unable to load project details. Please try again later.
+          {OPERATIONS_HUB_PROJECT_ERROR_MESSAGE}
         </Typography>
       </Box>
     );
@@ -201,7 +222,7 @@ export default function OperationsPage(): JSX.Element {
                 (isChangeRequestEnabled && isCrStatsLoading)))
           }
           isError={isError}
-          entityName="operations"
+          entityName={OPERATIONS_HUB_STAT_ENTITY_NAME}
           stats={stats}
           configs={operationsStatConfigs}
         />
@@ -210,45 +231,39 @@ export default function OperationsPage(): JSX.Element {
         <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
           <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
             <SupportOverviewCard
-              title="Service Requests"
-              subtitle={`Latest ${OPERATIONS_OVERVIEW_LIST_LIMIT} service requests`}
+              title={OPERATIONS_HUB_CARD_TITLE_SR}
+              subtitle={srOverviewSubtitle}
               icon={FileText}
-              iconVariant="orange"
+              iconVariant={SupportOverviewIconVariant.Orange}
               footerButtons={[]}
             >
-              <OutstandingCasesList
-                cases={[]}
-                isLoading
-              />
+              <OutstandingCasesList cases={[]} isLoading />
             </SupportOverviewCard>
           </Grid>
           <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
             <SupportOverviewCard
-              title="Change Requests"
-              subtitle={`Latest ${OPERATIONS_OVERVIEW_LIST_LIMIT} change requests`}
+              title={OPERATIONS_HUB_CARD_TITLE_CR}
+              subtitle={crOverviewSubtitle}
               icon={FileText}
-              iconVariant="blue"
+              iconVariant={SupportOverviewIconVariant.Blue}
               footerButtons={[]}
             >
-              <OutstandingChangeRequestsList
-                changeRequests={[]}
-                isLoading
-              />
+              <OutstandingChangeRequestsList changeRequests={[]} isLoading />
             </SupportOverviewCard>
           </Grid>
         </Grid>
-      ) : (isServiceRequestEnabled || isChangeRequestEnabled) ? (
+      ) : isServiceRequestEnabled || isChangeRequestEnabled ? (
         <>
           <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
             {isServiceRequestEnabled && (
               <Grid size={overviewGridSize} sx={{ display: "flex" }}>
                 <SupportOverviewCard
-                  title="Service Requests"
-                  subtitle={`Latest ${OPERATIONS_OVERVIEW_LIST_LIMIT} service requests`}
+                  title={OPERATIONS_HUB_CARD_TITLE_SR}
+                  subtitle={srOverviewSubtitle}
                   icon={FileText}
-                  iconVariant="orange"
+                  iconVariant={SupportOverviewIconVariant.Orange}
                   headerAction={{
-                    label: "Create Service Request",
+                    label: OPERATIONS_HUB_HEADER_ACTION_CREATE_SR,
                     onClick: () =>
                       navigate(
                         `/projects/${projectId}/operations/service-requests/create`,
@@ -256,7 +271,7 @@ export default function OperationsPage(): JSX.Element {
                   }}
                   footerButtons={[
                     {
-                      label: "View my requests",
+                      label: OPERATIONS_HUB_FOOTER_VIEW_MINE,
                       onClick: () =>
                         navigate(
                           `/projects/${projectId}/operations/service-requests?createdByMe=true`,
@@ -264,7 +279,7 @@ export default function OperationsPage(): JSX.Element {
                         ),
                     },
                     {
-                      label: "View all requests",
+                      label: OPERATIONS_HUB_FOOTER_VIEW_ALL_SR,
                       onClick: () =>
                         navigate(
                           `/projects/${projectId}/operations/service-requests`,
@@ -293,13 +308,13 @@ export default function OperationsPage(): JSX.Element {
             {isChangeRequestEnabled && (
               <Grid size={overviewGridSize} sx={{ display: "flex" }}>
                 <SupportOverviewCard
-                  title="Change Requests"
-                  subtitle={`Latest ${OPERATIONS_OVERVIEW_LIST_LIMIT} change requests`}
+                  title={OPERATIONS_HUB_CARD_TITLE_CR}
+                  subtitle={crOverviewSubtitle}
                   icon={FileText}
-                  iconVariant="blue"
+                  iconVariant={SupportOverviewIconVariant.Blue}
                   footerButtons={[
                     {
-                      label: "View all change requests",
+                      label: OPERATIONS_HUB_FOOTER_VIEW_ALL_CR,
                       onClick: () =>
                         navigate(
                           `/projects/${projectId}/operations/change-requests`,

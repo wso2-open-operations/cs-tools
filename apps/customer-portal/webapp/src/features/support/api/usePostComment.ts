@@ -23,17 +23,12 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys, ApiMutationKeys } from "@/constants/apiConstants";
-import { CommentType } from "@features/support/constants/supportConstants";
+import type {
+  PostCommentRequest,
+  PostCommentVariables,
+} from "@features/support/types/supportApi";
 
-export interface PostCommentRequest {
-  content: string;
-  type: CommentType;
-}
-
-export interface PostCommentVariables {
-  caseId: string;
-  body: PostCommentRequest;
-}
+export type { PostCommentRequest, PostCommentVariables };
 
 /**
  * Posts a comment to a case (POST /cases/:caseId/comments).

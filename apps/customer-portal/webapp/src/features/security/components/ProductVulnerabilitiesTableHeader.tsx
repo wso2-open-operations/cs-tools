@@ -29,14 +29,14 @@ import {
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ChangeEvent } from "react";
-
-interface ProductVulnerabilitiesTableHeaderProps {
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  onFilterToggle: () => void;
-  isFiltersOpen: boolean;
-  activeFiltersCount: number;
-}
+import {
+  PRODUCT_VULNERABILITIES_FILTERS_BUTTON_LABEL,
+  PRODUCT_VULNERABILITIES_SEARCH_PLACEHOLDER,
+  PRODUCT_VULNERABILITIES_TABLE_DESCRIPTION,
+  PRODUCT_VULNERABILITIES_TABLE_TITLE,
+} from "@features/security/constants/securityConstants";
+import type { ProductVulnerabilitiesTableHeaderProps } from "@features/security/types/security";
+import { formatProductVulnerabilitiesClearFiltersLabel } from "@features/security/utils/productVulnerabilitiesTable";
 
 /**
  * Header for the Product Vulnerabilities table with title, description, search bar, and filters.
@@ -75,10 +75,9 @@ const ProductVulnerabilitiesTableHeader = ({
             pr: { lg: 1 },
           }}
         >
-          <Typography variant="h6">Component Analysis</Typography>
+          <Typography variant="h6">{PRODUCT_VULNERABILITIES_TABLE_TITLE}</Typography>
           <Typography variant="body2" color="text.secondary">
-            Third-party components with known vulnerabilities and remediation
-            status
+            {PRODUCT_VULNERABILITIES_TABLE_DESCRIPTION}
           </Typography>
         </Box>
         <Box
@@ -96,7 +95,7 @@ const ProductVulnerabilitiesTableHeader = ({
             <TextField
               value={searchValue}
               onChange={handleSearchChange}
-              placeholder="Search CVE or component"
+              placeholder={PRODUCT_VULNERABILITIES_SEARCH_PLACEHOLDER}
               size="small"
               fullWidth
               slotProps={{
@@ -137,8 +136,10 @@ const ProductVulnerabilitiesTableHeader = ({
             }
           >
             {hasActiveFilters
-              ? `Clear Filters (${activeFiltersCount})`
-              : "Filters"}
+              ? formatProductVulnerabilitiesClearFiltersLabel(
+                  activeFiltersCount,
+                )
+              : PRODUCT_VULNERABILITIES_FILTERS_BUTTON_LABEL}
           </Button>
         </Box>
       </Box>

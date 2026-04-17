@@ -21,7 +21,7 @@ import type {
   PaginationResponse,
   SearchRequestBase,
   SharedEnvContext,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
 
 // Item type for a support chat session summary.
 export type ChatHistoryItem = {
@@ -80,6 +80,22 @@ export type ConversationMessagesResponse = PaginationResponse & {
 // Model type for all conversations search filter values state.
 export type AllConversationsFilterValues = {
   stateId?: string;
+};
+
+/**
+ * Row CTA for a conversation card (list view).
+ */
+export enum ConversationListRowAction {
+  View = "view",
+  Resume = "resume",
+}
+
+export type AllConversationsListProps = {
+  conversations: Conversation[];
+  isLoading: boolean;
+  isError?: boolean;
+  hasListRefinement?: boolean;
+  onConversationClick?: (conversation: Conversation) => void;
 };
 
 // Item type for select-type user input collection slot option.

@@ -18,13 +18,7 @@ import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import { TrendingUp, TrendingDown } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-import type { TrendData } from "@features/dashboard/types/common";
-
-interface TrendIndicatorProps {
-  trend?: TrendData;
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import type { TrendIndicatorProps } from "@features/dashboard/types/stats";
 
 /**
  * Component to display a trend indicator with an icon and value.

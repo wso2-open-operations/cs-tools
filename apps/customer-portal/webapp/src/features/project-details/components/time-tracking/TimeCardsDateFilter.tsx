@@ -24,15 +24,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Calendar, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-export interface TimeCardsDateFilterProps {
-  startDate: string;
-  endDate: string;
-  onStartDateChange: (value: string) => void;
-  onEndDateChange: (value: string) => void;
-  onClear?: () => void;
-  hasFilters?: boolean;
-}
+import type { TimeCardsDateFilterProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * TimeCardsDateFilter provides date range filters for time cards.

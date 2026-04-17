@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DeployedProductsResponse } from "@features/project-details/types/deployments";
+import type {
+  DeployedProductsResponse,
+  SelectedDeploymentProduct,
+} from "@features/project-details/types/deployments";
 
 /**
  * Type guard for DeployedProductsResponse.
@@ -30,4 +33,33 @@ export function isDeployedProductsResponse(
     payload !== null &&
     Array.isArray((payload as { deployedProducts?: unknown }).deployedProducts)
   );
+}
+
+/**
+ * Clamps the current page index to valid range for a known page count.
+ *
+ * @param page - One-based page from UI.
+ * @param totalPages - Total pages (0 when unknown or empty).
+ * @returns Clamped one-based page.
+ */
+export function clampDeploymentsPage(page: number, totalPages: number): number {
+  if (totalPages <= 0) {
+    return 1;
+  }
+  return Math.min(Math.max(page, 1), totalPages);
+}
+
+/**
+ * Query string for service request creation from a selected deployment product.
+ *
+ * @param selected - Selected deployment and product row.
+ * @returns URLSearchParams for the create-SR route.
+ */
+export function buildServiceRequestCreateSearchParams(
+  selected: SelectedDeploymentProduct,
+): URLSearchParams {
+  return new URLSearchParams({
+    deploymentId: selected.deploymentId,
+    productId: selected.productItemId,
+  });
 }

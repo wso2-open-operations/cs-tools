@@ -14,13 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type {
   AuditMetadata,
   IdLabelRef,
   PaginationResponse,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
-
+} from "@/types/common";
 
 // Item type for a change request.
 export type ChangeRequestItem = AuditMetadata & {
@@ -42,7 +42,6 @@ export type ChangeRequestItem = AuditMetadata & {
   state: IdLabelRef | null;
   type: IdLabelRef | null;
 };
-
 
 // Response type for detailed change request information.
 export type ChangeRequestDetails = ChangeRequestItem & {
@@ -76,7 +75,6 @@ export type ChangeRequestStats = {
 // Item type for change request state count.
 export type ChangeRequestStateCount = IdLabelRef & { count: number };
 
-
 // Response type for change request statistics breakdown.
 export type ChangeRequestStatsResponse = {
   totalCount: number;
@@ -94,7 +92,7 @@ export type PatchChangeRequestResponse = AuditMetadata & {
 export type ChangeRequestFilterValues = {
   stateId?: string;
   impactId?: string;
-}
+};
 
 // Filter type for searching change requests.
 export type ChangeRequestSearchFilters = {
@@ -129,4 +127,75 @@ export type ChangeRequestWorkflowStage = {
   completed: boolean;
   current: boolean;
   disabled: boolean;
+};
+
+// --- Change requests UI (list, calendar, filters) ---------------------------
+
+/** List vs calendar on the change requests page. */
+export enum ChangeRequestsViewMode {
+  List = "list",
+  Calendar = "calendar",
 }
+
+/**
+ * `ListFiltersPanel` / `CHANGE_REQUEST_FILTER_DEFINITIONS` entry `id` values
+ * (used when resolving metadata into select options).
+ */
+export enum ChangeRequestFilterDefinitionId {
+  State = "state",
+  Impact = "impact",
+}
+
+export type ChangeRequestsListProps = {
+  changeRequests: ChangeRequestItem[];
+  isLoading: boolean;
+  isError?: boolean;
+  hasListRefinement?: boolean;
+  onChangeRequestClick?: (item: ChangeRequestItem) => void;
+};
+
+export type OutstandingChangeRequestsListProps = {
+  changeRequests: ChangeRequestItem[];
+  isLoading?: boolean;
+  isError?: boolean;
+  onItemClick?: (item: ChangeRequestItem) => void;
+};
+
+export type ChangeRequestsCalendarViewProps = {
+  changeRequests: ChangeRequestItem[];
+  isLoading: boolean;
+  isError?: boolean;
+  onChangeRequestClick?: (item: ChangeRequestItem) => void;
+};
+
+export type ChangeRequestFilterOption = {
+  label: string;
+  value: string;
+};
+
+export type ChangeRequestsSearchBarProps = {
+  searchTerm: string;
+  onSearchChange: (value: string) => void;
+  isFiltersOpen: boolean;
+  onFiltersToggle: () => void;
+  filters: ChangeRequestFilterValues;
+  filterMetadata: CaseMetadataResponse | undefined;
+  onFilterChange: (field: string, value: string) => void;
+  onClearFilters: () => void;
+};
+
+export type ChangeRequestsStatCardsProps = {
+  isLoading: boolean;
+  isError?: boolean;
+  stats: ChangeRequestStats | undefined;
+};
+
+export type ProposeNewImplementationTimeModalProps = {
+  open: boolean;
+  onClose: () => void;
+  changeRequest: ChangeRequestDetails | null;
+};
+
+export type ScheduledMaintenanceWindowCardProps = {
+  changeRequest: ChangeRequestDetails | null;
+};

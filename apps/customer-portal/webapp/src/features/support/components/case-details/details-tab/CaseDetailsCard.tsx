@@ -14,15 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsCardProps } from "@features/support/types/supportComponents";
 import { Card, CardContent, Stack, Typography } from "@wso2/oxygen-ui";
-import { type ReactNode, type JSX } from "react";
-
-export interface CaseDetailsCardProps {
-  title: string;
-  icon: ReactNode;
-  children: ReactNode;
-  rightAction?: ReactNode;
-}
+import { type JSX } from "react";
 
 /**
  * Reusable card for case details sections with a consistent title row (icon + heading).

@@ -14,21 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
-import type { SelectedDeploymentProduct } from "@features/project-details/components/deployments/deploymentSelectionTypes";
-import { displayValue, formatProjectDateTime } from "@features/project-details/utils/projectDetails";
+import type { DeploymentCardProps } from "@features/project-details/types/projectDetailsComponents";
+import {
+  displayValue,
+  formatProjectDateTime,
+} from "@features/project-details/utils/projectDetails";
 import {
   Box,
   Card,
   CardContent,
   Chip,
   Divider,
-  IconButton,
   Link,
   Typography,
-  Button,
 } from "@wso2/oxygen-ui";
-import { Calendar, PencilLine, Trash2, Key } from "@wso2/oxygen-ui-icons-react";
+import DeploymentCardLicenseFooter from "@features/project-details/components/deployments/deployment-card/DeploymentCardLicenseFooter";
+import DeploymentCardToolbar from "@features/project-details/components/deployments/deployment-card/DeploymentCardToolbar";
 import { useState, type JSX } from "react";
 import DeploymentDocumentList from "@deployments/DeploymentDocumentList";
 import DeploymentProductList from "@deployments/DeploymentProductList";
@@ -36,12 +37,6 @@ import EditDeploymentModal from "@deployments/EditDeploymentModal";
 import DeleteDeploymentModal from "@deployments/DeleteDeploymentModal";
 import { usePatchDeployment } from "@features/project-details/api/usePatchDeployment";
 import { useDownloadDeploymentLicense } from "@features/project-details/api/useDownloadDeploymentLicense";
-
-export interface DeploymentCardProps {
-  deployment: ProjectDeploymentItem;
-  selectedProduct: SelectedDeploymentProduct | null;
-  onToggleProductSelect: (deploymentId: string, productItemId: string) => void;
-}
 
 /**
  * Renders a single deployment environment card with products and documents.
@@ -126,37 +121,11 @@ export default function DeploymentCard({
               )}
             </Box>
           </Box>
-          <Box sx={{ display: "flex", gap: 0.25, alignItems: "center" }}>
-            <IconButton
-              component="div"
-              size="small"
-              role="button"
-              aria-label="Edit deployment"
-              onClick={() => setIsEditModalOpen(true)}
-              sx={{
-                color: "text.secondary",
-                "&:hover": { color: "primary.main" },
-                "&.Mui-focusVisible": { color: "primary.main" },
-              }}
-            >
-              <PencilLine size={16} aria-hidden />
-            </IconButton>
-            <IconButton
-              component="div"
-              size="small"
-              role="button"
-              aria-label="Delete deployment"
-              onClick={() => setIsDeleteModalOpen(true)}
-              disabled={patchDeployment.isPending}
-              sx={{
-                color: "text.secondary",
-                "&:hover": { color: "primary.main" },
-                "&.Mui-focusVisible": { color: "primary.main" },
-              }}
-            >
-              <Trash2 size={16} aria-hidden />
-            </IconButton>
-          </Box>
+          <DeploymentCardToolbar
+            onEdit={() => setIsEditModalOpen(true)}
+            onDelete={() => setIsDeleteModalOpen(true)}
+            isDeleteDisabled={patchDeployment.isPending}
+          />
         </Box>
 
         <Divider />
@@ -177,50 +146,12 @@ export default function DeploymentCard({
         <DeploymentDocumentList deploymentId={deployment.id} />
 
         <Divider />
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 1,
-            color: "text.secondary",
-            fontSize: "0.75rem",
-          }}
-        >
-          <Box
-            sx={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 0.5,
-              flexShrink: 0,
-            }}
-          >
-            <Calendar
-              size={14}
-              style={{
-                verticalAlign: "middle",
-                display: "inline-block",
-                marginTop: "-2px",
-              }}
-            />
-            <span style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
-              Created on {createdAtStr} • Updated on {updatedAtStr}
-            </span>
-          </Box>
-          <Button
-            startIcon={<Key size={16} />}
-            onClick={handleDownloadLicense}
-            loading={downloadLicense.isPending}
-            loadingPosition="start"
-            variant="outlined"
-            size="small"
-            sx={{
-              textTransform: "none",
-            }}
-          >
-            Download License
-          </Button>
-        </Box>
+        <DeploymentCardLicenseFooter
+          createdAtLabel={createdAtStr}
+          updatedAtLabel={updatedAtStr}
+          onDownloadLicense={handleDownloadLicense}
+          isDownloading={downloadLicense.isPending}
+        />
       </CardContent>
 
       <EditDeploymentModal

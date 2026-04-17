@@ -21,11 +21,9 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { ProjectSupportStats } from "@features/project-hub/types/projects";
 import { CaseType } from "@features/support/constants/supportConstants";
+import type { UseGetProjectSupportStatsOptions } from "@features/support/types/supportApi";
 
-export interface UseGetProjectSupportStatsOptions {
-  caseTypes?: string[];
-  query?: string;
-}
+export type { UseGetProjectSupportStatsOptions };
 
 /**
  * Custom hook to fetch project support statistics by ID.

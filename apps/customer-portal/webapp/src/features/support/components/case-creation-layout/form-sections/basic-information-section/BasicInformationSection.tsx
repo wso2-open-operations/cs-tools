@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { BasicInformationSectionProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Chip,
@@ -33,33 +34,6 @@ import {
   EMPTY_DROPDOWN_PLACEHOLDER,
   paginatedSelectMenuListProps,
 } from "@features/shared/constants/dropdownConstants";
-import type { ProductVersionOption } from "@features/support/utils/caseCreation";
-
-export interface BasicInformationSectionProps {
-  project?: string;
-  product?: string;
-  setProduct?: (value: string) => void;
-  deployment?: string;
-  setDeployment?: (value: string) => void;
-  productOptionList?: ProductVersionOption[];
-  isProductAutoDetected?: boolean;
-  isDeploymentAutoDetected?: boolean;
-  metadata?: { deploymentTypes?: string[]; products?: string[] };
-  isDeploymentLoading?: boolean;
-  isProductDropdownDisabled?: boolean;
-  isProductLoading?: boolean;
-  extraDeploymentOptions?: string[];
-  extraProductOptions?: string[];
-  isRelatedCaseMode?: boolean;
-  isDeploymentDisabled?: boolean;
-  hideDeploymentField?: boolean;
-  onLoadMoreDeployments?: () => void;
-  hasMoreDeployments?: boolean;
-  isFetchingMoreDeployments?: boolean;
-  onLoadMoreProducts?: () => void;
-  hasMoreProducts?: boolean;
-  isFetchingMoreProducts?: boolean;
-}
 
 /**
  * Renders the Basic Information section used during case creation.

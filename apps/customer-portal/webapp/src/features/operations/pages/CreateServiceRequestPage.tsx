@@ -65,15 +65,90 @@ import {
 import {
   filterDeploymentsForCaseCreation,
   shouldRestrictToPrimaryProductionDeployments,
-} from "@features/project-details/utils/permissions";
+} from "@/utils/permission";
 import { htmlToPlainText } from "@features/support/utils/richTextEditor";
-import type { CreateServiceRequestPayload } from "@features/operations/types/catalogs";
-import CatalogSelector from "@features/support/components/service-requests/CatalogSelector";
-import VariableFormFields from "@features/support/components/service-requests/VariableFormFields";
+import type { CreateServiceRequestPayload } from "@features/operations/types/serviceRequests";
+import CatalogSelector from "@features/operations/components/service-requests/CatalogSelector";
+import VariableFormFields from "@features/operations/components/service-requests/VariableFormFields";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseType } from "@features/support/constants/supportConstants";
+
+function getCreateServiceRequestLoadingState(
+  isProjectLoading: boolean,
+  isDeploymentsLoading: boolean,
+  projectId: string | undefined,
+): boolean {
+  if (!projectId) {
+    return true;
+  }
+  if (isProjectLoading || isDeploymentsLoading) {
+    return true;
+  }
+  return false;
+}
+
+function getCreateServiceRequestValidationError(params: {
+  projectId: string | undefined;
+  deploymentMatchExists: boolean;
+  productId: string;
+  selectedCatalogId: string;
+  selectedCatalogItemId: string;
+  firstEmptyRequiredField: string | null;
+}): string | null {
+  const {
+    projectId,
+    deploymentMatchExists,
+    productId,
+    selectedCatalogId,
+    selectedCatalogItemId,
+    firstEmptyRequiredField,
+  } = params;
+
+  if (!projectId) return "Missing project context.";
+  if (!deploymentMatchExists) return "Please select a deployment type.";
+  if (!productId) return "Please select a product version.";
+  if (!selectedCatalogId || !selectedCatalogItemId) {
+    return "Please select a request type (catalog item).";
+  }
+  if (firstEmptyRequiredField) {
+    return `Please fill in the required field: ${firstEmptyRequiredField}`;
+  }
+  return null;
+}
+
+function getCanSubmitServiceRequest(params: {
+  projectId: string | undefined;
+  selectedDeploymentId: string;
+  productId: string;
+  selectedCatalogId: string;
+  selectedCatalogItemId: string;
+  isCreatePending: boolean;
+}): boolean {
+  const {
+    projectId,
+    selectedDeploymentId,
+    productId,
+    selectedCatalogId,
+    selectedCatalogItemId,
+    isCreatePending,
+  } = params;
+
+  if (
+    !projectId ||
+    !selectedDeploymentId ||
+    !productId ||
+    !selectedCatalogId ||
+    !selectedCatalogItemId
+  ) {
+    return false;
+  }
+  if (isCreatePending) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * CreateServiceRequestPage - multi-step form to create a service request.
@@ -214,8 +289,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
 
-  const isInitialLoading =
-    isProjectLoading || isDeploymentsLoading || !projectId;
+  const isInitialLoading = getCreateServiceRequestLoadingState(
+    isProjectLoading,
+    isDeploymentsLoading,
+    projectId,
+  );
   useEffect(() => {
     if (isInitialLoading) {
       showLoader();
@@ -250,6 +328,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
     if (!baseDeploymentOptions.length) return;
     const first = baseDeploymentOptions[0];
     if (!first) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keep deployment aligned with restricted mode options
     setDeployment((prev) =>
       baseDeploymentOptions.includes(prev) ? prev : first,
     );
@@ -330,27 +409,12 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!projectId) return;
 
     const deploymentMatch = resolveDeploymentMatch(
       deployment,
       projectDeployments,
       undefined,
     );
-    if (!deploymentMatch) {
-      showError("Please select a deployment type.");
-      return;
-    }
-
-    if (!productId) {
-      showError("Please select a product version.");
-      return;
-    }
-
-    if (!selectedCatalogId || !selectedCatalogItemId) {
-      showError("Please select a request type (catalog item).");
-      return;
-    }
 
     const variables = variablesData?.variables ?? [];
     const contextValues = {
@@ -364,8 +428,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
       contextValues,
       variableValues,
     );
-    if (firstEmpty) {
-      showError(`Please fill in the required field: ${firstEmpty}`);
+
+    const validationError = getCreateServiceRequestValidationError({
+      projectId,
+      deploymentMatchExists: !!deploymentMatch,
+      productId,
+      selectedCatalogId,
+      selectedCatalogItemId,
+      firstEmptyRequiredField: firstEmpty,
+    });
+    if (validationError) {
+      showError(validationError);
+      return;
+    }
+    if (!projectId || !deploymentMatch) {
       return;
     }
 
@@ -444,13 +520,14 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const projectDisplay = projectDetails?.name ?? "";
   const isProductDropdownDisabled =
     !selectedDeploymentId || deploymentProductsLoading;
-  const canSubmit =
-    !!projectId &&
-    !!selectedDeploymentId &&
-    !!productId &&
-    !!selectedCatalogId &&
-    !!selectedCatalogItemId &&
-    !isCreatePending;
+  const canSubmit = getCanSubmitServiceRequest({
+    projectId,
+    selectedDeploymentId,
+    productId,
+    selectedCatalogId,
+    selectedCatalogItemId,
+    isCreatePending,
+  });
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>

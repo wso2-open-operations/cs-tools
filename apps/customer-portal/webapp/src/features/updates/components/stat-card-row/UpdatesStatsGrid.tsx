@@ -24,20 +24,23 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import { UPDATES_STATS } from "@features/updates/constants/updatesConstants";
-import type { RecommendedUpdateLevelItem, UpdatesStats } from "@features/updates/types/updates";
+import {
+  UPDATES_SECURITY_PENDING_ACTION_CHIP_LABEL,
+  UPDATES_STATS,
+  UPDATES_STATS_GRID_SECTION_TITLE,
+} from "@features/updates/constants/updatesConstants";
+import {
+  UpdatesStatKey,
+  type UpdatesStatConfigItem,
+  type UpdatesStats,
+  type UpdatesStatsGridProps,
+} from "@features/updates/types/updates";
 import {
   aggregateUpdateStats,
   getStatTooltipText,
   getStatValue,
 } from "@features/updates/utils/updates";
 import { StatCard } from "@features/updates/components/stat-card-row/StatCard";
-
-export interface UpdatesStatsGridProps {
-  data: RecommendedUpdateLevelItem[] | undefined;
-  isLoading: boolean;
-  isError: boolean;
-}
 
 /**
  * Grid of stat cards for Overall Update Status.
@@ -72,85 +75,90 @@ export function UpdatesStatsGrid({
   };
 
   const renderExtraContent = (
-    stat: (typeof UPDATES_STATS)[number],
+    stat: UpdatesStatConfigItem,
   ): JSX.Element | undefined => {
     if (isError) {
       return undefined;
     }
 
-    if (
-      stat.id === "totalUpdatesInstalled" &&
-      (isEffectiveLoading || aggregatedData?.totalUpdatesInstalledBreakdown)
-    ) {
-      const { regular, security } =
-        aggregatedData?.totalUpdatesInstalledBreakdown || {};
-      return (
-        <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-          <Typography variant="caption" color="text.secondary">
-            {renderCountWithSkeleton(regular)} Regular •{" "}
-            {renderCountWithSkeleton(security)} Security
-          </Typography>
-        </Box>
-      );
-    }
+    switch (stat.id) {
+      case UpdatesStatKey.TotalUpdatesInstalled:
+        if (
+          isEffectiveLoading ||
+          aggregatedData?.totalUpdatesInstalledBreakdown
+        ) {
+          const { regular, security } =
+            aggregatedData?.totalUpdatesInstalledBreakdown || {};
+          return (
+            <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+              <Typography variant="caption" color="text.secondary">
+                {renderCountWithSkeleton(regular)} Regular •{" "}
+                {renderCountWithSkeleton(security)} Security
+              </Typography>
+            </Box>
+          );
+        }
+        return undefined;
+      case UpdatesStatKey.TotalUpdatesPending:
+        if (
+          isEffectiveLoading ||
+          aggregatedData?.totalUpdatesPendingBreakdown
+        ) {
+          const { regular, security } =
+            aggregatedData?.totalUpdatesPendingBreakdown || {};
+          return (
+            <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+              <Typography variant="caption" color="text.secondary">
+                {renderCountWithSkeleton(regular)} Regular •{" "}
+                {renderCountWithSkeleton(security)} Security
+              </Typography>
+            </Box>
+          );
+        }
+        return undefined;
+      case UpdatesStatKey.SecurityUpdatesPending: {
+        const securityPending = aggregatedData?.securityUpdatesPending;
 
-    if (
-      stat.id === "totalUpdatesPending" &&
-      (isEffectiveLoading || aggregatedData?.totalUpdatesPendingBreakdown)
-    ) {
-      const { regular, security } =
-        aggregatedData?.totalUpdatesPendingBreakdown || {};
-      return (
-        <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-          <Typography variant="caption" color="text.secondary">
-            {renderCountWithSkeleton(regular)} Regular •{" "}
-            {renderCountWithSkeleton(security)} Security
-          </Typography>
-        </Box>
-      );
-    }
+        if (isEffectiveLoading) {
+          return (
+            <Skeleton
+              variant="rectangular"
+              width={90}
+              height={20}
+              sx={{ borderRadius: 1, mt: 0.5 }}
+            />
+          );
+        }
 
-    if (stat.id === "securityUpdatesPending") {
-      const securityPending = aggregatedData?.securityUpdatesPending;
-
-      if (isEffectiveLoading) {
-        return (
-          <Skeleton
-            variant="rectangular"
-            width={90}
-            height={20}
-            sx={{ borderRadius: 1, mt: 0.5 }}
-          />
-        );
+        if (securityPending && securityPending > 0) {
+          const resolvedColor = theme.palette.error.main;
+          return (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={UPDATES_SECURITY_PENDING_ACTION_CHIP_LABEL}
+              sx={{
+                bgcolor: alpha(resolvedColor, 0.1),
+                color: resolvedColor,
+                borderColor: alpha(resolvedColor, 0.3),
+                height: 20,
+                fontSize: "0.75rem",
+                fontWeight: 500,
+              }}
+            />
+          );
+        }
+        return undefined;
       }
-
-      if (securityPending && securityPending > 0) {
-        const resolvedColor = theme.palette.error.main;
-        return (
-          <Chip
-            size="small"
-            variant="outlined"
-            label="Action Required"
-            sx={{
-              bgcolor: alpha(resolvedColor, 0.1),
-              color: resolvedColor,
-              borderColor: alpha(resolvedColor, 0.3),
-              height: 20,
-              fontSize: "0.75rem",
-              fontWeight: 500,
-            }}
-          />
-        );
-      }
+      default:
+        return undefined;
     }
-
-    return undefined;
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>
-        Overall Update Status
+        {UPDATES_STATS_GRID_SECTION_TITLE}
       </Typography>
       <Grid container spacing={2}>
         {UPDATES_STATS.map((stat) => {

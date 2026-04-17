@@ -16,26 +16,20 @@
 
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 import type { CaseClassificationResponse } from "@features/support/types/cases";
+import type {
+  DeploymentOption,
+  IssueTypeOption,
+  ProductVersionOption,
+  ProjectDeploymentOption,
+} from "@features/support/types/caseCreationOptions";
 import { ChatSender } from "@features/support/types/conversations";
 
-// Deployment list item with id and label.
-export interface DeploymentOption {
-  id: string;
-  label: string;
-}
-
-// Issue type with id and label.
-export interface IssueTypeOption {
-  id: string;
-  label: string;
-}
-
-// Project deployment item.
-export interface ProjectDeploymentOption {
-  id: string;
-  name: string;
-  type?: { id: string; label: string };
-}
+export type {
+  DeploymentOption,
+  IssueTypeOption,
+  ProjectDeploymentOption,
+  ProductVersionOption,
+} from "@features/support/types/caseCreationOptions";
 
 /**
  * Normalizes a product label for comparison.
@@ -284,12 +278,6 @@ export function shouldAddClassificationProductToOptions(
   return (
     findMatchingProductId(classificationProduct, baseProductOptions) == null
   );
-}
-
-/** Option for Product Version dropdown: id is deployment product item id, label is "Product Version" display. */
-export interface ProductVersionOption {
-  id: string;
-  label: string;
 }
 
 /**

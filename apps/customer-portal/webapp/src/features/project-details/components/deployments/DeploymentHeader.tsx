@@ -17,12 +17,7 @@
 import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-
-export interface DeploymentHeaderProps {
-  count?: number;
-  onAddClick?: () => void;
-  isLoading?: boolean;
-}
+import type { DeploymentHeaderProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Header for the deployments section with count and Add Deployment button.

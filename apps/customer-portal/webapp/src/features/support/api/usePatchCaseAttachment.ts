@@ -23,13 +23,9 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { PatchAttachmentRequest } from "@features/support/types/attachments";
+import type { PatchCaseAttachmentVariables } from "@features/support/types/supportApi";
 
-export interface PatchCaseAttachmentVariables {
-  caseId: string;
-  attachmentId: string;
-  body: PatchAttachmentRequest;
-}
+export type { PatchCaseAttachmentVariables };
 
 /**
  * Updates a case attachment (name/description) via PATCH /cases/:caseId/attachments/:attachmentId.

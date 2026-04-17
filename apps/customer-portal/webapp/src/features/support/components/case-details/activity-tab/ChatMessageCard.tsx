@@ -14,16 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ChatMessageCardProps } from "@features/support/types/supportComponents";
 import { Box, Paper } from "@wso2/oxygen-ui";
 import { useCallback, useEffect, useRef } from "react";
 import type { JSX } from "react";
-
-export interface ChatMessageCardProps {
-  htmlContent: string;
-  isCurrentUser: boolean;
-  primaryBg: string;
-  onImageClick?: (src: string) => void;
-}
 
 /**
  * Card-style chat message using Paper without border or border radius.
@@ -54,34 +48,14 @@ export default function ChatMessageCard({
     [onImageClick],
   );
 
-  const handleImageError = useCallback(
-    (e: Event) => {
-      const target = e.target as HTMLElement;
-      if (!(target instanceof HTMLImageElement)) return;
-
-      const currentSrc = target.currentSrc || target.src || "";
-      const fallback = target.getAttribute("data-inline-download-url") || "";
-      const alreadyTriedFallback =
-        target.getAttribute("data-inline-fallback-tried") === "true";
-
-      if (fallback && !alreadyTriedFallback && fallback !== currentSrc) {
-        target.setAttribute("data-inline-fallback-tried", "true");
-        target.src = fallback;
-      }
-    },
-    [],
-  );
-
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
     el.addEventListener("click", handleClick);
-    el.addEventListener("error", handleImageError, true);
     return () => {
       el.removeEventListener("click", handleClick);
-      el.removeEventListener("error", handleImageError, true);
     };
-  }, [handleClick, handleImageError]);
+  }, [handleClick]);
 
   return (
     <Paper

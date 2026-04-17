@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { AuditMetadata } from "@features/dashboard/types/common";
+import type { AuditMetadata } from "@/types/common";
 
 // Item type for inline attachment for comment images.
 export type CaseCommentInlineAttachment = AuditMetadata & {

@@ -25,14 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
 import type { TimeCardSearchResponse } from "@features/usage-metrics/types/timeTracking";
 import type { TimeCardSearchRequest } from "@features/usage-metrics/types/timeTracking";
-
-export interface UseSearchProjectTimeCardsParams {
-  projectId: string;
-  startDate?: string;
-  endDate?: string;
-  states?: string[];
-  enabled?: boolean;
-}
+import type { UseSearchProjectTimeCardsParams } from "@features/usage-metrics/types/usageMetrics";
 
 /**
  * Custom hook to search project time cards with date range filters using infinite query.

@@ -20,11 +20,9 @@ import { type JSX, useMemo } from "react";
 import { useLocation, useParams, Link as NavigateLink } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetMetadata from "@api/useGetMetadata";
-import {
-  APP_SHELL_NAV_ITEMS,
-  type AppShellNavItem,
-} from "@features/project-hub/constants/appLayoutConstants";
-import { getProjectPermissions } from "@features/project-details/utils/permissions";
+import { APP_SHELL_NAV_ITEMS } from "@features/project-hub/constants/appLayoutConstants";
+import type { AppShellNavItem } from "@features/project-hub/types/appLayout";
+import { getProjectPermissions } from "@/utils/permission";
 
 // Props for the SideBar component.
 interface SideBarProps {

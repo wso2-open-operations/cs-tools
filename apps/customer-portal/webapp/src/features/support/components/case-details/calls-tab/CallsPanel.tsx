@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CallsPanelProps } from "@features/support/types/supportComponents";
 import { Box, Button, Pagination, Stack, Typography } from "@wso2/oxygen-ui";
 import { MapPin, PhoneCall } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -49,15 +50,6 @@ import {
   type CaseStatus,
 } from "@features/support/constants/supportConstants";
 import { ERROR_BANNER_TIMEOUT_MS } from "@features/shared/constants/errorBannerConstants";
-
-export interface CallsPanelProps {
-  projectId: string;
-  caseId: string;
-  isCaseClosed?: boolean;
-  caseStatusLabel?: string;
-  /** Case severity id for minimum scheduling offset from filter metadata. */
-  caseSeverityId?: string | null;
-}
 
 /**
  * CallsPanel displays call requests for a specific case.

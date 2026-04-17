@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ApproveCallRequestModalProps } from "@features/support/types/supportComponents";
 import {
   Alert,
   Box,
@@ -38,7 +39,6 @@ import {
   type JSX,
 } from "react";
 import { usePatchCallRequest } from "@features/support/api/usePatchCallRequest";
-import type { CallRequest } from "@features/support/types/calls";
 import {
   callRequestApiPreferredTimeToDatetimeLocal,
   callRequestPreferredTimeFromDatetimeLocal,
@@ -47,21 +47,6 @@ import {
   sortCallRequestPreferredTimeStringsAsc,
 } from "@features/support/utils/support";
 
-export interface ApproveCallRequestModalProps {
-  open: boolean;
-  call: CallRequest | null;
-  projectId: string;
-  caseId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-  userTimeZone?: string;
-  /**
-   * The stateKey to send when approving. Resolved from project filters (Pending on WSO2 state).
-   * Falls back to the CALL_REQUEST_STATE_PENDING_ON_WSO2 constant when not provided.
-   */
-  approveStateKey?: number;
-}
 const MAX_PREFERRED_TIMES = 3;
 
 /**

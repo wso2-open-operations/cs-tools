@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CommentBubbleProps } from "@features/support/types/supportComponents";
 import { Avatar, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useMemo } from "react";
 import type { CaseComment } from "@features/support/types/cases";
@@ -41,18 +42,6 @@ function commentAuthorDisplayName(comment: CaseComment): string {
     return fromNames;
   }
   return comment.createdBy?.trim() || "Unknown";
-}
-
-export interface CommentBubbleProps {
-  comment: CaseComment;
-  isCurrentUser: boolean;
-  primaryBg: string;
-  onImageClick?: (src: string) => void;
-  userDetails?: {
-    email?: string;
-    firstName?: string;
-    lastName?: string;
-  } | null;
 }
 
 /**

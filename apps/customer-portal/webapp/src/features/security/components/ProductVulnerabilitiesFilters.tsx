@@ -24,17 +24,11 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
-
-export interface FilterOption {
-  value: string | number;
-  label: string;
-}
-
-export interface ProductVulnerabilitiesFiltersProps {
-  filters: Record<string, string | number>;
-  severityOptions?: FilterOption[];
-  onFilterChange: (field: string, value: string | number) => void;
-}
+import {
+  PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL,
+  PRODUCT_VULNERABILITIES_SEVERITY_LABEL,
+} from "@features/security/constants/securityConstants";
+import type { ProductVulnerabilitiesFiltersProps } from "@features/security/types/security";
 
 /**
  * ProductVulnerabilitiesFilters component to display filter dropdowns.
@@ -56,16 +50,20 @@ export default function ProductVulnerabilitiesFilters({
     <Grid container spacing={2} sx={{ mt: 1 }}>
       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <FormControl fullWidth size="small">
-          <InputLabel id="severity-label">Severity</InputLabel>
+          <InputLabel id="severity-label">
+            {PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
+          </InputLabel>
           <Select
             labelId="severity-label"
             id="severityId"
             value={filters.severityId || ""}
-            label="Severity"
+            label={PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
             onChange={handleSelectChange}
           >
             <MenuItem value="">
-              <Typography variant="body2">All Severity</Typography>
+              <Typography variant="body2">
+                {PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL}
+              </Typography>
             </MenuItem>
             {severityOptions.map((option) => (
               <MenuItem key={option.value} value={option.value}>

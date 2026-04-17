@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsAttachmentsPanelProps } from "@features/support/types/supportComponents";
 import { Box, Button, Pagination, Stack, Typography } from "@wso2/oxygen-ui";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
@@ -33,11 +34,6 @@ import EditCaseAttachmentModal from "@case-details-attachments/EditCaseAttachmen
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 
 const ITEMS_PER_PAGE = 10;
-
-export interface CaseDetailsAttachmentsPanelProps {
-  caseId: string;
-  isCaseClosed?: boolean;
-}
 
 /**
  * Renders the Attachments tab: upload button, modal, and list from GET /cases/:id/attachments.

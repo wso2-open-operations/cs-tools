@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { OutstandingCasesListProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Chip,
@@ -26,11 +27,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { Clock } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { CaseListItem } from "@features/support/types/cases";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import OutstandingCasesSkeleton from "./OutstandingCasesSkeleton";
-import { getSeverityLegendColor } from "@features/dashboard/constants/dashboardConstants";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
   formatRelativeTime,
   getAssignedEngineerLabel,
@@ -39,14 +39,6 @@ import {
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
-
-export interface OutstandingCasesListProps {
-  cases: CaseListItem[];
-  isLoading?: boolean;
-  isError?: boolean;
-  /** When provided, clicking a case card navigates to case details (caller should navigate). */
-  onCaseClick?: (caseItem: CaseListItem) => void;
-}
 
 /**
  * Renders a list of outstanding case rows for the support overview card.

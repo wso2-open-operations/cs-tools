@@ -34,7 +34,7 @@ import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
-import { getProjectPermissions } from "@features/project-details/utils/permissions";
+import { getProjectPermissions } from "@/utils/permission";
 
 interface GetHelpMenuItem {
   id: string;

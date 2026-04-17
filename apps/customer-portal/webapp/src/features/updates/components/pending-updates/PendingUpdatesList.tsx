@@ -30,16 +30,15 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import type { UpdateLevelsSearchResponse } from "@features/updates/types/updates";
+import type { PendingUpdatesListProps } from "@features/updates/types/updates";
 import { getUpdateTypeChipColor } from "@features/updates/utils/updates";
 import EmptyState from "@components/empty-state/EmptyState";
 import Error500Page from "@components/error/Error500Page";
-
-export interface PendingUpdatesListProps {
-  data: UpdateLevelsSearchResponse | null;
-  isError: boolean;
-  onView: (levelKey: string) => void;
-}
+import {
+  PENDING_UPDATES_LIST_EMPTY_DESCRIPTION,
+  PENDING_UPDATES_LIST_ERROR_MESSAGE,
+  PENDING_UPDATES_TABLE_VIEW_BUTTON_LABEL,
+} from "@features/updates/constants/updatesConstants";
 
 /**
  * Displays pending update levels as a simple table.
@@ -68,7 +67,7 @@ export function PendingUpdatesList({
       >
         <Error500Page style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Failed to load pending updates.
+          {PENDING_UPDATES_LIST_ERROR_MESSAGE}
         </Typography>
       </Box>
     );
@@ -88,7 +87,7 @@ export function PendingUpdatesList({
 
   if (entries.length === 0) {
     return (
-      <EmptyState description="No pending updates found for this product and version." />
+      <EmptyState description={PENDING_UPDATES_LIST_EMPTY_DESCRIPTION} />
     );
   }
 
@@ -213,7 +212,7 @@ export function PendingUpdatesList({
                         },
                       }}
                     >
-                      View
+                      {PENDING_UPDATES_TABLE_VIEW_BUTTON_LABEL}
                     </Button>
                   </TableCell>
                 </TableRow>

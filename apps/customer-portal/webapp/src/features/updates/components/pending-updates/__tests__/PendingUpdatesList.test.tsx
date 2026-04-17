@@ -17,6 +17,10 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { PendingUpdatesList } from "@features/updates/components/pending-updates/PendingUpdatesList";
+import {
+  PENDING_UPDATES_LIST_EMPTY_DESCRIPTION,
+  PENDING_UPDATES_LIST_ERROR_MESSAGE,
+} from "@features/updates/constants/updatesConstants";
 import type { UpdateLevelsSearchResponse } from "@features/updates/types/updates";
 
 const mockData: UpdateLevelsSearchResponse = {
@@ -83,20 +87,20 @@ describe("PendingUpdatesList", () => {
   it("renders empty state when data is null", () => {
     render(<PendingUpdatesList data={null} isError={false} onView={vi.fn()} />);
     expect(
-      screen.getByText("No pending updates found for this product and version."),
+      screen.getByText(PENDING_UPDATES_LIST_EMPTY_DESCRIPTION),
     ).toBeDefined();
   });
 
   it("renders empty state when data is empty object", () => {
     render(<PendingUpdatesList data={{}} isError={false} onView={vi.fn()} />);
     expect(
-      screen.getByText("No pending updates found for this product and version."),
+      screen.getByText(PENDING_UPDATES_LIST_EMPTY_DESCRIPTION),
     ).toBeDefined();
   });
 
   it("renders error state when isError is true", () => {
     render(<PendingUpdatesList data={null} isError={true} onView={vi.fn()} />);
-    expect(document.querySelector("svg")).toBeTruthy();
+    expect(screen.getByText(PENDING_UPDATES_LIST_ERROR_MESSAGE)).toBeDefined();
   });
 
   it("renders summary text with correct counts", () => {

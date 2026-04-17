@@ -26,18 +26,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { Activity } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 
-import type { ProjectStatsResponse } from "@features/project-hub/types/projects";
 import { statItems } from "@features/project-details/constants/projectDetailsConstants";
-
-interface ProjectStatisticsCardProps {
-  stats?: ProjectStatsResponse["projectStats"];
-  isLoading?: boolean;
-  isError?: boolean;
-  isSidebarOpen?: boolean;
-  showDeploymentsStat?: boolean;
-}
+import type { ProjectStatisticsCardProps } from "@features/project-details/types/projectDetailsComponents";
 
 const ProjectStatisticsCard = ({
   stats,
@@ -50,6 +41,7 @@ const ProjectStatisticsCard = ({
   const visibleStats = showDeploymentsStat
     ? statItems
     : statItems.filter((s) => s.key !== "deployments");
+  const isStatLoading = isLoading || (!isError && !stats);
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent sx={{ p: 3 }}>
@@ -67,12 +59,12 @@ const ProjectStatisticsCard = ({
                 <StatCard
                   label={stat.label}
                   value={
-                    isLoading
-                      ? ((
-                          <Skeleton variant="text" width="40%" height={24} />
-                        ) as any)
+                    isStatLoading
+                      ? (((
+                          <Skeleton variant="rounded" width={60} height={24} />
+                        ) as unknown) as string)
                       : isError
-                        ? ((<ErrorIndicator entityName={stat.label} />) as any)
+                        ? "Error"
                         : (stats?.[stat.key] ?? "--").toString()
                   }
                   icon={<StatIcon size={24} />}

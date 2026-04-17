@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { AllConversationsSearchBarProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Button,
@@ -31,20 +32,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 import { countListSearchAndFilters } from "@features/support/utils/support";
-import type { CaseMetadataResponse } from "@features/support/types/cases";
-import type { AllConversationsFilterValues } from "@features/support/types/conversations";
 import AllConversationsFilters from "./AllConversationsFilters";
-
-export interface AllConversationsSearchBarProps {
-  searchTerm: string;
-  onSearchChange: (value: string) => void;
-  isFiltersOpen: boolean;
-  onFiltersToggle: () => void;
-  filters: AllConversationsFilterValues;
-  filterMetadata: CaseMetadataResponse | undefined;
-  onFilterChange: (field: string, value: string) => void;
-  onClearFilters: () => void;
-}
 
 /**
  * Component with search input and filters toggle for conversations.

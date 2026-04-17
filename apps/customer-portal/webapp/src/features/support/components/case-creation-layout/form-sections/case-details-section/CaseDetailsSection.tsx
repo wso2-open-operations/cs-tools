@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CaseDetailsSectionProps } from "@features/support/types/supportComponents";
 import {
   Box,
   Chip,
@@ -29,35 +30,9 @@ import {
 import { File, Sparkles, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
-import { isS0SeverityLabel } from "@features/dashboard/constants/dashboardConstants";
-import type { CaseMetadataResponse } from "@features/support/types/cases";
+import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
 import { getSeverityColor } from "@features/support/utils/support";
 import Editor from "@components/rich-text-editor/Editor";
-
-export interface CaseDetailsSectionProps {
-  title?: string;
-  setTitle?: (value: string) => void;
-  description?: string;
-  setDescription?: (value: string) => void;
-  issueType?: string;
-  setIssueType?: (value: string) => void;
-  severity?: string;
-  setSeverity?: (value: string) => void;
-  metadata?: unknown;
-  filters?: CaseMetadataResponse;
-  isLoading?: boolean;
-  storageKey?: string;
-  extraIssueTypes?: string[];
-  extraSeverityLevels?: { id: string; label: string; description?: string }[];
-  attachments?: File[];
-  onAttachmentClick?: () => void;
-  onAttachmentRemove?: (index: number) => void;
-  isRelatedCaseMode?: boolean;
-  isTitleDisabled?: boolean;
-  relatedCaseNumber?: string;
-  isSecurityReport?: boolean;
-  excludeS0?: boolean;
-}
 
 /**
  * Renders the Case Details section for case creation.
@@ -86,6 +61,7 @@ export function CaseDetailsSection({
   relatedCaseNumber,
   isSecurityReport = false,
   excludeS0 = false,
+  isSeverityDisabled = false,
 }: CaseDetailsSectionProps): JSX.Element {
   const titleReadOnly = isTitleDisabled;
   const meta = metadata as
@@ -464,87 +440,126 @@ export function CaseDetailsSection({
                   />
                 )}
               </Box>
-              <FormControl fullWidth size="small" disabled={isLoading}>
-                <Select
-                  id="severity-level-select"
-                  value={severity}
-                  onChange={(e) => setSeverity(e.target.value)}
-                  displayEmpty
-                  renderValue={(value) => {
-                    if (value === "") {
-                      return "Select Severity Level...";
-                    }
-                    const selectedLevel = severityLevels.find(
-                      (level) => level.id === value,
-                    );
-                    if (!selectedLevel) {
-                      return value as string;
-                    }
-                    return (
+              {isSeverityDisabled ? (
+                (() => {
+                  const selectedLevel = severityLevels.find(
+                    (level) => level.id === severity,
+                  );
+                  return (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1.5,
+                        px: 1.5,
+                        py: 1,
+                        border: 1,
+                        borderColor: "divider",
+                        borderRadius: 1,
+                        bgcolor: "action.hover",
+                        minHeight: 40,
+                      }}
+                    >
                       <Box
-                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
-                      >
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          bgcolor: getSeverityColor(
+                            selectedLevel?.label ?? CaseSeverityLevel.S4,
+                          ),
+                          flexShrink: 0,
+                        }}
+                      />
+                      <Typography variant="body2" color="text.primary">
+                        {selectedLevel?.label ?? CaseSeverityLevel.S4}
+                      </Typography>
+                    </Box>
+                  );
+                })()
+              ) : (
+                <FormControl fullWidth size="small" disabled={isLoading}>
+                  <Select
+                    id="severity-level-select"
+                    value={severity}
+                    onChange={(e) => setSeverity(e.target.value)}
+                    displayEmpty
+                    renderValue={(value) => {
+                      if (value === "") {
+                        return "Select Severity Level...";
+                      }
+                      const selectedLevel = severityLevels.find(
+                        (level) => level.id === value,
+                      );
+                      if (!selectedLevel) {
+                        return value as string;
+                      }
+                      return (
                         <Box
-                          sx={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: "50%",
-                            bgcolor: getSeverityColor(selectedLevel.label),
-                            flexShrink: 0,
-                          }}
-                        />
-                        <Typography variant="body2">
-                          {selectedLevel.label}
-                        </Typography>
-                      </Box>
-                    );
-                  }}
-                >
-                  <MenuItem value="" disabled>
-                    Select Severity Level...
-                  </MenuItem>
-                  {severityLevels.map((lvl) => (
-                    <MenuItem key={lvl.id} value={lvl.id}>
-                      <Box
-                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
-                      >
-                        <Box
-                          sx={{
-                            width: 12,
-                            height: 12,
-                            borderRadius: "50%",
-                            bgcolor: getSeverityColor(lvl.label),
-                          }}
-                        />
-                        <Box
-                          sx={{
-                            display: "flex",
-                            flexDirection: "column",
-                            minWidth: 0,
-                          }}
+                          sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
                         >
-                          <Typography variant="body2">{lvl.label}</Typography>
-                          {lvl.description && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{
-                                display: "block",
-                                lineHeight: 1.2,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {lvl.description}
-                            </Typography>
-                          )}
+                          <Box
+                            sx={{
+                              width: 10,
+                              height: 10,
+                              borderRadius: "50%",
+                              bgcolor: getSeverityColor(selectedLevel.label),
+                              flexShrink: 0,
+                            }}
+                          />
+                          <Typography variant="body2">
+                            {selectedLevel.label}
+                          </Typography>
                         </Box>
-                      </Box>
+                      );
+                    }}
+                  >
+                    <MenuItem value="" disabled>
+                      Select Severity Level...
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                    {severityLevels.map((lvl) => (
+                      <MenuItem key={lvl.id} value={lvl.id}>
+                        <Box
+                          sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                        >
+                          <Box
+                            sx={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: "50%",
+                              bgcolor: getSeverityColor(lvl.label),
+                            }}
+                          />
+                          <Box
+                            sx={{
+                              display: "flex",
+                              flexDirection: "column",
+                              minWidth: 0,
+                            }}
+                          >
+                            <Typography variant="body2">{lvl.label}</Typography>
+                            {lvl.description && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{
+                                  display: "block",
+                                  lineHeight: 1.2,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {lvl.description}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
             </Grid>
           </Grid>
         )}

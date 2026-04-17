@@ -8,14 +8,13 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on
-// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
 
 import { Box, Typography } from "@wso2/oxygen-ui";
-import { Bot, KeyRound, Users } from "@wso2/oxygen-ui-icons-react";
 import { useParams } from "react-router";
 import { useState, useMemo, type JSX } from "react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
@@ -23,15 +22,13 @@ import TabBar from "@components/tab-bar/TabBar";
 import SettingsAiAssistant from "@features/settings/components/SettingsAiAssistant";
 import SettingsUserManagement from "@features/settings/components/SettingsUserManagement";
 import SettingsRegistryTokens from "@features/settings/components/SettingsRegistryTokens";
-
-const SETTINGS_TABS = [
-  { id: "users", label: "User Management", icon: Users },
-  { id: "ai", label: "AI Assistant", icon: Bot },
-  { id: "registryTokens", label: "Registry Tokens", icon: KeyRound },
-] as const;
-
-/** Role that can see AI Assistant tab and User Management Add/Delete. */
-const CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
+import {
+  SETTINGS_CUSTOMER_ADMIN_ROLE,
+  SETTINGS_PAGE_TABS,
+  SETTINGS_PROJECT_NOT_FOUND_MESSAGE,
+} from "@features/settings/constants/settingsConstants";
+import { SettingsPageTabId } from "@features/settings/types/settings";
+import { resolveSettingsPageTabId } from "@features/settings/utils/settingsPage";
 
 /**
  * Settings page with User Management and AI Assistant tabs.
@@ -40,27 +37,26 @@ const CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
  */
 export default function SettingsPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState<string>("users");
+  const [activeTab, setActiveTab] = useState<string>(SettingsPageTabId.USERS);
   const { data: userDetails } = useGetUserDetails();
 
   const isCustomerAdmin = useMemo(
-    () => (userDetails?.roles ?? []).includes(CUSTOMER_ADMIN_ROLE),
+    () => (userDetails?.roles ?? []).includes(SETTINGS_CUSTOMER_ADMIN_ROLE),
     [userDetails?.roles],
   );
 
-  const tabs = useMemo(() => SETTINGS_TABS, []);
+  const tabs = useMemo(() => [...SETTINGS_PAGE_TABS], []);
 
   const displayTab = useMemo(
-    () =>
-      tabs.some((t) => t.id === activeTab) ? activeTab : (tabs[0]?.id ?? "users"),
-    [tabs, activeTab],
+    () => resolveSettingsPageTabId(activeTab),
+    [activeTab],
   );
 
   if (!projectId) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography variant="body1" color="text.secondary">
-          Project not found. Please select a project.
+          {SETTINGS_PROJECT_NOT_FOUND_MESSAGE}
         </Typography>
       </Box>
     );
@@ -79,16 +75,16 @@ export default function SettingsPage(): JSX.Element {
         sx={{ mb: 0 }}
       />
 
-      {displayTab === "users" && (
+      {displayTab === SettingsPageTabId.USERS && (
         <SettingsUserManagement
           projectId={projectId}
           canAddOrRemoveUsers={isCustomerAdmin}
         />
       )}
-      {displayTab === "ai" && (
+      {displayTab === SettingsPageTabId.AI && (
         <SettingsAiAssistant projectId={projectId} canEdit={isCustomerAdmin} />
       )}
-      {displayTab === "registryTokens" && (
+      {displayTab === SettingsPageTabId.REGISTRY_TOKENS && (
         <SettingsRegistryTokens
           projectId={projectId}
           isAdmin={isCustomerAdmin}

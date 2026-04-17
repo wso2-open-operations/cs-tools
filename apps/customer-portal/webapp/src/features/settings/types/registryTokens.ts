@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { AuditMetadata } from "@features/dashboard/types/common";
+import type { AuditMetadata } from "@/types/common";
 
 // Enum for registry token types.
 export enum RegistryTokenType {

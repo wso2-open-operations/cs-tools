@@ -23,12 +23,9 @@ import {
   fetchDeploymentProductsAll,
 } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
+import type { DeploymentForProducts } from "@features/support/types/supportHooks";
 
-interface DeploymentForProducts {
-  id: string;
-  name?: string;
-  type?: { id?: string; label?: string };
-}
+export type { DeploymentForProducts };
 
 /**
  * Fetches products for all deployments and returns a map of deploymentId -> products.

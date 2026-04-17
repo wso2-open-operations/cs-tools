@@ -25,23 +25,18 @@ import {
 import { useMemo, useEffect, useRef, useState, type JSX } from "react";
 import useGetCaseComments from "@features/support/api/useGetCaseComments";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
-import type { CaseComment } from "@features/support/types/cases";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import { compareByCreatedOnThenId, formatCommentDate } from "@features/support/utils/support";
 import ActivityCommentInput from "@case-details-activity/ActivityCommentInput";
 import CommentBubble from "@case-details-activity/CommentBubble";
 import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
 import { hasDisplayableContent } from "@features/support/utils/support";
+import type {
+  ActivityContentProps,
+  CaseDetailsActivityPanelProps,
+} from "@features/support/types/supportComponents";
 
 // TODO : DUE TO URGENCY THIS COMPONENT BREAKS THE BEST PRACTICES , NEED FULL REFACTOR
-export interface CaseDetailsActivityPanelProps {
-  projectId: string;
-  caseId: string;
-  caseCreatedOn?: string | null;
-  focusMode?: boolean;
-  caseStatus?: string | null;
-}
-
 /**
  * Renders the Activity tab content: timeline of case comments (current user on right, others on left).
  *
@@ -133,19 +128,6 @@ export default function CaseDetailsActivityPanel({
       <ActivityCommentInput caseId={caseId} caseStatus={caseStatus} />
     </Box>
   );
-}
-
-interface ActivityContentProps {
-  commentsToShow: CaseComment[];
-  caseCreatedOn?: string | null;
-  currentUserEmail: string;
-  primaryBg: string;
-  userDetails?: {
-    email?: string;
-    firstName?: string;
-    lastName?: string;
-  } | null;
-  onImageClick?: (src: string) => void;
 }
 
 function ActivityContentWithImageModal(

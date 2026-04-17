@@ -8,34 +8,29 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on
-// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
 
 import { colors } from "@wso2/oxygen-ui";
-import type { ComponentType } from "react";
-import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
-import type { ProjectContact } from "@features/settings/types/users";
 import { Code, Crown, Monitor, Shield, Users } from "@wso2/oxygen-ui-icons-react";
-
-/** Priority: Admin > System User > Portal User (default). */
-
-interface RoleBadge {
-  label: string;
-  Icon: ComponentType<{ size?: number }>;
-  chipColor: "primary" | "info" | "error" | "default" | "warning";
-}
+import {
+  NULL_PLACEHOLDER,
+  SETTINGS_AVATAR_BACKGROUND_COLORS,
+} from "@features/settings/constants/settingsConstants";
+import type { SettingsRoleBadge } from "@features/settings/types/settings";
+import type { ProjectContact } from "@features/settings/types/users";
 
 /**
  * Returns all applicable role badges for a contact.
  *
- * @param {ProjectContact} contact - The project contact.
- * @returns {RoleBadge[]} Array of role badges to display.
+ * @param contact - The project contact.
+ * @returns Array of role badges to display.
  */
-export function getRoleBadges(contact: ProjectContact): RoleBadge[] {
-  const badges: RoleBadge[] = [];
+export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
+  const badges: SettingsRoleBadge[] = [];
 
   if (contact.isCsAdmin) {
     badges.push({ label: "Admin", Icon: Crown, chipColor: "primary" });
@@ -59,35 +54,36 @@ export function getRoleBadges(contact: ProjectContact): RoleBadge[] {
 /**
  * Returns sx props for role chips based on their color category.
  *
- * @param {string} chipColor - The color key (primary, info, warning, etc).
- * @returns {object} MUI sx object for the chip.
+ * @param chipColor - The color key (primary, info, warning, etc).
+ * @returns MUI sx object for the chip.
  */
 export function getRoleChipSx(chipColor: string): object {
   const purple = colors.purple?.[600] ?? "#7c3aed";
-  // Base styles shared by all chips
   const baseStyles = {
     typography: "caption",
     "& .MuiChip-icon": { ml: 0.75, mr: 0.5 },
     "& .MuiChip-label": { pl: 0.5 },
   };
-  if (chipColor === "primary") {
-    return {
-      ...baseStyles,
-      color: purple,
-      borderColor: purple,
-      "& .MuiChip-icon": { ml: 0.75, mr: 0.5, color: purple },
-    };
+  switch (chipColor) {
+    case "primary":
+      return {
+        ...baseStyles,
+        color: purple,
+        borderColor: purple,
+        "& .MuiChip-icon": { ml: 0.75, mr: 0.5, color: purple },
+      };
+    default:
+      return baseStyles;
   }
-  return baseStyles;
 }
 
 /**
  * Returns initials from name or email.
  *
- * @param {string} [firstName] - First name.
- * @param {string} [lastName] - Last name.
- * @param {string} [email] - Email fallback.
- * @returns {string} 1–2 character initials.
+ * @param firstName - First name.
+ * @param lastName - Last name.
+ * @param email - Email fallback.
+ * @returns 1–2 character initials.
  */
 export function getInitials(
   firstName?: string,
@@ -108,19 +104,11 @@ export function getInitials(
   return "?";
 }
 
-const AVATAR_COLORS = [
-  colors.purple[600],
-  colors.blue[600],
-  colors.green[600],
-  colors.orange[600],
-  colors.pink[500],
-] as const;
-
 /**
  * Returns a stable avatar color from a string id (e.g. contact.id or email).
  *
- * @param {string} id - Stable identifier for the contact.
- * @returns {string} Hex color string.
+ * @param id - Stable identifier for the contact.
+ * @returns Hex color string.
  */
 export function getAvatarColor(id: string): string {
   let hash = 0;
@@ -128,6 +116,6 @@ export function getAvatarColor(id: string): string {
     hash = (hash << 5) - hash + id.charCodeAt(i);
     hash |= 0;
   }
-  const index = Math.abs(hash) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[index] as string;
+  const index = Math.abs(hash) % SETTINGS_AVATAR_BACKGROUND_COLORS.length;
+  return SETTINGS_AVATAR_BACKGROUND_COLORS[index] as string;
 }

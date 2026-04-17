@@ -17,10 +17,8 @@
 import { Button, Form, Stack } from "@wso2/oxygen-ui";
 import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-
-interface ProjectCardActionsProps {
-  onViewDashboard?: () => void;
-}
+import { PROJECT_CARD_VIEW_DASHBOARD_LABEL } from "@features/project-hub/constants/projectHubConstants";
+import type { ProjectCardActionsProps } from "@features/project-hub/types/projectHub";
 
 /**
  * Component to render the action buttons for the Project Card.
@@ -45,7 +43,7 @@ export default function ProjectCardActions({
             onViewDashboard?.();
           }}
         >
-          View Dashboard
+          {PROJECT_CARD_VIEW_DASHBOARD_LABEL}
         </Button>
       </Stack>
     </Form.CardActions>

@@ -38,13 +38,12 @@ import {
   CaseSeverityLevel,
   type CaseTypeInput,
 } from "@features/support/constants/supportConstants";
-import { CaseReportType } from "@features/security/constants/securityConstants";
-import {
-  SEVERITY_LABEL_TO_DISPLAY,
-  isS0SeverityLabel,
-} from "@features/dashboard/constants/dashboardConstants";
+import { CaseReportType } from "@features/security/types/security";
+import { SEVERITY_LABEL_TO_DISPLAY } from "@/features/dashboard/constants/dashboard";
+import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
 import type { CaseComment } from "@features/support/types/cases";
-import type { MetadataItem } from "@features/dashboard/types/common";
+import type { InlineAttachment } from "@features/support/types/supportInlineAttachment";
+import type { MetadataItem } from "@/types/common";
 import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
@@ -1020,9 +1019,9 @@ export function mapSeverityToDisplay(label?: string): string {
  * @param caseItem - Case with optional severity.
  * @returns {boolean}
  */
-export function isS0Case(
-  caseItem: { severity?: { label?: string } | null },
-): boolean {
+export function isS0Case(caseItem: {
+  severity?: { label?: string } | null;
+}): boolean {
   return isS0SeverityLabel(caseItem?.severity?.label);
 }
 
@@ -1219,27 +1218,10 @@ export function hasDisplayableContent(comment: CaseComment): boolean {
   return textOnly.length > 0;
 }
 
-/** Inline attachment item for image src replacement (supports API id/downloadUrl or legacy sys_id/url). */
-export interface InlineAttachment {
-  id?: string;
-  downloadUrl?: string;
-  sys_id?: string;
-  url?: string;
-}
+export type { InlineAttachment };
 
-/** DOMPurify: keep fallback URL for img error handler in ChatMessageCard. */
-export const INLINE_COMMENT_HTML_PURIFY: {
-  ADD_ATTR: string[];
-} = {
-  ADD_ATTR: ["data-inline-download-url"],
-};
-
-function escapeHtmlAttrValue(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+/** DOMPurify config for inline comment HTML. */
+export const INLINE_COMMENT_HTML_PURIFY: Record<string, never> = {};
 
 /**
  * Extracts ServiceNow-style attachment id from img src (relative /id.iix or absolute https://host/id.iix).
@@ -1253,11 +1235,19 @@ export function extractInlineImageRefId(src: string): string {
   if (fromPath) {
     return fromPath[1];
   }
-  const tail = s.replace(/\.iix$/i, "").split("/").pop()?.trim() ?? "";
+  const tail =
+    s
+      .replace(/\.iix$/i, "")
+      .split("/")
+      .pop()
+      ?.trim() ?? "";
   if (/^[a-f0-9]{32}$/i.test(tail)) {
     return tail;
   }
-  return s.replace(/^\//, "").replace(/\.iix$/i, "").trim();
+  return s
+    .replace(/^\//, "")
+    .replace(/\.iix$/i, "")
+    .trim();
 }
 
 function resolveInlineImageDisplaySrc(
@@ -1275,7 +1265,6 @@ function resolveInlineImageDisplaySrc(
 /**
  * Replaces inline image sources in HTML (e.g. /sys_id.iix or /id.iix) with URLs from attachments.
  * Prefers same-origin `https://host/<id>.iix` when the HTML already used that host (matches ServiceNow inline images).
- * Adds `data-inline-download-url` for ChatMessageCard fallback when .iix fails to load.
  * Sanitizes the result with DOMPurify to prevent XSS.
  *
  * @param html - HTML string with img tags.
@@ -1291,7 +1280,9 @@ export function replaceInlineImageSources(
   const normalizedHtml = html.replace(/\\\//g, "/");
 
   if (!inlineAttachments?.length) {
-    return String(DOMPurify.sanitize(normalizedHtml, INLINE_COMMENT_HTML_PURIFY));
+    return String(
+      DOMPurify.sanitize(normalizedHtml, INLINE_COMMENT_HTML_PURIFY),
+    );
   }
 
   const replaced = normalizedHtml.replace(
@@ -1312,13 +1303,8 @@ export function replaceInlineImageSources(
       }
 
       const newSrc = resolveInlineImageDisplaySrc(attachment, src);
-      const fallback = attachment.downloadUrl ?? attachment.url ?? "";
-      const fallbackAttr =
-        fallback && fallback !== newSrc
-          ? ` data-inline-download-url="${escapeHtmlAttrValue(fallback)}"`
-          : "";
 
-      return `<img${before} src=${quote}${newSrc}${quote}${fallbackAttr}${after}>`;
+      return `<img${before} src=${quote}${newSrc}${quote}${after}>`;
     },
   );
   return String(DOMPurify.sanitize(replaced, INLINE_COMMENT_HTML_PURIFY));
@@ -1523,65 +1509,27 @@ export function estimateLineCount(html: string): number {
 }
 
 /**
- * True when the user entered search text or any filter field has a value.
- * Used to choose empty-state copy (refined vs default list).
- *
- * @param searchTerm - Current search string.
- * @param filters - Filter object (string or numeric values).
- * @returns {boolean} True if search or any filter is active.
- */
-export function hasListSearchOrFilters(
-  searchTerm: string,
-  filters: object,
-): boolean {
-  return countListSearchAndFilters(searchTerm, filters) > 0;
-}
-
-/**
- * Counts active refinements: non-empty search counts as one, plus each non-empty filter field.
- *
- * @param searchTerm - Search string.
- * @param filters - Filter key/value object.
- * @returns {number} Number of active filters (minimum 0).
- */
-export function countListSearchAndFilters(
-  searchTerm: string,
-  filters: object,
-): number {
-  let n = 0;
-  if (searchTerm.trim().length > 0) n += 1;
-  for (const v of Object.values(
-    filters as Record<string, string | number | undefined | null>,
-  )) {
-    if (v !== undefined && v !== null && String(v).trim() !== "") {
-      n += 1;
-    }
-  }
-  return n;
-}
-
-/**
  * Parses API timestamps for ordering: unzoned `YYYY-MM-DD HH:mm:ss` or `YYYY-MM-DDTHH:mm:ss`
  * as local wall time; strings with `Z` or numeric offset use instant parsing.
  *
  * @param dateStr - Raw timestamp from API.
  * @returns {number} Epoch ms or NaN if invalid.
  */
-export function parseApiLocalDateTimeMs(dateStr: string | null | undefined): number {
+export function parseApiLocalDateTimeMs(
+  dateStr: string | null | undefined,
+): number {
   if (!dateStr?.trim()) return Number.NaN;
   const trimmed = dateStr.trim();
 
-  if (
-    /Z$/i.test(trimmed) ||
-    /[+-]\d{2}:?\d{2}(?::?\d{2})?$/.test(trimmed)
-  ) {
+  if (/Z$/i.test(trimmed) || /[+-]\d{2}:?\d{2}(?::?\d{2})?$/.test(trimmed)) {
     const t = Date.parse(trimmed);
     return Number.isNaN(t) ? Number.NaN : t;
   }
 
-  const local = /^(\d{4})-(\d{2})-(\d{2})[\sT](\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-    trimmed,
-  );
+  const local =
+    /^(\d{4})-(\d{2})-(\d{2})[\sT](\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
+      trimmed,
+    );
   if (local) {
     const y = Number(local[1]);
     const mo = Number(local[2]);
@@ -2008,3 +1956,5 @@ export function computeMinScheduleDatetimeLocalForTimeZone(
   const severityStr = instantToDatetimeLocalStringInZone(targetMs, tz);
   return severityStr > floorStr ? severityStr : floorStr;
 }
+
+export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";

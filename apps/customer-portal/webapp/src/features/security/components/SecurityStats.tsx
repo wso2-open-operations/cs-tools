@@ -21,7 +21,11 @@ import ListStatGrid from "@components/list-view/ListStatGrid";
 import { usePostProductVulnerabilitiesSearch } from "@features/security/api/usePostProductVulnerabilitiesSearch";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { CaseType } from "@features/support/constants/supportConstants";
-import { SECURITY_STAT_CONFIGS } from "@features/security/constants/securityConstants";
+import {
+  SECURITY_STAT_CONFIGS,
+  SECURITY_STATS_ENTITY_NAME,
+} from "@features/security/constants/securityConstants";
+import { SecurityStatKey } from "@features/security/types/security";
 
 /**
  * SecurityStats component displays security-related statistics cards.
@@ -51,10 +55,12 @@ export default function SecurityStats(): JSX.Element {
     enabled: !!projectId,
   });
 
-  const stats = {
-    totalVulnerabilities: vulnerabilitiesData?.totalRecords ?? 0,
-    activeSecurityReports: securityReportStats?.activeCount ?? 0,
-    resolvedSecurityReports:
+  const stats: Partial<Record<SecurityStatKey, number>> = {
+    [SecurityStatKey.totalVulnerabilities]:
+      vulnerabilitiesData?.totalRecords ?? 0,
+    [SecurityStatKey.activeSecurityReports]:
+      securityReportStats?.activeCount ?? 0,
+    [SecurityStatKey.resolvedSecurityReports]:
       securityReportStats?.resolvedCases?.pastThirtyDays ?? 0,
   };
 
@@ -66,7 +72,7 @@ export default function SecurityStats(): JSX.Element {
       <ListStatGrid
         isLoading={isLoading}
         isError={isError}
-        entityName="security"
+        entityName={SECURITY_STATS_ENTITY_NAME}
         stats={stats}
         configs={SECURITY_STAT_CONFIGS}
       />

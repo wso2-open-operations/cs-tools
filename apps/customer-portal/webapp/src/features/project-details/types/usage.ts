@@ -18,7 +18,7 @@ import type {
   PaginationResponse,
   IdLabelRef,
   SearchRequestBase,
-} from "@features/dashboard/types/common";
+} from "@/types/common";
 
 // Filter type for instance metrics and usage requests.
 export type DateRangeFilter = {

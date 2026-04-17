@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { DeleteCallRequestModalProps } from "@features/support/types/supportComponents";
 import {
   Button,
   CircularProgress,
@@ -33,17 +34,7 @@ import {
   type ChangeEvent,
   type JSX,
 } from "react";
-import type { CallRequest } from "@features/support/types/calls";
 import { formatUtcToLocal } from "@features/support/utils/support";
-
-export interface DeleteCallRequestModalProps {
-  open: boolean;
-  call: CallRequest | null;
-  userTimeZone?: string;
-  onClose: () => void;
-  onConfirm: (reason: string) => void;
-  isDeleting?: boolean;
-}
 
 /**
  * Confirmation modal before deleting (cancelling) a call request.

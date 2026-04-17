@@ -23,12 +23,9 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@/constants/apiConstants";
-import type { PostCaseAttachmentRequest } from "@features/support/types/attachments";
+import type { PostAttachmentsVariables } from "@features/support/types/supportApi";
 
-export interface PostAttachmentsVariables {
-  caseId: string;
-  body: PostCaseAttachmentRequest;
-}
+export type { PostAttachmentsVariables };
 
 /**
  * Posts an attachment to a case (POST /cases/:caseId/attachments).

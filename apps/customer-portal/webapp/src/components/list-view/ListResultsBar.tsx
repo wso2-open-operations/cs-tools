@@ -23,7 +23,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX, ReactNode } from "react";
-import { SortOrder } from "@features/dashboard/types/common";
+import { SortOrder } from "@/types/common";
 
 export interface SortFieldOption {
   value: string;

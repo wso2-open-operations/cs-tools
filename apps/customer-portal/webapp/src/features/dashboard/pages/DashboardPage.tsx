@@ -30,21 +30,25 @@ import { useGetProjectChangeRequestsStats } from "@features/dashboard/api/useGet
 import {
   DASHBOARD_STATS,
   SEVERITY_API_LABELS,
-} from "@features/dashboard/constants/dashboardConstants";
-import { TrendDirection, TrendColor } from "@features/dashboard/types/common";
+} from "@/features/dashboard/constants/dashboard";
+import { OperationsChartMode } from "@/features/dashboard/types/charts";
+import { TrendDirection, TrendColor } from "@features/dashboard/types/stats";
 import { CaseType } from "@features/support/constants/supportConstants";
 import {
   calculateProjectStats,
   getProjectPermissions,
   shouldExcludeS0,
-} from "@features/project-details/utils/permissions";
+} from "@/utils/permission";
 import { StatCard } from "@features/dashboard/components/stats/StatCard";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
 import CasesTable from "@features/dashboard/components/cases-table/CasesTable";
 import {
   computeCrCardIsCardError,
   computeCrCardIsCardLoading,
-} from "@features/dashboard/utils/dashboardUtils";
+  getAllCoreFailedState,
+  getDashboardChartsLoadingState,
+  normalizeEngagementLabel,
+} from "@features/dashboard/utils/dashboard";
 
 /**
  * DashboardPage component to display project-specific statistics and overview.
@@ -52,56 +56,86 @@ import {
  * @returns {JSX.Element} The rendered Dashboard page.
  */
 export default function DashboardPage(): JSX.Element {
+  // logger
   const logger = useLogger();
+  // project id
   const { projectId } = useParams<{ projectId: string }>();
+
+  // loader
   const { showLoader, hideLoader } = useLoader();
 
+  // auth
   const { isLoading: isAuthLoading } = useAsgardeo();
 
+  // project list
   const {
     data: projectsData,
     isLoading: isProjectsLoading,
     error: projectsError,
   } = useInfiniteProjects({ pageSize: 20, enabled: !!projectId });
+
+  // project list
   const projects = useMemo(
     () => flattenProjectPages(projectsData),
     [projectsData],
   );
+
+  // project from list
   const projectFromList = useMemo(
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+
+  // project details
   const {
     data: projectDetails,
     isFetching: isProjectDetailsFetching,
     error: projectDetailsError,
   } = useGetProjectDetails(projectId || "");
 
+  // forbidden
   const isForbidden =
     isForbiddenError(projectsError) || isForbiddenError(projectDetailsError);
+
+  // forbidden message
   const forbiddenMessage =
     getForbiddenMessage(projectsError) ??
     getForbiddenMessage(projectDetailsError);
+
+  // resolved project
   const resolvedProject = projectFromList ?? projectDetails ?? undefined;
 
+  // awaiting project context
   const awaitingProjectContext =
     !!projectId &&
     resolvedProject === undefined &&
     (isProjectsLoading || isProjectDetailsFetching);
 
+  // permissions
   const permissions = useMemo(
     () => getProjectPermissions(resolvedProject?.type?.label),
     [resolvedProject?.type?.label],
   );
 
+  // exclude S0
   const excludeS0 = shouldExcludeS0(resolvedProject?.type?.label);
+
+  // has agent
   const hasAgent = resolvedProject?.hasAgent ?? false;
 
+  // include CR stats
   const includeCrStats = permissions.includeChangeRequestsInDashboardTotals;
-  const showOpsChart = permissions.showOutstandingOpsChart;
-  const operationsChartMode =
-    permissions.hasSR && !permissions.hasCR ? "srOnly" : "srAndCr";
 
+  // show operations chart
+  const showOpsChart = permissions.showOutstandingOpsChart;
+
+  // operations chart mode
+  const operationsChartMode =
+    permissions.hasSR && !permissions.hasCR
+      ? OperationsChartMode.SrOnly
+      : OperationsChartMode.SrAndCr;
+
+  // combined cases stats
   const {
     data: combinedCasesStats,
     isLoading: isCombinedCasesLoading,
@@ -115,6 +149,7 @@ export default function DashboardPage(): JSX.Element {
     enabled: !!projectId,
   });
 
+  // default case stats
   const {
     data: defaultCaseStats,
     isLoading: isDefaultCaseLoading,
@@ -124,6 +159,7 @@ export default function DashboardPage(): JSX.Element {
     enabled: !!projectId,
   });
 
+  // service request stats
   const {
     data: serviceRequestStats,
     isLoading: isServiceRequestLoading,
@@ -133,6 +169,7 @@ export default function DashboardPage(): JSX.Element {
     enabled: !!projectId && showOpsChart,
   });
 
+  // engagement stats
   const {
     data: engagementStats,
     isLoading: isEngagementLoading,
@@ -142,6 +179,7 @@ export default function DashboardPage(): JSX.Element {
     enabled: !!projectId,
   });
 
+  // change request stats
   const {
     data: changeRequestStats,
     isLoading: isChangeRequestStatsLoading,
@@ -150,8 +188,10 @@ export default function DashboardPage(): JSX.Element {
     enabled: !!projectId && includeCrStats,
   });
 
+  // is dashboard loading
   const isDashboardLoading = isAuthLoading || awaitingProjectContext;
 
+  // use effect to show loader
   useEffect(() => {
     if (isForbidden) {
       hideLoader();
@@ -164,25 +204,31 @@ export default function DashboardPage(): JSX.Element {
     hideLoader();
   }, [isDashboardLoading, isForbidden, showLoader, hideLoader]);
 
+  // use effect to log dashboard data loaded
   useEffect(() => {
     if (combinedCasesStats || defaultCaseStats) {
       logger.debug(`Dashboard data loaded for project ID: ${projectId}`);
     }
   }, [combinedCasesStats, defaultCaseStats, logger, projectId]);
 
+  // show error
   const { showError } = useErrorBanner();
+
+  // has shown error ref
   const hasShownErrorRef = useRef(false);
 
+  // use effect to show error
   useEffect(() => {
     if (isForbidden) return;
-    const srFailed = showOpsChart && isErrorServiceRequest;
-    const crFailed = includeCrStats && isErrorChangeRequestStats;
-    const allCoreFailed =
-      isErrorCombinedCases &&
-      isErrorDefaultCase &&
-      isErrorEngagement &&
-      (!showOpsChart || srFailed) &&
-      (!includeCrStats || crFailed);
+    const allCoreFailed = getAllCoreFailedState({
+      isErrorCombinedCases,
+      isErrorDefaultCase,
+      isErrorEngagement,
+      showOpsChart,
+      isErrorServiceRequest,
+      includeCrStats,
+      isErrorChangeRequestStats,
+    });
 
     if (allCoreFailed && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
@@ -208,6 +254,7 @@ export default function DashboardPage(): JSX.Element {
     isForbidden,
   ]);
 
+  // outstanding cases
   const outstandingCases = useMemo(() => {
     const source = defaultCaseStats;
     const outstanding = source?.outstandingSeverityCount ?? [];
@@ -238,6 +285,7 @@ export default function DashboardPage(): JSX.Element {
     };
   }, [defaultCaseStats, permissions.includeS0InSupportMetrics]);
 
+  // outstanding operations
   const outstandingOperations = useMemo(() => {
     const hasServiceRequests = !!serviceRequestStats && !isErrorServiceRequest;
     const hasChangeRequests =
@@ -266,14 +314,10 @@ export default function DashboardPage(): JSX.Element {
     permissions,
   ]);
 
+  // outstanding engagements
   const outstandingEngagements = useMemo(() => {
     const source = engagementStats;
     const outstanding = source?.outstandingEngagementTypeCount ?? [];
-    const normalizeEngagementLabel = (label: string): string => {
-      if (label === "New Feature / Improvement") return "Improvements";
-      if (label === "Consultancy") return "Services";
-      return label;
-    };
 
     const categories = outstanding.map((item) => ({
       name: normalizeEngagementLabel(item.label),
@@ -287,13 +331,18 @@ export default function DashboardPage(): JSX.Element {
     };
   }, [engagementStats]);
 
-  const isChartsLoading =
-    isDashboardLoading ||
-    isDefaultCaseLoading ||
-    (showOpsChart && isServiceRequestLoading) ||
-    isEngagementLoading ||
-    (includeCrStats && isChangeRequestStatsLoading);
+  // is charts loading
+  const isChartsLoading = getDashboardChartsLoadingState({
+    isDashboardLoading,
+    isDefaultCaseLoading,
+    showOpsChart,
+    isServiceRequestLoading,
+    isEngagementLoading,
+    includeCrStats,
+    isChangeRequestStatsLoading,
+  });
 
+  // cr branch state
   const crBranchState = useMemo(() => {
     const hasCombined = !!combinedCasesStats && !isErrorCombinedCases;
     const hasChange = !!changeRequestStats && !isErrorChangeRequestStats;
@@ -325,6 +374,7 @@ export default function DashboardPage(): JSX.Element {
     isErrorCombinedCases,
   ]);
 
+  // render
   if (isForbidden) {
     return <Error403Page message={forbiddenMessage} />;
   }

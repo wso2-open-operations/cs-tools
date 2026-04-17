@@ -15,20 +15,24 @@
 // under the License.
 
 import { type TimeTrackingBadgeType } from "@features/project-details/constants/projectDetailsConstants";
-import type { IdLabelRef, PaginationResponse, SearchRequestBase } from "@features/dashboard/types/common";
+import type {
+  IdLabelRef,
+  PaginationResponse,
+  SearchRequestBase,
+} from "@/types/common";
 
 // Response type for project time tracking statistics.
 export type ProjectTimeTrackingStats = {
   totalHours: number;
   billableHours: number;
   nonBillableHours: number;
-}
+};
 
 // Item type for a time tracking log badge.
 export type TimeTrackingLogBadge = {
   text: string;
   type: TimeTrackingBadgeType;
-}
+};
 
 // Item type for a single time tracking log.
 export type TimeTrackingLog = {
@@ -39,12 +43,12 @@ export type TimeTrackingLog = {
   role: string | null;
   date: string | null;
   hours: number | null;
-}
+};
 
 // Response type for project time tracking details.
 export type TimeTrackingDetailsResponse = {
   timeLogs: TimeTrackingLog[];
-}
+};
 
 // Item type for a time card from projects/:projectId/time-cards/search.
 export type TimeCard = {

@@ -25,14 +25,7 @@ import {
   RefreshCw,
   Shield,
 } from "@wso2/oxygen-ui-icons-react";
-import type { ComponentType } from "react";
-
-export interface AppShellNavItem {
-  id: string;
-  label: string;
-  path: string;
-  icon: ComponentType;
-}
+import type { AppShellNavItem } from "@features/project-hub/types/appLayout";
 
 // Navigation items for the app shell.
 export const APP_SHELL_NAV_ITEMS: AppShellNavItem[] = [
