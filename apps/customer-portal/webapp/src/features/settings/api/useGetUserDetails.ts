@@ -19,6 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@utils/useAuthApiClient";
 import type { UserDetails } from "@features/settings/types/users";
 import { useLogger } from "@hooks/useLogger";
+import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
 
 /**
  * Hook to get user details.
@@ -69,11 +70,21 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
               : "";
         return { ...data, timeZone } as UserDetails;
       } catch (error) {
-        logger.error("[useGetUserDetails] Error:", error);
+        if (
+          error instanceof Error &&
+          error.message.includes(AUTH_NOT_READY_ERROR_MESSAGE)
+        ) {
+          logger.warn("[useGetUserDetails] Auth not ready yet; will retry.");
+        } else {
+          logger.error("[useGetUserDetails] Error:", error);
+        }
         throw error;
       }
     },
     enabled: isSignedIn && !isAuthLoading,
+    retry: (failureCount, error) =>
+      error.message.includes(AUTH_NOT_READY_ERROR_MESSAGE) && failureCount < 4,
+    retryDelay: (attemptIndex) => Math.min(500 * 2 ** attemptIndex, 4000),
     staleTime: 0,
     refetchOnWindowFocus: false,
     refetchOnMount: true,
