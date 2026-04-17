@@ -63,8 +63,6 @@ import { formatDateTime } from "@features/support/utils/support";
 import {
   formatImpactLabel,
   getChangeRequestImpactColorShades,
-  getChangeRequestStateColorShades,
-  getChangeRequestStateIcon,
 } from "@features/operations/utils/changeRequestUi";
 
 /**
@@ -109,8 +107,6 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   const impactColor = getChangeRequestImpactColorShades(
     changeRequest?.impact?.label,
   );
-  const statusColor = getChangeRequestStateColorShades(changeRequest?.state);
-
   const handleApproveChange = () => {
     if (!changeRequest || decisionMode === ChangeRequestDecisionMode.NONE)
       return;
@@ -184,12 +180,6 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   if (!changeRequest) {
     return <ChangeRequestDetailsLoadingSkeleton />;
   }
-
-  // Render state icon from stable id/label resolution
-  const renderStateIcon = () => {
-    const IconComponent = getChangeRequestStateIcon(changeRequest.state);
-    return <IconComponent size={12} />;
-  };
 
   const renderHtmlContent = (
     html: string | null | undefined,
@@ -324,23 +314,6 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                           color: impactColor.text,
                           borderColor: impactColor.border,
                           border: "1px solid",
-                        }}
-                      />
-                    )}
-                  {changeRequest.state?.label &&
-                    typeof changeRequest.state.label === "string" && (
-                      <Chip
-                        icon={renderStateIcon()}
-                        label={String(changeRequest.state.label)}
-                        size="small"
-                        sx={{
-                          bgcolor: statusColor.bg,
-                          color: statusColor.text,
-                          borderColor: statusColor.border,
-                          border: "1px solid",
-                          "& .MuiChip-icon": {
-                            color: statusColor.text,
-                          },
                         }}
                       />
                     )}
