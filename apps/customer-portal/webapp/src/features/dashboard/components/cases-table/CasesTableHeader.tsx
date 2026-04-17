@@ -24,33 +24,39 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useCallback } from "react";
 import { useNavigate, useParams } from "react-router";
+import {
+  CASES_TABLE_BUTTON_CREATE,
+  CASES_TABLE_BUTTON_FILTERS,
+  CASES_TABLE_HEADER_SUBTITLE,
+  CASES_TABLE_HEADER_TITLE,
+} from "@/features/dashboard/constants/casesTable";
+import type {
+  CasesTableHeaderProps,
+  CasesTableRouteParams,
+} from "@/features/dashboard/types/casesTable";
+import { formatCasesTableClearFiltersLabel, navigateToCreateCase } from "@features/dashboard/utils/dashboard";
 
-interface CasesTableHeaderProps {
-  activeFiltersCount: number;
-  isFiltersOpen: boolean;
-  onFilterToggle: () => void;
-  hasAgent?: boolean;
-}
-
+/**
+ * Header row for the dashboard cases table (title, filter toggle, create case).
+ *
+ * @returns {JSX.Element} Header UI
+ */
 const CasesTableHeader = ({
   activeFiltersCount,
   isFiltersOpen,
   onFilterToggle,
   hasAgent = false,
 }: CasesTableHeaderProps): JSX.Element => {
+  // navigate function
   const navigate = useNavigate();
-  const { projectId: rawProjectId } = useParams<{ projectId?: string }>();
+  // project id
+  const { projectId: rawProjectId } = useParams<CasesTableRouteParams>();
   const projectId = rawProjectId ?? "";
+  // has active filters
   const hasActiveFilters = activeFiltersCount > 0;
-
+  // handle create case
   const handleCreateCase = useCallback(() => {
-    if (hasAgent) {
-      navigate(`/projects/${projectId}/support/chat/describe-issue`);
-    } else {
-      navigate(`/projects/${projectId}/support/chat/create-case`, {
-        state: { skipChat: true },
-      });
-    }
+    navigateToCreateCase(navigate, projectId, hasAgent);
   }, [navigate, projectId, hasAgent]);
 
   return (
@@ -65,21 +71,21 @@ const CasesTableHeader = ({
           gap: 2,
         }}
       >
-        {/* Title and description */}
         <Box>
-          <Typography variant="h6">Outstanding Support Cases</Typography>
+          <Typography variant="h6">{CASES_TABLE_HEADER_TITLE}</Typography>
           <Typography variant="body2" color="text.secondary">
-            Track and manage all active support tickets
+            {CASES_TABLE_HEADER_SUBTITLE}
           </Typography>
         </Box>
-        {/* Filter and Create buttons */}
         <Box sx={{ display: "flex", gap: 1 }}>
           <Button
             variant="outlined"
             color="warning"
             size="small"
             onClick={onFilterToggle}
-            startIcon={hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />}
+            startIcon={
+              hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
+            }
             endIcon={
               !hasActiveFilters &&
               (isFiltersOpen ? (
@@ -90,8 +96,8 @@ const CasesTableHeader = ({
             }
           >
             {hasActiveFilters
-              ? `Clear Filters (${activeFiltersCount})`
-              : "Filters"}
+              ? formatCasesTableClearFiltersLabel(activeFiltersCount)
+              : CASES_TABLE_BUTTON_FILTERS}
           </Button>
           <Button
             variant="contained"
@@ -100,7 +106,7 @@ const CasesTableHeader = ({
             size="small"
             onClick={handleCreateCase}
           >
-            Create
+            {CASES_TABLE_BUTTON_CREATE}
           </Button>
         </Box>
       </Box>

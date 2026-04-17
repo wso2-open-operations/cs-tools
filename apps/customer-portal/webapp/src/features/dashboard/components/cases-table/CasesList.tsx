@@ -29,32 +29,19 @@ import {
   TablePagination,
   alpha,
 } from "@wso2/oxygen-ui";
-import { type JSX, type ChangeEvent } from "react";
-import type { CaseSearchResponse, CaseListItem } from "@features/support/types/cases";
+import { type JSX } from "react";
 import {
   formatValue,
   getInitials,
   getStatusColor,
   mapSeverityToDisplay,
 } from "@features/support/utils/support";
-import { getSeverityLegendColor } from "@features/dashboard/constants/dashboardConstants";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CasesTableSkeleton from "@features/dashboard/components/cases-table/CasesTableSkeleton";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
-
-interface CasesListProps {
-  isLoading: boolean;
-  isError?: boolean;
-  data: CaseSearchResponse | undefined;
-  page: number;
-  rowsPerPage: number;
-  onPageChange: (event: unknown, newPage: number) => void;
-  onRowsPerPageChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  onCaseClick?: (caseItem: CaseListItem) => void;
-  showPagination?: boolean;
-  hasListRefinement?: boolean;
-}
+import type { CasesListProps } from "@/features/dashboard/types/casesTable";
 
 const CasesList = ({
   isLoading,

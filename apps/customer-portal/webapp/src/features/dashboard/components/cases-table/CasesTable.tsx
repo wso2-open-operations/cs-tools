@@ -15,182 +15,199 @@
 // under the License.
 
 import { ListingTable, Divider, Box } from "@wso2/oxygen-ui";
-import { type JSX, useState, useMemo, useEffect } from "react";
+import {
+  type JSX,
+  useState,
+  useMemo,
+  useEffect,
+  type ChangeEvent,
+} from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
-import type { FilterField } from "@components/filter-panel/FilterPopover";
 import CasesTableHeader from "@features/dashboard/components/cases-table/CasesTableHeader";
 import CasesFilters from "@features/dashboard/components/cases-table/CasesFilters";
 import CasesList from "@features/dashboard/components/cases-table/CasesList";
-import { mapSeverityToDisplay, isS0Case, deriveFilterLabels } from "@features/support/utils/support";
-import { isS0SeverityLabel } from "@features/dashboard/constants/dashboardConstants";
-import { CaseType, ALL_CASES_FILTER_DEFINITIONS } from "@features/support/constants/supportConstants";
-import type { CaseListItem, CaseSearchResponse } from "@features/support/types/cases";
-import { SortOrder } from "@features/dashboard/types/common";
+import {
+  countCasesTableActiveFilters,
+  filterCasesTableMetadataOptions,
+  mapCasesTableFilterOptionLabel,
+  navigateToProjectCaseDetail,
+  resolveCasesTableDefaultStatusIds,
+  resolveCasesTableSearchStatusIds,
+} from "@features/dashboard/utils/casesTable";
+import { isS0Case, deriveFilterLabels } from "@features/support/utils/support";
+import {
+  CaseType,
+  ALL_CASES_FILTER_DEFINITIONS,
+} from "@features/support/constants/supportConstants";
+import type {
+  CaseListItem,
+  CaseSearchResponse,
+} from "@features/support/types/cases";
+import { SortOrder } from "@/types/common";
+import type {
+  CasesTableFilterValues,
+  CasesTableProps,
+  TableFilter,
+} from "@/features/dashboard/types/casesTable";
 
-const OUTSTANDING_STATUS_IDS = [1, 10, 18, 1003, 1006] as const;
-
-const isClosedStatus = (label?: string): boolean =>
-  label?.trim().toLowerCase() === "closed";
-
-interface CasesTableProps {
-  projectId: string;
-  excludeS0?: boolean;
-  hasAgent?: boolean;
-  includeDeploymentFilter?: boolean;
-}
-
-interface CasesTableFilterValues {
-  [key: string]: string | number | undefined;
-  statusId?: string | number;
-  severityId?: string | number;
-  issueTypes?: string | number;
-  deploymentId?: string | number;
-}
-
+/**
+ * Dashboard outstanding cases listing with filters, pagination, and case navigation.
+ *
+ * @returns {JSX.Element} Cases table container
+ */
 const CasesTable = ({
   projectId,
   excludeS0 = false,
   hasAgent = false,
   includeDeploymentFilter = true,
 }: CasesTableProps): JSX.Element => {
+  // navigate function
   const navigate = useNavigate();
+  // asgardeo loading
   const { isLoading: isAuthLoading } = useAsgardeo();
+  // filters
   const [filters, setFilters] = useState<CasesTableFilterValues>({});
+  // filter open
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  // page
   const [page, setPage] = useState(0);
+  // rows per page
   const [rowsPerPage, setRowsPerPage] = useState(5);
+  // show all
   const [showAll, setShowAll] = useState(false);
+  // loading all
   const [isLoadingAll, setIsLoadingAll] = useState(false);
 
-  const {
-    data: filtersMetadata,
-  } = useGetProjectFilters(projectId);
-
-  // Fetch deployments for the deployment filter
+  const { data: filtersMetadata } = useGetProjectFilters(projectId);
+  // deployments query
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(projectId, {
     pageSize: 10,
     enabled: !!projectId,
   });
+
+  // deployments list
   const deploymentsList = useMemo(
-    () => deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [],
+    () =>
+      deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [],
     [deploymentsQuery.data],
   );
 
+  // effective filters
   const effectiveFilters: CasesTableFilterValues = useMemo(
     () =>
-      includeDeploymentFilter ? filters : { ...filters, deploymentId: undefined },
+      includeDeploymentFilter
+        ? filters
+        : { ...filters, deploymentId: undefined },
     [filters, includeDeploymentFilter],
   );
 
-  const dynamicFilterFields: Array<FilterField & { type: "select" }> = useMemo(() => {
-    return ALL_CASES_FILTER_DEFINITIONS
-      .filter(
-        (def) =>
-          def.id !== "caseType" &&
-          (includeDeploymentFilter || def.id !== "deployment"),
-      )
-      .map((def) => {
+  // dynamic filter fields
+  const dynamicFilterFields: Array<TableFilter> = useMemo(() => {
+    return ALL_CASES_FILTER_DEFINITIONS.filter(
+      (def) =>
+        def.id !== "caseType" &&
+        (includeDeploymentFilter || def.id !== "deployment"),
+    ).map((def) => {
       const { label } = deriveFilterLabels(def.id);
 
       const isDeploymentFilter = def.id === "deployment";
       let options: { label: string; value: string }[];
-      if (isDeploymentFilter) {
-        options =
-          deploymentsList.map((deployment) => ({
-            label: deployment.type?.label || deployment.name,
-            value: deployment.id,
-          })) ?? [];
-      } else {
-        const metadataOptions = filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
-        if (!Array.isArray(metadataOptions)) {
-          options = [];
-        } else {
-          const filtered: Array<{ label: string; id: string }> =
-            def.metadataKey === "severities" && excludeS0
-              ? metadataOptions.filter(
-                  (item: { label: string }) =>
-                    !isS0SeverityLabel(item.label),
-                )
-              : def.metadataKey === "caseStates"
-                ? (metadataOptions as Array<{ label: string; id: string }>).filter(
-                    (s) => !isClosedStatus(s.label),
-                  )
-                : metadataOptions;
+      switch (isDeploymentFilter) {
+        case true:
+          options =
+            deploymentsList.map((deployment) => ({
+              label: deployment.type?.label || deployment.name,
+              value: deployment.id,
+            })) ?? [];
+          break;
+        default: {
+          const metadataOptions =
+            filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
+          const filtered = filterCasesTableMetadataOptions(
+            def.metadataKey,
+            metadataOptions,
+            excludeS0,
+          );
           options = filtered.map((item) => ({
-            label:
-              def.metadataKey === "severities"
-                ? mapSeverityToDisplay(item.label)
-                : item.label,
+            label: mapCasesTableFilterOptionLabel(
+              def.metadataKey,
+              item.label,
+            ),
             value: item.id,
           }));
         }
       }
 
-        return {
-          id: def.filterKey,
-          label,
-          type: "select" as const,
-          options,
-          ...(isDeploymentFilter
-            ? {
-                onLoadMore: () => {
-                  if (
-                    deploymentsQuery.hasNextPage &&
-                    !deploymentsQuery.isFetchingNextPage
-                  ) {
-                    void deploymentsQuery.fetchNextPage();
-                  }
-                },
-                hasMore: !!deploymentsQuery.hasNextPage,
-                isFetchingMore: deploymentsQuery.isFetchingNextPage,
-              }
-            : null),
-        };
-      });
-  }, [filtersMetadata, deploymentsList, excludeS0, includeDeploymentFilter, deploymentsQuery]);
-
-  const caseSearchRequest = useMemo(
-    () => {
-      // If no status filter is applied, use all statuses except Closed (id: 3)
-      const defaultStatusIds = filtersMetadata?.caseStates
-        ?.filter((status) => !isClosedStatus(status.label))
-        .map((status) => Number(status.id)) || [];
-      
       return {
-        filters: {
-          statusIds: effectiveFilters.statusId
-            ? [Number(effectiveFilters.statusId)]
-            : defaultStatusIds.length > 0 
-              ? defaultStatusIds 
-              : [...OUTSTANDING_STATUS_IDS],
-          caseTypes: [CaseType.DEFAULT_CASE],
-          severityId: effectiveFilters.severityId
-            ? Number(effectiveFilters.severityId)
-            : undefined,
-          issueId: effectiveFilters.issueTypes
-            ? Number(effectiveFilters.issueTypes)
-            : undefined,
-          deploymentId: effectiveFilters.deploymentId
-            ? String(effectiveFilters.deploymentId)
-            : undefined,
-        },
-        sortBy: {
-          field: "createdOn",
-          order: SortOrder.DESC,
-        },
+        id: def.filterKey,
+        label,
+        type: "select" as const,
+        options,
+        ...(isDeploymentFilter
+          ? {
+              onLoadMore: () => {
+                if (
+                  deploymentsQuery.hasNextPage &&
+                  !deploymentsQuery.isFetchingNextPage
+                ) {
+                  void deploymentsQuery.fetchNextPage();
+                }
+              },
+              hasMore: !!deploymentsQuery.hasNextPage,
+              isFetchingMore: deploymentsQuery.isFetchingNextPage,
+            }
+          : null),
       };
-    },
-    [effectiveFilters, filtersMetadata],
-  );
+    });
+  }, [
+    filtersMetadata,
+    deploymentsList,
+    excludeS0,
+    includeDeploymentFilter,
+    deploymentsQuery,
+  ]);
 
+  // case search request
+  const caseSearchRequest = useMemo(() => {
+    const defaultStatusIds = resolveCasesTableDefaultStatusIds(
+      filtersMetadata?.caseStates,
+    );
+
+    return {
+      filters: {
+        statusIds: resolveCasesTableSearchStatusIds(
+          effectiveFilters.statusId,
+          defaultStatusIds,
+        ),
+        caseTypes: [CaseType.DEFAULT_CASE],
+        severityId: effectiveFilters.severityId
+          ? Number(effectiveFilters.severityId)
+          : undefined,
+        issueId: effectiveFilters.issueTypes
+          ? Number(effectiveFilters.issueTypes)
+          : undefined,
+        deploymentId: effectiveFilters.deploymentId
+          ? String(effectiveFilters.deploymentId)
+          : undefined,
+      },
+      sortBy: {
+        field: "createdOn",
+        order: SortOrder.DESC,
+      },
+    };
+  }, [effectiveFilters, filtersMetadata]);
+
+  // offset
   const offset = page * rowsPerPage;
+  // limit
   const limit = rowsPerPage;
 
+  // page query
   const pageQuery = useGetProjectCasesPage(
     projectId,
     caseSearchRequest,
@@ -199,10 +216,12 @@ const CasesTable = ({
     { enabled: !showAll },
   );
 
+  // infinite query
   const infiniteQuery = useGetProjectCases(projectId, caseSearchRequest, {
     enabled: showAll,
   });
 
+  // fetch next page
   useEffect(() => {
     if (!showAll) return;
     if (!infiniteQuery.hasNextPage) return;
@@ -210,6 +229,7 @@ const CasesTable = ({
     void infiniteQuery.fetchNextPage();
   }, [showAll, infiniteQuery]);
 
+  // paginated data
   const paginatedData = useMemo((): CaseSearchResponse => {
     const filterS0 = (items: CaseListItem[]): CaseListItem[] =>
       excludeS0 ? items.filter((c) => !isS0Case(c)) : items;
@@ -220,7 +240,6 @@ const CasesTable = ({
       }
       const rawCases = infiniteQuery.data.pages.flatMap((p) => p.cases ?? []);
       const cases = filterS0(rawCases);
-      // For showAll mode, use the original total records from API
       const totalRecords = infiniteQuery.data.pages[0]?.totalRecords ?? 0;
       return {
         cases,
@@ -232,22 +251,28 @@ const CasesTable = ({
     const pageData = pageQuery.data;
     const rawCases = (pageData?.cases ?? []) as CaseListItem[];
     const cases = filterS0(rawCases);
-    // For paginated mode, use the original total records from API
     const totalRecords = pageData?.totalRecords ?? 0;
     return { cases, totalRecords, offset, limit };
   }, [showAll, infiniteQuery.data, pageQuery.data, offset, limit, excludeS0]);
 
+  // fetching cases
   const isFetchingCases = showAll
-    ? isLoadingAll || infiniteQuery.isFetching || infiniteQuery.isFetchingNextPage
+    ? isLoadingAll ||
+      infiniteQuery.isFetching ||
+      infiniteQuery.isFetchingNextPage
     : pageQuery.isFetching;
+
+  // error
   const isError = showAll ? infiniteQuery.isError : pageQuery.isError;
 
+  // handle clear filters
   const handleClearFilters = () => {
     setFilters({});
     setPage(0);
     setIsLoadingAll(false);
   };
 
+  // handle update filter
   const handleUpdateFilter = (field: string, value: string | number) => {
     setFilters((prev) => ({
       ...prev,
@@ -258,29 +283,27 @@ const CasesTable = ({
     setIsLoadingAll(false);
   };
 
+  // handle change page
   const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
-  const handleChangeRowsPerPage = (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  // handle change rows per page
+  const handleChangeRowsPerPage = (event: ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
 
-  const getActiveFiltersCount = () => {
-    return Object.values(filters).filter((v) => v !== "" && v != null).length;
-  };
+  // active filters count
+  const activeFiltersCount = countCasesTableActiveFilters(filters);
 
   return (
     <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
-      {/* Header */}
       <CasesTableHeader
-        activeFiltersCount={getActiveFiltersCount()}
+        activeFiltersCount={activeFiltersCount}
         isFiltersOpen={isFilterOpen}
         onFilterToggle={() => {
-          if (getActiveFiltersCount() > 0) {
+          if (activeFiltersCount > 0) {
             handleClearFilters();
           } else {
             setIsFilterOpen(!isFilterOpen);
@@ -289,7 +312,6 @@ const CasesTable = ({
         hasAgent={hasAgent}
       />
 
-      {/* Filter dropdowns section */}
       {isFilterOpen && (
         <>
           <Divider sx={{ my: 2 }} />
@@ -303,7 +325,6 @@ const CasesTable = ({
         </>
       )}
 
-      {/* Cases list */}
       <CasesList
         isLoading={isFetchingCases || isAuthLoading}
         isError={isError}
@@ -312,9 +333,11 @@ const CasesTable = ({
         rowsPerPage={rowsPerPage}
         onPageChange={handleChangePage}
         onRowsPerPageChange={handleChangeRowsPerPage}
-        onCaseClick={(c) => navigate(`/projects/${projectId}/support/cases/${c.id}`)}
+        onCaseClick={(c) =>
+          navigateToProjectCaseDetail(navigate, projectId, c.id)
+        }
         showPagination={!showAll}
-        hasListRefinement={getActiveFiltersCount() > 0}
+        hasListRefinement={activeFiltersCount > 0}
       />
     </ListingTable.Container>
   );

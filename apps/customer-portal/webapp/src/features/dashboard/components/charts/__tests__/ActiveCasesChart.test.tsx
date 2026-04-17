@@ -17,7 +17,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ActiveCasesChart } from "@features/dashboard/components/charts/ActiveCasesChart";
-import { ACTIVE_CASES_CHART_DATA } from "@features/dashboard/constants/dashboardConstants";
+import { ACTIVE_CASES_CHART_DATA } from "@/features/dashboard/constants/dashboard";
+import { OperationsChartMode } from "@/features/dashboard/types/charts";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
@@ -40,10 +41,13 @@ vi.mock("@wso2/oxygen-ui", () => ({
     <div data-testid="skeleton" data-variant={variant}></div>
   ),
   colors: {
-    common: { white: "#FFFFFF" },
     blue: { 500: "#3B82F6" },
+    brown: { 500: "#795548" },
+    common: { white: "#FFFFFF" },
     green: { 500: "#22C55E" },
+    grey: { 300: "#D1D5DB", 500: "#9CA3AF" },
     orange: { 500: "#F97316" },
+    purple: { 500: "#A855F7" },
     red: { 500: "#EF4444" },
     yellow: { 600: "#EAB308" },
   },
@@ -130,15 +134,13 @@ describe("ActiveCasesChart", () => {
       <ActiveCasesChart
         data={mockData}
         isLoading={false}
-        variant="srOnly"
+        variant={OperationsChartMode.SrOnly}
       />,
     );
 
     const segments = screen.getAllByTestId("pie-segment");
     expect(segments).toHaveLength(1);
-    expect(segments[0]).toHaveTextContent(
-      ACTIVE_CASES_CHART_DATA[0].name,
-    );
+    expect(segments[0]).toHaveTextContent(ACTIVE_CASES_CHART_DATA[0].name);
   });
 
   it("should have correct paddingAngle and minAngle", () => {
