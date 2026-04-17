@@ -261,6 +261,7 @@ export type AttachmentListItemProps = {
   onDelete?: (attachment: CaseAttachment) => void;
   onEdit?: (attachment: CaseAttachment) => void;
   deleteDisabled?: boolean;
+  deleteTooltip?: string;
   hideDescription?: boolean;
   isDownloadLoading?: boolean;
 };
