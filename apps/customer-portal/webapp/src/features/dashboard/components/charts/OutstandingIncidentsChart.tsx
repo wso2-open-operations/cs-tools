@@ -54,18 +54,32 @@ export const OutstandingIncidentsChart = ({
   isLoading,
   isError,
   excludeS0 = false,
+  restrictSeverityToLow = false,
 }: OutstandingIncidentsChartProps): JSX.Element => {
   // safe data
   const safeData = data ?? EMPTY_OUTSTANDING_INCIDENTS_DATA;
+  const displayedData = restrictSeverityToLow
+    ? {
+        ...safeData,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        catastrophic: 0,
+        total: safeData.low,
+      }
+    : safeData;
   // chart source
-  const chartSource = resolveOutstandingIncidentsChartSource(excludeS0);
+  const chartSource = resolveOutstandingIncidentsChartSource(
+    excludeS0,
+    restrictSeverityToLow,
+  );
   // error grey
   const errorGrey = colors.grey?.[300] ?? "#D1D5DB";
 
   // chart data
   const chartData = buildOutstandingIncidentsPieSlices(
     chartSource,
-    safeData,
+    displayedData,
     Boolean(isLoading),
     Boolean(isError),
     errorGrey,
@@ -161,7 +175,7 @@ export const OutstandingIncidentsChart = ({
                 <Typography variant="h4">
                   {formatOutstandingIncidentsCenterTotal(
                     Boolean(data),
-                    safeData.total,
+                    displayedData.total,
                   )}
                 </Typography>
                 <Typography variant="caption">
@@ -192,7 +206,7 @@ export const OutstandingIncidentsChart = ({
         </Box>
       ) : (
         <ChartLegend
-          data={buildOutstandingIncidentsLegendRows(chartSource, safeData)}
+          data={buildOutstandingIncidentsLegendRows(chartSource, displayedData)}
           isError={isError}
           showValues
         />

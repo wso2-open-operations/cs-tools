@@ -63,7 +63,13 @@ export const EMPTY_CASES_TREND_DATA: CasesTrendChartData = {
  */
 export function resolveOutstandingIncidentsChartSource(
   excludeS0: boolean,
+  restrictSeverityToLow: boolean = false,
 ): SeverityLegendEntry[] {
+  if (restrictSeverityToLow) {
+    return OUTSTANDING_INCIDENTS_CHART_DATA.filter(
+      (item) => item.key === SeverityLegendKey.Low,
+    );
+  }
   switch (excludeS0) {
     case true:
       return OUTSTANDING_INCIDENTS_CHART_DATA.filter(

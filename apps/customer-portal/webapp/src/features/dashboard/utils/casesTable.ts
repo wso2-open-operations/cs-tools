@@ -123,17 +123,24 @@ export function filterCasesTableMetadataOptions(
   metadataKey: string,
   metadataOptions: unknown,
   excludeS0: boolean,
+  restrictSeverityToLow: boolean = false,
 ): Array<{ label: string; id: string }> {
   if (!Array.isArray(metadataOptions)) {
     return [];
   }
   switch (metadataKey) {
     case CaseTableMetadataKey.Severities:
-      return excludeS0
-        ? metadataOptions.filter(
-            (item: { label: string }) => !isS0SeverityLabel(item.label),
-          )
-        : metadataOptions;
+      return (
+        metadataOptions as Array<{ label: string; id: string }>
+      ).filter((item) => {
+        if (excludeS0 && isS0SeverityLabel(item.label)) {
+          return false;
+        }
+        if (restrictSeverityToLow) {
+          return mapSeverityToDisplay(item.label).startsWith(CaseSeverityLevel.S4);
+        }
+        return true;
+      });
     case CaseTableMetadataKey.CaseStates:
       return (metadataOptions as Array<{ label: string; id: string }>).filter(
         (s) => !isClosedCaseStatusLabel(s.label),

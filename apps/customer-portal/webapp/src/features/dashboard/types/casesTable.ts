@@ -75,6 +75,7 @@ export type CasesTableSkeletonProps = {
 export type CasesTableProps = {
   projectId: string;
   excludeS0?: boolean;
+  restrictSeverityToLow?: boolean;
   hasAgent?: boolean;
   includeDeploymentFilter?: boolean;
 };

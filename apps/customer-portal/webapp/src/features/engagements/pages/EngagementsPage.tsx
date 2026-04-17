@@ -29,6 +29,7 @@ export default function EngagementsPage(): JSX.Element {
   const {
     projectReady,
     excludeS0,
+    restrictSeverityToLow,
     filterMetadata,
     stats,
     isStatsLoading,
@@ -73,6 +74,7 @@ export default function EngagementsPage(): JSX.Element {
         onFilterChange={handleFilterChange}
         onClearFilters={handleClearFilters}
         excludeS0={excludeS0}
+        restrictSeverityToLow={restrictSeverityToLow}
         isProjectContextLoading={!projectReady}
         sortField={sortField}
         onSortFieldChange={handleSortFieldUiChange}

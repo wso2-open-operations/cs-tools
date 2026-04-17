@@ -38,6 +38,7 @@ import {
   calculateProjectStats,
   getProjectPermissions,
   shouldExcludeS0,
+  shouldForceSeverityS4,
 } from "@/utils/permission";
 import { StatCard } from "@features/dashboard/components/stats/StatCard";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
@@ -119,6 +120,9 @@ export default function DashboardPage(): JSX.Element {
 
   // exclude S0
   const excludeS0 = shouldExcludeS0(resolvedProject?.type?.label);
+  const restrictSeverityToLow = shouldForceSeverityS4(
+    resolvedProject?.type?.label,
+  );
 
   // has agent
   const hasAgent = resolvedProject?.hasAgent ?? false;
@@ -541,6 +545,7 @@ export default function DashboardPage(): JSX.Element {
         }
         isErrorEngagements={isErrorEngagement}
         excludeS0={excludeS0}
+        restrictSeverityToLow={restrictSeverityToLow}
         showOperationsChart={showOpsChart}
         operationsChartMode={operationsChartMode}
       />
@@ -550,6 +555,7 @@ export default function DashboardPage(): JSX.Element {
           <CasesTable
             projectId={projectId}
             excludeS0={excludeS0}
+            restrictSeverityToLow={restrictSeverityToLow}
             hasAgent={hasAgent}
             includeDeploymentFilter={permissions.hasDeployments}
           />

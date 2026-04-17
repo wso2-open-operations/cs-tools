@@ -59,6 +59,7 @@ export type OutstandingIncidentsChartProps = {
   isLoading?: boolean;
   isError?: boolean;
   excludeS0?: boolean;
+  restrictSeverityToLow?: boolean;
 };
 
 // Outstanding Engagements chart props.
@@ -93,6 +94,7 @@ export type ChartLayoutProps = {
   isErrorActiveCases?: boolean;
   isErrorEngagements?: boolean;
   excludeS0?: boolean;
+  restrictSeverityToLow?: boolean;
   showOperationsChart?: boolean;
   operationsChartMode?: OperationsChartMode;
 };

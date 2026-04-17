@@ -42,6 +42,7 @@ export default function EngagementsListSection({
   onFilterChange,
   onClearFilters,
   excludeS0,
+  restrictSeverityToLow,
   isProjectContextLoading,
   sortField,
   onSortFieldChange,
@@ -71,6 +72,7 @@ export default function EngagementsListSection({
         onFilterChange={onFilterChange}
         onClearFilters={onClearFilters}
         excludeS0={excludeS0}
+        restrictSeverityToLow={restrictSeverityToLow}
         isProjectContextLoading={isProjectContextLoading}
       />
 
