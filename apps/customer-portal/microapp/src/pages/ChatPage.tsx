@@ -102,7 +102,7 @@ export default function ChatPage() {
     };
   }, [projectId]);
 
-  const { data: deployments = [] } = useQuery(projects.deployments(projectId!));
+  const { data: deployments = [], isLoading: deploymentsLoading } = useQuery(projects.deployments(projectId!));
 
   const productQueries = useQueries({
     queries: deployments.map((deployment) => ({
@@ -111,6 +111,8 @@ export default function ChatPage() {
     })),
   });
 
+  const productsLoading = productQueries.every((query) => query.isLoading);
+
   const mutation = useMutation({
     ...cases.classify,
     onSuccess: (response) => {
@@ -118,6 +120,7 @@ export default function ChatPage() {
         navigate("/create", { state: { messages, classifications: response } });
       }, 500);
     },
+    onSettled: () => setIsAwaitingCreateCase(false),
   });
 
   const envProducts = deployments.reduce((acc, deployment, index) => {
@@ -221,20 +224,28 @@ export default function ChatPage() {
     sendMessage(comment);
   };
 
-  const handleCreateCase = () => {
-    mutation.mutate({
-      chatHistory: toString(messages),
-      envProducts: deployments.reduce((acc, deployment, index) => {
-        const products = productQueries[index]?.data ?? [];
-        const productNames = products.map((p) => p.name);
+  const [isAwaitingCreateCase, setIsAwaitingCreateCase] = useState(false);
 
-        return {
-          ...acc,
-          [deployment.name]: productNames,
-        };
-      }, {}),
-    });
+  const handleCreateCase = () => {
+    setIsAwaitingCreateCase(true);
   };
+
+  useEffect(() => {
+    if (isAwaitingCreateCase) {
+      mutation.mutate({
+        chatHistory: toString(messages),
+        envProducts: deployments.reduce((acc, deployment, index) => {
+          const products = productQueries[index]?.data ?? [];
+          const productNames = products.map((p) => p.name);
+
+          return {
+            ...acc,
+            [deployment.name]: productNames,
+          };
+        }, {}),
+      });
+    }
+  }, [isAwaitingCreateCase, deploymentsLoading, productsLoading]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -249,7 +260,7 @@ export default function ChatPage() {
           flexDirection: "column",
           gap: 2,
         }}
-        open={mutation.isPending}
+        open={isAwaitingCreateCase && (deploymentsLoading || productsLoading || mutation.isPending)}
       >
         <CircularProgress color="inherit" />
       </Backdrop>
