@@ -19,7 +19,7 @@ import * as React from "react";
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
-  fallback: React.ReactNode | ((error: unknown) => React.ReactNode);
+  fallback: React.ReactNode | ((error: unknown, resetErrorBoundary: () => void) => React.ReactNode);
   onError?: (error: unknown) => void;
 }
 
@@ -44,13 +44,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     this.props.onError?.(error);
   }
 
+  resetErrorBoundary = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   render(): React.ReactNode {
     const { hasError, error } = this.state;
     const { fallback, children } = this.props;
 
     if (hasError && error) {
       if (typeof fallback === "function") {
-        return fallback(error);
+        return fallback(error, this.resetErrorBoundary);
       }
       return fallback;
     }

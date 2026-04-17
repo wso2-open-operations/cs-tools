@@ -31,15 +31,27 @@ import { useLayoutEffect } from "react";
 import { ErrorBoundary } from "../components/core";
 import { SecurityReportAnalysisListContent } from "../components/features/support/SecurityReportAnalysisListContent";
 import { EngagementListContent } from "../components/features/support/EngagementListContent";
+import ErrorState from "../components/shared/ErrorState";
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
   const filter = searchParams.get("filter") ?? "all";
   const search = (searchParams.get("search") ?? "").toLowerCase();
+  const { reset } = useQueryErrorResetBoundary();
 
   return (
     <Stack gap={2}>
-      <ErrorBoundary fallback={<ItemsListContentSkeleton />}>
+      <ErrorBoundary
+        fallback={(_error, resetErrorBoundary) => (
+          <ErrorState
+            onRetry={() => {
+              reset();
+              resetErrorBoundary();
+            }}
+          />
+        )}
+      >
         <ItemsListContent type={type} filter={filter} search={search} />
       </ErrorBoundary>
     </Stack>

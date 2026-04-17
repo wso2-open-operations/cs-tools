@@ -20,7 +20,7 @@ import { Card, Grid, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
 import { MetricWidget } from "@components/features/dashboard";
 import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
 
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { projects } from "@src/services/projects";
 import { useProject } from "@context/project";
@@ -33,6 +33,7 @@ import { useNotify } from "../context/snackbar";
 import { ITEM_DETAIL_PATHS, TAB_CONFIG } from "../config/constants";
 import { securityReportAnalysis } from "../services/sra";
 import { engagements } from "../services/engagements";
+import ErrorState from "../components/shared/ErrorState";
 
 type TabType = ItemCardProps["type"];
 
@@ -255,10 +256,18 @@ function ItemsListContentSkeleton() {
 
 function ItemsListErrorBoundary({ children }: { children: ReactNode }) {
   const notify = useNotify();
+  const { reset } = useQueryErrorResetBoundary();
 
   return (
     <ErrorBoundary
-      fallback={<ItemsListContentSkeleton />}
+      fallback={(_error, resetErrorBoundary) => (
+        <ErrorState
+          onRetry={() => {
+            reset();
+            resetErrorBoundary();
+          }}
+        />
+      )}
       onError={() => notify.error("Content failed to load. Please try again later.")}
     >
       {children}
