@@ -17,7 +17,6 @@
 import { Box, Chip, Form, Typography, alpha } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { OutstandingChangeRequestsListProps } from "@features/operations/types/changeRequests";
-import { NULL_PLACEHOLDER } from "@constants/common";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { formatRelativeTime } from "@features/support/utils/support";
 import OutstandingChangeRequestsSkeleton from "./OutstandingChangeRequestsSkeleton";
@@ -91,9 +90,49 @@ export default function OutstandingChangeRequestsList({
           <Form.CardHeader
             sx={{ p: 0 }}
             title={
-              <Typography variant="body2" fontWeight={500} color="text.primary">
-                {cr.number}
-              </Typography>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Typography variant="body2" fontWeight={500} color="text.primary">
+                  {cr.number}
+                </Typography>
+                {cr.state?.label
+                  ? (() => {
+                      const statusColor = getChangeRequestStateColor(cr.state);
+                      const StatusIcon = getChangeRequestStateIcon(cr.state);
+                      return (
+                        <Chip
+                          icon={<StatusIcon size={12} />}
+                          label={cr.state.label}
+                          size="small"
+                          variant="outlined"
+                          sx={{
+                            bgcolor: alpha(statusColor, 0.1),
+                            color: statusColor,
+                            px: 0,
+                            height: 20,
+                            fontSize: "0.75rem",
+                            fontWeight: 500,
+                            "& .MuiChip-icon": {
+                              color: statusColor,
+                              ml: "6px",
+                              mr: "6px",
+                            },
+                            "& .MuiChip-label": {
+                              pl: 0,
+                              pr: "6px",
+                            },
+                          }}
+                        />
+                      );
+                    })()
+                  : null}
+              </Box>
             }
           />
           <Form.CardContent sx={{ p: 0 }}>
@@ -116,47 +155,12 @@ export default function OutstandingChangeRequestsList({
           <Form.CardActions
             sx={{
               p: 0,
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               alignItems: "center",
               flexWrap: "wrap",
               gap: 1,
             }}
           >
-            {cr.state?.label ? (
-              (() => {
-                const statusColor = getChangeRequestStateColor(cr.state);
-                const StatusIcon = getChangeRequestStateIcon(cr.state);
-                return (
-                  <Chip
-                    icon={<StatusIcon size={12} />}
-                    label={cr.state.label}
-                    size="small"
-                    variant="outlined"
-                    sx={{
-                      bgcolor: alpha(statusColor, 0.1),
-                      color: statusColor,
-                      px: 0,
-                      height: 20,
-                      fontSize: "0.75rem",
-                      fontWeight: 500,
-                      "& .MuiChip-icon": {
-                        color: statusColor,
-                        ml: "6px",
-                        mr: "6px",
-                      },
-                      "& .MuiChip-label": {
-                        pl: 0,
-                        pr: "6px",
-                      },
-                    }}
-                  />
-                );
-              })()
-            ) : (
-              <Typography variant="caption" color="text.secondary">
-                {NULL_PLACEHOLDER}
-              </Typography>
-            )}
             <Typography variant="caption" color="text.secondary">
               {formatRelativeTime(cr.createdOn ?? undefined)}
             </Typography>
