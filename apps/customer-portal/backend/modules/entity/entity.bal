@@ -237,7 +237,7 @@ public isolated function updateAttachment(string idToken, IdString attachmentId,
 public isolated function deleteAttachment(string idToken, IdString attachmentId)
     returns AttachmentDeleteResponse|error {
 
-    return csEntityClient->/attachments/[attachmentId].delete(generateHeaders(idToken));
+    return csEntityClient->/attachments/[attachmentId].delete(headers = generateHeaders(idToken));
 }
 
 # Search products of a deployment.
