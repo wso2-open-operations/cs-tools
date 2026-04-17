@@ -80,3 +80,8 @@ export const ApiMutationKeys = {
 export const WS_CHOREO_OAUTH2_TOKEN = "choreo-oauth2-token";
 export const WS_CUSTOMER_PORTAL = "cs-customer-portal";
 export const CONNECT_HANDSHAKE_TIMEOUT_MS = 25_000;
+
+export const TOKEN_RETRY_DELAYS_MS = [150, 300, 600, 1000] as const;
+
+export const ASGARDEO_UNAUTHENTICATED_CODE = "SPA-AUTH_CLIENT-VM-IV02";
+export const AUTH_NOT_READY_ERROR_MESSAGE = "Authentication is not ready yet";
