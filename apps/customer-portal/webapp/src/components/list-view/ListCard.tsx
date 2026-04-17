@@ -41,6 +41,7 @@ import {
 export interface ListCardProps {
   caseItem: CaseListItem;
   onClick?: (caseItem: CaseListItem) => void;
+  hideSeverity?: boolean;
 }
 
 /**
