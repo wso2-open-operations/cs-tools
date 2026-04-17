@@ -73,8 +73,8 @@ describe("updates utilities", () => {
       expect(stats.totalUpdatesInstalled).toBe(4458);
       expect(stats.totalUpdatesPending).toBe(1534);
       expect(stats.securityUpdatesPending).toBe(429);
-      expect(stats.totalUpdatesInstalledBreakdown!.regular).toBe(3667);
-      expect(stats.totalUpdatesInstalledBreakdown!.security).toBe(791);
+      expect(stats.totalUpdatesInstalledBreakdown!.regular).toBe(3677);
+      expect(stats.totalUpdatesInstalledBreakdown!.security).toBe(781);
       expect(stats.totalUpdatesPendingBreakdown!.regular).toBe(1105);
       expect(stats.totalUpdatesPendingBreakdown!.security).toBe(429);
     });

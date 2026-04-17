@@ -25,11 +25,11 @@ import { useGetRecommendedUpdateLevels } from "@features/updates/api/useGetRecom
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useLogger } from "@hooks/useLogger";
-
-const UPDATES_TABS = [
-  { id: "my-updates", label: "My Updates" },
-  { id: "all", label: "All Updates" },
-];
+import {
+  UPDATES_PAGE_TABS,
+  UPDATES_RECOMMENDED_LEVELS_LOAD_ERROR,
+} from "@features/updates/constants/updatesConstants";
+import { UpdatesPageTabId } from "@features/updates/types/updates";
 
 /**
  * UpdatesPage component to display project updates with tab bar and stats.
@@ -39,7 +39,7 @@ const UPDATES_TABS = [
 export default function UpdatesPage(): JSX.Element {
   const logger = useLogger();
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState("my-updates");
+  const [activeTab, setActiveTab] = useState<string>(UpdatesPageTabId.MyUpdates);
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
@@ -64,7 +64,7 @@ export default function UpdatesPage(): JSX.Element {
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
-      showError("Could not load recommended update levels.");
+      showError(UPDATES_RECOMMENDED_LEVELS_LOAD_ERROR);
       logger.error(
         `Failed to load recommended update levels for project ID: ${projectId}`,
       );
@@ -75,7 +75,7 @@ export default function UpdatesPage(): JSX.Element {
   }, [isError, showError, logger, projectId]);
 
   const renderContent = (): JSX.Element => {
-    if (activeTab === "my-updates") {
+    if (activeTab === UpdatesPageTabId.MyUpdates) {
       return (
         <Stack spacing={2}>
           <UpdatesStatsGrid
@@ -98,7 +98,7 @@ export default function UpdatesPage(): JSX.Element {
   return (
     <Box sx={{ width: "100%", pt: 0 }}>
       <TabBar
-        tabs={UPDATES_TABS}
+        tabs={UPDATES_PAGE_TABS}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />

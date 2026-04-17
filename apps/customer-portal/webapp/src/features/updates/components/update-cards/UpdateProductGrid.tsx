@@ -19,16 +19,14 @@ import { useNavigate } from "react-router";
 import type { JSX } from "react";
 import Error500Page from "@components/error/Error500Page";
 import EmptyState from "@components/empty-state/EmptyState";
-import type { RecommendedUpdateLevelItem } from "@features/updates/types/updates";
+import type { UpdateProductGridProps } from "@features/updates/types/updates";
 import { UpdateProductCard } from "@update-cards/UpdateProductCard";
 import { UpdateProductCardSkeleton } from "@update-cards/UpdateProductCardSkeleton";
-
-export interface UpdateProductGridProps {
-  data: RecommendedUpdateLevelItem[] | undefined;
-  isLoading: boolean;
-  isError: boolean;
-  projectId?: string;
-}
+import {
+  UPDATE_PRODUCT_GRID_EMPTY_MESSAGE,
+  UPDATE_PRODUCT_GRID_ERROR_MESSAGE,
+  UPDATE_PRODUCT_GRID_SECTION_TITLE,
+} from "@features/updates/constants/updatesConstants";
 
 /**
  * Grid component to display a list of product update status cards.
@@ -57,6 +55,9 @@ export function UpdateProductGrid({
         }}
       >
         <Error500Page style={{ width: 200, height: "auto" }} />
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          {UPDATE_PRODUCT_GRID_ERROR_MESSAGE}
+        </Typography>
       </Box>
     );
   }
@@ -74,12 +75,12 @@ export function UpdateProductGrid({
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h6" sx={{ mb: 2 }}>
-        Product Update Status
+        {UPDATE_PRODUCT_GRID_SECTION_TITLE}
       </Typography>
       {isLoading || !data ? (
         renderSkeletons()
       ) : data.length === 0 ? (
-        <EmptyState description="No product updates found." />
+        <EmptyState description={UPDATE_PRODUCT_GRID_EMPTY_MESSAGE} />
       ) : (
         <Grid container spacing={2}>
           {data.map((item) => (

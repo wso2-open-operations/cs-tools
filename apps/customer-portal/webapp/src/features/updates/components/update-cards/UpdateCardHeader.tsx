@@ -16,16 +16,7 @@
 
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-
-/**
- * Props for the UpdateCardHeader component.
- */
-interface UpdateCardHeaderProps {
-  productName: string;
-  productBaseVersion: string;
-  percentage: number;
-  statusColor: "info" | "warning" | "success" | "error";
-}
+import type { UpdateCardHeaderProps } from "@features/updates/types/updates";
 
 /**
  * Header section of the update product card.
