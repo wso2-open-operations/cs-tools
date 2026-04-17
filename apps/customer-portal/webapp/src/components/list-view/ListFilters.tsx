@@ -49,6 +49,7 @@ export interface ListFiltersProps {
   onFilterChange: (field: string, value: string) => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
+  hideSeverityFilter?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
