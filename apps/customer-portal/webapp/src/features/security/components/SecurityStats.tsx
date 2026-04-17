@@ -75,6 +75,7 @@ export default function SecurityStats(): JSX.Element {
         entityName={SECURITY_STATS_ENTITY_NAME}
         stats={stats}
         configs={SECURITY_STAT_CONFIGS}
+        itemSize={{ xs: 12, sm: 4, md: 4 }}
       />
     </Box>
   );
