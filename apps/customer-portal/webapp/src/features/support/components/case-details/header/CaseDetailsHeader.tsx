@@ -18,11 +18,15 @@ import type { CaseDetailsHeaderProps } from "@features/support/types/supportComp
 import { Box, Chip, Stack, Typography, alpha } from "@wso2/oxygen-ui";
 import { type ReactElement, type JSX } from "react";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
-import { formatValue, mapSeverityToDisplay } from "@features/support/utils/support";
+import {
+  formatValue,
+  hasSeverityLabelForChip,
+  mapSeverityToDisplay,
+} from "@features/support/utils/support";
 import { CaseDetailsHeaderSkeleton } from "@case-details/CaseDetailsSkeleton";
 
 /**
- * Case details header: case number, severity, status chip, and title.
+ * Case details header: case number, optional severity, optional status chip, and title.
  *
  * @param {CaseDetailsHeaderProps} props - Header data and styling.
  * @returns {JSX.Element} The header block.
@@ -36,10 +40,15 @@ export default function CaseDetailsHeader({
   statusChipSx,
   isLoading = false,
   showSeverityChip = true,
+  showStatusChip = true,
+  variant = "default",
 }: CaseDetailsHeaderProps): JSX.Element {
   if (isLoading) {
-    return <CaseDetailsHeaderSkeleton />;
+    return <CaseDetailsHeaderSkeleton variant={variant} />;
   }
+
+  const displaySeverity =
+    showSeverityChip && hasSeverityLabelForChip(severityLabel);
 
   return (
     <Box>
@@ -52,7 +61,7 @@ export default function CaseDetailsHeader({
         <Typography variant="body2" fontWeight={500} color="text.primary">
           {formatValue(caseNumber)}
         </Typography>
-        {showSeverityChip && (
+        {displaySeverity && (
           <Chip
             label={mapSeverityToDisplay(severityLabel ?? undefined)}
             size="small"
@@ -78,13 +87,15 @@ export default function CaseDetailsHeader({
             }}
           />
         )}
-        <Chip
-          size="small"
-          variant="outlined"
-          label={formatValue(statusLabel)}
-          icon={statusChipIcon as ReactElement}
-          sx={statusChipSx}
-        />
+        {showStatusChip && (
+          <Chip
+            size="small"
+            variant="outlined"
+            label={formatValue(statusLabel)}
+            icon={statusChipIcon as ReactElement}
+            sx={statusChipSx}
+          />
+        )}
       </Stack>
       <Typography variant="h6" color="text.primary" sx={{ fontWeight: 500 }}>
         {formatValue(title)}
