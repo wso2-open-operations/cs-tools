@@ -55,6 +55,7 @@ export type EngagementsListSectionProps = {
   onFilterChange: (field: string, value: string) => void;
   onClearFilters: () => void;
   excludeS0: boolean;
+  restrictSeverityToLow: boolean;
   isProjectContextLoading: boolean;
   sortField: EngagementsSortField;
   onSortFieldChange: (value: string) => void;

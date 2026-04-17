@@ -17,6 +17,7 @@
 import { Box, Chip, Form, Typography, alpha } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { OutstandingChangeRequestsListProps } from "@features/operations/types/changeRequests";
+import { NULL_PLACEHOLDER } from "@constants/common";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { formatRelativeTime } from "@features/support/utils/support";
 import OutstandingChangeRequestsSkeleton from "./OutstandingChangeRequestsSkeleton";
@@ -153,7 +154,7 @@ export default function OutstandingChangeRequestsList({
               })()
             ) : (
               <Typography variant="caption" color="text.secondary">
-                —
+                {NULL_PLACEHOLDER}
               </Typography>
             )}
             <Typography variant="caption" color="text.secondary">

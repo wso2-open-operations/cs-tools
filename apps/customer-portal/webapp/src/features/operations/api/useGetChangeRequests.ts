@@ -24,7 +24,7 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/utils/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { ApiQueryKeys } from "@/constants/apiConstants";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ChangeRequestSearchRequest } from "@features/operations/types/changeRequests";
 import type { ChangeRequestSearchResponse } from "@features/operations/types/changeRequests";
 

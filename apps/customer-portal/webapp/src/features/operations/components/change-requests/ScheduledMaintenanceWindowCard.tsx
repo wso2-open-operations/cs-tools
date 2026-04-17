@@ -38,11 +38,16 @@ export default function ScheduledMaintenanceWindowCard({
     const duration = (changeRequest as { duration?: string | number | null })
       .duration;
     if (duration == null) return "Not available";
-    const mins =
-      typeof duration === "number" ? duration : parseInt(String(duration), 10);
-    return Number.isNaN(mins)
-      ? "Not available"
-      : formatChangeRequestDuration(mins);
+    if (typeof duration === "number") {
+      return formatChangeRequestDuration(duration);
+    }
+    const durationTextValue = String(duration).trim();
+    if (durationTextValue.length === 0) return "Not available";
+    const mins = parseInt(durationTextValue, 10);
+    if (!Number.isNaN(mins) && /^\d+(\.\d+)?$/.test(durationTextValue)) {
+      return formatChangeRequestDuration(mins);
+    }
+    return durationTextValue;
   }, [changeRequest]);
 
   return (
