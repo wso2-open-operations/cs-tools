@@ -31,14 +31,11 @@ import TimeTrackingCardSkeleton from "@time-tracking/TimeTrackingCardSkeleton";
 import TimeTrackingErrorState from "@time-tracking/TimeTrackingErrorState";
 import EmptyState from "@components/empty-state/EmptyState";
 
-import type { ProjectDetails } from "@features/project-hub/types/projects";
-
-interface ProjectTimeTrackingProps {
-  projectId: string;
-  project?: ProjectDetails | null;
-  isProjectLoading?: boolean;
-  isProjectError?: boolean;
-}
+import type { ProjectTimeTrackingProps } from "@features/project-details/types/projectDetailsComponents";
+import {
+  findApprovedTimeCardStateId,
+  paginateList,
+} from "@features/project-details/utils/timeTrackingPage";
 
 /**
  * ProjectTimeTracking component manages the display of time tracking statistics, date filter, and time cards.
@@ -63,15 +60,10 @@ export default function ProjectTimeTracking({
   const { data: filters, isLoading: isFiltersLoading } =
     useGetProjectFilters(projectId);
 
-  // Find approved state id from filters
   useEffect(() => {
-    if (filters?.timeCardStates) {
-      const approved = filters.timeCardStates.find(
-        (s) => s.label.toLowerCase() === "approved",
-      );
-      if (approved?.id !== approvedStateId) {
-        Promise.resolve().then(() => setApprovedStateId(approved?.id));
-      }
+    const nextId = findApprovedTimeCardStateId(filters?.timeCardStates);
+    if (nextId !== approvedStateId) {
+      Promise.resolve().then(() => setApprovedStateId(nextId));
     }
   }, [filters, approvedStateId]);
 
@@ -110,10 +102,10 @@ export default function ProjectTimeTracking({
   const totalItems = data?.pages?.[0]?.totalRecords ?? allTimeCards.length;
 
   // Client-side pagination
-  const paginatedTimeCards = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    return allTimeCards.slice(startIndex, startIndex + pageSize);
-  }, [allTimeCards, page, pageSize]);
+  const paginatedTimeCards = useMemo(
+    () => paginateList(allTimeCards, page, pageSize),
+    [allTimeCards, page, pageSize],
+  );
 
   const totalPages = Math.ceil(totalItems / pageSize);
 

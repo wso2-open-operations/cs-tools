@@ -16,16 +16,12 @@
 
 import { Card, Box, Typography, Chip, useTheme } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import type { TimeCard } from "@features/usage-metrics/types/timeTracking";
 import {
   formatMinutesAsHrMin,
   getTimeCardStateColorPath,
 } from "@features/project-details/utils/projectDetails";
 import { getSupportOverviewChipSx, getPlainChipSx } from "@features/support/utils/support";
-
-interface TimeTrackingCardProps {
-  card: TimeCard;
-}
+import type { TimeTrackingCardProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * TimeTrackingCard displays a single time card with case label, state, billable, case number, total time, and approver.
