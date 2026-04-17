@@ -229,6 +229,8 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+        "409":
+          description: Conflict
   /projects/{projectId}/deployments/{deploymentId}:
     patch:
       summary: Update an existing deployment for a project.
@@ -2667,10 +2669,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -2848,7 +2852,7 @@ components:
             $ref: '#/components/schemas/DateTime'
         durationInMinutes:
           type: integer
-          description: New preferred duration for the call
+          description: Duration in minutes
           format: int64
       additionalProperties: false
       description: Request payload for updating a call request.
