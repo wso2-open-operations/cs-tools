@@ -17,11 +17,7 @@
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { Mail } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import type { Contact } from "@features/project-details/constants/projectDetailsConstants";
-
-interface ContactRowProps {
-  contact: Contact;
-}
+import type { ContactRowProps } from "@features/project-details/types/projectDetailsComponents";
 
 const ContactRow = ({ contact }: ContactRowProps): JSX.Element => {
   const Icon = contact.icon;

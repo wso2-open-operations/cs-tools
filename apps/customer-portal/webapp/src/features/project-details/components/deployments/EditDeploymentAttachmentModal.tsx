@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DeploymentDocument } from "@features/project-details/types/deployments";
 import {
   Box,
   Button,
@@ -36,15 +35,7 @@ import {
   type JSX,
 } from "react";
 import { usePatchDeploymentAttachment } from "@features/project-details/api/usePatchDeploymentAttachment";
-
-export interface EditDeploymentAttachmentModalProps {
-  open: boolean;
-  document: DeploymentDocument | null;
-  deploymentId: string;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
-}
+import type { EditDeploymentAttachmentModalProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
  * Modal for editing a deployment document (name and description).

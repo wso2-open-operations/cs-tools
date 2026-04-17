@@ -18,12 +18,7 @@ import { Box, Typography, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { stripHtmlTags } from "@features/project-hub/utils/projectCard";
-
-interface ProjectDescriptionProps {
-  description: string;
-  isLoading?: boolean;
-  isError?: boolean;
-}
+import type { ProjectDescriptionProps } from "@features/project-details/types/projectDetailsComponents";
 
 const ProjectDescription = ({
   description,

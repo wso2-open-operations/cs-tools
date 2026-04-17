@@ -40,16 +40,23 @@ import {
 import { usePatchDeploymentProduct } from "@features/project-details/api/usePatchDeploymentProduct";
 import type { DeploymentProductItem } from "@features/project-details/types/deployments";
 import type { ProductUpdate } from "@features/project-details/types/products";
-import UpdateHistoryTab, {
-  type UpdateHistorySaveAction,
-} from "@features/project-details/components/deployments/UpdateHistoryTab";
+import UpdateHistoryTab from "@features/project-details/components/deployments/UpdateHistoryTab";
+import type {
+  ManageProductModalProps,
+  UpdateHistorySaveAction,
+} from "@features/project-details/types/projectDetailsComponents";
 
 function updateHistoryFooterSavingLabel(
   action: UpdateHistorySaveAction | null,
 ): string {
-  if (action === "delete") return "Deleting Update...";
-  if (action === "edit") return "Saving Update...";
-  return "Adding...";
+  switch (action) {
+    case "delete":
+      return "Deleting Update...";
+    case "edit":
+      return "Saving Update...";
+    default:
+      return "Adding...";
+  }
 }
 
 /**
@@ -82,15 +89,6 @@ function deployedProductVersionLabel(
     return version;
   }
   return version?.label?.trim() ?? "";
-}
-
-export interface ManageProductModalProps {
-  open: boolean;
-  deploymentId: string;
-  product: DeploymentProductItem | null;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onError?: (message: string) => void;
 }
 
 /**
