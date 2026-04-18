@@ -33,6 +33,10 @@ import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSk
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
 import EditCaseAttachmentModal from "@case-details-attachments/EditCaseAttachmentModal";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
+import {
+  ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED,
+  ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER,
+} from "@features/support/constants/supportConstants";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -232,13 +236,23 @@ export default function CaseDetailsAttachmentsPanel({
                   createdByEmail.length > 0 &&
                   currentUserEmail.length > 0 &&
                   createdByEmail === currentUserEmail;
+                const deleteDisabled = isCaseClosed || !isOwner;
+                const deleteTooltip = isCaseClosed
+                  ? ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED
+                  : !isOwner
+                    ? ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER
+                    : undefined;
                 return (
                   <AttachmentListItem
                     key={att.id}
                     attachment={att}
                     onDownload={handleDownload}
-                    onDelete={isCaseClosed || !isOwner ? undefined : handleDeleteClick}
-                    onEdit={isCaseClosed || !isOwner ? undefined : handleEditClick}
+                    onDelete={handleDeleteClick}
+                    deleteDisabled={deleteDisabled}
+                    deleteTooltip={deleteTooltip}
+                    onEdit={
+                      isOwner && !isCaseClosed ? handleEditClick : undefined
+                    }
                     hideDescription
                     isDownloadLoading={isDownloading && downloadingId === att.id}
                   />

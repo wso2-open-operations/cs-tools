@@ -203,7 +203,9 @@ export function normalizeAnnouncementDescriptionHtml(html: string): string {
  * @param html - Raw or normalized HTML.
  * @returns Whether the description should show the empty placeholder.
  */
-export function isAnnouncementDescriptionEffectivelyEmpty(html: string): boolean {
+export function isAnnouncementDescriptionEffectivelyEmpty(
+  html: string,
+): boolean {
   const normalizedHtml = normalizeAnnouncementDescriptionHtml(html);
   const normalizedText = normalizedHtml
     .replace(/<br\s*\/?>/gi, "")
@@ -211,4 +213,32 @@ export function isAnnouncementDescriptionEffectivelyEmpty(html: string): boolean
     .replace(/<[^>]*>/g, "")
     .trim();
   return !normalizedText;
+}
+
+/**
+ * Formats an API date string (ISO or ServiceNow-style `YYYY-MM-DD HH:mm:ss`) for
+ * list and detail views using the runtime locale.
+ *
+ * @param raw - Raw timestamp from the API.
+ * @returns Formatted date/time or `"--"` when missing or unparsable.
+ */
+export function formatAnnouncementDateDisplay(
+  raw: string | null | undefined,
+): string {
+  if (raw == null || String(raw).trim() === "") {
+    return "--";
+  }
+  try {
+    const normalized = String(raw).trim().replace(" ", "T");
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) {
+      return "--";
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  } catch {
+    return "--";
+  }
 }

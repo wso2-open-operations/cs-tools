@@ -183,6 +183,22 @@ export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 // Initial limit for case attachments list.
 export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
 
+/** Tooltip when delete is disabled because the case is closed. */
+export const ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED =
+  "Attachments cannot be deleted on a closed case.";
+
+/** Tooltip when delete is disabled because the current user did not upload the file. */
+export const ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER =
+  "Only the person who uploaded this attachment can delete it.";
+
+/** Tooltip for deployment documents when delete is disabled for non-owners. */
+export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
+  "Only the person who uploaded this document can delete it.";
+
+/** Tooltip for deployment documents when edit is disabled for non-owners. */
+export const DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER =
+  "Only the person who uploaded this document can edit it.";
+
 /**
  * Valid keys for all cases statistics.
  */

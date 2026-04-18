@@ -102,7 +102,7 @@ export default function TimeTrackingCard({
             {label}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Approved by: {reportedByName}
+            Reported by: {reportedByName}
           </Typography>
         </Box>
         <Box sx={{ textAlign: "right" }}>

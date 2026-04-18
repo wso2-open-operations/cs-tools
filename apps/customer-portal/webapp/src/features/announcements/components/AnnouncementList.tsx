@@ -17,13 +17,13 @@
 import { Box, Chip, Form, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 import {
-  formatUtcToLocalNoTimezone,
-  stripHtml,
   getStatusColor,
   getStatusIconElement,
   resolveColorFromTheme,
 } from "@features/support/utils/support";
+import { formatAnnouncementDateDisplay } from "@features/announcements/utils/announcements";
 
 import ListSkeleton from "@components/list-view/ListSkeleton";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
@@ -98,6 +98,7 @@ export default function AnnouncementList({
         const statusColor = getStatusColor(statusLabel);
         const resolvedStatusColor = resolveColorFromTheme(statusColor, theme);
         const statusChipIcon = getStatusIconElement(statusLabel, 12);
+        const createdOnLabel = formatAnnouncementDateDisplay(caseItem.createdOn);
 
         const cardContent = (
           <>
@@ -156,19 +157,7 @@ export default function AnnouncementList({
                 {caseItem.title || "--"}
               </Typography>
 
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{
-                  mb: 2,
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {stripHtml(caseItem.description) || "--"}
-              </Typography>
+              <CaseCardDescriptionClamp description={caseItem.description} />
             </Form.CardContent>
 
             <Form.CardActions
@@ -201,7 +190,7 @@ export default function AnnouncementList({
                     color="text.secondary"
                     sx={{ lineHeight: 1 }}
                   >
-                    Created {formatUtcToLocalNoTimezone(caseItem.createdOn)}
+                    Created {createdOnLabel}
                   </Typography>
                 </Box>
                 {caseItem.issueType?.label && (

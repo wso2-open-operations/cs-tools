@@ -14,17 +14,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseDetailsSkeletonProps } from "@features/support/types/supportComponents";
+import type {
+  CaseDetailsHeaderVariant,
+  CaseDetailsSkeletonProps,
+} from "@features/support/types/supportComponents";
 import { Box, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
+export type CaseDetailsHeaderSkeletonProps = {
+  variant?: CaseDetailsHeaderVariant;
+};
+
 /**
- * Header-only skeleton: case ID, severity, status chip, and title.
+ * Header-only skeleton: case ID and optional chip placeholders, title.
  * Used by CaseDetailsHeader when loading and by CaseDetailsSkeleton.
  *
+ * @param props - Optional variant matching {@link CaseDetailsHeader}.
  * @returns {JSX.Element} The header skeleton block.
  */
-export function CaseDetailsHeaderSkeleton(): JSX.Element {
+export function CaseDetailsHeaderSkeleton({
+  variant = "default",
+}: CaseDetailsHeaderSkeletonProps = {}): JSX.Element {
   return (
     <Box>
       <Stack
@@ -34,13 +44,20 @@ export function CaseDetailsHeaderSkeleton(): JSX.Element {
         sx={{ mb: 0.5, flexWrap: "wrap" }}
       >
         <Skeleton variant="text" width={100} height={20} />
-        <Skeleton
-          variant="rounded"
-          width={56}
-          height={20}
-          sx={{ borderRadius: "10px" }}
-        />
-        <Skeleton variant="rounded" width={72} height={20} />
+        {variant === "default" && (
+          <>
+            <Skeleton
+              variant="rounded"
+              width={56}
+              height={20}
+              sx={{ borderRadius: "10px" }}
+            />
+            <Skeleton variant="rounded" width={72} height={20} />
+          </>
+        )}
+        {variant === "serviceRequest" && (
+          <Skeleton variant="rounded" width={72} height={20} />
+        )}
       </Stack>
       <Skeleton variant="text" width="70%" height={28} sx={{ maxWidth: 400 }} />
     </Box>
@@ -58,11 +75,12 @@ export default function CaseDetailsSkeleton({
   hideActionRow = false,
   showEngineerOnly = false,
   hideAssignedEngineer = false,
+  headerVariant = "default",
 }: CaseDetailsSkeletonProps = {}): JSX.Element {
   void hideAssignedEngineer;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <CaseDetailsHeaderSkeleton />
+      <CaseDetailsHeaderSkeleton variant={headerVariant} />
 
       {/* Action row: manage status label placeholder */}
       {!hideActionRow && (

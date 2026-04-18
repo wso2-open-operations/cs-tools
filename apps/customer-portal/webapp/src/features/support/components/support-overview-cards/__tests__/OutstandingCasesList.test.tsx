@@ -19,9 +19,20 @@ import { describe, expect, it, vi } from "vitest";
 import OutstandingCasesList from "@features/support/components/support-overview-cards/OutstandingCasesList";
 import type { CaseListItem } from "@features/support/types/cases";
 
-vi.mock("@features/support/utils/support", () => ({
-  formatRelativeTime: vi.fn(() => "2 hours ago"),
-  stripHtml: vi.fn((html) => html),
+vi.mock("@features/support/utils/support", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@features/support/utils/support")
+  >();
+  return {
+    ...actual,
+    formatRelativeTime: vi.fn(() => "2 hours ago"),
+    stripHtml: vi.fn((html: string) => html),
+  };
+});
+
+vi.mock("@features/announcements/utils/announcements", () => ({
+  isAnnouncementDescriptionEffectivelyEmpty: vi.fn(() => true),
+  normalizeAnnouncementDescriptionHtml: vi.fn((html: string) => html),
 }));
 
 const mockCases: CaseListItem[] = [
@@ -48,11 +59,10 @@ describe("OutstandingCasesList", () => {
     expect(screen.getByText("No outstanding cases.")).toBeInTheDocument();
   });
 
-  it("should render case number, title, severity and status", () => {
+  it("should render case number, title, and status", () => {
     render(<OutstandingCasesList cases={mockCases} />);
     expect(screen.getByText("CASE-2845")).toBeInTheDocument();
     expect(screen.getByText("API Gateway timeout issues")).toBeInTheDocument();
-    expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByText("Work In Progress")).toBeInTheDocument();
     expect(screen.getByText(/Assigned to Sarah Chen/)).toBeInTheDocument();
     expect(screen.getByText("2 hours ago")).toBeInTheDocument();

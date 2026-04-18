@@ -73,6 +73,7 @@ export default function EngagementsListSection({
         onClearFilters={onClearFilters}
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
+        hideSeverityFilter
         isProjectContextLoading={isProjectContextLoading}
       />
 
@@ -94,6 +95,7 @@ export default function EngagementsListSection({
         hasListRefinement={listHasRefinement}
         entityName={ENGAGEMENTS_LIST_ENTITY_LABEL}
         onCaseClick={onCaseClick}
+        hideSeverity
       />
 
       <ListPagination

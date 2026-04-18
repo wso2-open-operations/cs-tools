@@ -30,6 +30,7 @@ export interface ListItemsProps {
   hasListRefinement?: boolean;
   onCaseClick?: (caseItem: CaseListItem) => void;
   entityName?: string;
+  hideSeverity?: boolean;
 }
 
 /**
@@ -45,6 +46,7 @@ export default function ListItems({
   hasListRefinement = false,
   onCaseClick,
   entityName = "items",
+  hideSeverity = false,
 }: ListItemsProps): JSX.Element {
   if (isLoading) {
     return <ListSkeleton />;
@@ -113,7 +115,12 @@ export default function ListItems({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {cases.map((caseItem) => (
-        <ListCard key={caseItem.id} caseItem={caseItem} onClick={onCaseClick} />
+        <ListCard
+          key={caseItem.id}
+          caseItem={caseItem}
+          onClick={onCaseClick}
+          hideSeverity={hideSeverity}
+        />
       ))}
     </Box>
   );

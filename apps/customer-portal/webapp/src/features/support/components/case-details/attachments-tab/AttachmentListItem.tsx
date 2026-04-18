@@ -21,6 +21,7 @@ import {
   IconButton,
   Paper,
   Stack,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -32,9 +33,13 @@ import {
   PencilLine,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
 import type { CaseAttachment } from "@features/support/types/cases";
-import { formatFileSize, getAttachmentFileCategory } from "@features/support/utils/support";
+import {
+  formatFileSize,
+  getAttachmentFileCategory,
+} from "@features/support/utils/support";
+import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
 
 // TODO: Use attachment category enum when introduced (see support.ts AttachmentFileCategory).
 function getAttachmentIcon(att: CaseAttachment): JSX.Element {
@@ -54,9 +59,10 @@ function getAttachmentIcon(att: CaseAttachment): JSX.Element {
 }
 
 /**
- * Single attachment row with icon, name, meta, and download button.
+ * Single attachment row: header (icon, name, actions), optional image preview (`previewUrl` only),
+ * then meta line. Clicking the preview opens the same fullscreen dialog as the activity tab.
  *
- * @param {AttachmentListItemProps} props - Attachment, handlers, optional download loading.
+ * @param {AttachmentListItemProps} props - Attachment, handlers, delete disabled/tooltip, download loading.
  * @returns {JSX.Element} The attachment list item.
  */
 export default function AttachmentListItem({
@@ -64,47 +70,161 @@ export default function AttachmentListItem({
   onDownload,
   onDelete,
   onEdit,
+  deleteDisabled = false,
+  deleteTooltip,
   hideDescription = false,
   isDownloadLoading = false,
 }: AttachmentListItemProps): JSX.Element {
-  return (
-    <Paper
-      variant="outlined"
-      sx={{
-        p: 2,
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        "&:hover": {
-          bgcolor: "action.hover",
-        },
-      }}
+  const [fullscreenSrc, setFullscreenSrc] = useState<string | null>(null);
+  const attachmentCategory = getAttachmentFileCategory(
+    attachment.name ?? "",
+    attachment.type ?? "",
+  );
+  const previewUrl = attachment.previewUrl?.trim() ?? "";
+  const hasPreviewImage =
+    attachmentCategory === "image" && previewUrl.length > 0;
+
+  const deleteIconButton = onDelete ? (
+    <IconButton
+      size="small"
+      aria-label={`Delete ${attachment.name}`}
+      sx={{ color: "text.secondary" }}
+      disabled={deleteDisabled}
+      onClick={() => onDelete(attachment)}
     >
-      <Box
+      <Trash2 size={16} aria-hidden />
+    </IconButton>
+  ) : null;
+
+  const deleteButton =
+    deleteIconButton && deleteDisabled && deleteTooltip ? (
+      <Tooltip title={deleteTooltip} arrow>
+        <span>{deleteIconButton}</span>
+      </Tooltip>
+    ) : (
+      deleteIconButton
+    );
+
+  return (
+    <>
+      <Paper
+        variant="outlined"
         sx={{
-          width: 40,
-          height: 40,
-          bgcolor: "action.hover",
+          p: 2,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "text.secondary",
-          flexShrink: 0,
+          flexDirection: "column",
+          alignItems: "stretch",
+          gap: 1.5,
+          "&:hover": {
+            bgcolor: "action.hover",
+          },
         }}
-        aria-hidden
       >
-        {getAttachmentIcon(attachment)}
-      </Box>
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant="body2" color="text.primary" noWrap>
-          {attachment.name}
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 2,
+            minWidth: 0,
+          }}
+        >
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              bgcolor: "action.hover",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "text.secondary",
+              flexShrink: 0,
+            }}
+            aria-hidden
+          >
+            {getAttachmentIcon(attachment)}
+          </Box>
+          <Typography
+            variant="body2"
+            color="text.primary"
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              fontWeight: 500,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {attachment.name}
+          </Typography>
+          <Stack direction="row" spacing={0.25} sx={{ flexShrink: 0 }}>
+            {onEdit && (
+              <IconButton
+                size="small"
+                aria-label={`Edit ${attachment.name}`}
+                sx={{ color: "text.secondary" }}
+                onClick={() => onEdit(attachment)}
+              >
+                <PencilLine size={16} aria-hidden />
+              </IconButton>
+            )}
+            {deleteButton}
+            <IconButton
+              size="small"
+              aria-label={`Download ${attachment.name}`}
+              aria-busy={isDownloadLoading || undefined}
+              sx={{ color: "text.secondary" }}
+              disabled={isDownloadLoading}
+              onClick={() => onDownload(attachment)}
+            >
+              {isDownloadLoading ? (
+                <CircularProgress color="inherit" size={16} aria-hidden />
+              ) : (
+                <Download size={16} aria-hidden />
+              )}
+            </IconButton>
+          </Stack>
+        </Box>
+
+        {hasPreviewImage && (
+          <Box
+            component="button"
+            type="button"
+            onClick={() => setFullscreenSrc(previewUrl)}
+            sx={{
+              m: 0,
+              p: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              alignSelf: "flex-start",
+              maxWidth: "100%",
+              maxHeight: 200,
+              overflow: "hidden",
+              display: "block",
+            }}
+          >
+            <Box
+              component="img"
+              src={previewUrl}
+              alt={attachment.name}
+              loading="lazy"
+              sx={{
+                maxWidth: "100%",
+                maxHeight: 200,
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
+          </Box>
+        )}
+
         {!hideDescription && attachment.description && (
           <Typography
             variant="body2"
             color="text.secondary"
             sx={{
-              mt: 0.25,
               display: "-webkit-box",
               WebkitLineClamp: 2,
               WebkitBoxOrient: "vertical",
@@ -114,13 +234,8 @@ export default function AttachmentListItem({
             {attachment.description}
           </Typography>
         )}
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="center"
-          flexWrap="wrap"
-          sx={{ mt: 0.5 }}
-        >
+
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Typography variant="caption" color="text.secondary" component="span">
             {formatFileSize(attachment.size ?? attachment.sizeBytes)}
           </Typography>
@@ -137,43 +252,13 @@ export default function AttachmentListItem({
             {attachment.createdOn}
           </Typography>
         </Stack>
-      </Box>
-      <Stack direction="row" spacing={0.25}>
-        {onEdit && (
-          <IconButton
-            size="small"
-            aria-label={`Edit ${attachment.name}`}
-            sx={{ color: "text.secondary" }}
-            onClick={() => onEdit(attachment)}
-          >
-            <PencilLine size={16} aria-hidden />
-          </IconButton>
-        )}
-        {onDelete && (
-          <IconButton
-            size="small"
-            aria-label={`Delete ${attachment.name}`}
-            sx={{ color: "text.secondary" }}
-            onClick={() => onDelete(attachment)}
-          >
-            <Trash2 size={16} aria-hidden />
-          </IconButton>
-        )}
-        <IconButton
-          size="small"
-          aria-label={`Download ${attachment.name}`}
-          aria-busy={isDownloadLoading || undefined}
-          sx={{ color: "text.secondary" }}
-          disabled={isDownloadLoading}
-          onClick={() => onDownload(attachment)}
-        >
-          {isDownloadLoading ? (
-            <CircularProgress color="inherit" size={16} aria-hidden />
-          ) : (
-            <Download size={16} aria-hidden />
-          )}
-        </IconButton>
-      </Stack>
-    </Paper>
+      </Paper>
+
+      <ImageFullscreenModal
+        open={!!fullscreenSrc}
+        imageSrc={fullscreenSrc}
+        onClose={() => setFullscreenSrc(null)}
+      />
+    </>
   );
 }

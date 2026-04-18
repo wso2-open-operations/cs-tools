@@ -44,9 +44,10 @@ export function parseEngagementsSortField(value: string): EngagementsSortField {
   switch (value) {
     case EngagementsSortField.CreatedOn:
     case EngagementsSortField.UpdatedOn:
-    case EngagementsSortField.Severity:
     case EngagementsSortField.State:
       return value;
+    case EngagementsSortField.Severity:
+      return EngagementsSortField.CreatedOn;
     default:
       return EngagementsSortField.CreatedOn;
   }
@@ -67,17 +68,21 @@ export function buildEngagementSearchRequest(
   sortField: EngagementsSortField,
   sortOrder: SortOrder,
 ): Omit<CaseSearchRequest, "pagination"> {
+  const normalizedSortField =
+    sortField === EngagementsSortField.Severity
+      ? EngagementsSortField.CreatedOn
+      : sortField;
+
   return {
     filters: {
       caseTypes: [CaseType.ENGAGEMENT],
       statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
-      severityId: filters.severityId ? Number(filters.severityId) : undefined,
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
       deploymentId: filters.deploymentId || undefined,
       searchQuery: searchTerm.trim() || undefined,
     },
     sortBy: {
-      field: sortField,
+      field: normalizedSortField,
       order: sortOrder,
     },
   };

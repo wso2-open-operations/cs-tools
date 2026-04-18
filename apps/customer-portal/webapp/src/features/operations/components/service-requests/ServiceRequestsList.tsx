@@ -26,15 +26,13 @@ import {
 import { Calendar, Layers, Package, Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
+import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 import {
   formatDateTime,
   getAssignedEngineerLabel,
-  getSeverityColor,
   getStatusColor,
   getStatusIcon,
-  mapSeverityToDisplay,
   resolveColorFromTheme,
-  stripHtml,
 } from "@features/support/utils/support";
 import ServiceRequestsListSkeleton from "@features/operations/components/service-requests/ServiceRequestsListSkeleton";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
@@ -146,24 +144,6 @@ export default function ServiceRequestsList({
                   >
                     {sr.number || NULL_PLACEHOLDER}
                   </Typography>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 0.5,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        bgcolor: getSeverityColor(sr.severity?.label),
-                      }}
-                    />
-                    <Typography variant="caption" color="text.secondary">
-                      {mapSeverityToDisplay(sr.severity?.label)}
-                    </Typography>
-                  </Box>
                   <Chip
                     size="small"
                     variant="outlined"
@@ -210,19 +190,10 @@ export default function ServiceRequestsList({
                 {sr.title || NULL_PLACEHOLDER}
               </Typography>
 
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{
-                  mb: 2,
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {stripHtml(sr.description) || NULL_PLACEHOLDER}
-              </Typography>
+              <CaseCardDescriptionClamp
+                description={sr.description}
+                emptyLabel={NULL_PLACEHOLDER}
+              />
             </Form.CardContent>
 
             <Form.CardActions

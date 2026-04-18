@@ -320,10 +320,6 @@ export const SERVICE_REQUESTS_SORT_FIELD_OPTIONS: ServiceRequestSortFieldOption[
       label: "Updated on",
     },
     {
-      value: ServiceRequestCaseSortField.Severity,
-      label: "Severity",
-    },
-    {
       value: ServiceRequestCaseSortField.State,
       label: "State",
     },

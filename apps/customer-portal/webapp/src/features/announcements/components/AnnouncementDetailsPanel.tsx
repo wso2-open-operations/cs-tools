@@ -30,7 +30,6 @@ import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactElement } from "react";
 import CaseDetailsActionRow from "@features/support/components/case-details/header/CaseDetailsActionRow";
 import {
-  formatUtcToLocalNoTimezone,
   getStatusColor,
   getStatusIconElement,
   resolveColorFromTheme,
@@ -45,6 +44,7 @@ import {
   ANNOUNCEMENTS_BACK_LABEL,
 } from "@features/announcements/constants/announcementsConstants";
 import {
+  formatAnnouncementDateDisplay,
   isAnnouncementDescriptionEffectivelyEmpty,
   normalizeAnnouncementDescriptionHtml,
 } from "@features/announcements/utils/announcements";
@@ -119,6 +119,7 @@ export default function AnnouncementDetailsPanel({
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
   const statusChipIcon = getStatusIconElement(statusLabel, 12);
+  const createdOnLabel = formatAnnouncementDateDisplay(data.createdOn);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -202,7 +203,7 @@ export default function AnnouncementDetailsPanel({
               aria-hidden
             />
             <Typography variant="body2" color="text.secondary">
-              {formatUtcToLocalNoTimezone(data.createdOn) || "--"}
+              {createdOnLabel}
             </Typography>
           </Stack>
           {data.issueType?.label && (

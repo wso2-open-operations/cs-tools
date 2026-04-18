@@ -1014,6 +1014,20 @@ export function mapSeverityToDisplay(label?: string): string {
 }
 
 /**
+ * Whether a severity chip should be shown (hide when API has no severity to avoid "—" chips).
+ *
+ * @param label - Raw severity label from API.
+ * @returns {boolean} True when severity is present and maps to a display value.
+ */
+export function hasSeverityLabelForChip(label?: string | null): boolean {
+  if (label == null || String(label).trim() === "") {
+    return false;
+  }
+  const display = mapSeverityToDisplay(label).trim();
+  return display !== "—" && display !== "";
+}
+
+/**
  * Returns true if the case has S0 (Catastrophic) severity.
  * Used to filter out S0 cases when project type is not Managed Cloud Subscription.
  *

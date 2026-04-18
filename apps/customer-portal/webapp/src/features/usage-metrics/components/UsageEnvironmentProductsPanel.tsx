@@ -259,7 +259,6 @@ function InstanceAccordionRow({
   expanded,
   onToggle,
 }: InstanceAccordionRowProps): JSX.Element {
-  const borderMuted = alpha(colors.grey?.[500] ?? "#6B7280", 0.2);
   const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
 
   return (
@@ -273,7 +272,7 @@ function InstanceAccordionRow({
         boxShadow: 1,
         overflow: "hidden",
         border: "1px solid",
-        borderColor: borderMuted,
+        borderColor: "divider",
         borderRadius: 0,
         bgcolor: "background.paper",
         "&.Mui-expanded": { margin: 0 },
@@ -396,11 +395,10 @@ function ProductAccordionRow({
         boxShadow: 1,
         overflow: "hidden",
         border: "1px solid",
-        borderColor: a.borderDefault,
+        borderColor: "divider",
         borderRadius: 0,
-        transition: "border-color 0.2s ease",
         bgcolor: "background.paper",
-        "&:hover": { borderColor: a.borderHover },
+        "&:hover": { bgcolor: "action.hover" },
         "&.Mui-expanded": { margin: 0 },
       }}
     >

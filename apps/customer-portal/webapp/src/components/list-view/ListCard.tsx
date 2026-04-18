@@ -27,19 +27,21 @@ import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, KeyboardEvent } from "react";
 import type { CaseListItem } from "@features/support/types/cases";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
+import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 import {
   formatDateTime,
   getAssignedEngineerLabel,
   getStatusColor,
   getStatusIcon,
+  hasSeverityLabelForChip,
   mapSeverityToDisplay,
   resolveColorFromTheme,
-  stripHtml,
 } from "@features/support/utils/support";
 
 export interface ListCardProps {
   caseItem: CaseListItem;
   onClick?: (caseItem: CaseListItem) => void;
+  hideSeverity?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export interface ListCardProps {
 export default function ListCard({
   caseItem,
   onClick,
+  hideSeverity = false,
 }: ListCardProps): JSX.Element {
   const theme = useTheme();
   const StatusIcon = getStatusIcon(caseItem.status?.label);
@@ -96,27 +99,29 @@ export default function ListCard({
             <Typography variant="body2" fontWeight={500} color="text.primary">
               {caseItem.number || "--"}
             </Typography>
-            <Chip
-              label={mapSeverityToDisplay(caseItem.severity?.label)}
-              size="small"
-              variant="outlined"
-              sx={{
-                bgcolor: alpha(
-                  getSeverityLegendColor(caseItem.severity?.label),
-                  0.1,
-                ),
-                color: getSeverityLegendColor(caseItem.severity?.label),
-                borderColor: alpha(
-                  getSeverityLegendColor(caseItem.severity?.label),
-                  0.3,
-                ),
-                fontWeight: 500,
-                px: 0,
-                height: 20,
-                fontSize: "0.75rem",
-                "& .MuiChip-label": { pl: "6px", pr: "6px" },
-              }}
-            />
+            {!hideSeverity && hasSeverityLabelForChip(caseItem.severity?.label) && (
+              <Chip
+                label={mapSeverityToDisplay(caseItem.severity?.label)}
+                size="small"
+                variant="outlined"
+                sx={{
+                  bgcolor: alpha(
+                    getSeverityLegendColor(caseItem.severity?.label),
+                    0.1,
+                  ),
+                  color: getSeverityLegendColor(caseItem.severity?.label),
+                  borderColor: alpha(
+                    getSeverityLegendColor(caseItem.severity?.label),
+                    0.3,
+                  ),
+                  fontWeight: 500,
+                  px: 0,
+                  height: 20,
+                  fontSize: "0.75rem",
+                  "& .MuiChip-label": { pl: "6px", pr: "6px" },
+                }}
+              />
+            )}
             <Chip
               size="small"
               variant="outlined"
@@ -162,22 +167,7 @@ export default function ListCard({
         >
           {caseItem.title || "--"}
         </Typography>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{
-            mb: 2,
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-            overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            minWidth: 0,
-          }}
-        >
-          {stripHtml(caseItem.description) || "--"}
-        </Typography>
+        <CaseCardDescriptionClamp description={caseItem.description} />
       </Form.CardContent>
 
       <Form.CardActions

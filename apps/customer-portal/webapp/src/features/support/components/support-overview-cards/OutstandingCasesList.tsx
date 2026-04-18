@@ -25,18 +25,17 @@ import {
   alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Clock } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
+import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import OutstandingCasesSkeleton from "./OutstandingCasesSkeleton";
-import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
   formatRelativeTime,
   getAssignedEngineerLabel,
   getStatusColor,
-  mapSeverityToDisplay,
+  getStatusIcon,
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
@@ -95,6 +94,7 @@ export default function OutstandingCasesList({
       {cases.map((c) => {
         const colorPath = getStatusColor(c.status?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
+        const StatusIcon = getStatusIcon(c.status?.label);
 
         return (
           <Form.CardButton
@@ -111,7 +111,12 @@ export default function OutstandingCasesList({
             <Form.CardHeader
               sx={{ p: 0 }}
               title={
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  flexWrap="wrap"
+                >
                   <Typography
                     variant="body2"
                     fontWeight={500}
@@ -120,25 +125,23 @@ export default function OutstandingCasesList({
                     {c.number}
                   </Typography>
                   <Chip
-                    label={mapSeverityToDisplay(c.severity?.label)}
                     size="small"
                     variant="outlined"
+                    label={c.status?.label ?? NULL_PLACEHOLDER}
+                    icon={<StatusIcon size={12} />}
                     sx={{
-                      bgcolor: alpha(
-                        getSeverityLegendColor(c.severity?.label),
-                        0.1,
-                      ),
-                      color: getSeverityLegendColor(c.severity?.label),
-                      borderColor: alpha(
-                        getSeverityLegendColor(c.severity?.label),
-                        0.3,
-                      ),
-                      fontWeight: 500,
-                      px: 0,
+                      bgcolor: alpha(resolvedColor, 0.1),
+                      color: resolvedColor,
                       height: 20,
                       fontSize: "0.75rem",
+                      px: 0,
+                      "& .MuiChip-icon": {
+                        color: "inherit",
+                        ml: "6px",
+                        mr: "6px",
+                      },
                       "& .MuiChip-label": {
-                        pl: "6px",
+                        pl: 0,
                         pr: "6px",
                       },
                     }}
@@ -148,7 +151,14 @@ export default function OutstandingCasesList({
             />
 
             <Form.CardContent sx={{ p: 0 }}>
-              <Box sx={{ minWidth: 0 }}>
+              <Box
+                sx={{
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.5,
+                }}
+              >
                 <Typography
                   variant="body2"
                   color="text.primary"
@@ -162,32 +172,15 @@ export default function OutstandingCasesList({
                 >
                   {stripHtml(c.title)}
                 </Typography>
+                <CaseCardDescriptionClamp
+                  description={c.description}
+                  hideWhenEmpty
+                  sx={{ mb: 0 }}
+                />
               </Box>
             </Form.CardContent>
 
-            <Form.CardActions sx={{ p: 0, justifyContent: "space-between" }}>
-              <Chip
-                size="small"
-                variant="outlined"
-                label={c.status?.label ?? NULL_PLACEHOLDER}
-                icon={<Clock size={12} />}
-                sx={{
-                  bgcolor: alpha(resolvedColor, 0.1),
-                  color: resolvedColor,
-                  px: 0,
-                  height: 20,
-                  fontSize: "0.75rem",
-                  "& .MuiChip-icon": {
-                    color: "inherit",
-                    ml: "6px",
-                    mr: "6px",
-                  },
-                  "& .MuiChip-label": {
-                    pl: 0,
-                    pr: "6px",
-                  },
-                }}
-              />
+            <Form.CardActions sx={{ p: 0, justifyContent: "flex-end" }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
                 {(() => {
                   const label = getAssignedEngineerLabel(c.assignedEngineer);

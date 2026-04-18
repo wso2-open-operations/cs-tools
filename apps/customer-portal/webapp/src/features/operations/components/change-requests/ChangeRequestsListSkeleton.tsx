@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Card } from "@wso2/oxygen-ui";
+import { Box, Form, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 /**
@@ -26,7 +26,7 @@ export default function ChangeRequestsListSkeleton(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {[...Array(5)].map((_, index) => (
-        <Card
+        <Form.CardButton
           key={index}
           sx={{
             p: 3,
@@ -37,7 +37,6 @@ export default function ChangeRequestsListSkeleton(): JSX.Element {
             gap: 3,
           }}
         >
-          {/* Right Section - Status badges */}
           <Box
             sx={{
               display: "flex",
@@ -47,48 +46,46 @@ export default function ChangeRequestsListSkeleton(): JSX.Element {
               order: 2,
             }}
           >
-            <Skeleton variant="rounded" width={60} height={22} />
-            <Skeleton variant="rounded" width={80} height={22} />
+            <Skeleton variant="rounded" width={72} height={22} />
           </Box>
 
-          {/* Left Section */}
           <Box sx={{ flex: 1, minWidth: 0, order: 1 }}>
-            {/* Title */}
             <Box sx={{ mb: 1.5 }}>
               <Skeleton variant="text" width="60%" height={24} />
             </Box>
 
-            {/* Details row */}
             <Box
               sx={{
                 display: "flex",
                 alignItems: "center",
                 gap: 1.5,
                 mb: 1.5,
+                flexWrap: "wrap",
               }}
             >
               <Skeleton variant="text" width={100} height={20} />
+              <Skeleton variant="rounded" width={88} height={22} />
               <Skeleton variant="text" width={8} height={20} />
               <Skeleton variant="text" width={90} height={20} />
               <Skeleton variant="text" width={8} height={20} />
               <Skeleton variant="text" width={120} height={20} />
             </Box>
 
-            {/* Date/Time row */}
             <Box
               sx={{
                 display: "flex",
                 alignItems: "center",
                 gap: 1.5,
+                flexWrap: "wrap",
               }}
             >
               <Skeleton variant="text" width={150} height={20} />
               <Skeleton variant="text" width={8} height={20} />
               <Skeleton variant="text" width={150} height={20} />
-              <Skeleton variant="rounded" width={50} height={20} />
+              <Skeleton variant="rounded" width={56} height={20} />
             </Box>
           </Box>
-        </Card>
+        </Form.CardButton>
       ))}
     </Box>
   );

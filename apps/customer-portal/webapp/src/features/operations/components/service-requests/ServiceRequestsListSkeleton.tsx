@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Stack, Skeleton } from "@wso2/oxygen-ui";
+import { Box, Form, Skeleton, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 /**
@@ -26,24 +26,48 @@ export default function ServiceRequestsListSkeleton(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <Card key={i} sx={{ p: 3 }}>
-          <Box sx={{ mb: 1 }}>
-            <Stack direction="row" spacing={1.5} sx={{ mb: 1 }}>
-              <Skeleton variant="text" width={80} height={20} />
-              <Skeleton variant="text" width={60} height={20} />
-              <Skeleton variant="rounded" width={70} height={20} />
-              <Skeleton variant="rounded" width={100} height={20} />
-            </Stack>
+        <Form.CardButton
+          key={i}
+          sx={{
+            p: 3,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: 1,
+          }}
+        >
+          <Form.CardHeader
+            sx={{ p: 0 }}
+            title={
+              <Stack
+                direction="row"
+                spacing={1.5}
+                alignItems="center"
+                sx={{ mb: 1, flexWrap: "wrap" }}
+              >
+                <Skeleton variant="text" width={72} height={20} />
+                <Skeleton variant="rounded" width={88} height={20} />
+                <Skeleton variant="rounded" width={96} height={20} />
+              </Stack>
+            }
+          />
+          <Form.CardContent sx={{ p: 0 }}>
             <Skeleton variant="text" width="70%" height={32} sx={{ mb: 1 }} />
             <Skeleton variant="text" width="90%" height={20} />
             <Skeleton variant="text" width="85%" height={20} />
-            <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-              <Skeleton variant="text" width={120} height={16} />
-              <Skeleton variant="text" width={150} height={16} />
-              <Skeleton variant="text" width={100} height={16} />
-            </Stack>
-          </Box>
-        </Card>
+          </Form.CardContent>
+          <Form.CardActions
+            sx={{
+              p: 0,
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 2,
+            }}
+          >
+            <Skeleton variant="text" width={120} height={16} />
+            <Skeleton variant="text" width={100} height={16} />
+          </Form.CardActions>
+        </Form.CardButton>
       ))}
     </Box>
   );

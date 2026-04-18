@@ -192,7 +192,10 @@ export function useEngagementsPageState() {
     setPage(1);
   };
 
-  const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+  const listHasRefinement = hasListSearchOrFilters(searchTerm, {
+    ...filters,
+    severityId: undefined,
+  });
 
   const onCaseClick =
     projectId !== undefined

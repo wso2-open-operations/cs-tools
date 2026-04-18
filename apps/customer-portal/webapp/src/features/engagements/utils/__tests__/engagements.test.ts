@@ -38,6 +38,12 @@ describe("parseEngagementsSortField", () => {
       EngagementsSortField.State,
     );
   });
+
+  it("maps legacy Severity sort to CreatedOn", () => {
+    expect(parseEngagementsSortField(EngagementsSortField.Severity)).toBe(
+      EngagementsSortField.CreatedOn,
+    );
+  });
 });
 
 describe("buildEngagementSearchRequest", () => {
@@ -51,6 +57,26 @@ describe("buildEngagementSearchRequest", () => {
     expect(req.filters?.caseTypes).toEqual([CaseType.ENGAGEMENT]);
     expect(req.sortBy?.field).toBe(EngagementsSortField.CreatedOn);
     expect(req.sortBy?.order).toBe(SortOrder.DESC);
+  });
+
+  it("does not send severity filter", () => {
+    const req = buildEngagementSearchRequest(
+      { severityId: "99" },
+      "",
+      EngagementsSortField.CreatedOn,
+      SortOrder.DESC,
+    );
+    expect(req.filters?.severityId).toBeUndefined();
+  });
+
+  it("normalizes legacy Severity sort field to CreatedOn in API payload", () => {
+    const req = buildEngagementSearchRequest(
+      {},
+      "",
+      EngagementsSortField.Severity,
+      SortOrder.DESC,
+    );
+    expect(req.sortBy?.field).toBe(EngagementsSortField.CreatedOn);
   });
 });
 

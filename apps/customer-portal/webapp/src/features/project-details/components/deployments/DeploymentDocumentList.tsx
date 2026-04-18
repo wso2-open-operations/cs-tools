@@ -26,6 +26,7 @@ import {
   CircularProgress,
   IconButton,
   Skeleton,
+  Tooltip,
   Typography,
   alpha,
 } from "@wso2/oxygen-ui";
@@ -59,6 +60,10 @@ import {
   DEPLOYMENT_DOCUMENT_IMAGE_FILE_REGEX,
   PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
 } from "@features/project-details/constants/projectDetailsConstants";
+import {
+  DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER,
+  DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER,
+} from "@features/support/constants/supportConstants";
 import type {
   DeploymentDocumentListProps,
   DeploymentDocumentRowProps,
@@ -416,25 +421,57 @@ function DocumentRow({
               </Box>
             </Box>
             <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
-              {isOwner && (
-                <>
-                  <IconButton
-                    size="small"
-                    aria-label={`Edit ${name}`}
-                    sx={{ color: "text.secondary" }}
-                    onClick={() => setEditModalOpen(true)}
-                  >
-                    <PencilLine size={16} aria-hidden />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    aria-label={`Delete ${name}`}
-                    sx={{ color: "text.secondary" }}
-                    onClick={() => setDeleteModalOpen(true)}
-                  >
-                    <Trash2 size={16} aria-hidden />
-                  </IconButton>
-                </>
+              {!isOwner ? (
+                <Tooltip
+                  title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER}
+                  arrow
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label={`Edit ${name}`}
+                      sx={{ color: "text.secondary" }}
+                      disabled
+                    >
+                      <PencilLine size={16} aria-hidden />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : (
+                <IconButton
+                  size="small"
+                  aria-label={`Edit ${name}`}
+                  sx={{ color: "text.secondary" }}
+                  onClick={() => setEditModalOpen(true)}
+                >
+                  <PencilLine size={16} aria-hidden />
+                </IconButton>
+              )}
+              {!isOwner ? (
+                <Tooltip
+                  title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER}
+                  arrow
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label={`Delete ${name}`}
+                      sx={{ color: "text.secondary" }}
+                      disabled
+                    >
+                      <Trash2 size={16} aria-hidden />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : (
+                <IconButton
+                  size="small"
+                  aria-label={`Delete ${name}`}
+                  sx={{ color: "text.secondary" }}
+                  onClick={() => setDeleteModalOpen(true)}
+                >
+                  <Trash2 size={16} aria-hidden />
+                </IconButton>
               )}
               <IconButton
                 size="small"

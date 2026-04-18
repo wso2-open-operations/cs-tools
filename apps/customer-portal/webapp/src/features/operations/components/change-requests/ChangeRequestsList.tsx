@@ -165,27 +165,6 @@ export default function ChangeRequestsList({
                   }}
                 />
               )}
-              {item.state?.label && (
-                <Chip
-                  icon={<StatusIcon size={12} />}
-                  label={item.state.label}
-                  size="small"
-                  sx={{
-                    bgcolor: alpha(statusColor, 0.1),
-                    color: statusColor,
-                    borderColor: alpha(statusColor, 0.2),
-                    border: "1px solid",
-                    height: 22,
-                    fontSize: "0.75rem",
-                    fontWeight: 500,
-                    "& .MuiChip-icon": {
-                      color: statusColor,
-                      ml: "6px",
-                      mr: "-2px",
-                    },
-                  }}
-                />
-              )}
             </Box>
 
             <Box sx={{ flex: 1, minWidth: 0, order: 1 }}>
@@ -243,6 +222,27 @@ export default function ChangeRequestsList({
                 >
                   {item.number || CHANGE_REQUESTS_LIST_PLACEHOLDER}
                 </Typography>
+                {item.state?.label && (
+                  <Chip
+                    icon={<StatusIcon size={12} />}
+                    label={item.state.label}
+                    size="small"
+                    sx={{
+                      bgcolor: alpha(statusColor, 0.1),
+                      color: statusColor,
+                      borderColor: alpha(statusColor, 0.2),
+                      border: "1px solid",
+                      height: 22,
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      "& .MuiChip-icon": {
+                        color: statusColor,
+                        ml: "6px",
+                        mr: "-2px",
+                      },
+                    }}
+                  />
+                )}
                 {item.case?.number && (
                   <>
                     <Typography variant="body2" color="text.disabled">

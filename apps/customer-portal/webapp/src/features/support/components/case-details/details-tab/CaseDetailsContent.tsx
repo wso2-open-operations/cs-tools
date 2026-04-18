@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CaseDetailsContentProps } from "@features/support/types/supportComponents";
+import type {
+  CaseDetailsContentProps,
+  CaseDetailsHeaderVariant,
+} from "@features/support/types/supportComponents";
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
@@ -27,6 +30,7 @@ import {
   resolveColorFromTheme,
   getStatusIconElement,
   getInitials,
+  hasSeverityLabelForChip,
   isSecurityReportAnalysisType,
 } from "@features/support/utils/support";
 import {
@@ -124,6 +128,13 @@ export default function CaseDetailsContent({
   const engineerInitials = getInitials(assignedEngineer);
 
   const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
+
+  const headerVariant: CaseDetailsHeaderVariant = useMemo(() => {
+    if (isEngagementRoute) return "engagement";
+    if (isServiceRequest) return "serviceRequest";
+    return "default";
+  }, [isEngagementRoute, isServiceRequest]);
+
   const hideAssignedEngineer =
     isSecurityReportAnalysis ||
     isSecurityReportAnalysisRoute ||
@@ -199,6 +210,7 @@ export default function CaseDetailsContent({
             hideActionRow={hideActionRow}
             showEngineerOnly={showEngineerOnly}
             hideAssignedEngineer={hideAssignedEngineer}
+            headerVariant={headerVariant}
           />
         </Paper>
       </Box>
@@ -266,7 +278,13 @@ export default function CaseDetailsContent({
                 statusChipIcon={statusChipIcon}
                 statusChipSx={statusChipSx}
                 isLoading={isLoading}
-                showSeverityChip={!isSecurityReportAnalysis}
+                showSeverityChip={
+                  headerVariant === "default" &&
+                  !isSecurityReportAnalysis &&
+                  hasSeverityLabelForChip(severityLabel)
+                }
+                showStatusChip={headerVariant !== "engagement"}
+                variant={headerVariant}
               />
 
               {(!hideActionRow || showEngineerOnly) && (

@@ -36,6 +36,9 @@ import type { ChatAction } from "@features/support/constants/supportConstants";
 import type { ProductVersionOption } from "@features/support/types/caseCreationOptions";
 import type { AssignedEngineerValue } from "@features/support/utils/support";
 
+/** Header layout variant for case / SR / engagement detail shells. */
+export type CaseDetailsHeaderVariant = "default" | "engagement" | "serviceRequest";
+
 export type CaseDetailsHeaderProps = {
   caseNumber: string | null | undefined;
   title: string | null | undefined;
@@ -45,6 +48,8 @@ export type CaseDetailsHeaderProps = {
   statusChipSx: Record<string, unknown>;
   isLoading?: boolean;
   showSeverityChip?: boolean;
+  showStatusChip?: boolean;
+  variant?: CaseDetailsHeaderVariant;
 };
 
 export type OutstandingCasesListProps = {
@@ -255,6 +260,8 @@ export type AttachmentListItemProps = {
   onDownload: (attachment: CaseAttachment) => void;
   onDelete?: (attachment: CaseAttachment) => void;
   onEdit?: (attachment: CaseAttachment) => void;
+  deleteDisabled?: boolean;
+  deleteTooltip?: string;
   hideDescription?: boolean;
   isDownloadLoading?: boolean;
 };
@@ -390,6 +397,7 @@ export type CaseDetailsSkeletonProps = {
   hideActionRow?: boolean;
   showEngineerOnly?: boolean;
   hideAssignedEngineer?: boolean;
+  headerVariant?: CaseDetailsHeaderVariant;
 };
 
 export type CaseDetailsBackButtonProps = {

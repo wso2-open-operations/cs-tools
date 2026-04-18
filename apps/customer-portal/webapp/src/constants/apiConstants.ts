@@ -80,3 +80,25 @@ export const ApiMutationKeys = {
 export const WS_CHOREO_OAUTH2_TOKEN = "choreo-oauth2-token";
 export const WS_CUSTOMER_PORTAL = "cs-customer-portal";
 export const CONNECT_HANDSHAKE_TIMEOUT_MS = 25_000;
+
+/**
+ * Backoff delays (ms) between ID-token retrieval attempts inside
+ * `useAuthApiClient` (`resolveIdTokenWithRetry`). Array length equals the
+ * maximum number of token retrieval attempts before surfacing failure.
+ */
+export const TOKEN_RETRY_DELAYS_MS = [150, 300, 600, 1000] as const;
+
+/**
+ * Asgardeo SPA SDK internal error code when `getIdToken()` runs before the auth
+ * client is ready (observed with `@asgardeo/auth-react`; value may change on SDK
+ * upgrades — re-verify against SDK release notes if token retrieval misbehaves).
+ */
+export const ASGARDEO_UNAUTHENTICATED_CODE = "SPA-AUTH_CLIENT-VM-IV02";
+
+/**
+ * Synthetic error message thrown when ID token cannot be obtained after retries
+ * because auth is not ready (`getIdToken` kept returning unauthenticated).
+ * Used by `useGetUserDetails` and other callers to retry without treating as a
+ * hard failure.
+ */
+export const AUTH_NOT_READY_ERROR_MESSAGE = "Authentication is not ready yet";

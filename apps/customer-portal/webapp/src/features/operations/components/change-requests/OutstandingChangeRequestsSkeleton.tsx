@@ -36,19 +36,33 @@ export default function OutstandingChangeRequestsSkeleton(): JSX.Element {
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
-            gap: 1.5,
+            gap: 1,
           }}
         >
-          <Skeleton variant="text" width={60} height={20} />
+          <Form.CardHeader
+            sx={{ p: 0 }}
+            title={
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Skeleton variant="text" width={60} height={20} />
+                <Skeleton variant="rounded" width={72} height={20} />
+              </Box>
+            }
+          />
           <Skeleton variant="text" width="90%" height={24} />
           <Box
             sx={{
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               alignItems: "center",
             }}
           >
-            <Skeleton variant="rounded" width={80} height={20} />
             <Skeleton variant="text" width={100} height={16} />
           </Box>
         </Form.CardButton>

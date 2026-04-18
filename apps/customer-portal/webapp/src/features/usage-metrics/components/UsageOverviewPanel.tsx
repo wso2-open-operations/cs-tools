@@ -25,7 +25,6 @@ import {
   Skeleton,
   StatCard,
   Typography,
-  alpha,
   useTheme,
   useMediaQuery,
 } from "@wso2/oxygen-ui";
@@ -91,11 +90,10 @@ function ExpandedProductCard({
 }: ExpandedProductCardProps): JSX.Element {
   return (
     <Card
+      variant="outlined"
       sx={{
         p: 2,
         height: "100%",
-        border: "1px solid",
-        borderColor: alpha(a.main, 0.15),
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5 }}>
@@ -288,7 +286,7 @@ function EnvironmentBreakdownAccordion({
         boxShadow: 1,
         overflow: "hidden",
         border: "1px solid",
-        borderColor: a.border,
+        borderColor: "divider",
         borderRadius: 0,
         bgcolor: "background.paper",
         "&.Mui-expanded": { margin: 0 },

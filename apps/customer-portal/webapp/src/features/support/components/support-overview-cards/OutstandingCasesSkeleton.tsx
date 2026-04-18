@@ -36,40 +36,40 @@ export default function OutstandingCasesSkeleton(): JSX.Element {
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
-            gap: 1.5,
+            gap: 1,
           }}
         >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              flexWrap: "wrap",
-            }}
-          >
-            <Skeleton variant="text" width={60} height={20} />
-            <Skeleton
-              variant="rounded"
-              width={56}
-              height={20}
-              sx={{ borderRadius: "10px" }}
-            />
-            <Skeleton
-              variant="rounded"
-              width={70}
-              height={20}
-              sx={{ borderRadius: "10px" }}
-            />
-          </Box>
+          <Form.CardHeader
+            sx={{ p: 0 }}
+            title={
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Skeleton variant="text" width={60} height={20} />
+                <Skeleton
+                  variant="rounded"
+                  width={72}
+                  height={20}
+                  sx={{ borderRadius: "10px" }}
+                />
+              </Box>
+            }
+          />
           <Skeleton variant="text" width="90%" height={24} />
           <Box
             sx={{
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               alignItems: "center",
+              gap: 1.5,
             }}
           >
-            <Skeleton variant="rounded" width={80} height={20} />
+            <Skeleton variant="text" width={120} height={16} />
             <Skeleton variant="text" width={100} height={16} />
           </Box>
         </Form.CardButton>

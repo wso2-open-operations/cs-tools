@@ -19,6 +19,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@utils/useAuthApiClient";
 import type { UserDetails } from "@features/settings/types/users";
 import { useLogger } from "@hooks/useLogger";
+import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
 
 /**
  * Hook to get user details.
@@ -53,9 +54,11 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
         logger.debug(`[useGetUserDetails] Response status: ${response.status}`);
 
         if (!response.ok) {
-          throw new Error(
-            `Error fetching user details: ${response.statusText}`,
-          );
+          const err = new Error(
+            `Error fetching user details: ${response.status} ${response.statusText}`,
+          ) as Error & { status?: number };
+          err.status = response.status;
+          throw err;
         }
 
         const data = (await response.json()) as Record<string, unknown>;
@@ -69,11 +72,43 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
               : "";
         return { ...data, timeZone } as UserDetails;
       } catch (error) {
-        logger.error("[useGetUserDetails] Error:", error);
+        if (
+          error instanceof Error &&
+          error.message.includes(AUTH_NOT_READY_ERROR_MESSAGE)
+        ) {
+          logger.warn("[useGetUserDetails] Auth not ready yet; will retry.");
+        } else {
+          logger.error("[useGetUserDetails] Error:", error);
+        }
         throw error;
       }
     },
     enabled: isSignedIn && !isAuthLoading,
+    retry: (failureCount, error) => {
+      if (failureCount >= 3) {
+        return false;
+      }
+      if (
+        error instanceof Error &&
+        error.message.includes(AUTH_NOT_READY_ERROR_MESSAGE)
+      ) {
+        return true;
+      }
+      const status = (error as Error & { status?: number }).status;
+      if (typeof status === "number") {
+        if (status >= 500) {
+          return true;
+        }
+        if (status >= 400 && status < 500) {
+          return false;
+        }
+      }
+      if (error instanceof TypeError) {
+        return true;
+      }
+      return false;
+    },
+    retryDelay: (attemptIndex) => Math.min(400 * 2 ** attemptIndex, 3000),
     staleTime: 0,
     refetchOnWindowFocus: false,
     refetchOnMount: true,

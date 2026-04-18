@@ -111,6 +111,28 @@ describe("buildServiceRequestsPageCaseSearchRequest", () => {
     expect(req.filters?.caseTypes).toEqual([CaseType.SERVICE_REQUEST]);
     expect(req.sortBy?.field).toBe("createdOn");
   });
+
+  it("does not send severity filter", () => {
+    const req = buildServiceRequestsPageCaseSearchRequest(
+      { severityId: "99" },
+      "",
+      ServiceRequestCaseSortField.CreatedOn,
+      SortOrder.DESC,
+      false,
+    );
+    expect(req.filters?.severityId).toBeUndefined();
+  });
+
+  it("normalizes legacy Severity sort field to CreatedOn in API payload", () => {
+    const req = buildServiceRequestsPageCaseSearchRequest(
+      {},
+      "",
+      ServiceRequestCaseSortField.Severity,
+      SortOrder.DESC,
+      false,
+    );
+    expect(req.sortBy?.field).toBe(ServiceRequestCaseSortField.CreatedOn);
+  });
 });
 
 describe("formatOperationsOverviewServiceRequestsSubtitle", () => {
