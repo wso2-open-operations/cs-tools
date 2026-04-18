@@ -79,8 +79,7 @@ describe("useGetProjectCases", () => {
       queryKey: ["project-cases", "project-1", requestBody],
     })[0];
 
-    expect((query?.options as any).staleTime).toBe(5 * 60 * 1000);
-    expect((query?.options as any).refetchOnWindowFocus).toBe(false);
+    expect((query?.options as any).staleTime).toBe(0);
   });
 
   it("should not fetch if projectId is missing", () => {

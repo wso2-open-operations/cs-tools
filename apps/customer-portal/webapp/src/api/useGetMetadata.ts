@@ -57,6 +57,5 @@ export default function useGetMetadata(): UseQueryResult<
     },
     enabled: isSignedIn && !isAuthLoading,
     staleTime: 10 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
   });
 }
