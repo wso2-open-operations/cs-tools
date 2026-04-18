@@ -40,13 +40,13 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
 
-  const { data, isLoading, isFetching, isError } = useGetCaseDetails(
+  const { data, isLoading, isError } = useGetCaseDetails(
     projectId || "",
     serviceRequestId || "",
   );
 
   const showSkeletons =
-    isLoading || isFetching || (data === undefined && !isError);
+    isLoading || (data === undefined && !isError);
 
   useEffect(() => {
     if (showSkeletons) {
