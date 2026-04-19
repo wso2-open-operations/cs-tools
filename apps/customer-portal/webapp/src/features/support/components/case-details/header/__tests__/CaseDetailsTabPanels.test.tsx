@@ -152,6 +152,14 @@ vi.mock("@features/support/api/usePostComment", () => ({
   })),
 }));
 
+vi.mock("@features/support/api/useConversationRecommendationsSearch", () => ({
+  useConversationRecommendationsSearch: vi.fn(() => ({
+    data: { query: "", recommendations: [] },
+    isLoading: false,
+    isError: false,
+  })),
+}));
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: vi.fn(() => ({
     isSignedIn: true,
@@ -228,10 +236,10 @@ describe("CaseDetailsTabPanels", () => {
     ).toBeInTheDocument();
   });
 
-  it("should show Knowledge Base placeholder when activeTab is 4", () => {
+  it("should show Knowledge Base recommendations panel when activeTab is 4", () => {
     renderTabPanels(4);
     expect(
-      screen.getByText("Knowledge Base articles will appear here."),
+      screen.getByText(/Knowledge base articles that may help/i),
     ).toBeInTheDocument();
   });
 });
