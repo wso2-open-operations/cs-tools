@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Box, SearchBar, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Folder } from "@wso2/oxygen-ui-icons-react";
 import { ProjectCard, ProjectCardSkeleton } from "@components/features/projects";
@@ -90,13 +90,14 @@ function ProjectsListContent({ search }: { search: string }) {
     );
   }, [projectsData, search]);
 
-  if (data.length === 0) return <EmptyState />;
-
-  if (data.length === 1) {
+  useEffect(() => {
     setProjectId(data[0].id);
     navigate("/");
-    return <ProjectsListContentSkeleton />;
-  }
+  }, [data, navigate, setProjectId]);
+
+  if (data.length === 0) return <EmptyState />;
+
+  if (data.length === 1) return <ProjectsListContentSkeleton />;
 
   return (
     <>
