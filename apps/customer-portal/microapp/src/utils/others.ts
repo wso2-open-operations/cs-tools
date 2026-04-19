@@ -71,6 +71,11 @@ export function useScrollControl(position: "top" | "bottom" = "top", onRouteChan
 }
 
 export const setLastVisitedProjectId = (projectId: string | null) => {
+  if (projectId === null) {
+    document.cookie = `${LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY}=; path=/`;
+    return;
+  }
+
   document.cookie = `${LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY}=${projectId}; path=/`;
 };
 
@@ -85,7 +90,11 @@ export function getLastVisitedProjectId(): string | undefined {
       c = c.substring(1);
     }
     if (c.indexOf(name) == 0) {
-      return c.substring(name.length, c.length);
+      const value = c.substring(name.length, c.length);
+
+      if (!value || value === "null") return undefined;
+
+      return value;
     }
   }
 
