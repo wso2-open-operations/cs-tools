@@ -22,7 +22,6 @@ import {
   Button,
   Card,
   CircularProgress,
-  colors,
   pxToRem,
   Stack,
   TextField,
@@ -156,8 +155,9 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         <Button
           disabled={
             mode === "edit"
-              ? role === (state.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole)
-              : false
+              ? role === (state.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole) ||
+                editUserMutation.isPending
+              : createUserMutation.isPending
           }
           variant="contained"
           startIcon={
@@ -346,6 +346,7 @@ function DangerZone({ isPending, onDelete }: { isPending: boolean; onDelete: () 
         <Button
           variant="contained"
           color="error"
+          disabled={isPending}
           startIcon={isPending ? <CircularProgress size={16} color="inherit" /> : <Trash2 />}
           sx={{ mt: 3 }}
           onClick={() => setOpen(true)}
