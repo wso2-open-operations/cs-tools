@@ -23,12 +23,12 @@ import {
   colors,
 } from "@wso2/oxygen-ui";
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { stripHtml } from "@features/support/utils/support";
+import { hasSubmittableEditorContent } from "@features/support/utils/support";
 import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
@@ -61,19 +61,16 @@ export default function ActivityCommentInput({
   // EnterSubmitPlugin, which may hold an outdated render's callback).
   const valueRef = useRef(value);
   const attachmentsRef = useRef(attachments);
-  valueRef.current = value;
-  attachmentsRef.current = attachments;
+  useEffect(() => {
+    valueRef.current = value;
+    attachmentsRef.current = attachments;
+  }, [value, attachments]);
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
-  const hasSubmittableEditorContent = (html: string): boolean => {
-    const text = stripHtml(html).trim();
-    if (text.length > 0) return true;
-    return /<img\b|<figure\b/i.test(html);
-  };
   const isDisabled =
     !isSignedIn ||
     isAuthLoading ||
@@ -182,8 +179,13 @@ export default function ActivityCommentInput({
 
     // Attachment-only: skip comment endpoint, upload directly
     if (!hasText && hasAttachments) {
-      clearUI();
-      await uploadAttachmentsFromSnapshot(attachmentsSnapshot, attachmentNamesSnapshot);
+      const ok = await uploadAttachmentsFromSnapshot(
+        attachmentsSnapshot,
+        attachmentNamesSnapshot,
+      );
+      if (ok) {
+        clearUI();
+      }
       return;
     }
 
@@ -229,7 +231,7 @@ export default function ActivityCommentInput({
       >
         <Box sx={{ flex: 1 }}>
           <Editor
-            onChange={(html) => { valueRef.current = html; setValue(html); }}
+            onChange={setValue}
             disabled={isDisabled}
             resetTrigger={resetTrigger}
             minHeight={120}

@@ -55,7 +55,7 @@ import {
   getStatusColor,
   mapSeverityToDisplay,
   resolveColorFromTheme,
-  stripHtml,
+  hasSubmittableEditorContent,
   hasSingleCodeWrapper,
   stripCodeWrapper,
   stripAllCodeBlocks,
@@ -106,14 +106,6 @@ function isPlainTextComment(content: string): boolean {
     trimmed.startsWith("[code]") && trimmed.endsWith("[/code]");
   const hasInlineImageRef = /\[img:\d+\]/.test(trimmed);
   return !hasHtmlTags && !isFullCodeBlock && !hasInlineImageRef;
-}
-
-function hasSubmittableEditorContent(html: string): boolean {
-  const plainText = stripHtml(html).trim();
-  if (plainText.length > 0) {
-    return true;
-  }
-  return /<img\b[^>]*>/i.test(html);
 }
 
 function stripWso2ProductFromText(text: string): string {
@@ -286,13 +278,15 @@ export default function ServiceRequestDetailContent({
     }
 
     return entries.sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+      (a, b) =>
+        (parseBackendTimestamp(a.date)?.getTime() ?? 0) -
+        (parseBackendTimestamp(b.date)?.getTime() ?? 0),
     );
   }, [data, statusLabel, requestedBy, commentsToShow]);
 
   const handleAddComment = () => {
     const content = commentText.trim();
-    if (!content || !hasSubmittableEditorContent(content)) return;
+    if (!hasSubmittableEditorContent(content)) return;
     postComment.mutate(
       {
         caseId,

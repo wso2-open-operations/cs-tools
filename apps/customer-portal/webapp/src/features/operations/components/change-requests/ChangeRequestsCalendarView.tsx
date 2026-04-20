@@ -84,26 +84,21 @@ export default function ChangeRequestsCalendarView({
 
   // Compute initial month/year from first valid request or use current date
   const getInitialMonthYear = () => {
+    const zonedNow = getZonedDateParts(new Date());
     if (changeRequests.length > 0) {
       const firstValidRequest = changeRequests.find((req) => {
         if (!req.startDate) return false;
-        const normalizedDateStr = req.startDate.includes(" ")
-          ? req.startDate
-          : req.startDate;
-        return parseBackendTimestamp(normalizedDateStr) !== null;
+        return parseBackendTimestamp(req.startDate) !== null;
       });
 
       if (firstValidRequest) {
-        const normalizedDateStr = firstValidRequest.startDate!.includes(" ")
-          ? firstValidRequest.startDate!
-          : firstValidRequest.startDate!;
-        const date = parseBackendTimestamp(normalizedDateStr);
-        if (!date) return { month: new Date().getMonth(), year: new Date().getFullYear() };
+        const date = parseBackendTimestamp(firstValidRequest.startDate);
+        if (!date) return { month: zonedNow.monthIndex, year: zonedNow.year };
         const zoned = getZonedDateParts(date);
         return { month: zoned.monthIndex, year: zoned.year };
       }
     }
-    return { month: new Date().getMonth(), year: new Date().getFullYear() };
+    return { month: zonedNow.monthIndex, year: zonedNow.year };
   };
 
   const [currentMonth, setCurrentMonth] = useState(getInitialMonthYear().month);
@@ -143,10 +138,10 @@ export default function ChangeRequestsCalendarView({
   }
 
   // Use state-managed month and year
-  const today = new Date();
-  const todayDate = today.getDate();
-  const todayMonth = today.getMonth();
-  const todayYear = today.getFullYear();
+  const today = getZonedDateParts(new Date());
+  const todayDate = today.day;
+  const todayMonth = today.monthIndex;
+  const todayYear = today.year;
 
   // Get first day of month and number of days
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
@@ -161,10 +156,7 @@ export default function ChangeRequestsCalendarView({
     if (!item.startDate) return;
 
     // Parse date - handle "YYYY-MM-DD HH:mm:ss" format from API
-    const normalizedDateStr = item.startDate.includes(" ")
-      ? item.startDate
-      : item.startDate;
-    const date = parseBackendTimestamp(normalizedDateStr);
+    const date = parseBackendTimestamp(item.startDate);
 
     // Skip invalid dates
     if (!date) return;
@@ -230,10 +222,7 @@ export default function ChangeRequestsCalendarView({
             </Typography>
             <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
               {dayRequests.map((item) => {
-                const normalizedDateStr = item.startDate.includes(" ")
-                  ? item.startDate
-                  : item.startDate;
-                const scheduledTime = parseBackendTimestamp(normalizedDateStr);
+                const scheduledTime = parseBackendTimestamp(item.startDate);
                 if (!scheduledTime) return null;
                 const timeStr = getZonedDateParts(scheduledTime).timeLabel;
                 const stateColor = getChangeRequestStateColor(item.state);

@@ -45,9 +45,8 @@ export default function SessionWarningDialog({
   return (
     <Dialog
       open={open}
-      onClose={(_event, reason) => {
-        if (reason === "backdropClick" || reason === "escapeKeyDown") return;
-        onContinue();
+      onClose={() => {
+        // Explicit dialog actions only (Continue / Logout).
       }}
       maxWidth="sm"
       fullWidth

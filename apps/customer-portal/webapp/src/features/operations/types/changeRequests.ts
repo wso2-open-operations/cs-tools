@@ -27,6 +27,7 @@ export type ChangeRequestItem = AuditMetadata & {
   id: string;
   number: string;
   title: string;
+  description?: string | null;
   project: IdLabelRef | null;
   case: IdLabelRef | null;
   deployment: IdLabelRef | null;

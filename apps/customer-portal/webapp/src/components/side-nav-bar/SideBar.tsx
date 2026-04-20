@@ -104,6 +104,8 @@ export default function SideBar({
   }, [
     isProjectTypeResolved,
     permissions.hasOperations,
+    permissions.hasSR,
+    permissions.hasCR,
     permissions.hasEngagements,
     permissions.hasUpdates,
     usageMetricsEnabled,

@@ -250,17 +250,18 @@ export default function ChatMessageBubble({
         : new Date(message.timestamp);
 
     if (!Number.isNaN(dateObj.getTime())) {
+      const tz = resolveDisplayTimeZone();
       const timeStr = dateObj.toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
-        timeZone: resolveDisplayTimeZone(),
+        timeZone: tz,
       });
       const dateStr = dateObj.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
-        timeZone: resolveDisplayTimeZone(),
+        timeZone: tz,
       });
       formattedDateTime = `${dateStr} ${timeStr}`;
     }

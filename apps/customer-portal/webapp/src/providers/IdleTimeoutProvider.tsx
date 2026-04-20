@@ -24,6 +24,7 @@ import {
   IDLE_PROMPT_BEFORE_MS,
   IDLE_THROTTLE_MS,
 } from "@constants/authConstants";
+import { clearUserPreferredTimeZone } from "@utils/dateTime";
 
 interface IdleTimeoutProviderProps {
   children: ReactNode;
@@ -66,6 +67,7 @@ export default function IdleTimeoutProvider({
     try {
       await signOut();
     } finally {
+      clearUserPreferredTimeZone();
       navigate("/home");
     }
   };

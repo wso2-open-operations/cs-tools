@@ -41,8 +41,7 @@ export default function OutstandingChangeRequestsList({
   const getDescription = (
     item: OutstandingChangeRequestsListProps["changeRequests"][number],
   ): string | null | undefined => {
-    const itemWithDescription = item as { description?: string | null };
-    return itemWithDescription.description;
+    return item.description;
   };
 
   if (isError) {

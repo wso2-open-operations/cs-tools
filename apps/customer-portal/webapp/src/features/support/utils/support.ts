@@ -51,7 +51,6 @@ import { CASE_STATUS } from "@features/project-details/constants/projectDetailsC
 import {
   formatBackendTimestampForDisplay,
   normalizeUserTimeZone,
-  parseBackendTimestamp,
   resolveDisplayTimeZone,
 } from "@utils/dateTime";
 
@@ -1267,7 +1266,13 @@ function normalizeCommentDateString(dateStr: string): string {
 export function formatCommentDate(date: string | null | undefined): string {
   if (!date) return "--";
   const normalized = normalizeCommentDateString(date);
-  const d = parseBackendTimestamp(normalized);
+  const localMs = parseApiLocalDateTimeMs(normalized);
+  const d = !Number.isNaN(localMs)
+    ? new Date(localMs)
+    : (() => {
+        const fallback = new Date(normalizeUtcDateString(normalized));
+        return Number.isNaN(fallback.getTime()) ? null : fallback;
+      })();
   if (!d) return "--";
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -1288,6 +1293,21 @@ export function formatCommentDate(date: string | null | undefined): string {
 export function stripHtml(html: string | null | undefined): string {
   if (!html || typeof html !== "string") return "";
   return html.replace(/<[^>]+>/g, "").trim();
+}
+
+/**
+ * Returns whether rich editor HTML has submit-worthy content.
+ * Treats plain text, inline images, and figure-wrapped images as content.
+ *
+ * @param html - Raw editor HTML.
+ * @returns {boolean} True when content can be submitted.
+ */
+export function hasSubmittableEditorContent(
+  html: string | null | undefined,
+): boolean {
+  const plainText = stripHtml(html).trim();
+  if (plainText.length > 0) return true;
+  return /<img\b|<figure\b/i.test(html ?? "");
 }
 
 /**

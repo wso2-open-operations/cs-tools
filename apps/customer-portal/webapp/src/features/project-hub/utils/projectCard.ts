@@ -30,27 +30,14 @@ import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 export const formatProjectDate = (dateString: string): string => {
   if (!dateString) return "";
 
-  const day = formatBackendTimestampForDisplay(
+  const formatted = formatBackendTimestampForDisplay(
     dateString,
-    { day: "numeric" },
+    { day: "numeric", month: "short", year: "numeric" },
     undefined,
     PROJECT_CARD_DATE_LOCALE,
   );
-  const month = formatBackendTimestampForDisplay(
-    dateString,
-    { month: "short" },
-    undefined,
-    PROJECT_CARD_DATE_LOCALE,
-  );
-  const year = formatBackendTimestampForDisplay(
-    dateString,
-    { year: "numeric" },
-    undefined,
-    PROJECT_CARD_DATE_LOCALE,
-  );
-
-  if (!day || !month || !year) return dateString;
-  return `${PROJECT_CARD_DATE_CREATED_PREFIX}${day} ${month} ${year}`;
+  if (!formatted) return dateString;
+  return `${PROJECT_CARD_DATE_CREATED_PREFIX}${formatted}`;
 };
 
 /**

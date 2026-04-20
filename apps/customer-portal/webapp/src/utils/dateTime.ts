@@ -62,6 +62,13 @@ export function setUserPreferredTimeZone(
 }
 
 /**
+ * Clears cached timezone between authenticated sessions.
+ */
+export function clearUserPreferredTimeZone(): void {
+  cachedUserTimeZone = null;
+}
+
+/**
  * Gets user timezone if previously cached.
  *
  * @returns {string | null} Cached timezone.
@@ -107,21 +114,31 @@ export function normalizeBackendTimestamp(
   const raw = rawTimestamp?.trim();
   if (!raw) return null;
 
-  if (/^\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)) {
-    return `${raw.replace(" ", "T")}Z`;
+  const spaceSeparated =
+    /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d+)?$/.exec(
+      raw,
+    );
+  if (spaceSeparated) {
+    const [, yyyy, mm, dd, hh, mi, ss, fractional = ""] = spaceSeparated;
+    return `${yyyy}-${mm!.padStart(2, "0")}-${dd!.padStart(2, "0")}T${hh!.padStart(2, "0")}:${mi!.padStart(2, "0")}:${ss!.padStart(2, "0")}${fractional}Z`;
   }
 
   const mdy =
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d+)?$/.exec(
       raw,
     );
   if (mdy) {
-    const [, mm, dd, yyyy, hh, mi, ss] = mdy;
-    return `${yyyy}-${mm!.padStart(2, "0")}-${dd!.padStart(2, "0")}T${hh!.padStart(2, "0")}:${mi}:${ss}Z`;
+    const [, mm, dd, yyyy, hh, mi, ss, fractional = ""] = mdy;
+    return `${yyyy}-${mm!.padStart(2, "0")}-${dd!.padStart(2, "0")}T${hh!.padStart(2, "0")}:${mi!.padStart(2, "0")}:${ss!.padStart(2, "0")}${fractional}Z`;
   }
 
-  if (/^\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)) {
-    return `${raw}Z`;
+  const tSeparated =
+    /^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{1,2}):(\d{1,2})(\.\d+)?$/.exec(
+      raw,
+    );
+  if (tSeparated) {
+    const [, yyyy, mm, dd, hh, mi, ss, fractional = ""] = tSeparated;
+    return `${yyyy}-${mm!.padStart(2, "0")}-${dd!.padStart(2, "0")}T${hh!.padStart(2, "0")}:${mi!.padStart(2, "0")}:${ss!.padStart(2, "0")}${fractional}Z`;
   }
 
   return raw;

@@ -115,7 +115,7 @@ export default function ConversationDetailsPage(): JSX.Element {
     [messages],
   );
 
-  const conversationStatus = summary?.status ?? "Open";
+  const conversationStatus = summary?.status ?? undefined;
   const startedTime = summary?.startedTime ?? "";
   const messageCount = summary?.messages;
   const kbArticles = summary?.kbArticles;
