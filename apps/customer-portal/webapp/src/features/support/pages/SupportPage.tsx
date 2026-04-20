@@ -38,6 +38,7 @@ import { getProjectPermissions } from "@utils/permission";
 import { isClosedLikeCaseStatus, isS0Case } from "@features/support/utils/support";
 import { SortOrder } from "@/types/common";
 import type { ChatHistoryItem } from "@features/support/types/conversations";
+import ApiErrorState from "@components/error/ApiErrorState";
 
 /**
  * SupportPage component to display case details for a project.
@@ -59,6 +60,7 @@ export default function SupportPage(): JSX.Element {
     data: stats,
     isLoading,
     isError,
+    error: statsError,
   } = useGetProjectSupportStats(projectId || "", {
     caseTypes: [CaseType.DEFAULT_CASE],
   });
@@ -67,6 +69,7 @@ export default function SupportPage(): JSX.Element {
     data,
     isLoading: isCasesLoading,
     isError: isCasesError,
+    error: casesError,
   } = useGetProjectCases(
     projectId || "",
     {
@@ -84,6 +87,7 @@ export default function SupportPage(): JSX.Element {
     data: conversationsData,
     isLoading: isChatLoading,
     isError: isChatError,
+    error: chatError,
   } = useSearchConversations(projectId || "", {
     pagination: { limit: SUPPORT_OVERVIEW_CHAT_LIMIT, offset: 0 },
     sortBy: { field: "updatedOn", order: SortOrder.DESC },
@@ -125,6 +129,16 @@ export default function SupportPage(): JSX.Element {
       logger.debug(`Support stats loaded for project: ${projectId}`);
     }
   }, [stats, projectId, logger]);
+
+  const supportPageError = statsError ?? casesError ?? chatError;
+  if (supportPageError) {
+    return (
+      <ApiErrorState
+        error={supportPageError}
+        fallbackMessage="Failed to load support overview."
+      />
+    );
+  }
 
   return (
     <Stack spacing={3}>

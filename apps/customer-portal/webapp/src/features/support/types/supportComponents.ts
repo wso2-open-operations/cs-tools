@@ -62,6 +62,7 @@ export type OutstandingCasesListProps = {
 export type CaseDetailsDetailsPanelProps = {
   data: CaseDetails | undefined;
   isError: boolean;
+  error?: unknown;
   isEngagement?: boolean;
   isServiceRequest?: boolean;
 };
@@ -94,6 +95,8 @@ export type CaseDetailsSectionProps = {
 
 export type ChatMessageCardProps = {
   htmlContent: string;
+  markdownContent?: string;
+  renderAsMarkdown?: boolean;
   isCurrentUser: boolean;
   primaryBg: string;
   onImageClick?: (src: string) => void;
@@ -188,6 +191,7 @@ export type CommentBubbleProps = {
 export type CaseDetailsActivityPanelProps = {
   projectId: string;
   caseId: string;
+  conversationId?: string | null;
   caseCreatedOn?: string | null;
   focusMode?: boolean;
   caseStatus?: string | null;
@@ -278,6 +282,7 @@ export type DeleteCallRequestModalProps = {
 export type CallsPanelProps = {
   projectId: string;
   caseId: string;
+  error?: unknown;
   isCaseClosed?: boolean;
   caseStatusLabel?: string;
   caseSeverityId?: string | null;
@@ -351,6 +356,7 @@ export type CaseDetailsContentProps = {
   data: CaseDetails | undefined;
   isLoading: boolean;
   isError: boolean;
+  error?: unknown;
   caseId: string;
   onBack: () => void;
   onOpenRelatedCase?: () => void;
@@ -389,6 +395,7 @@ export type CaseDetailsTabPanelsProps = {
   caseId: string;
   data?: CaseDetails;
   isError?: boolean;
+  error?: unknown;
   projectId?: string;
   focusMode?: boolean;
   isEngagement?: boolean;
