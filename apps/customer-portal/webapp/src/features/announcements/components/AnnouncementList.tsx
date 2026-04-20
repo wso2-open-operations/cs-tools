@@ -14,13 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Form, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import { Box, Form, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 import {
   getStatusColor,
-  getStatusIconElement,
   resolveColorFromTheme,
 } from "@features/support/utils/support";
 import { formatAnnouncementDateDisplay } from "@features/announcements/utils/announcements";
@@ -97,7 +96,6 @@ export default function AnnouncementList({
         const statusLabel = caseItem.status?.label;
         const statusColor = getStatusColor(statusLabel);
         const resolvedStatusColor = resolveColorFromTheme(statusColor, theme);
-        const statusChipIcon = getStatusIconElement(statusLabel, 12);
         const createdOnLabel = formatAnnouncementDateDisplay(caseItem.createdOn);
 
         const cardContent = (
@@ -120,29 +118,20 @@ export default function AnnouncementList({
                   >
                     {caseItem.number || "--"}
                   </Typography>
-                  {statusLabel && statusChipIcon && (
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={statusLabel}
-                      icon={statusChipIcon as React.ReactElement}
-                      sx={{
-                        bgcolor: alpha(resolvedStatusColor, 0.1),
-                        color: resolvedStatusColor,
-                        height: 20,
-                        fontSize: "0.75rem",
-                        px: 0,
-                        "& .MuiChip-icon": {
-                          color: "inherit",
-                          ml: "6px",
-                          mr: "6px",
-                        },
-                        "& .MuiChip-label": {
-                          pl: 0,
-                          pr: "6px",
-                        },
-                      }}
-                    />
+                  {statusLabel && (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                      <Box
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          bgcolor: resolvedStatusColor,
+                        }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        {statusLabel}
+                      </Typography>
+                    </Box>
                   )}
                 </Box>
               }

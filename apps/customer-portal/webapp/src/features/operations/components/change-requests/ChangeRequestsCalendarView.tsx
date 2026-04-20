@@ -38,6 +38,7 @@ import {
   CHANGE_REQUEST_CALENDAR_LEGEND_STATES,
   CHANGE_REQUEST_CALENDAR_WEEKDAY_LABELS,
 } from "@features/operations/constants/operationsConstants";
+import { parseBackendTimestamp, resolveDisplayTimeZone } from "@utils/dateTime";
 
 /**
  * Calendar view for change requests.
@@ -51,23 +52,55 @@ export default function ChangeRequestsCalendarView({
   isError = false,
   onChangeRequestClick,
 }: ChangeRequestsCalendarViewProps): JSX.Element {
+  const displayTimeZone = resolveDisplayTimeZone();
+  const getZonedDateParts = (date: Date) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: displayTimeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).formatToParts(date);
+    const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    const year = Number(getPart("year"));
+    const month = Number(getPart("month"));
+    const day = Number(getPart("day"));
+    const hour = getPart("hour");
+    const minute = getPart("minute");
+    const dayPeriod = getPart("dayPeriod");
+    return {
+      year,
+      monthIndex: month - 1,
+      day,
+      timeLabel:
+        hour && minute && dayPeriod
+          ? `${hour}:${minute} ${dayPeriod.toUpperCase()}`
+          : "--",
+    };
+  };
+
   // Compute initial month/year from first valid request or use current date
   const getInitialMonthYear = () => {
     if (changeRequests.length > 0) {
       const firstValidRequest = changeRequests.find((req) => {
         if (!req.startDate) return false;
         const normalizedDateStr = req.startDate.includes(" ")
-          ? req.startDate.replace(" ", "T")
+          ? req.startDate
           : req.startDate;
-        return !isNaN(new Date(normalizedDateStr).getTime());
+        return parseBackendTimestamp(normalizedDateStr) !== null;
       });
 
       if (firstValidRequest) {
         const normalizedDateStr = firstValidRequest.startDate!.includes(" ")
-          ? firstValidRequest.startDate!.replace(" ", "T")
+          ? firstValidRequest.startDate!
           : firstValidRequest.startDate!;
-        const date = new Date(normalizedDateStr);
-        return { month: date.getMonth(), year: date.getFullYear() };
+        const date = parseBackendTimestamp(normalizedDateStr);
+        if (!date) return { month: new Date().getMonth(), year: new Date().getFullYear() };
+        const zoned = getZonedDateParts(date);
+        return { month: zoned.monthIndex, year: zoned.year };
       }
     }
     return { month: new Date().getMonth(), year: new Date().getFullYear() };
@@ -129,18 +162,16 @@ export default function ChangeRequestsCalendarView({
 
     // Parse date - handle "YYYY-MM-DD HH:mm:ss" format from API
     const normalizedDateStr = item.startDate.includes(" ")
-      ? item.startDate.replace(" ", "T")
+      ? item.startDate
       : item.startDate;
-    const date = new Date(normalizedDateStr);
+    const date = parseBackendTimestamp(normalizedDateStr);
 
     // Skip invalid dates
-    if (isNaN(date.getTime())) return;
+    if (!date) return;
 
-    if (
-      date.getMonth() === currentMonth &&
-      date.getFullYear() === currentYear
-    ) {
-      const day = date.getDate();
+    const zoned = getZonedDateParts(date);
+    if (zoned.monthIndex === currentMonth && zoned.year === currentYear) {
+      const day = zoned.day;
       if (!requestsByDay[day]) {
         requestsByDay[day] = [];
       }
@@ -200,14 +231,11 @@ export default function ChangeRequestsCalendarView({
             <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
               {dayRequests.map((item) => {
                 const normalizedDateStr = item.startDate.includes(" ")
-                  ? item.startDate.replace(" ", "T")
+                  ? item.startDate
                   : item.startDate;
-                const scheduledTime = new Date(normalizedDateStr);
-                const timeStr = scheduledTime.toLocaleTimeString("en-US", {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                });
+                const scheduledTime = parseBackendTimestamp(normalizedDateStr);
+                if (!scheduledTime) return null;
+                const timeStr = getZonedDateParts(scheduledTime).timeLabel;
                 const stateColor = getChangeRequestStateColor(item.state);
 
                 return (
@@ -281,6 +309,7 @@ export default function ChangeRequestsCalendarView({
   const monthName = firstDayOfMonth.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
+    timeZone: displayTimeZone,
   });
 
   if (changeRequests.length === 0) {

@@ -17,21 +17,18 @@
 import {
   Box,
   Button,
-  Chip,
   Paper,
   Skeleton,
   Stack,
   Typography,
-  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { ArrowLeft, Calendar, FileText } from "@wso2/oxygen-ui-icons-react";
-import type { JSX, ReactElement } from "react";
+import type { JSX } from "react";
 import CaseDetailsActionRow from "@features/support/components/case-details/header/CaseDetailsActionRow";
 import {
   getStatusColor,
-  getStatusIconElement,
   resolveColorFromTheme,
 } from "@features/support/utils/support";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
@@ -118,7 +115,6 @@ export default function AnnouncementDetailsPanel({
   const statusLabel = data.status?.label;
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
-  const statusChipIcon = getStatusIconElement(statusLabel, 12);
   const createdOnLabel = formatAnnouncementDateDisplay(data.createdOn);
 
   return (
@@ -156,28 +152,26 @@ export default function AnnouncementDetailsPanel({
               {data.number}
             </Typography>
             {statusLabel && (
-              <Chip
-                size="small"
-                variant="outlined"
-                label={statusLabel}
-                icon={statusChipIcon as ReactElement}
+              <Box
                 sx={{
-                  bgcolor: alpha(resolvedStatusColor, 0.1),
-                  color: resolvedStatusColor,
-                  height: 20,
-                  fontSize: "0.75rem",
-                  px: 0,
-                  "& .MuiChip-icon": {
-                    color: "inherit",
-                    ml: "6px",
-                    mr: "6px",
-                  },
-                  "& .MuiChip-label": {
-                    pl: 0,
-                    pr: "6px",
-                  },
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.75,
                 }}
-              />
+              >
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    bgcolor: resolvedStatusColor,
+                    flexShrink: 0,
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {statusLabel}
+                </Typography>
+              </Box>
             )}
           </Box>
         )}

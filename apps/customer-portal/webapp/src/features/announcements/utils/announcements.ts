@@ -31,6 +31,7 @@ import {
   ANNOUNCEMENT_CASE_STATE_ALLOWED_VALUES,
   ANNOUNCEMENTS_CLEAR_FILTERS_LABEL,
 } from "@features/announcements/constants/announcementsConstants";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 /**
  * Builds the case search payload for the announcements list (announcement case type only).
@@ -228,17 +229,9 @@ export function formatAnnouncementDateDisplay(
   if (raw == null || String(raw).trim() === "") {
     return "--";
   }
-  try {
-    const normalized = String(raw).trim().replace(" ", "T");
-    const date = new Date(normalized);
-    if (Number.isNaN(date.getTime())) {
-      return "--";
-    }
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date);
-  } catch {
-    return "--";
-  }
+  const formatted = formatBackendTimestampForDisplay(String(raw), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  return formatted ?? "--";
 }

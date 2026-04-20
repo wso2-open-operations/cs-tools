@@ -26,7 +26,6 @@ import { formatDuration } from "@features/operations/utils/changeRequests";
 import {
   getChangeRequestImpactColor,
   getChangeRequestStateColor,
-  getChangeRequestStateIcon,
   formatImpactLabel,
 } from "@features/operations/utils/changeRequestUi";
 import type { ChangeRequestsListProps } from "@features/operations/types/changeRequests";
@@ -121,7 +120,6 @@ export default function ChangeRequestsList({
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {changeRequests.map((item) => {
         const statusColor = getChangeRequestStateColor(item.state);
-        const StatusIcon = getChangeRequestStateIcon(item.state);
         const impactColor = getChangeRequestImpactColor(item.impact?.label);
 
         const startTime = formatDateTime(item.startDate);
@@ -223,25 +221,20 @@ export default function ChangeRequestsList({
                   {item.number || CHANGE_REQUESTS_LIST_PLACEHOLDER}
                 </Typography>
                 {item.state?.label && (
-                  <Chip
-                    icon={<StatusIcon size={12} />}
-                    label={item.state.label}
-                    size="small"
-                    sx={{
-                      bgcolor: alpha(statusColor, 0.1),
-                      color: statusColor,
-                      borderColor: alpha(statusColor, 0.2),
-                      border: "1px solid",
-                      height: 22,
-                      fontSize: "0.75rem",
-                      fontWeight: 500,
-                      "& .MuiChip-icon": {
-                        color: statusColor,
-                        ml: "6px",
-                        mr: "-2px",
-                      },
-                    }}
-                  />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        bgcolor: statusColor,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {item.state.label}
+                    </Typography>
+                  </Box>
                 )}
                 {item.case?.number && (
                   <>
