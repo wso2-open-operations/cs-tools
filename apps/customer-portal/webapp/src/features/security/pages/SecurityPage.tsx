@@ -17,6 +17,7 @@
 import { useCallback, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import SecurityStats from "@features/security/components/SecurityStats";
 import TabBar from "@components/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@features/security/components/ProductVulnerabilitiesTable";
@@ -24,14 +25,19 @@ import SecurityReportAnalysis from "@features/security/components/SecurityReport
 import { SECURITY_PAGE_TABS } from "@features/security/constants/securityConstants";
 import { SecurityTabId } from "@features/security/types/security";
 import { parseSecurityTabQueryParam } from "@features/security/utils/securityPage";
+import { getProjectPermissions } from "@utils/permission";
 
 const SecurityPage = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
 
   const tabParam = searchParams.get("tab");
-  const activeTab = parseSecurityTabQueryParam(tabParam);
+  const rawActiveTab = parseSecurityTabQueryParam(tabParam);
+  const permissions = getProjectPermissions(projectDetails?.type?.label, {
+    hasPdpSubscription: projectDetails?.hasPdpSubscription,
+  });
 
   const handleTabChange = useCallback(
     (tabId: string) => {
@@ -49,7 +55,22 @@ const SecurityPage = (): JSX.Element => {
     [navigate, projectId],
   );
 
-  const tabs = useMemo(() => [...SECURITY_PAGE_TABS], []);
+  const tabs = useMemo(
+    () =>
+      SECURITY_PAGE_TABS.filter((tab) =>
+        tab.id === SecurityTabId.VULNERABILITIES
+          ? permissions.hasSecurityReportAnalysis
+          : true,
+      ),
+    [permissions.hasSecurityReportAnalysis],
+  );
+  const activeTab = useMemo(() => {
+    const hasRawActive = tabs.some((tab) => tab.id === rawActiveTab);
+    if (hasRawActive) {
+      return rawActiveTab;
+    }
+    return tabs[0]?.id ?? SecurityTabId.COMPONENTS;
+  }, [rawActiveTab, tabs]);
 
   const renderTabContent = () => {
     switch (activeTab) {
