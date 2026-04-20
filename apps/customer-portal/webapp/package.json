@@ -12,8 +12,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@asgardeo/react": "^0.17.0",
-    "@asgardeo/react-router": "^1.1.0",
+    "@asgardeo/react": "^0.22.4",
+    "@asgardeo/react-router": "^2.0.0",
     "@lexical/code": "^0.40.0",
     "@lexical/html": "^0.40.0",
     "@lexical/link": "^0.40.0",
