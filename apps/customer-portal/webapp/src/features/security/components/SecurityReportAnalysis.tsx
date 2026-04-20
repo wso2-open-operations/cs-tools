@@ -27,6 +27,7 @@ import { useNavigate, useParams } from "react-router";
 import { CaseType } from "@features/support/constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { SortOrder } from "@/types/common";
 import SecurityReportAnalysisSkeleton from "@features/security/components/SecurityReportAnalysisSkeleton";
 import TabBar from "@components/tab-bar/TabBar";
@@ -61,6 +62,7 @@ import {
   parseSecurityReportCaseSortField,
   parseSecurityReportViewMode,
 } from "@features/security/utils/securityPage";
+import { getProjectPermissions } from "@utils/permission";
 
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
@@ -70,6 +72,11 @@ import {
 const SecurityReportAnalysis = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
+  const canCreateSecurityReport = getProjectPermissions(
+    projectDetails?.type?.label,
+    { hasPdpSubscription: projectDetails?.hasPdpSubscription },
+  ).hasSecurityReportAnalysis;
 
   const [viewMode, setViewMode] = useState<SecurityReportViewMode>(
     SecurityReportViewMode.ALL,
@@ -223,15 +230,17 @@ const SecurityReportAnalysis = (): JSX.Element => {
             }}
             sx={{ mb: 0, height: 32 }}
           />
-          <Button
-            variant="contained"
-            color="warning"
-            startIcon={<Plus size={16} />}
-            onClick={handleCreateReport}
-            size="small"
-          >
-            {SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL}
-          </Button>
+          {canCreateSecurityReport && (
+            <Button
+              variant="contained"
+              color="warning"
+              startIcon={<Plus size={16} />}
+              onClick={handleCreateReport}
+              size="small"
+            >
+              {SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL}
+            </Button>
+          )}
         </Box>
       </Box>
 

@@ -107,8 +107,16 @@ export default function ProjectDetails(): JSX.Element {
   }, [projectError, statsError, logger]);
 
   const permissions = useMemo(
-    () => getProjectPermissions(projectTypeLabel),
-    [projectTypeLabel],
+    () =>
+      getProjectPermissions(projectTypeLabel, {
+        hasPdpSubscription:
+          currentProject?.hasPdpSubscription ?? project?.hasPdpSubscription,
+      }),
+    [
+      projectTypeLabel,
+      currentProject?.hasPdpSubscription,
+      project?.hasPdpSubscription,
+    ],
   );
 
   const visibleTabs = useMemo(
