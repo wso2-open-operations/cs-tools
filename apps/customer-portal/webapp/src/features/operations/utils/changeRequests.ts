@@ -26,6 +26,11 @@ import type { ChangeRequestDetails, ChangeRequestStats, ChangeRequestStatsRespon
 import type { CaseComment } from "@features/support/types/cases";
 import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequests";
 import type { ChangeRequestWorkflowStage } from "@features/operations/types/changeRequests";
+import {
+  formatBackendTimestampForDisplay,
+  parseBackendTimestamp,
+  resolveDisplayTimeZone,
+} from "@utils/dateTime";
 
 // --- Change request stats (API → card counts) --------------------------------
 
@@ -107,8 +112,7 @@ export function isChangeRequestDateAvailable(
   dateStr: string | null | undefined,
 ): boolean {
   if (!dateStr?.trim()) return false;
-  const d = new Date(dateStr.replace(" ", "T"));
-  return !Number.isNaN(d.getTime());
+  return parseBackendTimestamp(dateStr) !== null;
 }
 
 /**
@@ -121,19 +125,15 @@ export function formatChangeRequestDisplayDate(
   dateStr: string | null | undefined,
 ): string {
   if (!isChangeRequestDateAvailable(dateStr)) return "Not available";
-  try {
-    const d = new Date((dateStr ?? "").replace(" ", "T"));
-    return d.toLocaleString(undefined, {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "Not available";
-  }
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return formatted ?? "Not available";
 }
 
 /**
@@ -476,6 +476,7 @@ export function generateChangeRequestDetailsPdf(
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: resolveDisplayTimeZone(),
   });
   const totalPages = doc.getNumberOfPages();
 

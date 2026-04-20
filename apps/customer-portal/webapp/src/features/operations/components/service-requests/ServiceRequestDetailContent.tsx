@@ -14,11 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, useMemo, type JSX, type ReactElement } from "react";
+import { useState, useMemo, type JSX } from "react";
 import {
   Box,
   Button,
-  Chip,
   Divider,
   Paper,
   Stack,
@@ -54,7 +53,6 @@ import {
   getAssignedEngineerLabel,
   getInitials,
   getStatusColor,
-  getStatusIconElement,
   mapSeverityToDisplay,
   resolveColorFromTheme,
   stripHtml,
@@ -78,6 +76,7 @@ import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAt
 import Editor from "@components/rich-text-editor/Editor";
 import DOMPurify from "dompurify";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
+import { parseBackendTimestamp } from "@utils/dateTime";
 
 export interface ServiceRequestDetailContentProps {
   data: CaseDetails | undefined;
@@ -107,6 +106,14 @@ function isPlainTextComment(content: string): boolean {
     trimmed.startsWith("[code]") && trimmed.endsWith("[/code]");
   const hasInlineImageRef = /\[img:\d+\]/.test(trimmed);
   return !hasHtmlTags && !isFullCodeBlock && !hasInlineImageRef;
+}
+
+function hasSubmittableEditorContent(html: string): boolean {
+  const plainText = stripHtml(html).trim();
+  if (plainText.length > 0) {
+    return true;
+  }
+  return /<img\b[^>]*>/i.test(html);
 }
 
 function stripWso2ProductFromText(text: string): string {
@@ -194,9 +201,6 @@ export default function ServiceRequestDetailContent({
   const severityLabel = data?.severity?.label;
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
-  const statusChipIcon = getStatusIconElement(statusLabel, 12) as
-    | ReactElement
-    | undefined;
 
   const assignedLabel = getAssignedEngineerLabel(data?.assignedEngineer);
   const environmentLabel = data?.deployment?.label ?? null;
@@ -230,8 +234,8 @@ export default function ServiceRequestDetailContent({
     const list = commentsData?.comments ?? [];
     return [...list].sort(
       (a, b) =>
-        new Date(a.createdOn ?? "").getTime() -
-        new Date(b.createdOn ?? "").getTime(),
+        (parseBackendTimestamp(a.createdOn)?.getTime() ?? 0) -
+        (parseBackendTimestamp(b.createdOn)?.getTime() ?? 0),
     );
   }, [commentsData?.comments]);
 
@@ -288,7 +292,7 @@ export default function ServiceRequestDetailContent({
 
   const handleAddComment = () => {
     const content = commentText.trim();
-    if (!content || !stripHtml(content).trim()) return;
+    if (!content || !hasSubmittableEditorContent(content)) return;
     postComment.mutate(
       {
         caseId,
@@ -371,20 +375,20 @@ export default function ServiceRequestDetailContent({
             <Typography variant="body2" fontWeight={600} color="text.primary">
               {data?.number ?? "--"}
             </Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              label={statusLabel ?? "--"}
-              icon={statusChipIcon}
-              sx={{
-                bgcolor: alpha(resolvedStatusColor, 0.1),
-                color: resolvedStatusColor,
-                height: 22,
-                fontSize: "0.75rem",
-                "& .MuiChip-icon": { color: "inherit", ml: "6px", mr: "6px" },
-                "& .MuiChip-label": { pl: 0, pr: "6px" },
-              }}
-            />
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  bgcolor: resolvedStatusColor,
+                  flexShrink: 0,
+                }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {statusLabel ?? "--"}
+              </Typography>
+            </Stack>
             <Typography variant="body2" color="text.secondary">
               Priority: {mapSeverityToDisplay(severityLabel ?? undefined)}
             </Typography>
@@ -790,7 +794,8 @@ export default function ServiceRequestDetailContent({
                   startIcon={<Send size={16} />}
                   onClick={handleAddComment}
                   disabled={
-                    !stripHtml(commentText).trim() || postComment.isPending
+                    !hasSubmittableEditorContent(commentText) ||
+                    postComment.isPending
                   }
                   sx={{ textTransform: "none" }}
                 >

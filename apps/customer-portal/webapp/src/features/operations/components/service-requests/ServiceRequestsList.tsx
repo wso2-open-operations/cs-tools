@@ -20,7 +20,6 @@ import {
   Form,
   Stack,
   Typography,
-  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Calendar, Layers, Package, Users } from "@wso2/oxygen-ui-icons-react";
@@ -31,7 +30,6 @@ import {
   formatDateTime,
   getAssignedEngineerLabel,
   getStatusColor,
-  getStatusIcon,
   resolveColorFromTheme,
 } from "@features/support/utils/support";
 import ServiceRequestsListSkeleton from "@features/operations/components/service-requests/ServiceRequestsListSkeleton";
@@ -109,7 +107,6 @@ export default function ServiceRequestsList({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {serviceRequests.map((sr) => {
-        const StatusIcon = getStatusIcon(sr.status?.label);
         const colorPath = getStatusColor(sr.status?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
         const assignedLabel = getAssignedEngineerLabel(sr.assignedEngineer);
@@ -126,6 +123,7 @@ export default function ServiceRequestsList({
               flexDirection: "column",
               alignItems: "stretch",
               gap: 1,
+              minHeight: 172,
             }}
           >
             <Form.CardHeader
@@ -144,28 +142,20 @@ export default function ServiceRequestsList({
                   >
                     {sr.number || NULL_PLACEHOLDER}
                   </Typography>
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={sr.status?.label || NULL_PLACEHOLDER}
-                    icon={<StatusIcon size={12} />}
-                    sx={{
-                      bgcolor: alpha(resolvedColor, 0.1),
-                      color: resolvedColor,
-                      height: 20,
-                      fontSize: "0.75rem",
-                      px: 0,
-                      "& .MuiChip-icon": {
-                        color: "inherit",
-                        ml: "6px",
-                        mr: "6px",
-                      },
-                      "& .MuiChip-label": {
-                        pl: 0,
-                        pr: "6px",
-                      },
-                    }}
-                  />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        bgcolor: resolvedColor,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ color: resolvedColor }}>
+                      {sr.status?.label || NULL_PLACEHOLDER}
+                    </Typography>
+                  </Box>
                   {sr.issueType?.label && (
                     <Chip
                       size="small"

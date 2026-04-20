@@ -820,18 +820,32 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                                 {stage.name}
                               </Typography>
                               {stage.current && !stage.disabled && (
-                                <Chip
-                                  label="Current"
-                                  size="small"
+                                <Box
                                   sx={{
-                                    bgcolor: alpha(colors.blue[500], 0.1),
-                                    color: colors.blue[800],
-                                    borderColor: alpha(colors.blue[500], 0.2),
-                                    border: "1px solid",
-                                    height: 20,
-                                    fontSize: "0.7rem",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 0.5,
                                   }}
-                                />
+                                >
+                                  <Box
+                                    sx={{
+                                      width: 6,
+                                      height: 6,
+                                      bgcolor: colors.blue[600],
+                                      borderRadius: "50%",
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      color: colors.blue[800],
+                                      fontSize: "0.7rem",
+                                    }}
+                                  >
+                                    Current
+                                  </Typography>
+                                </Box>
                               )}
                             </Box>
                             <Typography

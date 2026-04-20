@@ -235,8 +235,8 @@ export default function OperationsPage(): JSX.Element {
         />
       </Box>
       {!permissionsReady ? (
-        <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
-          <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
+        <Grid container spacing={3}>
+          <Grid size={loadingOverviewGridSize}>
             <SupportOverviewCard
               title={OPERATIONS_HUB_CARD_TITLE_SR}
               subtitle={srOverviewSubtitle}
@@ -247,7 +247,7 @@ export default function OperationsPage(): JSX.Element {
               <OutstandingCasesList cases={[]} isLoading />
             </SupportOverviewCard>
           </Grid>
-          <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
+          <Grid size={loadingOverviewGridSize}>
             <SupportOverviewCard
               title={OPERATIONS_HUB_CARD_TITLE_CR}
               subtitle={crOverviewSubtitle}
@@ -261,9 +261,9 @@ export default function OperationsPage(): JSX.Element {
         </Grid>
       ) : isServiceRequestEnabled || isChangeRequestEnabled ? (
         <>
-          <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
+          <Grid container spacing={3}>
             {isServiceRequestEnabled && (
-              <Grid size={overviewGridSize} sx={{ display: "flex" }}>
+              <Grid size={overviewGridSize}>
                 <SupportOverviewCard
                   title={OPERATIONS_HUB_CARD_TITLE_SR}
                   subtitle={srOverviewSubtitle}
@@ -313,7 +313,7 @@ export default function OperationsPage(): JSX.Element {
               </Grid>
             )}
             {isChangeRequestEnabled && (
-              <Grid size={overviewGridSize} sx={{ display: "flex" }}>
+              <Grid size={overviewGridSize}>
                 <SupportOverviewCard
                   title={OPERATIONS_HUB_CARD_TITLE_CR}
                   subtitle={crOverviewSubtitle}
