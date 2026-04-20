@@ -40,7 +40,7 @@ import type {
   ChatHistoryItem,
 } from "@features/support/types/conversations";
 import { ChatSender } from "@features/support/types/conversations";
-import Error500Page from "@components/error/Error500Page";
+import ApiErrorState from "@components/error/ApiErrorState";
 import type { Message } from "@features/support/types/conversations";
 import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
 import ConversationKnowledgeRecommendations from "@features/support/components/knowledge-base/ConversationKnowledgeRecommendations";
@@ -74,6 +74,7 @@ export default function ConversationDetailsPage(): JSX.Element {
     data,
     isLoading,
     isError,
+    error,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -278,10 +279,10 @@ export default function ConversationDetailsPage(): JSX.Element {
           </Box>
         ) : isError ? (
           <Box sx={{ textAlign: "center", py: 6 }}>
-            <Error500Page width={180} height={120} />
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              Could not load conversation messages.
-            </Typography>
+            <ApiErrorState
+              error={error}
+              fallbackMessage="Could not load conversation messages."
+            />
           </Box>
         ) : messages.length === 0 ? (
           <Typography variant="body2" color="text.secondary">

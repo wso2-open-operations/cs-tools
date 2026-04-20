@@ -18,6 +18,7 @@ import type { ChatMessageBubbleProps } from "@features/support/types/supportComp
 import { Box, Paper, Typography, IconButton, Button, alpha } from "@wso2/oxygen-ui";
 import { Bot, User, ThumbsUp, ThumbsDown, CheckCircle } from "@wso2/oxygen-ui-icons-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { type JSX, useEffect, useRef, useState } from "react";
 import { useDarkMode } from "@utils/useDarkMode";
 import { ChatSender, NoveraActionType } from "@features/support/types/conversations";
@@ -149,6 +150,53 @@ const markdownComponents: React.ComponentProps<
         {children}
       </Typography>
     ),
+  table: ({ children }) => (
+    <Box sx={{ width: "100%", overflowX: "auto", mb: 1 }}>
+      <Box
+        component="table"
+        sx={{
+          width: "100%",
+          borderCollapse: "collapse",
+          minWidth: 420,
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  ),
+  thead: ({ children }) => <Box component="thead">{children}</Box>,
+  tbody: ({ children }) => <Box component="tbody">{children}</Box>,
+  tr: ({ children }) => (
+    <Box component="tr" sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
+      {children}
+    </Box>
+  ),
+  th: ({ children }) => (
+    <Box
+      component="th"
+      sx={{
+        textAlign: "left",
+        p: 1,
+        fontSize: "0.75rem",
+        fontWeight: 600,
+        color: "text.secondary",
+      }}
+    >
+      {children}
+    </Box>
+  ),
+  td: ({ children }) => (
+    <Box
+      component="td"
+      sx={{
+        p: 1,
+        fontSize: "0.8125rem",
+        verticalAlign: "top",
+      }}
+    >
+      {children}
+    </Box>
+  ),
 };
 
 /**
@@ -402,7 +450,10 @@ export default function ChatMessageBubble({
             }}
             className="prose prose-sm max-w-none text-gray-800"
           >
-            <ReactMarkdown components={markdownComponents}>
+            <ReactMarkdown
+              components={markdownComponents}
+              remarkPlugins={[remarkGfm]}
+            >
               {displayText}
             </ReactMarkdown>
             {message.thinkingSteps && message.thinkingSteps.length > 0 && (
