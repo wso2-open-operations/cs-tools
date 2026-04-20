@@ -87,6 +87,8 @@ export default function SupportOverviewCard({
           flexDirection: "column",
           gap: 1.5,
           width: "100%",
+          minWidth: 0,
+          overflow: "hidden",
         },
         ...(Array.isArray(sx) ? sx : [sx]),
       ]}
