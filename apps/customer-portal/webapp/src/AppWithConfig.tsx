@@ -52,6 +52,9 @@ const queryClient: QueryClient = new QueryClient({
     queries: {
       retry: shouldRetry,
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
     },
     mutations: {
       retry: shouldRetry,
@@ -70,7 +73,7 @@ export default function AppWithConfig(): JSX.Element {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       periodicTokenRefresh
-      scopes={["openid", "email", "groups"]}
+      scopes={["openid", "email", "groups", "profile"]}
       preferences={{
         theme: {
           inheritFromBranding: false,

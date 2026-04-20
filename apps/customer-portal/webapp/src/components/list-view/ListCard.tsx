@@ -15,12 +15,12 @@
 // under the License.
 
 import {
+  alpha,
   Box,
   Chip,
   Form,
   Stack,
   Typography,
-  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Calendar, FileText, User } from "@wso2/oxygen-ui-icons-react";
@@ -32,7 +32,6 @@ import {
   formatDateTime,
   getAssignedEngineerLabel,
   getStatusColor,
-  getStatusIcon,
   hasSeverityLabelForChip,
   mapSeverityToDisplay,
   resolveColorFromTheme,
@@ -57,7 +56,6 @@ export default function ListCard({
   hideSeverity = false,
 }: ListCardProps): JSX.Element {
   const theme = useTheme();
-  const StatusIcon = getStatusIcon(caseItem.status?.label);
   const colorPath = getStatusColor(caseItem.status?.label);
   const resolvedColor = resolveColorFromTheme(colorPath, theme);
 
@@ -122,25 +120,20 @@ export default function ListCard({
                 }}
               />
             )}
-            <Chip
-              size="small"
-              variant="outlined"
-              label={caseItem.status?.label || "--"}
-              icon={<StatusIcon size={12} />}
-              sx={{
-                bgcolor: alpha(resolvedColor, 0.1),
-                color: resolvedColor,
-                height: 20,
-                fontSize: "0.75rem",
-                px: 0,
-                "& .MuiChip-icon": {
-                  color: "inherit",
-                  ml: "6px",
-                  mr: "6px",
-                },
-                "& .MuiChip-label": { pl: 0, pr: "6px" },
-              }}
-            />
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  bgcolor: resolvedColor,
+                  flexShrink: 0,
+                }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {caseItem.status?.label || "--"}
+              </Typography>
+            </Stack>
             {caseItem.issueType?.label && (
               <Chip
                 size="small"
