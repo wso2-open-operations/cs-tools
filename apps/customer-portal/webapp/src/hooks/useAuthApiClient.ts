@@ -21,6 +21,7 @@ import {
 } from "@constants/apiConstants";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
+import { recoverViaSilentSignIn } from "@hooks/authRecovery";
 
 // Waits for the provided duration.
 function sleep(delayMs: number): Promise<void> {
@@ -54,20 +55,30 @@ function isNonReplayableBody(body: unknown): boolean {
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken } = useAsgardeo();
+  const { getIdToken, signInSilently } = useAsgardeo();
   const logger = useLogger();
+
+  const tryGetToken = async (): Promise<{
+    token?: string;
+    error?: unknown;
+  }> => {
+    try {
+      const token = await getIdToken();
+      return { token: token || undefined };
+    } catch (error) {
+      return { error };
+    }
+  };
 
   const resolveIdTokenWithRetry = async (): Promise<string> => {
     let lastError: unknown;
     const delays = TOKEN_RETRY_DELAYS_MS;
     for (let attempt = 0; attempt < delays.length; attempt += 1) {
-      try {
-        const token = await getIdToken();
-        if (token) {
-          return token;
-        }
-        logger.warn("[authFetch] token-unavailable", { attempt: attempt + 1 });
-      } catch (error) {
+      const { token, error } = await tryGetToken();
+      if (token) {
+        return token;
+      }
+      if (error !== undefined) {
         lastError = error;
         if (isAsgardeoUnauthenticatedError(error)) {
           logger.warn("[authFetch] token-unavailable", {
@@ -80,10 +91,25 @@ export function useAuthApiClient() {
             error,
           });
         }
+      } else {
+        logger.warn("[authFetch] token-unavailable", { attempt: attempt + 1 });
       }
 
       if (attempt < delays.length - 1) {
         await sleep(delays[attempt]);
+      }
+    }
+
+    logger.warn("[authFetch] attempting-silent-recovery");
+    const recovered = await recoverViaSilentSignIn(signInSilently, logger);
+    if (recovered) {
+      const { token, error } = await tryGetToken();
+      if (token) {
+        logger.info("[authFetch] silent-recovery-succeeded");
+        return token;
+      }
+      if (error !== undefined) {
+        lastError = error;
       }
     }
 
@@ -164,6 +190,8 @@ export function useAuthApiClient() {
         url: urlLabel,
         method: options?.method ?? "GET",
       });
+
+      await recoverViaSilentSignIn(signInSilently, logger);
       const retryToken = await resolveIdTokenWithRetry();
       response = await fetch(input, {
         ...options,

@@ -27,6 +27,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
+import { useProactiveTokenRefresh } from "@hooks/useProactiveTokenRefresh";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
 import TopBanner from "@components/top-banner/TopBanner";
 import Footer from "@components/footer/Footer";
@@ -55,6 +56,8 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
   const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading } = useAsgardeo();
+
+  useProactiveTokenRefresh();
 
   // Scroll to top on route change
   useEffect(() => {
