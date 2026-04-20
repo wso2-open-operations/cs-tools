@@ -59,6 +59,7 @@ export default function SupportPage(): JSX.Element {
     data: stats,
     isLoading,
     isError,
+    error: statsError,
   } = useGetProjectSupportStats(projectId || "", {
     caseTypes: [CaseType.DEFAULT_CASE],
   });
@@ -67,6 +68,7 @@ export default function SupportPage(): JSX.Element {
     data,
     isLoading: isCasesLoading,
     isError: isCasesError,
+    error: casesError,
   } = useGetProjectCases(
     projectId || "",
     {
@@ -84,6 +86,7 @@ export default function SupportPage(): JSX.Element {
     data: conversationsData,
     isLoading: isChatLoading,
     isError: isChatError,
+    error: chatError,
   } = useSearchConversations(projectId || "", {
     pagination: { limit: SUPPORT_OVERVIEW_CHAT_LIMIT, offset: 0 },
     sortBy: { field: "updatedOn", order: SortOrder.DESC },

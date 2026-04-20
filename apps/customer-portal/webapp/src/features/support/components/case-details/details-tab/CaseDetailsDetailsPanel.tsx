@@ -42,7 +42,7 @@ import DOMPurify from "dompurify";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
-import Error500Page from "@components/error/Error500Page";
+import ApiErrorState from "@components/error/ApiErrorState";
 import {
   formatValue,
   formatSlaResponseTime,
@@ -67,6 +67,7 @@ import {
 export default function CaseDetailsDetailsPanel({
   data,
   isError,
+  error,
   isEngagement = false,
   isServiceRequest = false,
 }: CaseDetailsDetailsPanelProps): JSX.Element {
@@ -100,19 +101,11 @@ export default function CaseDetailsDetailsPanel({
 
   if (isError) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 2,
-          py: 10,
-        }}
-      >
-        <Error500Page />
-        <Typography variant="h4">Something Went Wrong</Typography>
-      </Box>
+      <ApiErrorState
+        error={error}
+        fallbackMessage="Something went wrong while loading case details."
+        containerSx={{ py: 10 }}
+      />
     );
   }
 

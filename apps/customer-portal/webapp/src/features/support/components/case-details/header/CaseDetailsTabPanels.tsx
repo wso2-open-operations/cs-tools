@@ -35,6 +35,7 @@ export default function CaseDetailsTabPanels({
   caseId,
   data,
   isError = false,
+  error,
   projectId = "",
   focusMode = false,
   isEngagement = false,
@@ -63,6 +64,7 @@ export default function CaseDetailsTabPanels({
           <CaseDetailsActivityPanel
             projectId={resolvedProjectId}
             caseId={caseId}
+            conversationId={data?.conversation?.id ?? null}
             caseCreatedOn={data?.createdOn}
             focusMode={focusMode}
             caseStatus={data?.status?.label}
@@ -75,6 +77,7 @@ export default function CaseDetailsTabPanels({
         <CaseDetailsDetailsPanel
           data={data}
           isError={isError}
+          error={error}
           isEngagement={isEngagement}
           isServiceRequest={isServiceRequest}
         />
@@ -99,6 +102,7 @@ export default function CaseDetailsTabPanels({
         <CallsPanel
           projectId={resolvedProjectId}
           caseId={caseId}
+          error={error}
           isCaseClosed={!!data?.closedOn || data?.status?.label === "Closed"}
           caseStatusLabel={data?.status?.label}
           caseSeverityId={data?.severity?.id}

@@ -32,6 +32,7 @@ import {
   buildRecommendationRequestFromConversationMessages,
   recommendationScoreToPercent,
 } from "@features/support/utils/recommendations";
+import ApiErrorState from "@components/error/ApiErrorState";
 
 export type ConversationKnowledgeRecommendationsProps = {
   messages: ConversationMessage[];
@@ -51,7 +52,7 @@ export default function ConversationKnowledgeRecommendations({
     [messages],
   );
 
-  const { data, isLoading, isError } = useConversationRecommendationsSearch(
+  const { data, isLoading, isError, error } = useConversationRecommendationsSearch(
     payload,
     true,
   );
@@ -116,9 +117,10 @@ export default function ConversationKnowledgeRecommendations({
           ))}
         </Stack>
       ) : isError ? (
-        <Typography variant="body2" color="text.secondary">
-          Could not load knowledge base recommendations. Please try again later.
-        </Typography>
+        <ApiErrorState
+          error={error}
+          fallbackMessage="Could not load knowledge base recommendations. Please try again later."
+        />
       ) : items.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           No matching knowledge base articles were found for this conversation.

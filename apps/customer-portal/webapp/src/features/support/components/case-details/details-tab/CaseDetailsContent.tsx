@@ -41,6 +41,7 @@ import {
   type CaseStatus,
 } from "@features/support/constants/supportConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import ApiErrorState from "@components/error/ApiErrorState";
 import CaseDetailsBackButton from "@case-details/CaseDetailsBackButton";
 import CaseDetailsHeader from "@case-details/CaseDetailsHeader";
 import CaseDetailsActionRow from "@case-details/CaseDetailsActionRow";
@@ -58,6 +59,7 @@ export default function CaseDetailsContent({
   data,
   isLoading,
   isError,
+  error,
   caseId,
   onBack,
   onOpenRelatedCase,
@@ -219,6 +221,19 @@ export default function CaseDetailsContent({
     setHideForDetailsActivityTab,
   ]);
 
+  if (isError && error) {
+    return (
+      <ApiErrorState
+        error={error}
+        fallbackMessage={
+          isServiceRequest
+            ? "Failed to load service request details."
+            : "Failed to load case details."
+        }
+      />
+    );
+  }
+
   if (isLoading) {
     return (
       <Box>
@@ -359,6 +374,7 @@ export default function CaseDetailsContent({
           caseId={caseId}
           data={data}
           isError={isError}
+          error={error}
           projectId={projectId}
           focusMode={focusMode}
           isEngagement={isEngagementRoute}

@@ -24,6 +24,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useEffect, useRef, useState, type JSX } from "react";
 import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import { compareByCreatedOnThenId, formatCommentDate } from "@features/support/utils/support";
@@ -35,6 +36,8 @@ import type {
   ActivityContentProps,
   CaseDetailsActivityPanelProps,
 } from "@features/support/types/supportComponents";
+import type { CaseComment } from "@features/support/types/cases";
+import ApiErrorState from "@components/error/ApiErrorState";
 
 // TODO : DUE TO URGENCY THIS COMPONENT BREAKS THE BEST PRACTICES , NEED FULL REFACTOR
 /**
@@ -46,6 +49,7 @@ import type {
 export default function CaseDetailsActivityPanel({
   projectId,
   caseId,
+  conversationId,
   caseCreatedOn,
   caseStatus,
 }: CaseDetailsActivityPanelProps): JSX.Element {
@@ -53,20 +57,34 @@ export default function CaseDetailsActivityPanel({
   const { data: userDetails } = useGetUserDetails();
   const {
     data: commentsData,
-    isLoading,
-    isError,
+    isLoading: isCommentsLoading,
+    isError: isCommentsError,
+    error: commentsError,
   } = useGetCaseComments(projectId, caseId, { offset: 0, limit: 50 });
+  const {
+    data: conversationData,
+    isLoading: isConversationLoading,
+    isError: isConversationError,
+    error: conversationError,
+  } = useGetConversationMessages(conversationId ?? "", { pageSize: 50 });
 
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
 
-  const commentsSorted = useMemo(() => {
-    const list = commentsData?.comments ?? [];
-    return [...list].sort(compareByCreatedOnThenId);
-  }, [commentsData?.comments]);
+  const mergedTimeline = useMemo(() => {
+    const caseComments = commentsData?.comments ?? [];
+    const conversationComments: CaseComment[] = (
+      conversationData?.pages?.flatMap((page) => page.comments) ?? []
+    ).map((comment) => ({
+      ...comment,
+      type: comment.type ?? "comments",
+      isEscalated: comment.isEscalated ?? false,
+    }));
+    return [...caseComments, ...conversationComments].sort(compareByCreatedOnThenId);
+  }, [commentsData?.comments, conversationData?.pages]);
 
   const commentsToShow = useMemo(
-    () => commentsSorted.filter(hasDisplayableContent),
-    [commentsSorted],
+    () => mergedTimeline.filter(hasDisplayableContent),
+    [mergedTimeline],
   );
 
   const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
@@ -74,6 +92,10 @@ export default function CaseDetailsActivityPanel({
 
   // Render content based on state
   let content: JSX.Element;
+
+  const isLoading = isCommentsLoading || (!!conversationId && isConversationLoading);
+  const isError = isCommentsError || (!!conversationId && isConversationError);
+  const resolvedError = commentsError ?? conversationError;
 
   if (isLoading) {
     content = (
@@ -99,9 +121,10 @@ export default function CaseDetailsActivityPanel({
   } else if (isError || !commentsData) {
     content = (
       <Box sx={{ p: 2, flex: 1, minHeight: 0, overflow: "auto" }}>
-        <Typography variant="body2" color="text.secondary">
-          Unable to load activity.
-        </Typography>
+        <ApiErrorState
+          error={resolvedError}
+          fallbackMessage="Unable to load activity."
+        />
       </Box>
     );
   } else {

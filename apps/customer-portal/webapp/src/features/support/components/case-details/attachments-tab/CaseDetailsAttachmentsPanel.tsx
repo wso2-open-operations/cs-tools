@@ -33,6 +33,7 @@ import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSk
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
 import EditCaseAttachmentModal from "@case-details-attachments/EditCaseAttachmentModal";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
+import ApiErrorState from "@components/error/ApiErrorState";
 import {
   ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED,
   ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER,
@@ -67,6 +68,7 @@ export default function CaseDetailsAttachmentsPanel({
     data,
     isLoading,
     isError,
+    error,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
@@ -197,9 +199,10 @@ export default function CaseDetailsAttachmentsPanel({
         {isLoading ? (
           <AttachmentsListSkeleton />
         ) : isError ? (
-          <Typography variant="body2" color="error">
-            Failed to load attachments.
-          </Typography>
+          <ApiErrorState
+            error={error}
+            fallbackMessage="Failed to load attachments."
+          />
         ) : allAttachments.length === 0 ? (
           <Stack
             spacing={2}

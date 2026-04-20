@@ -14,36 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import Error500Page from "@components/error/Error500Page";
+import ApiErrorState from "@components/error/ApiErrorState";
 
 /**
  * Renders the error state for the calls panel.
  *
  * @returns {JSX.Element} The rendered error state.
  */
-export default function CallsErrorState(): JSX.Element {
+export default function CallsErrorState({
+  error,
+}: {
+  error?: unknown;
+}): JSX.Element {
   return (
-    <Stack
-      spacing={2}
-      alignItems="center"
-      justifyContent="center"
-      sx={{ py: 4 }}
-    >
-      <Box
-        sx={{
-          width: 160,
-          maxWidth: "100%",
-          "& svg": { width: "100%", height: "auto" },
-        }}
-        aria-hidden
-      >
-        <Error500Page />
-      </Box>
-      <Typography variant="body2" color="error">
-        Error loading call requests.
-      </Typography>
-    </Stack>
+    <ApiErrorState
+      error={error}
+      fallbackMessage="Error loading call requests."
+    />
   );
 }

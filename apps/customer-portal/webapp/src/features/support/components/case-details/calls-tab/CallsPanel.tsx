@@ -170,6 +170,7 @@ export default function CallsPanel({
     data,
     isPending,
     isError,
+    error,
     refetch,
     fetchNextPage,
     hasNextPage,
@@ -383,7 +384,7 @@ export default function CallsPanel({
       {isPending ? (
         <CallsListSkeleton />
       ) : isError ? (
-        <CallsErrorState />
+        <CallsErrorState error={error} />
       ) : allCallRequests.length === 0 ? (
         <CallsEmptyState action={requestCallButton} />
       ) : (
