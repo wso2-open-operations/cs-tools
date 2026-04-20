@@ -72,7 +72,11 @@ export default function GetHelpDropdown(): JSX.Element {
   );
 
   const projectTypeLabel = selectedProject?.type?.label;
-  const isServiceRequestVisible = getProjectPermissions(projectTypeLabel).hasSR;
+  const permissions = getProjectPermissions(projectTypeLabel, {
+    hasPdpSubscription: selectedProject?.hasPdpSubscription,
+  });
+  const isServiceRequestVisible = permissions.hasSR;
+  const isSecurityReportVisible = permissions.hasSecurityReportAnalysis;
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
@@ -132,13 +136,17 @@ export default function GetHelpDropdown(): JSX.Element {
           },
         ]
       : []),
-    {
-      id: "security-report",
-      label: "Security Report",
-      description: "Submit a security report",
-      icon: <ShieldAlert size={16} />,
-      onClick: handleSecurityReport,
-    },
+    ...(isSecurityReportVisible
+      ? [
+          {
+            id: "security-report",
+            label: "Security Report",
+            description: "Submit a security report",
+            icon: <ShieldAlert size={16} />,
+            onClick: handleSecurityReport,
+          },
+        ]
+      : []),
   ];
 
   return (

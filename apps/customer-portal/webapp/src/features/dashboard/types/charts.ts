@@ -60,6 +60,7 @@ export type OutstandingIncidentsChartProps = {
   isError?: boolean;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
+  centerContent?: boolean;
 };
 
 // Outstanding Engagements chart props.
@@ -67,6 +68,7 @@ export type CasesTrendChartProps = {
   data?: CasesTrendChartData;
   isLoading?: boolean;
   isError?: boolean;
+  centerContent?: boolean;
 };
 
 // Active cases chart props.
@@ -75,6 +77,7 @@ export type ActiveCasesChartProps = {
   isLoading?: boolean;
   isError?: boolean;
   variant?: OperationsChartMode;
+  centerContent?: boolean;
 };
 
 // Chart legend props.
@@ -97,4 +100,5 @@ export type ChartLayoutProps = {
   restrictSeverityToLow?: boolean;
   showOperationsChart?: boolean;
   operationsChartMode?: OperationsChartMode;
+  showEngagementsChart?: boolean;
 };

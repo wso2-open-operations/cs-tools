@@ -56,6 +56,7 @@ export const ActiveCasesChart = ({
   isLoading,
   isError,
   variant = OperationsChartMode.SrAndCr,
+  centerContent = false,
 }: ActiveCasesChartProps): JSX.Element => {
   // safe data
   const safeData = data ?? EMPTY_ACTIVE_CASES_DATA;
@@ -74,7 +75,11 @@ export const ActiveCasesChart = ({
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
-      <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
+      <Typography
+        variant="h6"
+        component="h3"
+        sx={{ mb: 2, textAlign: centerContent ? "center" : "left" }}
+      >
         {DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS}
       </Typography>
       {isLoading ? (
@@ -189,11 +194,13 @@ export const ActiveCasesChart = ({
           ))}
         </Box>
       ) : (
-        <ChartLegend
-          data={buildActiveCasesLegendRows(seriesConfig, safeData)}
-          isError={isError}
-          showValues
-        />
+        <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
+          <ChartLegend
+            data={buildActiveCasesLegendRows(seriesConfig, safeData)}
+            isError={isError}
+            showValues
+          />
+        </Box>
       )}
     </Card>
   );

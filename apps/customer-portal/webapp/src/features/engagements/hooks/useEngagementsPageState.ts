@@ -22,7 +22,7 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { CaseType } from "@features/support/constants/supportConstants";
-import { shouldExcludeS0, shouldForceSeverityS4 } from "@utils/permission";
+import { getProjectSeverityPolicy } from "@utils/permission";
 import { isS0Case } from "@features/support/utils/support";
 import { hasListSearchOrFilters } from "@features/support/utils/support";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
@@ -63,12 +63,10 @@ export function useEngagementsPageState() {
     projectId || "",
   );
   const projectReady = !isProjectLoading && project !== undefined;
-  const excludeS0 = projectReady
-    ? shouldExcludeS0(project?.type?.label)
-    : false;
-  const restrictSeverityToLow = projectReady
-    ? shouldForceSeverityS4(project?.type?.label)
-    : false;
+  const severityPolicy = projectReady
+    ? getProjectSeverityPolicy(project?.type?.label)
+    : { excludeS0: false, restrictSeverityToLow: false };
+  const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 

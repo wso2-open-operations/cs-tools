@@ -153,7 +153,7 @@ export const SEVERITY_LEGEND_ORDER: SeverityLegendEntry[] = [
   {
     key: SeverityLegendKey.Low,
     label: "Low (P4)",
-    displayName: "S4 (Queries) - Low",
+    displayName: "S4 (Query) - Low",
     color: colors.green[500],
   },
 ];

@@ -55,6 +55,7 @@ export const OutstandingIncidentsChart = ({
   isError,
   excludeS0 = false,
   restrictSeverityToLow = false,
+  centerContent = false,
 }: OutstandingIncidentsChartProps): JSX.Element => {
   // safe data
   const safeData = data ?? EMPTY_OUTSTANDING_INCIDENTS_DATA;
@@ -87,7 +88,11 @@ export const OutstandingIncidentsChart = ({
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
-      <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
+      <Typography
+        variant="h6"
+        component="h3"
+        sx={{ mb: 2, textAlign: centerContent ? "center" : "left" }}
+      >
         {DASHBOARD_CHART_TITLE_OUTSTANDING_CASES}
       </Typography>
       {isLoading ? (
@@ -205,11 +210,13 @@ export const OutstandingIncidentsChart = ({
           ))}
         </Box>
       ) : (
-        <ChartLegend
-          data={buildOutstandingIncidentsLegendRows(chartSource, displayedData)}
-          isError={isError}
-          showValues
-        />
+        <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
+          <ChartLegend
+            data={buildOutstandingIncidentsLegendRows(chartSource, displayedData)}
+            isError={isError}
+            showValues
+          />
+        </Box>
       )}
     </Card>
   );

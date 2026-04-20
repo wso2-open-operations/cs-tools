@@ -46,8 +46,7 @@ import {
 import { SortOrder } from "@/types/common";
 import {
   getProjectPermissions,
-  shouldExcludeS0,
-  shouldForceSeverityS4,
+  getProjectSeverityPolicy,
 } from "@utils/permission";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
 import ListStatGrid from "@components/list-view/ListStatGrid";
@@ -92,18 +91,14 @@ export default function AllCasesPage(): JSX.Element {
     return getProjectPermissions(project.type?.label);
   }, [projectDetailsReady, project]);
 
-  const excludeS0 = useMemo(() => {
-    if (!projectDetailsReady || !project) {
-      return false;
-    }
-    return shouldExcludeS0(project.type?.label);
-  }, [projectDetailsReady, project]);
-  const restrictSeverityToLow = useMemo(() => {
-    if (!projectDetailsReady || !project) {
-      return false;
-    }
-    return shouldForceSeverityS4(project.type?.label);
-  }, [projectDetailsReady, project]);
+  const severityPolicy = useMemo(
+    () =>
+      projectDetailsReady && project
+        ? getProjectSeverityPolicy(project.type?.label)
+        : { excludeS0: false, restrictSeverityToLow: false },
+    [projectDetailsReady, project],
+  );
+  const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
@@ -222,7 +217,9 @@ export default function AllCasesPage(): JSX.Element {
     [currentPageCases, excludeS0],
   );
 
-  const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
+  const totalItems = excludeS0
+    ? filteredAndSearchedCases.length
+    : (apiTotalRecords || filteredAndSearchedCases.length);
 
   const paginatedCases = filteredAndSearchedCases;
 

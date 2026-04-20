@@ -28,7 +28,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import { Box, Button, Stack } from "@wso2/oxygen-ui";
+import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -46,8 +46,7 @@ import {
 } from "@features/support/constants/supportConstants";
 import {
   getProjectPermissions,
-  shouldExcludeS0,
-  shouldForceSeverityS4,
+  getProjectSeverityPolicy,
 } from "@utils/permission";
 import { SortOrder } from "@/types/common";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
@@ -112,21 +111,19 @@ export default function ServiceRequestsPage(): JSX.Element {
     if (!projectDetailsReady || !project) {
       return getProjectPermissions(undefined);
     }
-    return getProjectPermissions(project.type?.label);
+    return getProjectPermissions(project.type?.label, {
+      hasPdpSubscription: project.hasPdpSubscription,
+    });
   }, [projectDetailsReady, project]);
 
-  const excludeS0 = useMemo(() => {
-    if (!projectDetailsReady || !project) {
-      return false;
-    }
-    return shouldExcludeS0(project.type?.label);
-  }, [projectDetailsReady, project]);
-  const restrictSeverityToLow = useMemo(() => {
-    if (!projectDetailsReady || !project) {
-      return false;
-    }
-    return shouldForceSeverityS4(project.type?.label);
-  }, [projectDetailsReady, project]);
+  const severityPolicy = useMemo(
+    () =>
+      projectDetailsReady && project
+        ? getProjectSeverityPolicy(project.type?.label)
+        : { excludeS0: false, restrictSeverityToLow: false },
+    [projectDetailsReady, project],
+  );
+  const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
@@ -146,7 +143,7 @@ export default function ServiceRequestsPage(): JSX.Element {
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.SERVICE_REQUEST],
     createdByMe: createdByMe || undefined,
-    enabled: !!projectId,
+    enabled: !!projectId && permissions.hasSR,
   });
 
   const caseSearchRequest = useMemo(
@@ -169,7 +166,7 @@ export default function ServiceRequestsPage(): JSX.Element {
     fetchNextPage,
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest, {
-    enabled: !!projectId,
+    enabled: !!projectId && permissions.hasSR,
   });
 
   const { showLoader, hideLoader } = useLoader();
@@ -177,15 +174,18 @@ export default function ServiceRequestsPage(): JSX.Element {
   const hasStatsResponse = stats !== undefined;
   const hasCasesResponse = data !== undefined;
   const isProjectContextLoading = isProjectLoading;
+  const canLoadServiceRequests = !projectDetailsReady || permissions.hasSR;
   const isStatsLoading =
-    isProjectContextLoading ||
-    isStatsQueryLoading ||
-    (!!projectId && !hasStatsResponse && !isStatsError);
+    canLoadServiceRequests &&
+    (isProjectContextLoading ||
+      isStatsQueryLoading ||
+      (!!projectId && !hasStatsResponse && !isStatsError));
 
   const isCasesAreaLoading =
-    isCasesQueryLoading ||
-    (!!projectId && !hasCasesResponse) ||
-    isFetchingNextPage;
+    canLoadServiceRequests &&
+    (isCasesQueryLoading ||
+      (!!projectId && !hasCasesResponse) ||
+      isFetchingNextPage);
 
   const isInitialPageLoading = isStatsLoading || isCasesAreaLoading;
 
@@ -282,6 +282,26 @@ export default function ServiceRequestsPage(): JSX.Element {
   const handleNewServiceRequest = () => {
     navigate(`/projects/${projectId}/${navSegment}/service-requests/create`);
   };
+
+  if (projectDetailsReady && !permissions.hasSR) {
+    return (
+      <Stack spacing={3}>
+        <Box>
+          <Button
+            startIcon={<ArrowLeft size={16} />}
+            onClick={() => (returnTo ? navigate(returnTo) : navigate(".."))}
+            sx={{ mb: 2 }}
+            variant="text"
+          >
+            {OPERATIONS_LIST_BACK_LABEL}
+          </Button>
+          <Typography variant="body2" color="text.secondary">
+            Service requests are not available for this project.
+          </Typography>
+        </Box>
+      </Stack>
+    );
+  }
 
   if (isCasesError) {
     return (

@@ -144,6 +144,15 @@ vi.mock("@api/useGetProjects", () => {
   };
 });
 
+vi.mock("@api/useGetProjectDetails", () => ({
+  __esModule: true,
+  default: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 vi.mock("@components/side-nav-bar/SubscriptionWidget", () => {
   return {
     __esModule: true,
@@ -173,17 +182,19 @@ describe("SideBar", () => {
     mockUsageMetricsEnabled = true;
   });
 
-  it("should render all navigation items except Operations when the project type is not supported", () => {
+  it("should render all navigation items except Operations and Engagements when the project type is not supported", () => {
     mockProjectTypeLabel = "Other";
     render(<SideBar collapsed={false} />);
 
     APP_SHELL_NAV_ITEMS.filter(
-      (item: AppShellNavItem) => item.id !== "operations",
+      (item: AppShellNavItem) =>
+        item.id !== "operations" && item.id !== "engagements",
     ).forEach((item: AppShellNavItem) => {
       expect(screen.getByText(item.label)).toBeInTheDocument();
     });
 
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
+    expect(screen.queryByText("Engagements")).not.toBeInTheDocument();
   });
 
   it("should render the Operations item for Managed Cloud Subscription", () => {

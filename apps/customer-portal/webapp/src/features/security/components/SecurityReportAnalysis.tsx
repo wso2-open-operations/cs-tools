@@ -27,6 +27,7 @@ import { useNavigate, useParams } from "react-router";
 import { CaseType } from "@features/support/constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { SortOrder } from "@/types/common";
 import SecurityReportAnalysisSkeleton from "@features/security/components/SecurityReportAnalysisSkeleton";
 import TabBar from "@components/tab-bar/TabBar";
@@ -61,6 +62,7 @@ import {
   parseSecurityReportCaseSortField,
   parseSecurityReportViewMode,
 } from "@features/security/utils/securityPage";
+import { getProjectPermissions } from "@utils/permission";
 
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
@@ -70,6 +72,12 @@ import {
 const SecurityReportAnalysis = (): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const { data: projectDetails, isLoading: isProjectLoading } =
+    useGetProjectDetails(projectId || "");
+  const canCreateSecurityReport = getProjectPermissions(
+    projectDetails?.type?.label,
+    { hasPdpSubscription: projectDetails?.hasPdpSubscription },
+  ).hasSecurityReportAnalysis;
 
   const [viewMode, setViewMode] = useState<SecurityReportViewMode>(
     SecurityReportViewMode.ALL,
@@ -109,7 +117,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const { data, isLoading, hasNextPage, fetchNextPage } = useGetProjectCases(
     projectId || "",
     caseSearchRequest,
-    { enabled: !!projectId },
+    { enabled: !!projectId && canCreateSecurityReport },
   );
 
   useEffect(() => {
@@ -178,6 +186,28 @@ const SecurityReportAnalysis = (): JSX.Element => {
     [],
   );
 
+  if (!isProjectLoading && projectDetails && !canCreateSecurityReport) {
+    return (
+      <Paper
+        sx={{
+          width: "100%",
+          mb: 4,
+          p: 3,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1,
+        }}
+      >
+        <Typography variant="h5" color="text.primary">
+          {SECURITY_REPORT_ANALYSIS_TITLE}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Security report analysis is not available for this project type.
+        </Typography>
+      </Paper>
+    );
+  }
+
   return (
     <Paper
       sx={{
@@ -223,15 +253,17 @@ const SecurityReportAnalysis = (): JSX.Element => {
             }}
             sx={{ mb: 0, height: 32 }}
           />
-          <Button
-            variant="contained"
-            color="warning"
-            startIcon={<Plus size={16} />}
-            onClick={handleCreateReport}
-            size="small"
-          >
-            {SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL}
-          </Button>
+          {canCreateSecurityReport && (
+            <Button
+              variant="contained"
+              color="warning"
+              startIcon={<Plus size={16} />}
+              onClick={handleCreateReport}
+              size="small"
+            >
+              {SECURITY_REPORT_ANALYSIS_CREATE_BUTTON_LABEL}
+            </Button>
+          )}
         </Box>
       </Box>
 

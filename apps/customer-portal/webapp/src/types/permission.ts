@@ -18,11 +18,18 @@
 export enum ProjectType {
   MANAGED_CLOUD_SUBSCRIPTION = "Managed Cloud Subscription",
   CLOUD_SUPPORT = "Cloud Support",
+  CLOUD_SUBSCRIPTION = "Cloud Subscription",
   CLOUD_EVALUATION_SUPPORT = "Cloud Evaluation Support",
   EVALUATION_SUBSCRIPTION = "Evaluation Subscription",
   SUBSCRIPTION = "Subscription",
   DEVELOPMENT_SUPPORT = "Development Support",
+  PROFESSIONAL_SERVICES = "Professional Services",
 }
+
+/** Optional inputs when resolving permissions (e.g. PDP flag from project search/details). */
+export type GetProjectPermissionsOptions = {
+  hasPdpSubscription?: boolean;
+};
 
 /** Feature flags derived from project type for UI visibility and stats. */
 export type ProjectPermissions = {
@@ -30,12 +37,14 @@ export type ProjectPermissions = {
   hasDeployments: boolean;
   hasQueryHours: boolean;
   hasTimeLogs: boolean;
+  hasSecurityReportAnalysis: boolean;
   hasSR: boolean;
   hasCR: boolean;
   showOutstandingOpsChart: boolean;
   includeChangeRequestsInDashboardTotals: boolean;
   includeS0InSupportMetrics: boolean;
   showServiceHoursAllocationsCard: boolean;
+  hasEngagements: boolean;
 };
 
 /** Aggregated operation counts for dashboard and related UI. */

@@ -18,6 +18,7 @@ import type { ActivityItem } from "@features/project-details/types/projectDetail
 import type { ProjectStatsResponse } from "@features/project-hub/types/projects";
 import { PRIMARY_PRODUCTION_DEPLOYMENT_TYPE_LABEL } from "@constants/permissionConstants";
 import type {
+  GetProjectPermissionsOptions,
   ProjectOperationsStatsResult,
   ProjectPermissions,
 } from "@/types/permission";
@@ -27,9 +28,15 @@ import { convertMinutesToHours } from "@features/project-details/utils/projectDe
 export { PRIMARY_PRODUCTION_DEPLOYMENT_TYPE_LABEL } from "@constants/permissionConstants";
 export { ProjectType } from "@/types/permission";
 export type {
+  GetProjectPermissionsOptions,
   ProjectOperationsStatsResult,
   ProjectPermissions,
 } from "@/types/permission";
+
+export type ProjectSeverityPolicy = {
+  excludeS0: boolean;
+  restrictSeverityToLow: boolean;
+};
 
 /**
  * Restrictive defaults for unknown or unlisted project types.
@@ -42,10 +49,12 @@ function restrictivePermissions(): ProjectPermissions {
     hasDeployments: false,
     hasQueryHours: false,
     hasTimeLogs: false,
+    hasSecurityReportAnalysis: false,
     showOutstandingOpsChart: false,
     includeChangeRequestsInDashboardTotals: false,
     includeS0InSupportMetrics: false,
     showServiceHoursAllocationsCard: false,
+    hasEngagements: false,
   };
 }
 
@@ -53,13 +62,16 @@ function restrictivePermissions(): ProjectPermissions {
  * Returns UI and stats permissions for a project type label (API string).
  *
  * @param projectTypeLabel - Value from project.type.label.
+ * @param options - Optional flags from project search/details (e.g. `hasPdpSubscription` for Cloud SR).
  * @returns Permission flags for conditional rendering and aggregations.
  */
 export function getProjectPermissions(
   projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): ProjectPermissions {
   const permissions = restrictivePermissions();
   const label = projectTypeLabel ?? "";
+  const hasPdpSubscription = options?.hasPdpSubscription === true;
 
   switch (label) {
     case ProjectType.MANAGED_CLOUD_SUBSCRIPTION:
@@ -69,30 +81,41 @@ export function getProjectPermissions(
       permissions.hasDeployments = true;
       permissions.hasQueryHours = true;
       permissions.hasTimeLogs = true;
+      permissions.hasSecurityReportAnalysis = true;
       permissions.showOutstandingOpsChart = true;
       permissions.includeChangeRequestsInDashboardTotals = true;
       permissions.includeS0InSupportMetrics = true;
       permissions.showServiceHoursAllocationsCard = true;
+      permissions.hasEngagements = true;
       break;
 
     case ProjectType.CLOUD_SUPPORT:
+    case ProjectType.CLOUD_SUBSCRIPTION: {
       permissions.hasOperations = true;
-      permissions.hasSR = true;
+      permissions.hasSR = hasPdpSubscription;
       permissions.hasCR = false;
       permissions.hasDeployments = false;
       permissions.hasQueryHours = true;
       permissions.hasTimeLogs = false;
-      permissions.showOutstandingOpsChart = true;
+      permissions.hasSecurityReportAnalysis = true;
+      permissions.showOutstandingOpsChart = hasPdpSubscription;
       permissions.includeChangeRequestsInDashboardTotals = false;
       permissions.includeS0InSupportMetrics = false;
       permissions.showServiceHoursAllocationsCard = false;
+      permissions.hasEngagements = true;
       break;
+    }
 
     case ProjectType.CLOUD_EVALUATION_SUPPORT:
     case ProjectType.EVALUATION_SUBSCRIPTION:
       break;
 
     case ProjectType.DEVELOPMENT_SUPPORT:
+      permissions.hasSecurityReportAnalysis = true;
+      break;
+
+    case ProjectType.PROFESSIONAL_SERVICES:
+      permissions.hasSecurityReportAnalysis = true;
       break;
 
     case ProjectType.SUBSCRIPTION:
@@ -102,10 +125,12 @@ export function getProjectPermissions(
       permissions.hasDeployments = true;
       permissions.hasQueryHours = true;
       permissions.hasTimeLogs = true;
+      permissions.hasSecurityReportAnalysis = true;
       permissions.showOutstandingOpsChart = false;
       permissions.includeChangeRequestsInDashboardTotals = false;
       permissions.includeS0InSupportMetrics = false;
       permissions.showServiceHoursAllocationsCard = true;
+      permissions.hasEngagements = true;
       break;
 
     default:
@@ -123,8 +148,10 @@ export function getProjectPermissions(
  */
 export function shouldExcludeS0(
   projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): boolean {
-  return !getProjectPermissions(projectTypeLabel).includeS0InSupportMetrics;
+  return !getProjectPermissions(projectTypeLabel, options)
+    .includeS0InSupportMetrics;
 }
 
 /**
@@ -137,7 +164,25 @@ export function shouldExcludeS0(
 export function shouldForceSeverityS4(
   projectTypeLabel: string | null | undefined,
 ): boolean {
-  return projectTypeLabel === ProjectType.DEVELOPMENT_SUPPORT;
+  return (
+    projectTypeLabel === ProjectType.DEVELOPMENT_SUPPORT ||
+    projectTypeLabel === ProjectType.PROFESSIONAL_SERVICES
+  );
+}
+
+/**
+ * Centralized severity rendering policy for list filters, tables, and create flows.
+ *
+ * @param projectTypeLabel - Value from project.type.label.
+ * @returns Severity policy flags for conditional UI behavior.
+ */
+export function getProjectSeverityPolicy(
+  projectTypeLabel: string | null | undefined,
+): ProjectSeverityPolicy {
+  return {
+    excludeS0: shouldExcludeS0(projectTypeLabel),
+    restrictSeverityToLow: shouldForceSeverityS4(projectTypeLabel),
+  };
 }
 
 /**
@@ -152,6 +197,7 @@ export function shouldRestrictToPrimaryProductionDeployments(
 ): boolean {
   return (
     projectTypeLabel === ProjectType.CLOUD_SUPPORT ||
+    projectTypeLabel === ProjectType.CLOUD_SUBSCRIPTION ||
     projectTypeLabel === ProjectType.CLOUD_EVALUATION_SUPPORT
   );
 }
@@ -194,11 +240,9 @@ export function calculateProjectStats(
   srCount: number,
   crCount: number,
 ): ProjectOperationsStatsResult {
-  const serviceRequests = srCount;
+  const serviceRequests = permissions.hasSR ? srCount : 0;
   const changeRequests = permissions.hasCR ? crCount : 0;
-  const total = permissions.hasCR
-    ? serviceRequests + changeRequests
-    : serviceRequests;
+  const total = serviceRequests + changeRequests;
 
   return {
     total,

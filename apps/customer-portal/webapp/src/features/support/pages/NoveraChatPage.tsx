@@ -261,9 +261,7 @@ export default function NoveraChatPage(): JSX.Element {
 
     try {
       const chatHistory = formatChatHistoryForClassification(messages);
-      const hasEnvProducts = Object.keys(envProducts).length > 0;
-
-      if (chatHistory && hasEnvProducts) {
+      if (chatHistory) {
         try {
           const classificationResponse = await classifyCase({
             chatHistory,

@@ -49,6 +49,7 @@ export const CasesTrendChart = ({
   data,
   isLoading,
   isError,
+  centerContent = false,
 }: CasesTrendChartProps): JSX.Element => {
   // safe data
   const safeData = data ?? EMPTY_CASES_TREND_DATA;
@@ -81,7 +82,11 @@ export const CasesTrendChart = ({
 
   return (
     <Card sx={{ p: 2, height: "100%" }}>
-      <Typography variant="h6" component="h3" sx={{ mb: 2 }}>
+      <Typography
+        variant="h6"
+        component="h3"
+        sx={{ mb: 2, textAlign: centerContent ? "center" : "left" }}
+      >
         {DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS}
       </Typography>
       {isLoading ? (
@@ -195,15 +200,17 @@ export const CasesTrendChart = ({
               )}
             </Box>
           </Box>
-          <ChartLegend
-            data={chartData.map((item) => ({
-              name: item.name,
-              value: item.value,
-              color: item.color,
-            }))}
-            isError={isError}
-            showValues
-          />
+          <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
+            <ChartLegend
+              data={chartData.map((item) => ({
+                name: item.name,
+                value: item.value,
+                color: item.color,
+              }))}
+              isError={isError}
+              showValues
+            />
+          </Box>
         </>
       )}
     </Card>

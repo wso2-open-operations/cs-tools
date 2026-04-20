@@ -46,10 +46,17 @@ const ChartLayout = ({
   engagements,
   showOperationsChart = true,
   operationsChartMode = OperationsChartMode.SrAndCr,
+  showEngagementsChart = true,
 }: ChartLayoutProps): JSX.Element => {
-  const chartSpan = showOperationsChart
-    ? DASHBOARD_CHART_SPAN
-    : { xs: 12 as const, md: 6 as const };
+  const visibleChartsCount =
+    1 + (showOperationsChart ? 1 : 0) + (showEngagementsChart ? 1 : 0);
+  const singleChartMode = visibleChartsCount === 1;
+  const chartSpan =
+    singleChartMode
+      ? ({ xs: 12 as const, md: 12 as const })
+      : showOperationsChart
+        ? DASHBOARD_CHART_SPAN
+        : ({ xs: 12 as const, md: 6 as const });
 
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -60,27 +67,32 @@ const ChartLayout = ({
           isError={isErrorOutstanding}
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
+          centerContent={singleChartMode}
         />
       </Grid>
 
       {showOperationsChart && (
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={chartSpan}>
           <ActiveCasesChart
             data={activeCases}
             isLoading={isLoading}
             isError={isErrorActiveCases}
             variant={operationsChartMode}
+            centerContent={singleChartMode}
           />
         </Grid>
       )}
 
-      <Grid size={chartSpan}>
-        <CasesTrendChart
-          data={engagements}
-          isLoading={isLoading}
-          isError={isErrorEngagements}
-        />
-      </Grid>
+      {showEngagementsChart && (
+        <Grid size={chartSpan}>
+          <CasesTrendChart
+            data={engagements}
+            isLoading={isLoading}
+            isError={isErrorEngagements}
+            centerContent={singleChartMode}
+          />
+        </Grid>
+      )}
     </Grid>
   );
 };

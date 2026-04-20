@@ -73,8 +73,7 @@ import {
 import { SecurityTabId } from "@features/security/types/security";
 import {
   filterDeploymentsForCaseCreation,
-  shouldExcludeS0,
-  shouldForceSeverityS4,
+  getProjectSeverityPolicy,
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
 import {
@@ -135,12 +134,10 @@ export default function CreateCasePage(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
-  const excludeS0 = projectDetails
-    ? shouldExcludeS0(projectDetails.type?.label)
-    : false;
-  const forceSeverityS4 = projectDetails
-    ? shouldForceSeverityS4(projectDetails.type?.label)
-    : false;
+  const severityPolicy = projectDetails
+    ? getProjectSeverityPolicy(projectDetails.type?.label)
+    : { excludeS0: false, restrictSeverityToLow: false };
+  const { excludeS0, restrictSeverityToLow: forceSeverityS4 } = severityPolicy;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
   );
@@ -539,7 +536,7 @@ export default function CreateCasePage(): JSX.Element {
     if (hasClassificationAppliedRef.current || !classificationResponse) return;
     if (isFiltersLoading || isDeploymentsLoading) return;
 
-    if (!baseDeploymentOptions.length || !severityLevelsList.length) return;
+    if (!severityLevelsList.length) return;
 
     const info = classificationResponse.caseInfo;
     const deploymentLabel = info?.environment?.trim();

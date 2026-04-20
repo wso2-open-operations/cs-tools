@@ -37,8 +37,7 @@ import { CaseType } from "@features/support/constants/supportConstants";
 import {
   calculateProjectStats,
   getProjectPermissions,
-  shouldExcludeS0,
-  shouldForceSeverityS4,
+  getProjectSeverityPolicy,
 } from "@utils/permission";
 import { StatCard } from "@features/dashboard/components/stats/StatCard";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
@@ -114,13 +113,15 @@ export default function DashboardPage(): JSX.Element {
 
   // permissions
   const permissions = useMemo(
-    () => getProjectPermissions(resolvedProject?.type?.label),
-    [resolvedProject?.type?.label],
+    () =>
+      getProjectPermissions(resolvedProject?.type?.label, {
+        hasPdpSubscription: resolvedProject?.hasPdpSubscription,
+      }),
+    [resolvedProject?.type?.label, resolvedProject?.hasPdpSubscription],
   );
 
-  // exclude S0
-  const excludeS0 = shouldExcludeS0(resolvedProject?.type?.label);
-  const restrictSeverityToLow = shouldForceSeverityS4(
+  // severity policy
+  const { excludeS0, restrictSeverityToLow } = getProjectSeverityPolicy(
     resolvedProject?.type?.label,
   );
 
@@ -180,7 +181,7 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorEngagement,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.ENGAGEMENT],
-    enabled: !!projectId,
+    enabled: !!projectId && permissions.hasEngagements,
   });
 
   // change request stats
@@ -232,6 +233,7 @@ export default function DashboardPage(): JSX.Element {
       isErrorServiceRequest,
       includeCrStats,
       isErrorChangeRequestStats,
+      includeEngagementStats: permissions.hasEngagements,
     });
 
     if (allCoreFailed && !hasShownErrorRef.current) {
@@ -252,6 +254,7 @@ export default function DashboardPage(): JSX.Element {
     isErrorChangeRequestStats,
     showOpsChart,
     includeCrStats,
+    permissions.hasEngagements,
     showError,
     logger,
     projectId,
@@ -344,6 +347,7 @@ export default function DashboardPage(): JSX.Element {
     isEngagementLoading,
     includeCrStats,
     isChangeRequestStatsLoading,
+    includeEngagementStats: permissions.hasEngagements,
   });
 
   // cr branch state
@@ -548,6 +552,7 @@ export default function DashboardPage(): JSX.Element {
         restrictSeverityToLow={restrictSeverityToLow}
         showOperationsChart={showOpsChart}
         operationsChartMode={operationsChartMode}
+        showEngagementsChart={permissions.hasEngagements}
       />
       {/* Cases Table */}
       {projectId && (
