@@ -127,14 +127,14 @@ export default function SupportPage(): JSX.Element {
   }, [stats, projectId, logger]);
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={3} sx={{ width: "100%", minWidth: 0 }}>
       <CasesOverviewStatCard
         isLoading={isActuallyLoading}
         isError={isError}
         stats={stats}
       />
-      <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
-        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>
+      <Grid container spacing={3} sx={{ alignItems: "stretch", minWidth: 0 }}>
+        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex", minWidth: 0 }}>
           <SupportOverviewCard
             title="Outstanding Cases"
             subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} support tickets`}
@@ -170,7 +170,7 @@ export default function SupportPage(): JSX.Element {
             />
           </SupportOverviewCard>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>
+        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex", minWidth: 0 }}>
           <SupportOverviewCard
             title="Chat History"
             subtitle="Recent Novera conversations"

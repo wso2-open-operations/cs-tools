@@ -21,6 +21,7 @@ import type {
   UpdateLevelsReportParams,
   UpdateLevelsReportTableRow,
 } from "@features/updates/types/updates";
+import { resolveDisplayTimeZone } from "@utils/dateTime";
 
 export type {
   UpdateLevelsReportData,
@@ -65,6 +66,7 @@ export function getUpdateLevelsReportData(params: UpdateLevelsReportParams): Upd
   }
 
   const now = new Date();
+  const displayTimeZone = resolveDisplayTimeZone();
   const generatedStr = now.toLocaleString("en-US", {
     year: "numeric",
     month: "long",
@@ -72,6 +74,7 @@ export function getUpdateLevelsReportData(params: UpdateLevelsReportParams): Upd
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: displayTimeZone,
   });
 
   const securityCount = entries.filter(([, e]) => e.updateType === "security").length;

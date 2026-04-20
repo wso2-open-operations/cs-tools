@@ -48,6 +48,12 @@ import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
+import {
+  formatBackendTimestampForDisplay,
+  normalizeUserTimeZone,
+  parseBackendTimestamp,
+  resolveDisplayTimeZone,
+} from "@utils/dateTime";
 
 /**
  * Extracts Incident and Query case type IDs from caseTypes metadata.
@@ -270,58 +276,9 @@ export function stripCustomerPrefixFromReason(reason: string): string {
   return reason.replace(/^\[Customer\]\s*/i, "").trim();
 }
 
-const CALL_REQ_SHORT_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-function padClockMinute(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /**
- * Preferred times from call-request API: wall clock with `Z` suffix (not a real UTC offset).
- */
-const CALL_REQUEST_API_LITERAL_Z_RE =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?Z$/i;
-
-function formatWallClockShort(
-  month1to12: number,
-  day: number,
-  hour24: number,
-  minute: number,
-): string {
-  if (
-    month1to12 < 1 ||
-    month1to12 > 12 ||
-    day < 1 ||
-    day > 31 ||
-    hour24 < 0 ||
-    hour24 > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return "--";
-  }
-  const mon = CALL_REQ_SHORT_MONTHS[month1to12 - 1];
-  const h12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  const ampm = hour24 < 12 ? "AM" : "PM";
-  return `${mon} ${day}, ${h12}:${padClockMinute(minute)} ${ampm}`;
-}
-
-/**
- * Formats call-request timestamps exactly as returned by the API (wall-clock), with no timezone conversion.
- * Supports literal `YYYY-MM-DDTHH:mm:ss.sssZ`, `YYYY-MM-DD HH:mm:ss`, and `MM/DD/YYYY HH:mm:ss`.
+ * Formats call-request timestamps for display in user/browser timezone.
+ * Supports `YYYY-MM-DDTHH:mm:ss.sssZ`, `YYYY-MM-DD HH:mm:ss`, and `MM/DD/YYYY HH:mm:ss`.
  *
  * @param dateStr - Raw string from the backend.
  * @returns Short English date/time or "--" if unparseable.
@@ -330,42 +287,14 @@ export function formatCallRequestBackendDateTimeShort(
   dateStr: string | null | undefined,
 ): string {
   if (!dateStr?.trim()) return "--";
-  const t = dateStr.trim();
-
-  const literalZ = CALL_REQUEST_API_LITERAL_Z_RE.exec(t);
-  if (literalZ) {
-    const mo = Number(literalZ[2]);
-    const d = Number(literalZ[3]);
-    const h = Number(literalZ[4]);
-    const mi = Number(literalZ[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  const ymd =
-    /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (ymd) {
-    const mo = Number(ymd[2]);
-    const d = Number(ymd[3]);
-    const h = Number(ymd[4]);
-    const mi = Number(ymd[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  const mdy =
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (mdy) {
-    const mo = Number(mdy[1]);
-    const d = Number(mdy[2]);
-    const h = Number(mdy[4]);
-    const mi = Number(mdy[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  return "--";
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return formatted ?? "--";
 }
 
 /**
@@ -420,34 +349,41 @@ export function formatUtcToLocal(
   userTimeZone?: string,
 ): string {
   if (!dateStr) return "--";
-  const normalized = normalizeUtcDateString(dateStr);
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return "--";
   const tzOption = includeTimeZoneName
     ? { timeZoneName: "short" as const }
     : {};
-  const tzZone = userTimeZone ? { timeZone: userTimeZone } : {};
+  const timeZone = resolveDisplayTimeZone(userTimeZone);
+  const options: Intl.DateTimeFormatOptions =
+    formatStr === "short"
+      ? {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+          ...tzOption,
+        }
+      : {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+          ...tzOption,
+        };
+
+  const formatted = formatBackendTimestampForDisplay(
+    dateStr,
+    options,
+    timeZone,
+  );
+  if (!formatted) return "--";
+
   if (formatStr === "short") {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: true,
-      ...tzOption,
-      ...tzZone,
-    }).format(date);
+    return formatted;
   }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-    ...tzOption,
-    ...tzZone,
-  }).format(date);
+  return formatted;
 }
 
 /**
@@ -475,35 +411,26 @@ export function formatDateTime(
   dateStr: string | null | undefined,
   formatStr: "short" | "long" = "long",
 ): string {
-  if (!dateStr) {
-    return "Not Available";
-  }
-
-  // Handle API date format "YYYY-MM-DD HH:mm:ss" by converting space to 'T' for ISO format
-  const normalizedDateStr = dateStr.trim().replace(" ", "T");
-  const date = new Date(normalizedDateStr);
-
-  if (isNaN(date.getTime())) {
-    return "Not Available";
-  }
-
-  if (formatStr === "short") {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: true,
-    }).format(date);
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-  }).format(date);
+  if (!dateStr) return "Not Available";
+  const options: Intl.DateTimeFormatOptions =
+    formatStr === "short"
+      ? {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+        }
+      : {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+        };
+  const formatted = formatBackendTimestampForDisplay(dateStr, options);
+  return formatted ?? "Not Available";
 }
 
 /**
@@ -514,38 +441,12 @@ export function formatDateTime(
  */
 export function formatDateOnly(dateStr: string | null | undefined): string {
   if (!dateStr) return "Not Available";
-
-  const trimmed = dateStr.trim();
-
-  // Handle YYYY-MM-DD HH:mm:ss format (standard API format for chat history and case details)
-  const standardFormat =
-    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
-  if (standardFormat) {
-    const [, year, month, day, hour, minute, second] = standardFormat;
-    const isoDate = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-    const date = new Date(isoDate);
-    if (!Number.isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(date);
-    }
-  }
-
-  // Handle ISO format (YYYY-MM-DDTHH:mm:ssZ or similar)
-  if (/T\d{2}:\d{2}/.test(trimmed)) {
-    const date = new Date(trimmed);
-    if (!Number.isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(date);
-    }
-  }
-
-  return "Not Available";
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return formatted ?? "Not Available";
 }
 
 export type ChatActionState =
@@ -687,6 +588,8 @@ export function getChatStatusAction(status: string): ChatAction {
 
   switch (true) {
     case normalized.includes("resolved"):
+    case normalized.includes("abandoned"):
+    case normalized.includes("converted"):
       return ChatAction.VIEW;
     default:
       return ChatAction.RESUME;
@@ -1249,7 +1152,8 @@ export function hasDisplayableContent(comment: CaseComment): boolean {
   const stripped = stripCodeWrapper(raw);
   const withoutLabel = stripCustomerCommentAddedLabel(stripped);
   const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
-  return textOnly.length > 0;
+  if (textOnly.length > 0) return true;
+  return /<img\b/i.test(withoutLabel);
 }
 
 export type { InlineAttachment };
@@ -1351,12 +1255,7 @@ export function replaceInlineImageSources(
  * @returns {string} Normalized string for Date constructor.
  */
 function normalizeCommentDateString(dateStr: string): string {
-  const trimmed = dateStr.trim();
-  // API sends wall-clock local time without offset; do not treat as UTC.
-  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-    return trimmed.replace(" ", "T");
-  }
-  return trimmed;
+  return dateStr.trim();
 }
 
 /**
@@ -1368,15 +1267,16 @@ function normalizeCommentDateString(dateStr: string): string {
 export function formatCommentDate(date: string | null | undefined): string {
   if (!date) return "--";
   const normalized = normalizeCommentDateString(date);
-  const d = new Date(normalized);
-  if (Number.isNaN(d.getTime())) return "--";
-  return d.toLocaleString(undefined, {
+  const d = parseBackendTimestamp(normalized);
+  if (!d) return "--";
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    timeZone: resolveDisplayTimeZone(),
+  }).format(d);
 }
 
 /**
@@ -1677,14 +1577,6 @@ export function computeMinScheduleDatetimeLocal(
 }
 
 /**
- * Filter API / profile may return IDs that are not valid for `Intl` `timeZone`
- * (e.g. WSO2/Colombo). Map those to canonical IANA zones.
- */
-const API_TIMEZONE_TO_INTL_ALIASES: Record<string, string> = {
-  "WSO2/Colombo": "Asia/Colombo",
-};
-
-/**
  * Returns an ID accepted by `Intl.DateTimeFormat` `{ timeZone }`, or null if unknown/invalid.
  *
  * @param apiTimeZone - Value from profile or filters metadata.
@@ -1692,17 +1584,7 @@ const API_TIMEZONE_TO_INTL_ALIASES: Record<string, string> = {
 function normalizeApiTimeZoneToIntlTimeZone(
   apiTimeZone: string | null | undefined,
 ): string | null {
-  const raw = apiTimeZone?.trim();
-  if (!raw) return null;
-  const candidate = API_TIMEZONE_TO_INTL_ALIASES[raw] ?? raw;
-  try {
-    Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(
-      new Date("2020-06-15T12:00:00Z"),
-    );
-    return candidate;
-  } catch {
-    return null;
-  }
+  return normalizeUserTimeZone(apiTimeZone);
 }
 
 /**
