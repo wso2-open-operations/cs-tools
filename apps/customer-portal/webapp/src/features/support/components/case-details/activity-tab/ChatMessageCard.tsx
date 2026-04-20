@@ -97,6 +97,16 @@ const markdownComponents: React.ComponentProps<
       {children}
     </Box>
   ),
+  img: ({ src = "", alt = "" }) => (
+    <Box
+      component="img"
+      src={src}
+      alt={alt}
+      tabIndex={0}
+      role="button"
+      aria-label="Open image preview"
+    />
+  ),
 };
 
 /**
@@ -116,6 +126,15 @@ export default function ChatMessageCard({
 }: ChatMessageCardProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null);
 
+  const setImageA11yAttributes = useCallback((root: HTMLDivElement) => {
+    const images = root.querySelectorAll("img");
+    images.forEach((image) => {
+      image.setAttribute("tabindex", "0");
+      image.setAttribute("role", "button");
+      image.setAttribute("aria-label", "Open image preview");
+    });
+  }, []);
+
   const handleClick = useCallback(
     (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -130,14 +149,41 @@ export default function ChatMessageCard({
     [onImageClick],
   );
 
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target instanceof HTMLImageElement &&
+        (e.key === "Enter" || e.key === " ")
+      ) {
+        const src = target.src || target.getAttribute("src");
+        if (src && onImageClick) {
+          e.preventDefault();
+          onImageClick(src);
+        }
+      }
+    },
+    [onImageClick],
+  );
+
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
+    setImageA11yAttributes(el);
     el.addEventListener("click", handleClick);
+    el.addEventListener("keydown", handleKeyDown);
     return () => {
       el.removeEventListener("click", handleClick);
+      el.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleClick]);
+  }, [
+    handleClick,
+    handleKeyDown,
+    setImageA11yAttributes,
+    htmlContent,
+    markdownContent,
+    renderAsMarkdown,
+  ]);
 
   return (
     <Paper

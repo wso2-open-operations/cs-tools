@@ -42,21 +42,33 @@ export default function ApiErrorState({
   fallbackMessage = "Something went wrong while loading data.",
   containerSx,
 }: ApiErrorStateProps): JSX.Element {
+  const baseContainerSx: SxProps<Theme> = {
+    py: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  };
+  const mergedContainerSx = (
+    containerSx ? [baseContainerSx, containerSx] : baseContainerSx
+  ) as SxProps<Theme>;
+
   if (isUnauthorizedError(error)) {
-    return <Error401Page message={getApiErrorMessage(error)} />;
+    return (
+      <Stack spacing={2} sx={mergedContainerSx}>
+        <Error401Page message={getApiErrorMessage(error)} />
+      </Stack>
+    );
   }
 
   if (isForbiddenError(error)) {
-    return <Error403Page message={getApiErrorMessage(error)} />;
+    return (
+      <Stack spacing={2} sx={mergedContainerSx}>
+        <Error403Page message={getApiErrorMessage(error)} />
+      </Stack>
+    );
   }
 
   return (
-    <Stack
-      spacing={2}
-      alignItems="center"
-      justifyContent="center"
-      sx={{ py: 4, ...containerSx }}
-    >
+    <Stack spacing={2} sx={mergedContainerSx}>
       <Box
         sx={{
           width: 160,

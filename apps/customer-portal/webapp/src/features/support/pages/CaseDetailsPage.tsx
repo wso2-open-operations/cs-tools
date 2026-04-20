@@ -73,11 +73,15 @@ export default function CaseDetailsPage(): JSX.Element {
       hasShownErrorRef.current = false;
       return;
     }
+    if (error) {
+      // In-page ApiErrorState handles this path; avoid duplicate banner noise.
+      return;
+    }
     if (!hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
       showError("Could not load case details.");
     }
-  }, [isError, showError]);
+  }, [isError, error, showError]);
 
   const handleBack = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;

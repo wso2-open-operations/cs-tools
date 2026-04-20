@@ -38,7 +38,6 @@ import { getProjectPermissions } from "@utils/permission";
 import { isClosedLikeCaseStatus, isS0Case } from "@features/support/utils/support";
 import { SortOrder } from "@/types/common";
 import type { ChatHistoryItem } from "@features/support/types/conversations";
-import ApiErrorState from "@components/error/ApiErrorState";
 
 /**
  * SupportPage component to display case details for a project.
@@ -129,16 +128,6 @@ export default function SupportPage(): JSX.Element {
       logger.debug(`Support stats loaded for project: ${projectId}`);
     }
   }, [stats, projectId, logger]);
-
-  const supportPageError = statsError ?? casesError ?? chatError;
-  if (supportPageError) {
-    return (
-      <ApiErrorState
-        error={supportPageError}
-        fallbackMessage="Failed to load support overview."
-      />
-    );
-  }
 
   return (
     <Stack spacing={3}>

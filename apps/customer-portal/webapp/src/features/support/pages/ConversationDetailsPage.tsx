@@ -278,12 +278,10 @@ export default function ConversationDetailsPage(): JSX.Element {
             ))}
           </Box>
         ) : isError ? (
-          <Box sx={{ textAlign: "center", py: 6 }}>
-            <ApiErrorState
-              error={error}
-              fallbackMessage="Could not load conversation messages."
-            />
-          </Box>
+          <ApiErrorState
+            error={error}
+            fallbackMessage="Could not load conversation messages."
+          />
         ) : messages.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No messages found for this conversation.

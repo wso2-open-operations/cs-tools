@@ -207,19 +207,6 @@ export default function CaseDetailsContent({
     location.pathname,
   ]);
 
-  if (isError && error) {
-    return (
-      <ApiErrorState
-        error={error}
-        fallbackMessage={
-          isServiceRequest
-            ? "Failed to load service request details."
-            : "Failed to load case details."
-        }
-      />
-    );
-  }
-
   useEffect(() => {
     if (!suppressFloatingNoveraOnActivityTab) {
       return;
@@ -233,6 +220,19 @@ export default function CaseDetailsContent({
     resolvedPanelIndex,
     setHideForDetailsActivityTab,
   ]);
+
+  if (isError && error) {
+    return (
+      <ApiErrorState
+        error={error}
+        fallbackMessage={
+          isServiceRequest
+            ? "Failed to load service request details."
+            : "Failed to load case details."
+        }
+      />
+    );
+  }
 
   if (isLoading) {
     return (
