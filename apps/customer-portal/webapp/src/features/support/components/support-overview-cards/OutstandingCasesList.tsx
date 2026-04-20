@@ -17,12 +17,10 @@
 import type { OutstandingCasesListProps } from "@features/support/types/supportComponents";
 import {
   Box,
-  Chip,
   Form,
   Stack,
   Tooltip,
   Typography,
-  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
@@ -35,7 +33,6 @@ import {
   formatRelativeTime,
   getAssignedEngineerLabel,
   getStatusColor,
-  getStatusIcon,
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
@@ -94,7 +91,6 @@ export default function OutstandingCasesList({
       {cases.map((c) => {
         const colorPath = getStatusColor(c.status?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
-        const StatusIcon = getStatusIcon(c.status?.label);
 
         return (
           <Form.CardButton
@@ -124,28 +120,20 @@ export default function OutstandingCasesList({
                   >
                     {c.number}
                   </Typography>
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={c.status?.label ?? NULL_PLACEHOLDER}
-                    icon={<StatusIcon size={12} />}
-                    sx={{
-                      bgcolor: alpha(resolvedColor, 0.1),
-                      color: resolvedColor,
-                      height: 20,
-                      fontSize: "0.75rem",
-                      px: 0,
-                      "& .MuiChip-icon": {
-                        color: "inherit",
-                        ml: "6px",
-                        mr: "6px",
-                      },
-                      "& .MuiChip-label": {
-                        pl: 0,
-                        pr: "6px",
-                      },
-                    }}
-                  />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        bgcolor: resolvedColor,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ color: resolvedColor }}>
+                      {c.status?.label ?? NULL_PLACEHOLDER}
+                    </Typography>
+                  </Box>
                 </Stack>
               }
             />

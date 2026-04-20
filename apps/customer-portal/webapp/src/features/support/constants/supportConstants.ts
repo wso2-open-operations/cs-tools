@@ -323,7 +323,7 @@ export const CASE_STATUS_ACTIONS: CaseStatusAction[] = [
 export const SUPPORT_OVERVIEW_CASES_LIMIT = 5;
 
 // Number of chat history items to show on support overview cards.
-export const SUPPORT_OVERVIEW_CHAT_LIMIT = 5;
+export const SUPPORT_OVERVIEW_CHAT_LIMIT = 7;
 
 // Number of service requests / change requests to show on operations overview cards.
 export const OPERATIONS_OVERVIEW_LIST_LIMIT = 5;

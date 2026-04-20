@@ -20,21 +20,17 @@ import {
   Button,
   CardActions,
   CardContent,
-  Chip,
   Form,
   Stack,
   Typography,
-  alpha,
-  type Theme,
 } from "@wso2/oxygen-ui";
-import { Bot, Clock, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
+import { Bot, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { ChatAction } from "@features/support/constants/supportConstants";
 import {
   getChatActionColor,
   getChatStatusAction,
-  getStatusColor,
-  resolveColorFromTheme,
+  getConversationStatusColor,
   formatDateTime,
 } from "@features/support/utils/support";
 import ChatHistorySkeleton from "@features/support/components/support-overview-cards/ChatHistorySkeleton";
@@ -92,7 +88,7 @@ export default function ChatHistoryList({
     >
       {items.map((item) => {
         const action = getChatStatusAction(item.status);
-        const chipColorPath = getStatusColor(item.status);
+        const statusColorPath = getConversationStatusColor(item.status);
 
         return (
           <Form.CardButton
@@ -163,30 +159,20 @@ export default function ChatHistoryList({
             </CardContent>
 
             <CardActions sx={{ p: 0, justifyContent: "space-between" }}>
-              <Chip
-                size="small"
-                variant="outlined"
-                label={item.status}
-                icon={<Clock size={12} />}
-                sx={{
-                  bgcolor: (theme: Theme) =>
-                    alpha(resolveColorFromTheme(chipColorPath, theme), 0.1),
-                  color: chipColorPath,
-                  px: 0,
-                  height: 20,
-                  fontSize: "0.75rem",
-                  "& .MuiChip-icon": {
-                    color: "inherit",
-                    ml: "6px",
-                    mr: "6px",
-                    marginTop: "-1px",
-                  },
-                  "& .MuiChip-label": {
-                    pl: 0,
-                    pr: "6px",
-                  },
-                }}
-              />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    bgcolor: statusColorPath,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                  }}
+                />
+                <Typography variant="caption" sx={{ color: statusColorPath }}>
+                  {item.status}
+                </Typography>
+              </Box>
               <Button
                 size="small"
                 variant="text"

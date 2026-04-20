@@ -85,8 +85,7 @@ export default function SupportOverviewCard({
           p: 2.5,
           display: "flex",
           flexDirection: "column",
-          gap: 2,
-          height: "100%",
+          gap: 1.5,
           width: "100%",
         },
         ...(Array.isArray(sx) ? sx : [sx]),
@@ -132,7 +131,6 @@ export default function SupportOverviewCard({
           display: "flex",
           flexDirection: "column",
           gap: 1.5,
-          flex: 1,
           width: "100%",
           justifyContent: isError ? "center" : "flex-start",
           alignItems: isError ? "center" : "stretch",
@@ -149,8 +147,6 @@ export default function SupportOverviewCard({
         sx={{
           borderTop: 1,
           borderColor: "divider",
-          pt: 2,
-          mt: 1,
         }}
       />
       {footerButtons && footerButtons.length > 0 ? (
