@@ -345,7 +345,7 @@ export type CaseSearchRequest = SearchRequestBase & {
 // Request type for case classification.
 export type CaseClassificationRequest = SharedEnvContext & {
   chatHistory: string;
-  projectId: string;
+  projectTypeId: string;
 };
 
 // Request type for patching a case.

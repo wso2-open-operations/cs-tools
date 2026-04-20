@@ -39,9 +39,17 @@ async function fetchAttachmentDataUrl(
   );
   if (!response.ok) return null;
   const data = (await response.json()) as AttachmentDownloadResponse;
-  if (!data.content) return null;
-  if (data.content.startsWith("data:")) return data.content;
-  return `data:${data.type ?? "image/png"};base64,${data.content}`;
+  if (!data.content || typeof data.content !== "string") return null;
+  // Reject pre-built data URLs; require raw base64.
+  if (data.content.startsWith("data:")) return null;
+  const stripped = data.content.replace(/\s/g, "");
+  if (!stripped || !/^[A-Za-z0-9+/]+=*$/.test(stripped)) return null;
+  // Validate MIME type against safe image subtypes only.
+  const rawType = typeof data.type === "string" ? data.type.trim().toLowerCase() : "";
+  const safeType = /^image\/(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/.test(rawType)
+    ? rawType
+    : "image/png";
+  return `data:${safeType};base64,${stripped}`;
 }
 
 /**

@@ -16,7 +16,7 @@
 
 import { Box, Skeleton } from "@wso2/oxygen-ui";
 import type { SxProps, Theme } from "@wso2/oxygen-ui";
-import type { JSX } from "react";
+import type { JSX, KeyboardEvent } from "react";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 
 interface AuthenticatedImageProps {
@@ -52,6 +52,19 @@ export default function AuthenticatedImage({
 
   if (!dataUrl) return <></>;
 
+  const interactiveProps = onClick
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        },
+      }
+    : {};
+
   return (
     <Box
       component="img"
@@ -59,6 +72,7 @@ export default function AuthenticatedImage({
       alt={alt}
       loading="lazy"
       onClick={onClick}
+      {...interactiveProps}
       sx={{
         display: "block",
         maxWidth: "100%",
