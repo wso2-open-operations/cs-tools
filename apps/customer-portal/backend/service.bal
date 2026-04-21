@@ -66,7 +66,7 @@ http:ListenerConfiguration listenerConf = {
 }
 service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     public function createInterceptors() returns http:Interceptor[] =>
-        [new authorization:JwtInterceptor(), new ErrorInterceptor()];
+        [new authorization:JwtInterceptor(), new authorization:ResponseInterceptor(), new ErrorInterceptor()];
 
     # Service init function.
     #

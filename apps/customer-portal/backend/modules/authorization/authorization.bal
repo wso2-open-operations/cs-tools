@@ -141,3 +141,17 @@ public isolated service class JwtInterceptor {
         return ctx.next();
     }
 }
+
+# Response interceptor to add security headers for the response.
+public isolated service class ResponseInterceptor {
+    *http:ResponseInterceptor;
+
+    isolated remote function interceptResponse(http:RequestContext ctx, http:Response res)
+        returns http:NextService|error? {
+
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Content-Security-Policy", "upgrade-insecure-requests");
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        return ctx.next();
+    }
+}
