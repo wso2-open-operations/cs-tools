@@ -254,6 +254,32 @@ public type UpdatedUser record {|
     string timeZone?;
 |};
 
+# Project feature access configuration.
+public type ProjectFeatures record {|
+    # Severities available for the feature
+    ReferenceItem[] acceptedSeverityValues;
+    # Indicates if service request write access is enabled
+    boolean hasServiceRequestWriteAccess;
+    # Indicates if service request read access is enabled
+    boolean hasServiceRequestReadAccess;
+    # Indicates if SRA write access is enabled
+    boolean hasSraWriteAccess;
+    # Indicates if SRA read access is enabled
+    boolean hasSraReadAccess;
+    # Indicates if change request read access is enabled
+    boolean hasChangeRequestReadAccess;
+    # Indicates if engagements read access is enabled
+    boolean hasEngagementsReadAccess;
+    # Indicates if updates read access is enabled
+    boolean hasUpdatesReadAccess;
+    # Indicates if time logs read access is enabled
+    boolean hasTimeLogsReadAccess;
+    # Indicates if deployment write access is enabled
+    boolean hasDeploymentWriteAccess;
+    # Indicates if deployment read access is enabled
+    boolean hasDeploymentReadAccess;
+|};
+
 # Project filter options.
 public type ProjectFilterOptions record {|
     # List of case states
@@ -282,6 +308,7 @@ public type ProjectFilterOptions record {|
     ReferenceItem[] engagementPaymentTypes;
     # Severity based allocation time mapping (severity ID to allocation time in minutes)
     map<int> severityBasedAllocationTime;
+
 |};
 
 # Project data.

@@ -1370,7 +1370,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + return - Case filters or error
     resource function get projects/[entity:IdString id]/filters(http:RequestContext ctx)
-        returns types:ProjectFilterOptions|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns types:ProjectFilterOptions|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -1402,6 +1402,15 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 };
             }
 
+            if getStatusCode(projectMetadata) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
             string customError = "Failed to retrieve project filters.";
             log:printError(customError, projectMetadata);
             return <http:InternalServerError>{
@@ -1412,6 +1421,64 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         }
 
         return getProjectFilters(projectMetadata);
+    }
+
+    # Get features for a project.
+    #
+    # + id - ID of the project
+    # + return - Project features or error
+    resource function get projects/[entity:IdString id]/features(http:RequestContext ctx)
+        returns types:ProjectFeatures|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:ProjectMetadataResponse|error projectMetadata = entity:getProjectMetadata(userInfo.idToken, id);
+        if projectMetadata is error {
+            if getStatusCode(projectMetadata) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            if getStatusCode(projectMetadata) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to access project features for project: ${
+                        id}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to access the features for the selected project."
+                    }
+                };
+            }
+
+            if getStatusCode(projectMetadata) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${id} not found for user: ${userInfo.userId}`);
+                return <http:NotFound>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project features.";
+            log:printError(customError, projectMetadata);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        return getProjectFeatures(projectMetadata);
     }
 
     # Classify the case using AI chat agent.
