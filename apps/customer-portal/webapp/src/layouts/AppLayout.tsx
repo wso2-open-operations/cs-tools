@@ -56,7 +56,8 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
   const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading } = useAsgardeo();
-  const { error: userDetailsError } = useGetUserDetails();
+  const { error: userDetailsError, isLoading: isUserDetailsLoading } =
+    useGetUserDetails();
 
   // Scroll to top on route change
   useEffect(() => {
@@ -222,7 +223,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                       : { p: 3 }),
                 }}
               >
-                {isAuthLoading ? (
+                {isAuthLoading || isUserDetailsLoading ? (
                   <Box
                     sx={{
                       flex: 1,
