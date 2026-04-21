@@ -58,13 +58,20 @@ export default function AnnouncementsPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
-  const sessionPrefix = `${projectId ?? ""}-announcements`;
+  const sessionPrefix = `${projectId ?? "unknown"}-announcements`;
+  const validSortFields = Object.values(AnnouncementSortField) as string[];
+  const isValidAnnouncementSortField = (v: unknown): v is AnnouncementSortField =>
+    typeof v === "string" && validSortFields.includes(v);
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useSessionState<AnnouncementFilterValues>(`${sessionPrefix}-filters`, {});
-  const [sortField, setSortField] = useSessionState<AnnouncementSortField>(`${sessionPrefix}-sortField`, AnnouncementSortField.CreatedOn);
+  const [sortField, setSortField] = useSessionState<AnnouncementSortField>(
+    `${sessionPrefix}-sortField`,
+    AnnouncementSortField.CreatedOn,
+    isValidAnnouncementSortField,
+  );
   const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1);
   const pageSize = ANNOUNCEMENTS_PAGE_SIZE;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
@@ -94,7 +101,9 @@ export default function AnnouncementsPage(): JSX.Element {
   };
 
   const handleSortFieldChange = (value: string) => {
-    setSortField(value as AnnouncementSortField);
+    if (isValidAnnouncementSortField(value)) {
+      setSortField(value);
+    }
     setPage(1);
   };
 

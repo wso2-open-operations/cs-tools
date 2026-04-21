@@ -38,6 +38,7 @@ export enum AnnouncementFilterMetadataKey {
 export type AnnouncementSortOption = {
   value: AnnouncementSortField;
   label: string;
+  kind?: "chronological" | "ordinal";
 };
 
 /** Label/value pair for announcement filter dropdowns (`ListFiltersPanel`, `AnnouncementsFilters`). */
