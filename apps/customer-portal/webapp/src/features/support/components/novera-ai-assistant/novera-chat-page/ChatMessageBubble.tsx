@@ -15,7 +15,7 @@
 // under the License.
 
 import type { ChatMessageBubbleProps } from "@features/support/types/supportComponents";
-import { Box, Paper, Typography, alpha } from "@wso2/oxygen-ui";
+import { Avatar, Box, Paper, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { Bot, User } from "@wso2/oxygen-ui-icons-react";
 import MarkdownIt from "markdown-it";
 import { type JSX, useEffect, useMemo, useRef } from "react";
@@ -170,234 +170,188 @@ export default function ChatMessageBubble({
     // formattedDateTime remains "--"
   }
 
+  const theme = useTheme();
+  const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
+  const primaryBg = alpha(primaryLight, 0.1);
+
   if (isUser) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-end",
-          gap: 0.5,
-        }}
-      >
-        {/* User name display */}
-        <Box
+      <Stack direction="row" alignItems="flex-start" sx={{ flexDirection: "row-reverse", gap: 2 }}>
+        <Avatar
           sx={{
-            display: "flex",
-            justifyContent: "flex-end",
-            pr: (theme) => `calc(${theme.spacing(4)} + ${theme.spacing(1.5)})`,
-            mb: 0.5,
+            width: 32,
+            height: 32,
+            fontSize: "0.75rem",
+            flexShrink: 0,
+            bgcolor: primaryBg,
+            color: theme.palette.primary.main,
           }}
         >
-          <Typography variant="caption" sx={{ fontWeight: 600, color: "text.primary" }}>
-            {message.createdBy || "You"}
-          </Typography>
-        </Box>
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 1.5,
-            alignItems: "flex-end",
-            maxWidth: "80%",
-          }}
-        >
-          <Box sx={{ maxWidth: "100%" }}>
-            <Paper
-              sx={{
-                p: 2,
-                bgcolor: "action.hover",
-                color: "text.primary",
-                borderRadius: (theme) =>
-                  `${theme.spacing(2)} ${theme.spacing(2)} ${theme.spacing(0.5)} ${theme.spacing(2)}`,
-                boxShadow: "none",
-                border: "1px solid",
-                borderColor: "divider",
-              }}
-            >
-              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
-                {displayText}
-              </Typography>
-            </Paper>
-          </Box>
-          <Paper
-            sx={{
-              width: (theme) => theme.spacing(4),
-              height: (theme) => theme.spacing(4),
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              bgcolor: "primary.lighter",
-              color: "primary.main",
-            }}
-          >
-            <User size={16} />
-          </Paper>
-        </Box>
-        {/* Date and time sit under the bubble, aligned to its right edge (not under the icon) */}
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "flex-end",
-            pr: (theme) => `calc(${theme.spacing(4)} + ${theme.spacing(1.5)})`,
-          }}
-        >
-          <Typography variant="caption" color="text.secondary">
-            {formattedDateTime}
-          </Typography>
-        </Box>
-      </Box>
-    );
-  }
-
-  const hideBotIdentityLabel = message.showFeedbackActions === false;
-
-  // Bot message - new custom layout
-  return (
-    <Box sx={{ maxWidth: "80%" }}>
-      <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
-          <Box
-            sx={{
-              width: 24,
-              height: 24,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <Bot size={16} color="white" />
-          </Box>
-          {!hideBotIdentityLabel && (
-            <Typography
-              variant="body2"
-              sx={{ fontWeight: 600, color: "text.primary" }}
-            >
-              {NOVERA_DISPLAY_NAME}
+          <User size={14} />
+        </Avatar>
+        <Stack spacing={0.75} sx={{ minWidth: 0, alignItems: "flex-end" }}>
+          <Stack direction="row" alignItems="center" sx={{ flexDirection: "row-reverse", gap: 1 }}>
+            <Typography variant="body2" color="text.primary" fontWeight={500}>
+              {message.createdBy || "You"}
             </Typography>
-          )}
-        </Box>
-
-        {/* Message content */}
-        {message.isError ? (
-          <Typography variant="body2" color="error.main">
-            {displayText}
-          </Typography>
-        ) : showThinkingStreamFrame ? (
-          <Paper
-            sx={(theme) => ({
-              position: "relative",
-              mt: 2.5,
-              bgcolor: alpha(theme.palette.text.primary, 0.03),
-              px: 2,
-              py: 2,
-              pt: 2.25,
-            })}
-            aria-busy={message.isStreaming ? true : undefined}
-          >
-            <Typography
-              component="span"
-              variant="caption"
-              sx={{
-                position: "absolute",
-                top: -10,
-                px: 1,
-                lineHeight: 1.2,
-                fontWeight: 600,
-                color: "text.primary",
-                bgcolor: "background.paper",
-                borderRadius: 1,
-              }}
-            >
-              Thinking
-              <Box component="span" aria-hidden sx={thinkingLegendDotsSx}>
-                ...
-              </Box>
-            </Typography>
-            <Box aria-live="polite">
-              {showLiveThinkingStatus && (
-                <Typography
-                  variant="body2"
-                  sx={(theme) => ({
-                    color: "primary.main",
-                    whiteSpace: "pre-wrap",
-                    lineHeight: STREAM_LINE_HEIGHT,
-                    mb: 0.5,
-                    backgroundImage: `linear-gradient(90deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 30%, ${theme.palette.primary.light} 55%, ${theme.palette.primary.main} 80%, ${theme.palette.primary.dark} 100%)`,
-                    ...primaryWaveTextSx,
-                  })}
-                >
-                  {liveThinkingStatus}
-                </Typography>
-              )}
-              {message.isStreaming && (
-                <Typography
-                  component="div"
-                  variant="body2"
-                  ref={streamContainerRef}
-                  sx={{
-                    whiteSpace: "pre-wrap",
-                    lineHeight: STREAM_LINE_HEIGHT,
-                    m: 0,
-                    mt: 0.5,
-                    color: "text.primary",
-                    maxHeight: `${STREAM_MAX_HEIGHT_EM}em`,
-                    overflowY: "auto",
-                  }}
-                >
-                  {streamBodyText}
-                </Typography>
-              )}
-            </Box>
-          </Paper>
-        ) : (
-          <Box
-            sx={{
-              "& h1:first-of-type, & h2:first-of-type, & h3:first-of-type, & p:first-of-type":
-                { mt: 0 },
-            }}
-            className="prose prose-sm max-w-none text-gray-800"
-          >
-            <MarkdownContent text={displayText} />
-            {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-              <Box sx={{ mt: 1 }}>
-                {message.thinkingSteps.map((step, idx) => (
-                  <Typography
-                    key={`${message.id}-thinking-${idx}`}
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block" }}
-                  >
-                    {`• ${step}`}
-                  </Typography>
-                ))}
-              </Box>
-            )}
-          </Box>
-        )}
-
-        {/* Date and time display — show for final responses */}
-        {!hideFeedbackRow && (
-          <Box sx={{ mt: 1.5 }}>
             <Typography variant="caption" color="text.secondary">
               {formattedDateTime}
             </Typography>
-          </Box>
-        )}
+          </Stack>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 1.25,
+              bgcolor: primaryBg,
+              color: "text.primary",
+              boxShadow: "none",
+            }}
+          >
+            <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+              {displayText}
+            </Typography>
+          </Paper>
+        </Stack>
+      </Stack>
+    );
+  }
 
-      </Box>
+  // Bot message
+  return (
+    <Box>
+      <Stack direction="row" alignItems="flex-start" sx={{ gap: 2 }}>
+        <Box
+          sx={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Bot size={16} color="white" />
+        </Box>
+        <Stack spacing={0.75} sx={{ minWidth: 0, flex: 1 }}>
+          <Stack direction="row" alignItems="center" sx={{ gap: 1 }}>
+            <Typography variant="body2" color="text.primary" fontWeight={500}>
+              {NOVERA_DISPLAY_NAME}
+            </Typography>
+            {!hideFeedbackRow && (
+              <Typography variant="caption" color="text.secondary">
+                {formattedDateTime}
+              </Typography>
+            )}
+          </Stack>
+
+          {/* Message content */}
+          <Box>
+            {message.isError ? (
+              <Typography variant="body2" color="error.main">
+                {displayText}
+              </Typography>
+            ) : showThinkingStreamFrame ? (
+              <Paper
+                sx={(t) => ({
+                  position: "relative",
+                  bgcolor: alpha(t.palette.text.primary, 0.03),
+                  px: 2,
+                  py: 2,
+                  pt: 2.25,
+                })}
+                aria-busy={message.isStreaming ? true : undefined}
+              >
+                <Typography
+                  component="span"
+                  variant="caption"
+                  sx={{
+                    position: "absolute",
+                    top: -10,
+                    px: 1,
+                    lineHeight: 1.2,
+                    fontWeight: 600,
+                    color: "text.primary",
+                    bgcolor: "background.paper",
+                    borderRadius: 1,
+                  }}
+                >
+                  Thinking
+                  <Box component="span" aria-hidden sx={thinkingLegendDotsSx}>
+                    ...
+                  </Box>
+                </Typography>
+                <Box aria-live="polite">
+                  {showLiveThinkingStatus && (
+                    <Typography
+                      variant="body2"
+                      sx={(t) => ({
+                        color: "primary.main",
+                        whiteSpace: "pre-wrap",
+                        lineHeight: STREAM_LINE_HEIGHT,
+                        mb: 0.5,
+                        backgroundImage: `linear-gradient(90deg, ${t.palette.primary.dark} 0%, ${t.palette.primary.main} 30%, ${t.palette.primary.light} 55%, ${t.palette.primary.main} 80%, ${t.palette.primary.dark} 100%)`,
+                        ...primaryWaveTextSx,
+                      })}
+                    >
+                      {liveThinkingStatus}
+                    </Typography>
+                  )}
+                  {message.isStreaming && (
+                    <Typography
+                      component="div"
+                      variant="body2"
+                      ref={streamContainerRef}
+                      sx={{
+                        whiteSpace: "pre-wrap",
+                        lineHeight: STREAM_LINE_HEIGHT,
+                        m: 0,
+                        mt: 0.5,
+                        color: "text.primary",
+                        maxHeight: `${STREAM_MAX_HEIGHT_EM}em`,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {streamBodyText}
+                    </Typography>
+                  )}
+                </Box>
+              </Paper>
+            ) : (
+              <Box
+                sx={{
+                  "& h1:first-of-type, & h2:first-of-type, & h3:first-of-type, & p:first-of-type":
+                    { mt: 0 },
+                }}
+              >
+                <MarkdownContent text={displayText} />
+                {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    {message.thinkingSteps.map((step, idx) => (
+                      <Typography
+                        key={`${message.id}-thinking-${idx}`}
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: "block" }}
+                      >
+                        {`• ${step}`}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )}
+          </Box>
+        </Stack>
+      </Stack>
 
       {/* Recommendations - shown after message content */}
-      {!isUser &&
-        message.recommendations &&
-        message.recommendations.length > 0 && (
+      {message.recommendations && message.recommendations.length > 0 && (
+        <Box sx={{ ml: "48px", mt: 1 }}>
           <RecommendationsCard recommendations={message.recommendations} />
-        )}
+        </Box>
+      )}
     </Box>
   );
 }
