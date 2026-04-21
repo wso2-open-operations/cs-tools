@@ -49,7 +49,12 @@ export default function ErrorPage({
         />
 
         {description && (
-          <Typography variant="body1" color="text.secondary" textAlign="center">
+          <Typography
+            variant="body1"
+            color="text.secondary"
+            textAlign="center"
+            sx={{ whiteSpace: "pre-line" }}
+          >
             {description}
           </Typography>
         )}
