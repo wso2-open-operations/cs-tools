@@ -19,7 +19,6 @@ import {
   Button,
   Card,
   CardContent,
-  Paper,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
