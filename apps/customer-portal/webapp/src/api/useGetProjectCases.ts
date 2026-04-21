@@ -49,7 +49,7 @@ export default function useGetProjectCases(
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  const limit = options?.pageSize ?? 10;
+  const limit = Math.max(1, Math.floor(options?.pageSize ?? 10));
 
   return useInfiniteQuery<CaseSearchResponse, Error>({
     queryKey: [ApiQueryKeys.PROJECT_CASES, projectId, baseRequest, limit],
@@ -102,7 +102,7 @@ export default function useGetProjectCases(
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage) => {
-      const nextOffset = lastPage.offset + limit;
+      const nextOffset = lastPage.offset + (lastPage.limit ?? limit);
       return nextOffset < lastPage.totalRecords ? nextOffset : undefined;
     },
     enabled:

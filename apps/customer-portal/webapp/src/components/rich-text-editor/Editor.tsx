@@ -226,6 +226,7 @@ const Editor = ({
   toolbarVariant?: ToolbarVariant;
   /** When provided, Ctrl+Enter / Cmd+Enter triggers submit; plain Enter stays in the editor (lists, paragraphs). */
   onSubmitKeyDown?: () => void;
+  enterToSubmit?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
