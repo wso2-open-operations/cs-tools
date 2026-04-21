@@ -34,7 +34,6 @@ import {
   CaseStatus,
   CallRequestStatus,
   CaseType,
-  CaseSeverityLevel,
   type CaseTypeInput,
 } from "@features/support/constants/supportConstants";
 import { CaseReportType } from "@features/security/types/security";
@@ -949,17 +948,18 @@ export function isS0Case(caseItem: {
  */
 export function getSeverityColor(label?: string): string {
   const normalized = mapSeverityToDisplay(label);
-  const upper = normalized.toUpperCase();
-  switch (upper) {
+  // Strip any parenthetical suffix (e.g. "S4(Query)" → "S4") before comparing.
+  const token = normalized.replace(/\s*\(.*$/, "").toUpperCase();
+  switch (token) {
     case "S0":
       return "error.main";
-    case CaseSeverityLevel.S1:
+    case "S1":
       return "warning.main";
-    case CaseSeverityLevel.S2:
+    case "S2":
       return "info.main";
-    case CaseSeverityLevel.S3:
+    case "S3":
       return "secondary.main";
-    case CaseSeverityLevel.S4:
+    case "S4":
       return "success.main";
     default:
       return "text.primary";
@@ -1871,5 +1871,5 @@ export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";
 /** Hide terminal states from the Outstanding Cases overview list only. */
 export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {
   const normalized = statusLabel?.trim().toLowerCase() ?? "";
-  return normalized === CASE_STATUS.CLOSED;
+  return normalized === CASE_STATUS.CLOSED.toLowerCase();
 }

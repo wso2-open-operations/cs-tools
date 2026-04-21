@@ -67,6 +67,9 @@ export default function SupportPage(): JSX.Element {
     data,
     isLoading: isCasesLoading,
     isError: isCasesError,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
   } = useGetProjectCases(
     projectId || "",
     {
@@ -91,13 +94,14 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const rawCases =
-    data?.pages?.[0]?.cases
-      ?.filter((c) => !isClosedLikeCaseStatus(c.status?.label))
-      .slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
-  const cases = !includeS0InSupportMetrics
-    ? rawCases.filter((c) => !isS0Case(c))
-    : rawCases;
+  const allFetchedCases = data?.pages.flatMap((p) => p.cases) ?? [];
+  const openCases = allFetchedCases.filter(
+    (c) => !isClosedLikeCaseStatus(c.status?.label),
+  );
+  const openCasesFiltered = !includeS0InSupportMetrics
+    ? openCases.filter((c) => !isS0Case(c))
+    : openCases;
+  const cases = openCasesFiltered.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT);
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??
@@ -111,6 +115,17 @@ export default function SupportPage(): JSX.Element {
     kbArticles: 0,
     status: c.state?.label ?? "Open",
   }));
+
+  useEffect(() => {
+    if (
+      !isCasesLoading &&
+      !isFetchingNextPage &&
+      hasNextPage &&
+      openCasesFiltered.length < SUPPORT_OVERVIEW_CASES_LIMIT
+    ) {
+      void fetchNextPage();
+    }
+  }, [isCasesLoading, isFetchingNextPage, hasNextPage, openCasesFiltered.length, fetchNextPage]);
 
   const isActuallyLoading = isAuthLoading || isLoading || (!stats && !isError);
 

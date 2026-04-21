@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, useCallback } from "react";
+import { type Dispatch, type SetStateAction, useState, useEffect } from "react";
 
 /**
  * Drop-in replacement for `useState` that persists the value to `sessionStorage`.
@@ -22,37 +22,37 @@ import { useState, useCallback } from "react";
  *
  * @param key - Unique storage key (include projectId to avoid cross-project leakage).
  * @param defaultValue - Initial value when nothing is stored yet.
+ * @param validate - Optional type guard; if provided, stored values that fail the
+ *   check are discarded and `defaultValue` is used instead (protects against stale
+ *   or migrated enum values in storage).
  */
 export function useSessionState<T>(
   key: string,
   defaultValue: T,
-): [T, (value: T | ((prev: T) => T)) => void] {
+  validate?: (value: unknown) => value is T,
+): [T, Dispatch<SetStateAction<T>>] {
   const [state, setState] = useState<T>(() => {
     try {
       const stored = sessionStorage.getItem(key);
-      return stored !== null ? (JSON.parse(stored) as T) : defaultValue;
+      if (stored !== null) {
+        const parsed: unknown = JSON.parse(stored);
+        if (!validate || validate(parsed)) {
+          return parsed as T;
+        }
+      }
     } catch {
-      return defaultValue;
+      // ignore parse / storage errors
     }
+    return defaultValue;
   });
 
-  const setSessionState = useCallback(
-    (value: T | ((prev: T) => T)) => {
-      setState((prev) => {
-        const next =
-          typeof value === "function"
-            ? (value as (prev: T) => T)(prev)
-            : value;
-        try {
-          sessionStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          // ignore quota / private-browsing errors
-        }
-        return next;
-      });
-    },
-    [key],
-  );
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // ignore quota / private-browsing errors
+    }
+  }, [key, state]);
 
-  return [state, setSessionState];
+  return [state, setState];
 }
