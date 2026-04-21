@@ -114,6 +114,8 @@ public type Project record {|
     string? description;
     # Project type
     ReferenceTableItem 'type;
+    # Closure state
+    string? closureState;
     # Indicates whether the project has a PDP subscription
     boolean hasPdpSubscription;
     # Agent enabled status for the project
@@ -166,6 +168,8 @@ public type ProjectResponse record {|
     ReferenceTableItem 'type;
     # Salesforce ID
     string sfId;
+    # Closure state
+    string? closureState;
     # Indicates whether the project has a PDP subscription
     boolean hasPdpSubscription;
     # Project start date
@@ -2025,9 +2029,9 @@ public type ChangeRequestResponse record {|
     string? rollbackPlan;
     # Test plan
     string? testPlan;
-    # Indicates if the customer has approved
+    # Indicates if the customer has permission to approve
     boolean hasCustomerApproved;
-    # Indicates if the customer has reviewed
+    # Indicates if the customer has permission to reviewe
     boolean hasCustomerReviewed;
     # Internal approval details
     ReferenceTableItem? approvedBy;

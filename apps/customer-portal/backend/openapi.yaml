@@ -2695,10 +2695,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -3485,10 +3487,10 @@ components:
             nullable: true
           hasCustomerApproved:
             type: boolean
-            description: Indicates if the customer has approved
+            description: Indicates if the customer has permission to approve
           hasCustomerReviewed:
             type: boolean
-            description: Indicates if the customer has reviewed
+            description: Indicates if the customer has permission to review
           approvedBy:
             description: Internal approval details
             nullable: true
@@ -4822,6 +4824,7 @@ components:
     ProjectResponse:
       required:
       - account
+      - closureState
       - consumedOnboardingHours
       - consumedQueryHours
       - createdOn
@@ -4864,6 +4867,10 @@ components:
         sfId:
           type: string
           description: Salesforce ID
+        closureState:
+          type: string
+          description: Closure state
+          nullable: true
         hasPdpSubscription:
           type: boolean
           description: Indicates whether the project has a PDP subscription
