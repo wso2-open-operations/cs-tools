@@ -17,9 +17,8 @@
 import type { ChatMessageBubbleProps } from "@features/support/types/supportComponents";
 import { Box, Paper, Typography, alpha } from "@wso2/oxygen-ui";
 import { Bot, User } from "@wso2/oxygen-ui-icons-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { type JSX, useEffect, useRef } from "react";
+import MarkdownIt from "markdown-it";
+import { type JSX, useEffect, useMemo, useRef } from "react";
 import { ChatSender } from "@features/support/types/conversations";
 import {
   NOVERA_ANALYZING_PLACEHOLDER_TEXT,
@@ -73,131 +72,33 @@ function isSafeHref(href: string | undefined): href is string {
   }
 }
 
-/** Typography mapping for markdown elements (bot messages). */
-const markdownComponents: React.ComponentProps<
-  typeof ReactMarkdown
->["components"] = {
-  h1: ({ children }) => (
-    <Typography
-      variant="h6"
-      component="h1"
-      sx={{ mt: 2, mb: 1, fontWeight: 600 }}
-    >
-      {children}
-    </Typography>
-  ),
-  h2: ({ children }) => (
-    <Typography
-      variant="subtitle1"
-      component="h2"
-      sx={{ mt: 2, mb: 1, fontWeight: 600 }}
-    >
-      {children}
-    </Typography>
-  ),
-  h3: ({ children }) => (
-    <Typography
-      variant="subtitle2"
-      component="h3"
-      sx={{ mt: 1.5, mb: 0.5, fontWeight: 600 }}
-    >
-      {children}
-    </Typography>
-  ),
-  p: ({ children }) => (
-    <Typography variant="body2" component="p" sx={{ mb: 1, lineHeight: 1.6 }}>
-      {children}
-    </Typography>
-  ),
-  ul: ({ children }) => (
-    <Box component="ul" sx={{ m: 0, pl: 2.5, mb: 1 }}>
-      {children}
-    </Box>
-  ),
-  ol: ({ children }) => (
-    <Box component="ol" sx={{ m: 0, pl: 2.5, mb: 1 }}>
-      {children}
-    </Box>
-  ),
-  li: ({ children }) => (
-    <Typography
-      variant="body2"
-      component="li"
-      sx={{ mb: 0.5, lineHeight: 1.6 }}
-    >
-      {children}
-    </Typography>
-  ),
-  strong: ({ children }) => (
-    <Box component="strong" sx={{ fontWeight: 600 }}>
-      {children}
-    </Box>
-  ),
-  a: ({ href, children }) =>
-    isSafeHref(href) ? (
-      <Typography
-        component="a"
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        variant="body2"
-        sx={{ color: "primary.main", textDecoration: "underline" }}
-      >
-        {children}
-      </Typography>
-    ) : (
-      <Typography variant="body2" component="span">
-        {children}
-      </Typography>
-    ),
-  table: ({ children }) => (
-    <Box sx={{ width: "100%", overflowX: "auto", mb: 1 }}>
-      <Box
-        component="table"
-        sx={{
-          width: "100%",
-          borderCollapse: "collapse",
-          minWidth: 420,
-        }}
-      >
-        {children}
-      </Box>
-    </Box>
-  ),
-  thead: ({ children }) => <Box component="thead">{children}</Box>,
-  tbody: ({ children }) => <Box component="tbody">{children}</Box>,
-  tr: ({ children }) => (
-    <Box component="tr" sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-      {children}
-    </Box>
-  ),
-  th: ({ children }) => (
-    <Box
-      component="th"
-      sx={{
-        textAlign: "left",
-        p: 1,
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        color: "text.secondary",
-      }}
-    >
-      {children}
-    </Box>
-  ),
-  td: ({ children }) => (
-    <Box
-      component="td"
-      sx={{
-        p: 1,
-        fontSize: "0.8125rem",
-        verticalAlign: "top",
-      }}
-    >
-      {children}
-    </Box>
-  ),
+const md = new MarkdownIt({ linkify: true, breaks: false });
+
+/** Block unsafe href attributes before the HTML reaches the DOM. */
+const defaultLinkOpenRenderer =
+  md.renderer.rules.link_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const hrefIndex = token.attrIndex("href");
+  if (hrefIndex >= 0) {
+    const href = token.attrs?.[hrefIndex]?.[1];
+    if (!isSafeHref(href)) {
+      // Strip the href so the anchor renders as plain text wrapper
+      token.attrs?.splice(hrefIndex, 1);
+    } else {
+      token.attrSet("target", "_blank");
+      token.attrSet("rel", "noopener noreferrer");
+    }
+  }
+  return defaultLinkOpenRenderer(tokens, idx, options, env, self);
 };
+
+function MarkdownContent({ text }: { text: string }) {
+  const html = useMemo(() => md.render(text), [text]);
+  return <Box dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 /**
  * Renders a single chat message bubble.
@@ -462,12 +363,7 @@ export default function ChatMessageBubble({
             }}
             className="prose prose-sm max-w-none text-gray-800"
           >
-            <ReactMarkdown
-              components={markdownComponents}
-              remarkPlugins={[remarkGfm]}
-            >
-              {displayText}
-            </ReactMarkdown>
+            <MarkdownContent text={displayText} />
             {message.thinkingSteps && message.thinkingSteps.length > 0 && (
               <Box sx={{ mt: 1 }}>
                 {message.thinkingSteps.map((step, idx) => (
