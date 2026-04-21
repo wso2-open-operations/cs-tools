@@ -81,12 +81,12 @@ export default function ChangeRequestsPage(): JSX.Element {
     ChangeRequestsViewMode.List,
   );
   const sessionPrefix = `${projectId ?? "unknown"}-change-requests`;
-  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "");
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useSessionState<ChangeRequestFilterValues>(`${sessionPrefix}-filters`, {});
-  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1);
+  const [filters, setFilters] = useSessionState<ChangeRequestFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
+  const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, OPERATIONS_LIST_PAGE_SIZE, undefined, { popOnly: true });
   const [isExporting, setIsExporting] = useState(false);
-  const pageSize = OPERATIONS_LIST_PAGE_SIZE;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
@@ -104,7 +104,7 @@ export default function ChangeRequestsPage(): JSX.Element {
     [searchTerm, filters],
   );
 
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * rowsPerPage;
 
   const {
     data: listData,
@@ -114,7 +114,7 @@ export default function ChangeRequestsPage(): JSX.Element {
     projectId || "",
     changeRequestSearchRequest,
     offset,
-    pageSize,
+    rowsPerPage,
     {
       enabled: !!projectId && viewMode === ChangeRequestsViewMode.List,
     },
@@ -164,7 +164,6 @@ export default function ChangeRequestsPage(): JSX.Element {
     viewMode === ChangeRequestsViewMode.List
       ? listData?.totalRecords || 0
       : infiniteData?.pages[0]?.totalRecords || 0;
-  const totalPages = Math.ceil(totalRecords / pageSize);
 
   useEffect(() => {
     if (!isExporting) return;
@@ -202,6 +201,11 @@ export default function ChangeRequestsPage(): JSX.Element {
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -334,9 +338,11 @@ export default function ChangeRequestsPage(): JSX.Element {
             onChangeRequestClick={handleChangeRequestClick}
           />
           <ListPagination
-            totalPages={totalPages}
+            totalRecords={totalRecords}
             page={page}
-            onChange={handlePageChange}
+            rowsPerPage={rowsPerPage}
+            onPageChange={handlePageChange}
+            onRowsPerPageChange={handleRowsPerPageChange}
           />
         </>
       ) : (

@@ -15,7 +15,7 @@
 // under the License.
 
 import { type Dispatch, type SetStateAction, useState, useEffect } from "react";
-import { useNavigationType } from "react-router";
+import { useNavigationType, useLocation } from "react-router";
 
 /**
  * Drop-in replacement for `useState` that persists the value to `sessionStorage`.
@@ -37,7 +37,9 @@ export function useSessionState<T>(
   options?: { popOnly?: boolean },
 ): [T, Dispatch<SetStateAction<T>>] {
   const navigationType = useNavigationType();
-  const shouldRestore = !options?.popOnly || navigationType === "POP";
+  const location = useLocation();
+  const fromBack = (location.state as { fromBack?: boolean } | null)?.fromBack === true;
+  const shouldRestore = !options?.popOnly || navigationType === "POP" || fromBack;
 
   const [state, setState] = useState<T>(() => {
     if (!shouldRestore) return defaultValue;

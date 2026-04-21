@@ -71,7 +71,7 @@ export default function AnnouncementDetailsPage(): JSX.Element {
   }, [isError, showError]);
 
   const handleBack = () => {
-    navigate(`/projects/${projectId}/announcements`);
+    navigate(`/projects/${projectId}/announcements`, { state: { fromBack: true } });
   };
 
   return (

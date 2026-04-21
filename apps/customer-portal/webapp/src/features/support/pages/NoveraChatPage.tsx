@@ -97,7 +97,7 @@ export default function NoveraChatPage(): JSX.Element {
 
   const handleBack = () => {
     if (projectId) {
-      navigate(`/projects/${projectId}/support`);
+      navigate(`/projects/${projectId}/support`, { state: { fromBack: true } });
     } else {
       navigate(ROUTE_PREVIOUS_PAGE);
     }

@@ -86,11 +86,11 @@ export default function CaseDetailsPage(): JSX.Element {
   const handleBack = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     if (returnTo) {
-      navigate(returnTo);
+      navigate(returnTo, { state: { fromBack: true } });
       return;
     }
     if (isEngagementRoute) {
-      navigate(`/projects/${projectId}/engagements`);
+      navigate(`/projects/${projectId}/engagements`, { state: { fromBack: true } });
       return;
     }
 
@@ -108,6 +108,7 @@ export default function CaseDetailsPage(): JSX.Element {
     if (isSecurityReport) {
       navigate(
         `/projects/${projectId}/security-center?tab=${SecurityTabId.VULNERABILITIES}`,
+        { state: { fromBack: true } },
       );
     } else {
       navigate(ROUTE_PREVIOUS_PAGE);

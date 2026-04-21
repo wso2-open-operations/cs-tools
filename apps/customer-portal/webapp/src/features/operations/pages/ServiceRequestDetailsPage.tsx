@@ -76,13 +76,13 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   const handleBack = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     if (returnTo) {
-      navigate(returnTo);
+      navigate(returnTo, { state: { fromBack: true } });
       return;
     }
     const basePath = location.pathname.includes("/operations/")
       ? "operations"
       : "support";
-    navigate(`/projects/${projectId}/${basePath}/service-requests`);
+    navigate(`/projects/${projectId}/${basePath}/service-requests`, { state: { fromBack: true } });
   };
 
   const handleOpenRelatedCase = () => {
