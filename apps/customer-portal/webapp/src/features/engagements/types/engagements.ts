@@ -67,7 +67,8 @@ export type EngagementsListSectionProps = {
   listHasRefinement: boolean;
   totalItems: number;
   onCaseClick: ((caseItem: CaseListItem) => void) | undefined;
-  totalPages: number;
   page: number;
+  rowsPerPage: number;
   onPageChange: (event: ChangeEvent<unknown>, value: number) => void;
+  onRowsPerPageChange: (newSize: number) => void;
 };

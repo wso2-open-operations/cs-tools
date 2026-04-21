@@ -36,7 +36,6 @@ import {
   computeEngagementsInitialPageLoading,
   computeEngagementsStatsLoading,
   computeEngagementsTotalItems,
-  computeEngagementsTotalPages,
   getEngagementsCurrentPageCases,
   parseEngagementsSortField,
 } from "@features/engagements/utils/engagements";
@@ -58,6 +57,7 @@ export function useEngagementsPageState() {
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(ENGAGEMENTS_PAGE_SIZE);
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
@@ -94,6 +94,7 @@ export function useEngagementsPageState() {
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", engagementSearchRequest, {
     enabled: !!projectId,
+    pageSize: rowsPerPage,
   });
 
   const { showLoader, hideLoader } = useLoader();
@@ -151,14 +152,15 @@ export function useEngagementsPageState() {
     apiTotalRecords,
     filteredCases.length,
   );
-  const totalPages = computeEngagementsTotalPages(
-    totalItems,
-    ENGAGEMENTS_PAGE_SIZE,
-  );
   const paginatedCases = filteredCases;
 
   const handlePageChange = (_e: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -217,13 +219,14 @@ export function useEngagementsPageState() {
     sortField,
     sortOrder,
     page,
+    rowsPerPage,
     paginatedCases,
     isCasesAreaLoading,
     isCasesError,
     listHasRefinement,
     totalItems,
-    totalPages,
     handlePageChange,
+    handleRowsPerPageChange,
     handleFilterChange,
     handleClearFilters,
     handleSortChange,
