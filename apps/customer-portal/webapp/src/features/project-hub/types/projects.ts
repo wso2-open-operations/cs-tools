@@ -28,6 +28,7 @@ export type ProjectListItem = {
   createdOn: string;
   description: string;
   type?: IdLabelRef;
+  closureState?: string | null;
   hasAgent: boolean;
   hasPdpSubscription?: boolean;
   hasKbReferences?: boolean;
@@ -61,6 +62,7 @@ export type ProjectDetails = {
   hasKbReferences?: boolean;
   type: IdLabelRef;
   sfId?: string;
+  closureState?: string | null;
   hasPdpSubscription?: boolean;
   hasSr: boolean;
   startDate?: string;

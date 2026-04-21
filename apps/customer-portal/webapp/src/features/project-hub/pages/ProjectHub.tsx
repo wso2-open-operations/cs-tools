@@ -32,6 +32,8 @@ import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
 import Error500Page from "@components/error/Error500Page";
+import Error401Page from "@components/error/Error401Page";
+import { getApiErrorMessage, isUnauthorizedError } from "@utils/ApiError";
 import {
   PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE,
   PROJECT_HUB_EMPTY_DEFAULT_TITLE,
@@ -74,6 +76,7 @@ export default function ProjectHub(): JSX.Element {
 
   const {
     data,
+    error,
     isLoading,
     isError,
     fetchNextPage,
@@ -259,6 +262,9 @@ export default function ProjectHub(): JSX.Element {
           </Box>
         );
       case ProjectHubContentView.ERROR:
+        if (isUnauthorizedError(error)) {
+          return <Error401Page message={getApiErrorMessage(error)} />;
+        }
         return (
           <Box
             sx={{
