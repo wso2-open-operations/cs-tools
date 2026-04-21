@@ -2031,7 +2031,7 @@ public type ChangeRequestResponse record {|
     string? testPlan;
     # Indicates if the customer has permission to approve
     boolean hasCustomerApproved;
-    # Indicates if the customer has permission to reviewe
+    # Indicates if the customer has permission to review
     boolean hasCustomerReviewed;
     # Internal approval details
     ReferenceTableItem? approvedBy;
