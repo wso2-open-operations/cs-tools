@@ -184,6 +184,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const attachmentIdCounterRef = useRef(0);
   const requestDetailsSectionRef = useRef<HTMLDivElement>(null);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
+  const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
 
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
@@ -428,6 +429,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (isNavigatingAfterCreate) return;
 
     const deploymentMatch = resolveDeploymentMatch(
       deployment,
@@ -503,6 +505,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
     postCase(payload, {
       onSuccess: async (data) => {
+        setIsNavigatingAfterCreate(true);
         const srNumber = (data as { number?: string }).number;
         showSuccess(
           srNumber
@@ -528,6 +531,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
         );
       },
       onError: (error) => {
+        setIsNavigatingAfterCreate(false);
         const msg =
           error?.message?.trim() ||
           "We couldn't create your service request. Please try again.";
@@ -545,7 +549,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
     productId,
     selectedCatalogId,
     selectedCatalogItemId,
-    isCreatePending,
+    isCreatePending: isCreatePending || isNavigatingAfterCreate,
   });
 
   if (!isProjectLoading && projectDetails && !srPermissions.hasSR) {
@@ -665,7 +669,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit}
           >
-            {isCreatePending ? "Creating..." : "Create Service Request"}
+            {isCreatePending
+              ? "Creating..."
+              : isNavigatingAfterCreate
+                ? "Opening request..."
+                : "Create Service Request"}
           </Button>
         </Box>
       </Box>

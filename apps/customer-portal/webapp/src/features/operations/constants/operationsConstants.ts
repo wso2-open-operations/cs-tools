@@ -324,7 +324,7 @@ export const SERVICE_REQUESTS_SORT_FIELD_OPTIONS: ServiceRequestSortFieldOption[
     },
     {
       value: ServiceRequestCaseSortField.State,
-      label: "State",
+      label: "Status",
       kind: "ordinal",
     },
   ];

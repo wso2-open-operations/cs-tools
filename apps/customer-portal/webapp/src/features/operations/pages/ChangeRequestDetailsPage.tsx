@@ -152,7 +152,23 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
 
   // Loading state with skeleton (or if fetching/no data yet)
   if (isLoading || (isFetching && !changeRequest)) {
-    return <ChangeRequestDetailsLoadingSkeleton />;
+    return (
+      <Stack spacing={2}>
+        <Button
+          startIcon={<ArrowLeft size={16} />}
+          onClick={() =>
+            returnTo
+              ? navigate(returnTo)
+              : navigate(`/projects/${projectId}/${basePath}/change-requests`)
+          }
+          sx={{ alignSelf: "flex-start" }}
+          variant="text"
+        >
+          Back to Change Requests
+        </Button>
+        <ChangeRequestDetailsLoadingSkeleton />
+      </Stack>
+    );
   }
 
   // Error state - only show error if we have an actual error and not loading

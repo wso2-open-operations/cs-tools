@@ -390,6 +390,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
         hideSeverityFilter
+        hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}
       />
 
