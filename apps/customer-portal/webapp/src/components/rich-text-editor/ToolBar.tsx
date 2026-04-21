@@ -805,25 +805,43 @@ const Toolbar = ({
       )}
 
       {showKeyboardHint && !disabled && (
-        <Typography
-          component="span"
-          variant="caption"
+        <Box
           sx={{
-            color: "text.secondary",
+            display: "flex",
+            flexDirection: "row",
             flexShrink: 0,
             pl: 1,
-            whiteSpace: "nowrap",
           }}
         >
-          <Typography component="span" variant="caption" fontWeight={600}>
-            Ctrl+Enter
+          <Typography
+            component="span"
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+              whiteSpace: "nowrap",
+              lineHeight: 1.4,
+            }}
+          >
+            <Typography component="span" variant="caption" fontWeight={600}>
+              Shift+Enter
+            </Typography>
+            {" for new line and "}
           </Typography>
-          {" or "}
-          <Typography component="span" variant="caption" fontWeight={600}>
-            ⌘+Enter
+          <Typography
+            component="span"
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+              whiteSpace: "nowrap",
+              lineHeight: 1.4,
+            }}
+          >
+            <Typography component="span" variant="caption" fontWeight={600}>
+              &nbsp;Enter
+            </Typography>
+            {" to send"}
           </Typography>
-          {" to send."}
-        </Typography>
+        </Box>
       )}
     </Box>
   );
