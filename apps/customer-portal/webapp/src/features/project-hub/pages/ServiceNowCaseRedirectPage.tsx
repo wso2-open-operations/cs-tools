@@ -48,7 +48,7 @@ export default function ServiceNowCaseRedirectPage(): JSX.Element {
   useEffect(() => {
     if (!caseId) {
       showError(SERVICENOW_REDIRECT_NO_CASE_ID);
-      void navigate("/", { replace: true });
+      void navigate("/404", { replace: true });
       return;
     }
     if (isLoading) {
@@ -60,7 +60,7 @@ export default function ServiceNowCaseRedirectPage(): JSX.Element {
   useEffect(() => {
     if (isError || (!isLoading && data && !data.project?.id)) {
       showError(SERVICENOW_REDIRECT_RESOLVE_ERROR);
-      void navigate("/", { replace: true });
+      void navigate("/404", { replace: true });
       return;
     }
 
