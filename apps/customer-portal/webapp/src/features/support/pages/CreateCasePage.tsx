@@ -29,6 +29,7 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 import {
@@ -134,8 +135,9 @@ export default function CreateCasePage(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const severityPolicy = projectDetails
-    ? getProjectSeverityPolicy(projectDetails.type?.label)
+    ? getProjectSeverityPolicy(projectDetails.type?.label, { projectFeatures })
     : { excludeS0: false, restrictSeverityToLow: false };
   const { excludeS0, restrictSeverityToLow: forceSeverityS4 } = severityPolicy;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(

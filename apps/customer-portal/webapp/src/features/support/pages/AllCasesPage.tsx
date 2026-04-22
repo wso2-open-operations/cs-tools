@@ -32,6 +32,7 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { Box, Stack } from "@wso2/oxygen-ui";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
@@ -82,21 +83,22 @@ export default function AllCasesPage(): JSX.Element {
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const projectDetailsReady = !isProjectLoading && project !== undefined;
 
   const permissions = useMemo(() => {
     if (!projectDetailsReady || !project) {
-      return getProjectPermissions(undefined);
+      return getProjectPermissions(undefined, { projectFeatures: null });
     }
-    return getProjectPermissions(project.type?.label);
-  }, [projectDetailsReady, project]);
+    return getProjectPermissions(project.type?.label, { projectFeatures });
+  }, [projectDetailsReady, project, projectFeatures]);
 
   const severityPolicy = useMemo(
     () =>
       projectDetailsReady && project
-        ? getProjectSeverityPolicy(project.type?.label)
+        ? getProjectSeverityPolicy(project.type?.label, { projectFeatures })
         : { excludeS0: false, restrictSeverityToLow: false },
-    [projectDetailsReady, project],
+    [projectDetailsReady, project, projectFeatures],
   );
   const { excludeS0, restrictSeverityToLow } = severityPolicy;
 

@@ -26,6 +26,7 @@ import OutstandingCasesList from "@features/support/components/support-overview-
 import ChatHistoryList from "@features/support/components/support-overview-cards/ChatHistoryList";
 import { useGetProjectSupportStats } from "@features/support/api/useGetProjectSupportStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useSearchConversations } from "@features/support/api/useSearchConversations";
 import { useLogger } from "@hooks/useLogger";
@@ -51,8 +52,10 @@ export default function SupportPage(): JSX.Element {
   const supportPath = `/projects/${projectId}/support`;
 
   const { data: project } = useGetProjectDetails(projectId || "");
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const includeS0InSupportMetrics = getProjectPermissions(
     project?.type?.label,
+    { projectFeatures },
   ).includeS0InSupportMetrics;
 
   const {
