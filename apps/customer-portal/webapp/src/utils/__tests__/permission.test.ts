@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import { ProjectType } from "@/types/permission";
+import type { ProjectFeatures } from "@features/project-hub/types/projects";
 import {
   calculateProjectStats,
   getProjectPermissions,
@@ -23,75 +24,127 @@ import {
   shouldForceSeverityS4,
 } from "@utils/permission";
 
+function buildProjectFeatures(
+  overrides?: Partial<ProjectFeatures>,
+): ProjectFeatures {
+  return {
+    acceptedSeverityValues: [
+      { id: "10", label: "Critical (P1)" },
+      { id: "11", label: "High (P2)" },
+      { id: "12", label: "Medium (P3)" },
+      { id: "13", label: "Low (P4)" },
+    ],
+    hasServiceRequestWriteAccess: false,
+    hasServiceRequestReadAccess: false,
+    hasSraWriteAccess: false,
+    hasSraReadAccess: false,
+    hasChangeRequestReadAccess: false,
+    hasEngagementsReadAccess: false,
+    hasUpdatesReadAccess: false,
+    hasTimeLogsReadAccess: false,
+    hasDeploymentWriteAccess: false,
+    hasDeploymentReadAccess: false,
+    ...overrides,
+  };
+}
+
 describe("getProjectPermissions", () => {
-  it("enables Cloud Support SR and ops chart only when hasPdpSubscription is true", () => {
-    const withoutPdp = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {});
-    expect(withoutPdp.hasSR).toBe(false);
-    expect(withoutPdp.showOutstandingOpsChart).toBe(false);
-
-    const withPdp = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {
-      hasPdpSubscription: true,
+  it("enables SR, CR, SRA, engagements, updates and operations from feature flags", () => {
+    const perms = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {
+      projectFeatures: buildProjectFeatures({
+        hasServiceRequestReadAccess: true,
+        hasChangeRequestReadAccess: true,
+        hasSraReadAccess: true,
+        hasEngagementsReadAccess: true,
+        hasUpdatesReadAccess: true,
+      }),
     });
-    expect(withPdp.hasSR).toBe(true);
-    expect(withPdp.showOutstandingOpsChart).toBe(true);
-  });
-
-  it("treats Cloud Subscription label like Cloud Support for PDP", () => {
-    const perms = getProjectPermissions(ProjectType.CLOUD_SUBSCRIPTION, {
-      hasPdpSubscription: true,
-    });
+    expect(perms.hasOperations).toBe(true);
     expect(perms.hasSR).toBe(true);
-  });
-
-  it("keeps Managed Cloud SR independent of hasPdpSubscription", () => {
-    const perms = getProjectPermissions(ProjectType.MANAGED_CLOUD_SUBSCRIPTION, {
-      hasPdpSubscription: false,
-    });
-    expect(perms.hasSR).toBe(true);
-  });
-
-  it("disables engagements for Professional Services", () => {
-    const perms = getProjectPermissions(ProjectType.PROFESSIONAL_SERVICES);
-    expect(perms.hasEngagements).toBe(false);
-  });
-
-  it("disables security report analysis for evaluation subscriptions", () => {
-    const perms = getProjectPermissions(ProjectType.EVALUATION_SUBSCRIPTION);
-    expect(perms.hasSecurityReportAnalysis).toBe(false);
-  });
-
-  it("enables security report analysis for professional services", () => {
-    const perms = getProjectPermissions(ProjectType.PROFESSIONAL_SERVICES);
+    expect(perms.hasCR).toBe(true);
     expect(perms.hasSecurityReportAnalysis).toBe(true);
+    expect(perms.hasEngagements).toBe(true);
+    expect(perms.hasUpdates).toBe(true);
+    expect(perms.includeChangeRequestsInDashboardTotals).toBe(true);
+  });
+
+  it("enables deployment and time-log cards based on feature access", () => {
+    const perms = getProjectPermissions(ProjectType.CLOUD_SUBSCRIPTION, {
+      projectFeatures: buildProjectFeatures({
+        hasDeploymentReadAccess: true,
+        hasTimeLogsReadAccess: true,
+      }),
+    });
+    expect(perms.hasDeployments).toBe(true);
+    expect(perms.hasTimeLogs).toBe(true);
+    expect(perms.showServiceHoursAllocationsCard).toBe(true);
+  });
+
+  it("includes S0 only when catastrophic severity is accepted", () => {
+    const withoutS0 = getProjectPermissions(ProjectType.MANAGED_CLOUD_SUBSCRIPTION, {
+      projectFeatures: buildProjectFeatures(),
+    });
+    const withS0 = getProjectPermissions(ProjectType.MANAGED_CLOUD_SUBSCRIPTION, {
+      projectFeatures: buildProjectFeatures({
+        acceptedSeverityValues: [
+          { id: "14", label: "Catastrophic (P0)" },
+          { id: "10", label: "Critical (P1)" },
+          { id: "11", label: "High (P2)" },
+          { id: "12", label: "Medium (P3)" },
+          { id: "13", label: "Low (P4)" },
+        ],
+      }),
+    });
+    expect(withoutS0.includeS0InSupportMetrics).toBe(false);
+    expect(withS0.includeS0InSupportMetrics).toBe(true);
   });
 });
 
 describe("shouldForceSeverityS4", () => {
-  it("is true for Development Support", () => {
-    expect(shouldForceSeverityS4(ProjectType.DEVELOPMENT_SUPPORT)).toBe(true);
+  it("is true when only Low (P4) is accepted", () => {
+    expect(
+      shouldForceSeverityS4(ProjectType.DEVELOPMENT_SUPPORT, {
+        projectFeatures: buildProjectFeatures({
+          acceptedSeverityValues: [{ id: "13", label: "Low (P4)" }],
+        }),
+      }),
+    ).toBe(true);
   });
 
-  it("is true for Professional Services", () => {
-    expect(shouldForceSeverityS4(ProjectType.PROFESSIONAL_SERVICES)).toBe(true);
+  it("is false when multiple severities are accepted", () => {
+    expect(
+      shouldForceSeverityS4(ProjectType.PROFESSIONAL_SERVICES, {
+        projectFeatures: buildProjectFeatures(),
+      }),
+    ).toBe(false);
   });
 });
 
 describe("getProjectSeverityPolicy", () => {
-  it("excludes S0 and restricts to S4 for Development Support", () => {
-    const policy = getProjectSeverityPolicy(ProjectType.DEVELOPMENT_SUPPORT);
+  it("excludes S0 and restricts to low when only Low (P4) is accepted", () => {
+    const policy = getProjectSeverityPolicy(ProjectType.DEVELOPMENT_SUPPORT, {
+      projectFeatures: buildProjectFeatures({
+        acceptedSeverityValues: [{ id: "13", label: "Low (P4)" }],
+      }),
+    });
     expect(policy.excludeS0).toBe(true);
     expect(policy.restrictSeverityToLow).toBe(true);
   });
 
-  it("excludes S0 and restricts to S4 for Professional Services", () => {
-    const policy = getProjectSeverityPolicy(ProjectType.PROFESSIONAL_SERVICES);
-    expect(policy.excludeS0).toBe(true);
-    expect(policy.restrictSeverityToLow).toBe(true);
-  });
-
-  it("keeps full severity range for Managed Cloud Subscription", () => {
+  it("keeps full severity range when catastrophic is accepted", () => {
     const policy = getProjectSeverityPolicy(
       ProjectType.MANAGED_CLOUD_SUBSCRIPTION,
+      {
+        projectFeatures: buildProjectFeatures({
+          acceptedSeverityValues: [
+            { id: "14", label: "Catastrophic (P0)" },
+            { id: "10", label: "Critical (P1)" },
+            { id: "11", label: "High (P2)" },
+            { id: "12", label: "Medium (P3)" },
+            { id: "13", label: "Low (P4)" },
+          ],
+        }),
+      },
     );
     expect(policy.excludeS0).toBe(false);
     expect(policy.restrictSeverityToLow).toBe(false);
@@ -100,7 +153,9 @@ describe("getProjectSeverityPolicy", () => {
 
 describe("calculateProjectStats", () => {
   it("zeros service requests when hasSR is false", () => {
-    const perms = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {});
+    const perms = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {
+      projectFeatures: buildProjectFeatures(),
+    });
     const result = calculateProjectStats(perms, 5, 0);
     expect(result.serviceRequests).toBe(0);
     expect(result.total).toBe(0);
@@ -108,7 +163,9 @@ describe("calculateProjectStats", () => {
 
   it("includes service requests when hasSR is true", () => {
     const perms = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {
-      hasPdpSubscription: true,
+      projectFeatures: buildProjectFeatures({
+        hasServiceRequestReadAccess: true,
+      }),
     });
     const result = calculateProjectStats(perms, 5, 0);
     expect(result.serviceRequests).toBe(5);

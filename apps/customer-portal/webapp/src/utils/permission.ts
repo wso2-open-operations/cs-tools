@@ -16,6 +16,7 @@
 
 import type { ActivityItem } from "@features/project-details/types/projectDetails";
 import type { ProjectStatsResponse } from "@features/project-hub/types/projects";
+import type { ProjectFeatures } from "@features/project-hub/types/projects";
 import { PRIMARY_PRODUCTION_DEPLOYMENT_TYPE_LABEL } from "@constants/permissionConstants";
 import type {
   GetProjectPermissionsOptions,
@@ -38,6 +39,9 @@ export type ProjectSeverityPolicy = {
   excludeS0: boolean;
   restrictSeverityToLow: boolean;
 };
+
+const CATASTROPHIC_SEVERITY_TAG = "(P0)";
+const LOW_SEVERITY_TAG = "(P4)";
 
 /**
  * Restrictive defaults for unknown or unlisted project types.
@@ -64,106 +68,42 @@ function restrictivePermissions(): ProjectPermissions {
  * Returns UI and stats permissions for a project type label (API string).
  *
  * @param projectTypeLabel - Value from project.type.label.
- * @param options - Optional flags from project search/details (e.g. `hasPdpSubscription` for Cloud SR).
+ * @param options - Optional API-driven feature payload from `/projects/{projectId}/features`.
  * @returns Permission flags for conditional rendering and aggregations.
  */
 export function getProjectPermissions(
-  projectTypeLabel: string | null | undefined,
+  _projectTypeLabel: string | null | undefined,
   options?: GetProjectPermissionsOptions,
 ): ProjectPermissions {
-  const permissions = restrictivePermissions();
-  const label = projectTypeLabel ?? "";
-  const hasPdpSubscription = options?.hasPdpSubscription === true;
+  const features = options?.projectFeatures;
+  if (!features) return restrictivePermissions();
 
-  switch (label) {
-    case ProjectType.MANAGED_CLOUD_SUBSCRIPTION:
-      permissions.hasOperations = true;
-      permissions.hasSR = true;
-      permissions.hasCR = true;
-      permissions.hasDeployments = true;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = true;
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.showOutstandingOpsChart = true;
-      permissions.includeChangeRequestsInDashboardTotals = true;
-      permissions.includeS0InSupportMetrics = true;
-      permissions.showServiceHoursAllocationsCard = true;
-      permissions.hasEngagements = true;
-      permissions.hasUpdates = true;
-      break;
+  const hasSR = features.hasServiceRequestReadAccess;
+  const hasCR = features.hasChangeRequestReadAccess;
+  const hasDeployments =
+    features.hasDeploymentReadAccess || features.hasDeploymentWriteAccess;
+  const hasTimeLogs = features.hasTimeLogsReadAccess;
+  const hasSra = features.hasSraReadAccess || features.hasSraWriteAccess;
+  const hasCatastrophicSeverity = hasAcceptedSeverityLabel(
+    features,
+    CATASTROPHIC_SEVERITY_TAG,
+  );
 
-    case ProjectType.CLOUD_SUPPORT: {
-      permissions.hasOperations = true;
-      permissions.hasSR = hasPdpSubscription;
-      permissions.hasCR = false;
-      permissions.hasDeployments = false;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = false;
-      permissions.hasSecurityReportAnalysis = false;
-      permissions.showOutstandingOpsChart = hasPdpSubscription;
-      permissions.includeChangeRequestsInDashboardTotals = false;
-      permissions.includeS0InSupportMetrics = false;
-      permissions.showServiceHoursAllocationsCard = false;
-      permissions.hasEngagements = true;
-      permissions.hasUpdates = false;
-      break;
-    }
-
-    case ProjectType.CLOUD_SUBSCRIPTION: {
-      permissions.hasOperations = true;
-      permissions.hasSR = hasPdpSubscription;
-      permissions.hasCR = false;
-      permissions.hasDeployments = false;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = false;
-      permissions.hasSecurityReportAnalysis = false;
-      permissions.showOutstandingOpsChart = hasPdpSubscription;
-      permissions.includeChangeRequestsInDashboardTotals = false;
-      permissions.includeS0InSupportMetrics = false;
-      permissions.showServiceHoursAllocationsCard = false;
-      permissions.hasEngagements = true;
-      permissions.hasUpdates = true;
-      break;
-    }
-
-    case ProjectType.CLOUD_EVALUATION_SUPPORT:
-      permissions.hasUpdates = false;
-      break;
-
-    case ProjectType.EVALUATION_SUBSCRIPTION:
-      break;
-
-    case ProjectType.DEVELOPMENT_SUPPORT:
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.hasUpdates = true;
-      break;
-
-    case ProjectType.PROFESSIONAL_SERVICES:
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.hasUpdates = true;
-      break;
-
-    case ProjectType.SUBSCRIPTION:
-      permissions.hasOperations = false;
-      permissions.hasSR = false;
-      permissions.hasCR = false;
-      permissions.hasDeployments = true;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = true;
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.showOutstandingOpsChart = false;
-      permissions.includeChangeRequestsInDashboardTotals = false;
-      permissions.includeS0InSupportMetrics = false;
-      permissions.showServiceHoursAllocationsCard = true;
-      permissions.hasEngagements = true;
-      permissions.hasUpdates = true;
-      break;
-
-    default:
-      break;
-  }
-
-  return permissions;
+  return {
+    hasOperations: hasSR || hasCR,
+    hasSR,
+    hasCR,
+    hasDeployments,
+    hasQueryHours: true,
+    hasTimeLogs,
+    hasSecurityReportAnalysis: hasSra,
+    showOutstandingOpsChart: hasSR || hasCR,
+    includeChangeRequestsInDashboardTotals: hasCR,
+    includeS0InSupportMetrics: hasCatastrophicSeverity,
+    showServiceHoursAllocationsCard: hasTimeLogs,
+    hasEngagements: features.hasEngagementsReadAccess,
+    hasUpdates: features.hasUpdatesReadAccess,
+  };
 }
 
 /**
@@ -188,12 +128,13 @@ export function shouldExcludeS0(
  * @returns True when severity must be forced to S4.
  */
 export function shouldForceSeverityS4(
-  projectTypeLabel: string | null | undefined,
+  _projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): boolean {
-  return (
-    projectTypeLabel === ProjectType.DEVELOPMENT_SUPPORT ||
-    projectTypeLabel === ProjectType.PROFESSIONAL_SERVICES
-  );
+  const acceptedSeverities = options?.projectFeatures?.acceptedSeverityValues ?? [];
+  if (acceptedSeverities.length !== 1) return false;
+  const onlySeverityLabel = acceptedSeverities[0]?.label ?? "";
+  return onlySeverityLabel.includes(LOW_SEVERITY_TAG);
 }
 
 /**
@@ -204,11 +145,21 @@ export function shouldForceSeverityS4(
  */
 export function getProjectSeverityPolicy(
   projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): ProjectSeverityPolicy {
   return {
-    excludeS0: shouldExcludeS0(projectTypeLabel),
-    restrictSeverityToLow: shouldForceSeverityS4(projectTypeLabel),
+    excludeS0: shouldExcludeS0(projectTypeLabel, options),
+    restrictSeverityToLow: shouldForceSeverityS4(projectTypeLabel, options),
   };
+}
+
+function hasAcceptedSeverityLabel(
+  features: ProjectFeatures,
+  labelFragment: string,
+): boolean {
+  return features.acceptedSeverityValues.some((severity) =>
+    severity.label.includes(labelFragment),
+  );
 }
 
 /**
