@@ -34,6 +34,7 @@ import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { getProjectPermissions } from "@utils/permission";
 
 interface GetHelpMenuItem {
@@ -70,10 +71,11 @@ export default function GetHelpDropdown(): JSX.Element {
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
 
   const projectTypeLabel = selectedProject?.type?.label;
   const permissions = getProjectPermissions(projectTypeLabel, {
-    hasPdpSubscription: selectedProject?.hasPdpSubscription,
+    projectFeatures,
   });
   const isServiceRequestVisible = permissions.hasSR;
   const isSecurityReportVisible = permissions.hasSecurityReportAnalysis;
