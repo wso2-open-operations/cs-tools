@@ -215,20 +215,7 @@ export default function ActivityCommentInput({
 
   return (
     <>
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 1,
-          px: 2,
-          py: 1.5,
-          flexShrink: 0,
-          position: "sticky",
-          bottom: 0,
-          zIndex: 1,
-          bgcolor: "background.paper",
-        }}
-      >
+      <Box>
         <Box sx={{ flex: 1 }}>
           <Editor
             onChange={setValue}
@@ -242,7 +229,8 @@ export default function ActivityCommentInput({
                 : "Write a comment..."
             }
             onSubmitKeyDown={handleSend}
-            enterToSubmit={!isCaseClosed}
+            enterToSubmit={false}
+            shiftEnterToSubmit={!isCaseClosed}
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
@@ -266,9 +254,6 @@ export default function ActivityCommentInput({
                     onClick={handleSend}
                     aria-label="Send comment"
                     sx={{
-                      bgcolor: "warning.main",
-                      color: "white",
-                      "&:hover": { bgcolor: "warning.dark" },
                       "&.Mui-disabled": {
                         bgcolor: colors.grey[200],
                         color: colors.grey[400],
