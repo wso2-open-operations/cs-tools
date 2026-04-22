@@ -26,7 +26,7 @@ export interface TabOption {
 }
 
 export interface TabBarProps {
-  tabs: TabOption[];
+  tabs: readonly TabOption[];
   activeTab: string;
   onTabChange: (tabId: string) => void;
   className?: string;

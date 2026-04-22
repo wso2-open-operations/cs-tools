@@ -17,7 +17,7 @@
 import { Box, Grid, Typography } from "@wso2/oxygen-ui";
 import { useNavigate } from "react-router";
 import type { JSX } from "react";
-import Error500Page from "@components/error/Error500Page";
+import error500Svg from "@assets/error/error-500.svg";
 import EmptyState from "@components/empty-state/EmptyState";
 import type { UpdateProductGridProps } from "@features/updates/types/updates";
 import { UpdateProductCard } from "@update-cards/UpdateProductCard";
@@ -54,7 +54,7 @@ export function UpdateProductGrid({
           py: 5,
         }}
       >
-        <Error500Page style={{ width: 200, height: "auto" }} />
+        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {UPDATE_PRODUCT_GRID_ERROR_MESSAGE}
         </Typography>

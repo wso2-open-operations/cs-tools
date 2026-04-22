@@ -28,6 +28,7 @@ export type ProjectListItem = {
   createdOn: string;
   description: string;
   type?: IdLabelRef;
+  closureState?: string | null;
   hasAgent: boolean;
   hasPdpSubscription?: boolean;
   hasKbReferences?: boolean;
@@ -61,6 +62,7 @@ export type ProjectDetails = {
   hasKbReferences?: boolean;
   type: IdLabelRef;
   sfId?: string;
+  closureState?: string | null;
   hasPdpSubscription?: boolean;
   hasSr: boolean;
   startDate?: string;
@@ -76,6 +78,8 @@ export type ProjectDetails = {
   remainingOnboardingHours?: number;
   onboardingExpiryDate?: string | null;
   onboardingStatus?: string | null;
+  suspendedOn?: string | null;
+  suspensionReasons?: string[];
 };
 
 // Response type for project search responses.
@@ -138,6 +142,27 @@ export type ProjectRecentActivity = {
 export type ProjectStatsResponse = {
   projectStats: ProjectStatsSummary;
   recentActivity: ProjectRecentActivity;
+};
+
+// Item type for accepted severity values returned by project feature access API.
+export type ProjectFeatureSeverityValue = {
+  id: string;
+  label: string;
+};
+
+// Response type for project-specific feature and permission flags.
+export type ProjectFeatures = {
+  acceptedSeverityValues: ProjectFeatureSeverityValue[];
+  hasServiceRequestWriteAccess: boolean;
+  hasServiceRequestReadAccess: boolean;
+  hasSraWriteAccess: boolean;
+  hasSraReadAccess: boolean;
+  hasChangeRequestReadAccess: boolean;
+  hasEngagementsReadAccess: boolean;
+  hasUpdatesReadAccess: boolean;
+  hasTimeLogsReadAccess: boolean;
+  hasDeploymentWriteAccess: boolean;
+  hasDeploymentReadAccess: boolean;
 };
 
 // Request type for patching a project.

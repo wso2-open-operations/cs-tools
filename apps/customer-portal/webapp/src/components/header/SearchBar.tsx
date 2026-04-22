@@ -40,7 +40,7 @@ import ListItems from "@components/list-view/ListItems";
 import ListSkeleton from "@components/list-view/ListSkeleton";
 
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
-import Error500Page from "@components/error/Error500Page";
+import error500Svg from "@assets/error/error-500.svg";
 import { isS0Case } from "@features/support/utils/support";
 import { SortOrder } from "@/types/common";
 
@@ -177,7 +177,10 @@ export default function SearchBar({
             px: 2,
           }}
         >
-          <Error500Page
+          <img
+            src={error500Svg}
+            alt=""
+            aria-hidden="true"
             style={{ width: 120, height: "auto", marginBottom: 16 }}
           />
           <Typography variant="body2" color="text.secondary">

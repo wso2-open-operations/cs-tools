@@ -16,7 +16,7 @@
 
 import type { CaseDetailsHeaderProps } from "@features/support/types/supportComponents";
 import { Box, Chip, Stack, Typography, alpha } from "@wso2/oxygen-ui";
-import { type ReactElement, type JSX } from "react";
+import { type JSX } from "react";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
   formatValue,
@@ -36,7 +36,6 @@ export default function CaseDetailsHeader({
   title,
   severityLabel,
   statusLabel,
-  statusChipIcon,
   statusChipSx,
   isLoading = false,
   showSeverityChip = true,
@@ -49,6 +48,12 @@ export default function CaseDetailsHeader({
 
   const displaySeverity =
     showSeverityChip && hasSeverityLabelForChip(severityLabel);
+  const statusColor =
+    typeof statusChipSx === "object" &&
+    statusChipSx !== null &&
+    "color" in statusChipSx
+      ? (statusChipSx.color as string)
+      : undefined;
 
   return (
     <Box>
@@ -88,13 +93,20 @@ export default function CaseDetailsHeader({
           />
         )}
         {showStatusChip && (
-          <Chip
-            size="small"
-            variant="outlined"
-            label={formatValue(statusLabel)}
-            icon={statusChipIcon as ReactElement}
-            sx={statusChipSx}
-          />
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                bgcolor: statusColor ?? "text.secondary",
+                flexShrink: 0,
+              }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {formatValue(statusLabel)}
+            </Typography>
+          </Stack>
         )}
       </Stack>
       <Typography variant="h6" color="text.primary" sx={{ fontWeight: 500 }}>

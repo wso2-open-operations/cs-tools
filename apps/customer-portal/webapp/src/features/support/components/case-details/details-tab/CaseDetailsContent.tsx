@@ -19,9 +19,8 @@ import type {
   CaseDetailsHeaderVariant,
 } from "@features/support/types/supportComponents";
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
-import { useFloatingNoveraVisibility } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
 import { useGetCaseAttachments } from "@features/support/api/useGetCaseAttachments";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -70,7 +69,6 @@ export default function CaseDetailsContent({
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
   const location = useLocation();
-  const { setHideForDetailsActivityTab } = useFloatingNoveraVisibility();
   const [activeTab, setActiveTab] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
 
@@ -190,37 +188,6 @@ export default function CaseDetailsContent({
     return visibleTabs[clampedActiveTab] ?? visibleTabs[0] ?? 0;
   }, [visibleTabs, clampedActiveTab]);
 
-  const suppressFloatingNoveraOnActivityTab = useMemo(() => {
-    const isSupportCaseDetail =
-      /\/projects\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname) ||
-      /\/[^/]+\/support\/cases\/[^/]+$/.test(location.pathname);
-    return (
-      isServiceRequest ||
-      isEngagementRoute ||
-      isSecurityReportAnalysisRoute ||
-      isSupportCaseDetail
-    );
-  }, [
-    isServiceRequest,
-    isEngagementRoute,
-    isSecurityReportAnalysisRoute,
-    location.pathname,
-  ]);
-
-  useEffect(() => {
-    if (!suppressFloatingNoveraOnActivityTab) {
-      return;
-    }
-    setHideForDetailsActivityTab(resolvedPanelIndex === 0);
-    return () => {
-      setHideForDetailsActivityTab(false);
-    };
-  }, [
-    suppressFloatingNoveraOnActivityTab,
-    resolvedPanelIndex,
-    setHideForDetailsActivityTab,
-  ]);
-
   if (isError && error) {
     return (
       <ApiErrorState
@@ -323,7 +290,7 @@ export default function CaseDetailsContent({
                 variant={headerVariant}
               />
 
-              {(!hideActionRow || showEngineerOnly) && (
+              {!isEngagementRoute && (!hideActionRow || showEngineerOnly) && (
                 <CaseDetailsActionRow
                   assignedEngineer={assignedEngineer}
                   engineerInitials={engineerInitials}
@@ -360,12 +327,11 @@ export default function CaseDetailsContent({
         sx={{
           flex: 1,
           minHeight: 0,
-          mt: 2,
           display: "flex",
           flexDirection: "column",
           overflow: resolvedPanelIndex === 0 ? "hidden" : "auto",
           p: resolvedPanelIndex === 0 ? 0 : 3,
-          pt: 0,
+          pt: resolvedPanelIndex === 0 ? 0 : 2,
           WebkitOverflowScrolling: "touch",
         }}
       >

@@ -37,7 +37,10 @@ import type { ProductVersionOption } from "@features/support/types/caseCreationO
 import type { AssignedEngineerValue } from "@features/support/utils/support";
 
 /** Header layout variant for case / SR / engagement detail shells. */
-export type CaseDetailsHeaderVariant = "default" | "engagement" | "serviceRequest";
+export type CaseDetailsHeaderVariant =
+  | "default"
+  | "engagement"
+  | "serviceRequest";
 
 export type CaseDetailsHeaderProps = {
   caseNumber: string | null | undefined;

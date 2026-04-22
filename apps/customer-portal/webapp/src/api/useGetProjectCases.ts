@@ -28,6 +28,7 @@ import type { CaseSearchResponse } from "@features/support/types/cases";
 
 export interface UseGetProjectCasesOptions {
   enabled?: boolean;
+  pageSize?: number;
 }
 
 /**
@@ -48,14 +49,16 @@ export default function useGetProjectCases(
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
+  const limit = Math.max(1, Number.isFinite(options?.pageSize) ? Math.floor(options!.pageSize!) : 10);
+
   return useInfiniteQuery<CaseSearchResponse, Error>({
-    queryKey: [ApiQueryKeys.PROJECT_CASES, projectId, baseRequest],
+    queryKey: [ApiQueryKeys.PROJECT_CASES, projectId, baseRequest, limit],
     queryFn: async ({ pageParam = 0 }): Promise<CaseSearchResponse> => {
       const requestBody: CaseSearchRequest = {
         ...baseRequest,
         pagination: {
           offset: pageParam as number,
-          limit: 10,
+          limit,
         },
       };
 
@@ -93,13 +96,17 @@ export default function useGetProjectCases(
         logger.debug("[useGetProjectCases] Data received:", data);
         return data;
       } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError" || error instanceof DOMException) {
+          throw error;
+        }
         logger.error("[useGetProjectCases] Error:", error);
         throw error;
       }
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage) => {
-      const nextOffset = lastPage.offset + lastPage.limit;
+      const pageSize = Number.isFinite(lastPage.limit) && lastPage.limit > 0 ? lastPage.limit : limit;
+      const nextOffset = lastPage.offset + pageSize;
       return nextOffset < lastPage.totalRecords ? nextOffset : undefined;
     },
     enabled:

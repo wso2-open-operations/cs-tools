@@ -20,6 +20,7 @@ import { type JSX, useMemo } from "react";
 import { useLocation, useParams, Link as NavigateLink } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetMetadata from "@api/useGetMetadata";
 import { APP_SHELL_NAV_ITEMS } from "@features/project-hub/constants/appLayoutConstants";
 import type { AppShellNavItem } from "@features/project-hub/types/appLayout";
@@ -56,6 +57,7 @@ export default function SideBar({
   const projects = flattenProjectPages(projectsQuery.data);
   const selectedProject = projects.find((project) => project.id === projectId);
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const { data: portalMetadata } = useGetMetadata();
   const usageMetricsEnabled =
     portalMetadata?.featureFlags?.usageMetricsEnabled === true;
@@ -67,13 +69,11 @@ export default function SideBar({
   const permissions = useMemo(
     () =>
       getProjectPermissions(projectTypeLabel, {
-        hasPdpSubscription:
-          selectedProject?.hasPdpSubscription ?? projectDetails?.hasPdpSubscription,
+        projectFeatures,
       }),
     [
       projectTypeLabel,
-      selectedProject?.hasPdpSubscription,
-      projectDetails?.hasPdpSubscription,
+      projectFeatures,
     ],
   );
 
@@ -84,7 +84,11 @@ export default function SideBar({
       items = items.filter((item: AppShellNavItem) => item.id !== "usage-metrics");
     }
 
-    if (!isProjectTypeResolved || !permissions.hasOperations) {
+    if (
+      !isProjectTypeResolved ||
+      !permissions.hasOperations ||
+      (!permissions.hasSR && !permissions.hasCR)
+    ) {
       items = items.filter((item: AppShellNavItem) => item.id !== "operations");
     }
 
@@ -92,11 +96,18 @@ export default function SideBar({
       items = items.filter((item: AppShellNavItem) => item.id !== "engagements");
     }
 
+    if (!permissions.hasUpdates) {
+      items = items.filter((item: AppShellNavItem) => item.id !== "updates");
+    }
+
     return items;
   }, [
     isProjectTypeResolved,
     permissions.hasOperations,
+    permissions.hasSR,
+    permissions.hasCR,
     permissions.hasEngagements,
+    permissions.hasUpdates,
     usageMetricsEnabled,
   ]);
 

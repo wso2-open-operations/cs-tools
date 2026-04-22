@@ -20,9 +20,10 @@ import { ANNOUNCEMENT_FILTER_DEFINITIONS } from "@features/support/constants/sup
 
 export type { AnnouncementFilterValues };
 
-/** API `sortBy.field` for announcements list (fixed column). */
+/** API `sortBy.field` for announcements list. */
 export enum AnnouncementSortField {
   CreatedOn = "createdOn",
+  State = "state",
 }
 
 /**
@@ -37,6 +38,7 @@ export enum AnnouncementFilterMetadataKey {
 export type AnnouncementSortOption = {
   value: AnnouncementSortField;
   label: string;
+  kind?: "chronological" | "ordinal";
 };
 
 /** Label/value pair for announcement filter dropdowns (`ListFiltersPanel`, `AnnouncementsFilters`). */
@@ -79,6 +81,7 @@ export type AnnouncementDetailsPanelProps = {
   data: CaseDetails | undefined;
   isLoading: boolean;
   isError: boolean;
+  error?: unknown;
   onBack: () => void;
   projectId?: string;
   caseId?: string;

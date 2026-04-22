@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { ApiError } from "@utils/ApiError";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ChangeRequestDetails } from "@features/operations/types/changeRequests";
@@ -53,8 +54,19 @@ export default function useGetChangeRequestDetails(
         });
 
         if (!response.ok) {
-          throw new Error(
-            `Error fetching change request details: ${response.status} ${response.statusText}`,
+          let apiMessage: string | undefined;
+          try {
+            const errBody = await response.json();
+            if (typeof errBody?.message === "string") {
+              apiMessage = errBody.message;
+            }
+          } catch {
+            // ignore – body may not be JSON
+          }
+          throw new ApiError(
+            response.status,
+            response.statusText,
+            apiMessage ?? `Error fetching change request details: ${response.statusText}`,
           );
         }
 

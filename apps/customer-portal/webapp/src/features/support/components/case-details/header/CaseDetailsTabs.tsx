@@ -17,7 +17,7 @@
 import type { CaseDetailsTabsProps } from "@features/support/types/supportComponents";
 import { CASE_DETAILS_TABS } from "@features/support/constants/supportConstants";
 import { Box, Button, Skeleton, Tab, Tabs } from "@wso2/oxygen-ui";
-import { Maximize2, Minimize2 } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode } from "react";
 
 /**
@@ -111,8 +111,9 @@ export default function CaseDetailsTabs({
       {onFocusModeToggle && (
         <Button
           aria-label={focusMode ? "Exit focus mode" : "Focus mode"}
+          title={focusMode ? "Exit focus mode" : "Focus mode"}
           startIcon={
-            focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />
+            focusMode ? <ChevronDown size={14} /> : <ChevronUp size={14} />
           }
           onClick={onFocusModeToggle}
           size="small"

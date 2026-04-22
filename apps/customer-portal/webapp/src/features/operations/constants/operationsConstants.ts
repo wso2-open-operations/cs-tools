@@ -307,6 +307,7 @@ export const SERVICE_REQUESTS_ERROR_ENTITY_NAME = "service requests";
 export type ServiceRequestSortFieldOption = {
   value: ServiceRequestCaseSortField;
   label: string;
+  kind?: "chronological" | "ordinal";
 };
 
 export const SERVICE_REQUESTS_SORT_FIELD_OPTIONS: ServiceRequestSortFieldOption[] =
@@ -314,14 +315,17 @@ export const SERVICE_REQUESTS_SORT_FIELD_OPTIONS: ServiceRequestSortFieldOption[
     {
       value: ServiceRequestCaseSortField.CreatedOn,
       label: "Created on",
+      kind: "chronological",
     },
     {
       value: ServiceRequestCaseSortField.UpdatedOn,
       label: "Updated on",
+      kind: "chronological",
     },
     {
       value: ServiceRequestCaseSortField.State,
-      label: "State",
+      label: "Status",
+      kind: "ordinal",
     },
   ];
 

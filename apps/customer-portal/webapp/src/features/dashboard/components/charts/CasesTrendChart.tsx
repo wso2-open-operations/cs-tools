@@ -26,11 +26,13 @@ import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import { OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA } from "@/features/dashboard/constants/dashboard";
 import {
   DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_DARK_MODE_SHADE,
   DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX,
   DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
   DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
   DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS,
 } from "@/features/dashboard/constants/charts";
+import { useDarkMode } from "@utils/useDarkMode";
 import type { CasesTrendChartProps } from "@/features/dashboard/types/charts";
 import {
   EMPTY_CASES_TREND_DATA,
@@ -38,6 +40,10 @@ import {
   formatEngagementsCenterTotal,
   resolveEngagementsNumericTotal,
 } from "@features/dashboard/utils/dashboardCharts";
+
+function normalizeCategory(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, "-");
+}
 
 /**
  * Displays the cases trend chart.
@@ -51,6 +57,7 @@ export const CasesTrendChart = ({
   isError,
   centerContent = false,
 }: CasesTrendChartProps): JSX.Element => {
+  const isDarkMode = useDarkMode();
   // safe data
   const safeData = data ?? EMPTY_CASES_TREND_DATA;
   // error grey
@@ -65,6 +72,47 @@ export const CasesTrendChart = ({
     errorGrey,
     fallbackGrey,
   );
+  const darkModeColorByCategory = new Map<string, string>([
+    [
+      normalizeCategory("onboarding"),
+      colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.blue?.[300] ??
+        "#93C5FD",
+    ],
+    [
+      normalizeCategory("migration"),
+      colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.orange?.[300] ??
+        "#FDBA74",
+    ],
+    [
+      normalizeCategory("services"),
+      colors.green?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.green?.[300] ??
+        "#86EFAC",
+    ],
+    [
+      normalizeCategory("follow-up"),
+      colors.purple?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.purple?.[300] ??
+        "#D8B4FE",
+    ],
+    [
+      normalizeCategory("improvements"),
+      colors.brown?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.brown?.[300] ??
+        "#D6BFA8",
+    ],
+  ]);
+  const displayChartData = isDarkMode
+    ? chartData.map((entry) => ({
+        ...entry,
+        color:
+          darkModeColorByCategory.get(normalizeCategory(entry.name)) ?? entry.color,
+      }))
+    : chartData;
+  const darkModeCenterTextColor =
+    colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ?? colors.blue?.[300];
 
   // total
   const total = resolveEngagementsNumericTotal(
@@ -146,7 +194,7 @@ export const CasesTrendChart = ({
                   tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
                 >
                   <Pie
-                    data={chartData}
+                    data={displayChartData}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
@@ -160,7 +208,7 @@ export const CasesTrendChart = ({
                     label={false}
                     labelLine={false}
                   >
-                    {chartData.map((entry, index) => (
+                    {displayChartData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
                         fill={entry.color}
@@ -192,7 +240,12 @@ export const CasesTrendChart = ({
                 </>
               ) : (
                 <>
-                  <Typography variant="h4">{centerValue}</Typography>
+                  <Typography
+                    variant="h4"
+                    color={isDarkMode ? darkModeCenterTextColor : undefined}
+                  >
+                    {centerValue}
+                  </Typography>
                   <Typography variant="caption">
                     {DASHBOARD_CHART_CAPTION_TOTAL}
                   </Typography>
@@ -200,9 +253,15 @@ export const CasesTrendChart = ({
               )}
             </Box>
           </Box>
-          <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
+          <Box
+            sx={
+              centerContent
+                ? { maxWidth: 420, width: "100%", mx: "auto" }
+                : undefined
+            }
+          >
             <ChartLegend
-              data={chartData.map((item) => ({
+              data={displayChartData.map((item) => ({
                 name: item.name,
                 value: item.value,
                 color: item.color,

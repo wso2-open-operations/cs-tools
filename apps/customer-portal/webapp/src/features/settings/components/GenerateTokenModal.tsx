@@ -73,7 +73,7 @@ export default function GenerateTokenModal({
   function validateRobotName(value: string): string | null {
     if (!value.trim()) return "Token name is required.";
     if (!REGISTRY_TOKEN_ROBOT_NAME_REGEX.test(value))
-      return "Only alphanumeric characters and dashes are allowed.";
+      return "Only lowercase letters, numbers, and dashes are allowed.";
     return null;
   }
 
@@ -241,15 +241,16 @@ export default function GenerateTokenModal({
               required
               value={robotName}
               onChange={(e) => {
-                setRobotName(e.target.value);
+                const value = e.target.value.toLowerCase();
+                setRobotName(value);
                 if (robotNameError)
-                  setRobotNameError(validateRobotName(e.target.value));
+                  setRobotNameError(validateRobotName(value));
               }}
               onBlur={() => setRobotNameError(validateRobotName(robotName))}
               error={!!robotNameError}
               helperText={
                 robotNameError ??
-                "Only alphanumeric characters and dashes are allowed."
+                "Only lowercase letters, numbers, and dashes are allowed."
               }
             />
 

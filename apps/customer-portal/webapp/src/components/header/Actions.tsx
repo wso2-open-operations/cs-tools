@@ -24,6 +24,7 @@ import type { JSX } from "react";
 import { useLocation } from "react-router";
 import GetHelpDropdown from "@components/header/GetHelpDropdown";
 import UserProfile from "@components/header/UserProfile";
+import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 
 interface ActionsProps {
   showUserProfile?: boolean;
@@ -39,14 +40,15 @@ export default function Actions({
   showUserProfile = true,
 }: ActionsProps): JSX.Element {
   const location = useLocation();
+  const { isProjectSuspended } = useErrorPageContext();
   const isProjectHub = location.pathname === "/";
   const isPublicLandingPage = location.pathname === "/home";
 
   return (
     <HeaderUI.Actions>
-      {/* Get Help dropdown (before theme switcher, not on project hub or public landing page) */}
-      {!isProjectHub && !isPublicLandingPage && <GetHelpDropdown />}
-      {!isProjectHub && !isPublicLandingPage && (
+      {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, or suspended project) */}
+      {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && <GetHelpDropdown />}
+      {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && (
         <Divider
           orientation="vertical"
           flexItem

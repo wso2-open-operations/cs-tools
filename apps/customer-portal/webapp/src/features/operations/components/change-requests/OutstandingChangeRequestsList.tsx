@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Form, Typography, alpha } from "@wso2/oxygen-ui";
+import { Box, Form, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { OutstandingChangeRequestsListProps } from "@features/operations/types/changeRequests";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
@@ -23,8 +23,8 @@ import OutstandingChangeRequestsSkeleton from "./OutstandingChangeRequestsSkelet
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import {
   getChangeRequestStateColor,
-  getChangeRequestStateIcon,
 } from "@features/operations/utils/changeRequestUi";
+import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
 
 /**
  * Renders a list of change request rows for the operations overview card.
@@ -38,6 +38,12 @@ export default function OutstandingChangeRequestsList({
   isError,
   onItemClick,
 }: OutstandingChangeRequestsListProps): JSX.Element {
+  const getDescription = (
+    item: OutstandingChangeRequestsListProps["changeRequests"][number],
+  ): string | null | undefined => {
+    return item.description;
+  };
+
   if (isError) {
     return <ErrorIndicator entityName="change requests" size="medium" />;
   }
@@ -101,41 +107,29 @@ export default function OutstandingChangeRequestsList({
                 <Typography variant="body2" fontWeight={500} color="text.primary">
                   {cr.number}
                 </Typography>
-                {cr.state?.label
-                  ? (() => {
-                      const statusColor = getChangeRequestStateColor(cr.state);
-                      const StatusIcon = getChangeRequestStateIcon(cr.state);
-                      return (
-                        <Chip
-                          icon={<StatusIcon size={12} />}
-                          label={cr.state.label}
-                          size="small"
-                          variant="outlined"
-                          sx={{
-                            bgcolor: alpha(statusColor, 0.1),
-                            color: statusColor,
-                            px: 0,
-                            height: 20,
-                            fontSize: "0.75rem",
-                            fontWeight: 500,
-                            "& .MuiChip-icon": {
-                              color: statusColor,
-                              ml: "6px",
-                              mr: "6px",
-                            },
-                            "& .MuiChip-label": {
-                              pl: 0,
-                              pr: "6px",
-                            },
-                          }}
-                        />
-                      );
-                    })()
-                  : null}
+                {cr.state?.label ? (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        bgcolor: getChangeRequestStateColor(cr.state),
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography
+                      variant="caption"
+                      sx={{ color: getChangeRequestStateColor(cr.state) }}
+                    >
+                      {cr.state.label}
+                    </Typography>
+                  </Box>
+                ) : null}
               </Box>
             }
           />
-          <Form.CardContent sx={{ p: 0 }}>
+          <Form.CardContent sx={{ p: 0, flex: 1 }}>
             <Box sx={{ minWidth: 0 }}>
               <Typography
                 variant="body2"
@@ -150,6 +144,10 @@ export default function OutstandingChangeRequestsList({
               >
                 {cr.title}
               </Typography>
+              <CaseCardDescriptionClamp
+                description={getDescription(cr)}
+                hideWhenEmpty
+              />
             </Box>
           </Form.CardContent>
           <Form.CardActions

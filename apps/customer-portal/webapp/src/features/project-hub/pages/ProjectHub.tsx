@@ -31,7 +31,8 @@ import { FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
-import Error500Page from "@components/error/Error500Page";
+import ApiErrorState from "@components/error/ApiErrorState";
+import AccountSuspendedPage from "@/components/access-control/AccountSuspendedPage";
 import {
   PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE,
   PROJECT_HUB_EMPTY_DEFAULT_TITLE,
@@ -46,6 +47,7 @@ import {
   PROJECT_HUB_SKELETON_CARD_COUNT,
 } from "@features/project-hub/constants/projectHubConstants";
 import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
+import { ProjectClosureState } from "@/types/permission";
 import {
   resolveProjectHubContentView,
   resolveProjectHubHeaderSubtitle,
@@ -74,6 +76,7 @@ export default function ProjectHub(): JSX.Element {
 
   const {
     data,
+    error,
     isLoading,
     isError,
     fetchNextPage,
@@ -113,12 +116,23 @@ export default function ProjectHub(): JSX.Element {
     }
   }, [isLoading, showLoader, hideLoader]);
 
+  const allProjectsSuspended =
+    !isLoading &&
+    !isAuthLoading &&
+    !isError &&
+    projects.length > 0 &&
+    debouncedSearchQuery === "" &&
+    hasNextPage === false &&
+    !isFetchingNextPage &&
+    projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
+
   const isRedirectingToSingleProject =
     !isLoading &&
     !isAuthLoading &&
     !isError &&
     projects.length === 1 &&
-    !searchQuery;
+    !searchQuery &&
+    !allProjectsSuspended;
 
   useEffect(() => {
     if (isRedirectingToSingleProject) {
@@ -189,7 +203,10 @@ export default function ProjectHub(): JSX.Element {
     searchQuery,
   );
 
-  const headerTitle = resolveProjectHubHeaderTitle(totalRecords, hasSearchQuery);
+  const headerTitle = resolveProjectHubHeaderTitle(
+    totalRecords,
+    hasSearchQuery,
+  );
   const headerSubtitle = resolveProjectHubHeaderSubtitle(
     totalRecords,
     hasSearchQuery,
@@ -263,18 +280,15 @@ export default function ProjectHub(): JSX.Element {
           <Box
             sx={{
               display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
               justifyContent: "center",
-              gap: 2,
               py: 10,
+              px: 2,
             }}
           >
-            <Error500Page />
-            <Typography variant="h4">{PROJECT_HUB_ERROR_TITLE}</Typography>
-            <Typography variant="subtitle2" color="text.secondary">
-              {PROJECT_HUB_ERROR_SUBTITLE}
-            </Typography>
+            <ApiErrorState
+              error={error}
+              fallbackMessage={`${PROJECT_HUB_ERROR_TITLE}\n${PROJECT_HUB_ERROR_SUBTITLE}`}
+            />
           </Box>
         );
       case ProjectHubContentView.NO_GRID:
@@ -331,6 +345,7 @@ export default function ProjectHub(): JSX.Element {
                   date={project.createdOn}
                   activeCasesCount={project.activeCasesCount}
                   activeChatsCount={project.activeChatsCount}
+                  closureState={project.closureState}
                 />
               </Box>
             ))}
@@ -340,6 +355,10 @@ export default function ProjectHub(): JSX.Element {
         return null;
     }
   };
+
+  if (allProjectsSuspended) {
+    return <AccountSuspendedPage />;
+  }
 
   return (
     <Box

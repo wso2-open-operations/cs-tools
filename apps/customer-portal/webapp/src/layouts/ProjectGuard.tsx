@@ -14,45 +14,86 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, useEffect } from "react";
+import { Box } from "@wso2/oxygen-ui";
 import { Outlet, useParams } from "react-router";
 import useGetProjectDetails from "@api/useGetProjectDetails";
-import {
-  isForbiddenError,
-  isUnauthorizedError,
-  isNotFoundError,
-  getApiErrorMessage,
-} from "@utils/ApiError";
-import Error401Page from "@components/error/Error401Page";
-import Error403Page from "@components/error/Error403Page";
-import Error404Page from "@components/error/Error404Page";
+import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import ApiErrorState from "@components/error/ApiErrorState";
+import AccountSuspendedPage from "@/components/access-control/AccountSuspendedPage";
+import ProjectSuspendedNoticePage from "@/components/access-control/ProjectSuspendedNoticePage";
+import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
+import { PROJECT_HUB_PROJECTS_PAGE_SIZE } from "@features/project-hub/constants/projectHubConstants";
+import { ProjectClosureState } from "@/types/permission";
 
 /**
  * ProjectGuard wraps all routes under `projects/:projectId`.
  *
  * It fetches project details once at the layout boundary. If the API
- * returns a 401, 403, or 404 error the guard renders the matching error
- * page with the API-provided message instead of the child route, so no
- * individual page needs to duplicate this logic.
+ * returns an error (400, 401, 403, 404, 5xx, etc.) the guard renders
+ * {@link ApiErrorState} instead of the child route. If the project has
+ * closureState "Suspended" it renders the Project Suspension Notice.
  *
- * @returns {JSX.Element} The child outlet or an error page.
+ * @returns {JSX.Element} The child outlet or an error/suspension page.
  */
-export default function ProjectGuard(): JSX.Element {
+function ProjectGuardContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
+  const { setIsErrorPageDisplayed, setIsProjectSuspended } = useErrorPageContext();
 
-  const { error } = useGetProjectDetails(projectId ?? "");
+  const { data, error, isLoading } = useGetProjectDetails(projectId ?? "");
+  const {
+    data: projectsData,
+    isLoading: isProjectsLoading,
+    isFetching: isProjectsFetching,
+    hasNextPage,
+  } = useInfiniteProjects({ pageSize: PROJECT_HUB_PROJECTS_PAGE_SIZE });
 
-  if (isUnauthorizedError(error)) {
-    return <Error401Page message={getApiErrorMessage(error)} />;
+  const hasError = !isLoading && Boolean(error);
+  const isProjectSuspended =
+    !isLoading && data?.closureState === ProjectClosureState.SUSPENDED;
+
+  const allProjects = flattenProjectPages(projectsData);
+  const allPagesLoaded =
+    !isProjectsLoading && !isProjectsFetching && hasNextPage === false;
+  const allProjectsSuspended =
+    allPagesLoaded &&
+    allProjects.length > 0 &&
+    allProjects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
+
+  const isErrorPageDisplayed = hasError || isProjectSuspended;
+
+  useEffect(() => {
+    setIsErrorPageDisplayed(isErrorPageDisplayed);
+  }, [isErrorPageDisplayed, setIsErrorPageDisplayed]);
+
+  useEffect(() => {
+    setIsProjectSuspended(isProjectSuspended);
+  }, [isProjectSuspended, setIsProjectSuspended]);
+
+  if (hasError) {
+    return (
+      <Box sx={{ py: 4, px: 2 }}>
+        <ApiErrorState
+          error={error}
+          fallbackMessage="Unable to load project details. Please try again later."
+        />
+      </Box>
+    );
   }
 
-  if (isForbiddenError(error)) {
-    return <Error403Page message={getApiErrorMessage(error)} />;
-  }
-
-  if (isNotFoundError(error)) {
-    return <Error404Page message={getApiErrorMessage(error)} />;
+  if (isProjectSuspended) {
+    if (!allPagesLoaded) {
+      return <></>;
+    }
+    if (allProjectsSuspended) {
+      return <AccountSuspendedPage />;
+    }
+    return <ProjectSuspendedNoticePage project={data!} />;
   }
 
   return <Outlet />;
+}
+
+export default function ProjectGuard(): JSX.Element {
+  return <ProjectGuardContent />;
 }

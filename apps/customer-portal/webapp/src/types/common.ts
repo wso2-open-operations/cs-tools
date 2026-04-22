@@ -23,6 +23,8 @@ export type IdLabelRef = {
   number?: string | null;
   name?: string | null;
   abbreviation?: string | null;
+  releasedOn?: string | null;
+  endOfLifeOn?: string | null;
 };
 
 // Model type for metadata items (status, severity, type, etc.).

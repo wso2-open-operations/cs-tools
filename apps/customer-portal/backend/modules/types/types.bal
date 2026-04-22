@@ -246,6 +246,20 @@ public type UserUpdatePayload record {|
     string timeZone?;
 |};
 
+# Updated case details.
+public type UpdatedCase record {|
+    # ID of the updated case
+    entity:IdString id;
+    # Updated date and time
+    string updatedOn;
+    # User who updated the case
+    string updatedBy;
+    # Updated state information
+    ReferenceItem state;
+    # Case type information
+    ReferenceItem 'type;
+|};
+
 # Updated user information.
 public type UpdatedUser record {|
     # Phone number of the user

@@ -16,22 +16,25 @@
 
 import { useNavigate, useParams, useLocation } from "react-router";
 import {
+  Avatar,
   Box,
   Button,
   Paper,
   Skeleton,
   Stack,
   Typography,
-  Chip,
   Divider,
+  alpha,
 } from "@wso2/oxygen-ui";
 import {
   ArrowLeft,
+  Bot,
   MessageSquare,
   FileText,
-  CircleCheck,
-  CircleAlert,
+  Play,
+  Flag,
   Clock,
+  Hash,
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
@@ -42,15 +45,154 @@ import type {
 import { ChatSender } from "@features/support/types/conversations";
 import ApiErrorState from "@components/error/ApiErrorState";
 import type { Message } from "@features/support/types/conversations";
-import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
 import ConversationKnowledgeRecommendations from "@features/support/components/knowledge-base/ConversationKnowledgeRecommendations";
-import { alpha, useTheme } from "@wso2/oxygen-ui";
+import { useTheme } from "@wso2/oxygen-ui";
 import {
   compareByCreatedOnThenId,
   dateFromApiCreatedOn,
   formatDateOnly,
+  formatCommentDate,
+  getInitials,
 } from "@features/support/utils/support";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
+import { ConversationListRowAction } from "@features/support/types/conversations";
+import { resolveConversationListRowAction } from "@features/support/utils/conversationsList";
+import { NOVERA_DISPLAY_NAME } from "@features/support/constants/chatConstants";
+import MarkdownIt from "markdown-it";
+
+const md = new MarkdownIt({ linkify: true, breaks: true });
+
+function ConversationMsgBubble({
+  message,
+  isCurrentUser,
+}: {
+  message: Message;
+  isCurrentUser: boolean;
+}): JSX.Element {
+  const theme = useTheme();
+  const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
+  const primaryBg = alpha(primaryLight, 0.1);
+  const isBot = message.sender === ChatSender.BOT;
+  const isRight = isCurrentUser && !isBot;
+
+  const initials = isBot ? null : getInitials(message.createdBy || "?");
+  const displayName = isBot
+    ? NOVERA_DISPLAY_NAME
+    : message.createdBy || "Unknown";
+
+  const timestamp =
+    message.timestamp instanceof Date
+      ? message.timestamp.toISOString()
+      : String(message.timestamp ?? "");
+
+  const html = useMemo(() => md.render(message.text ?? ""), [message.text]);
+
+  return (
+    <Stack
+      direction="row"
+      alignItems="flex-start"
+      sx={{ flexDirection: isRight ? "row-reverse" : "row", gap: 2 }}
+    >
+      {isBot ? (
+        <Box
+          sx={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Bot size={16} color="white" />
+        </Box>
+      ) : (
+        <Avatar
+          sx={{
+            width: 32,
+            height: 32,
+            fontSize: "0.75rem",
+            flexShrink: 0,
+            bgcolor: isRight
+              ? primaryBg
+              : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
+            color: isRight
+              ? theme.palette.primary.main
+              : (theme.palette.info?.main ?? "#0288d1"),
+          }}
+        >
+          {initials}
+        </Avatar>
+      )}
+      <Stack
+        spacing={0.75}
+        sx={{
+          width: "100%",
+          maxWidth: isBot ? "100%" : 800,
+          minWidth: 0,
+          alignItems: isRight ? "flex-end" : "flex-start",
+        }}
+      >
+        <Stack
+          direction="row"
+          alignItems="center"
+          flexWrap="wrap"
+          sx={{ flexDirection: isRight ? "row-reverse" : "row", gap: 1 }}
+        >
+          <Typography variant="body2" color="text.primary" fontWeight={500}>
+            {displayName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatCommentDate(timestamp)}
+          </Typography>
+        </Stack>
+        <Paper
+          elevation={0}
+          sx={{
+            p: 1.25,
+            width: "100%",
+            bgcolor: isRight ? primaryBg : "background.paper",
+            fontSize: "0.875rem",
+            lineHeight: 1.6,
+            "& p": {
+              margin: "0 0 0.25em 0",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            },
+            "& p:last-child": { marginBottom: 0 },
+            "& ul, & ol": { mt: 0, mb: 1, pl: 2.5 },
+            "& li": { mb: 0.5 },
+            "& a": { color: "primary.main", textDecoration: "underline" },
+            "& code": {
+              fontFamily: "monospace",
+              backgroundColor: "action.hover",
+              px: 0.5,
+            },
+            "& pre": {
+              overflowX: "auto",
+              backgroundColor: "action.disabledBackground",
+              p: 1,
+              m: 0,
+            },
+          }}
+        >
+          {isBot ? (
+            <Box dangerouslySetInnerHTML={{ __html: html }} />
+          ) : (
+            <Typography
+              variant="body2"
+              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+            >
+              {message.text}
+            </Typography>
+          )}
+        </Paper>
+      </Stack>
+    </Stack>
+  );
+}
 
 /**
  * ConversationDetailsPage displays the message history for a single conversation.
@@ -85,8 +227,6 @@ export default function ConversationDetailsPage(): JSX.Element {
     return [...raw].sort(compareByCreatedOnThenId);
   }, [data]);
 
-  const theme = useTheme();
-
   const chatMessages: Message[] = useMemo(
     () =>
       messages.map((msg) => {
@@ -113,39 +253,25 @@ export default function ConversationDetailsPage(): JSX.Element {
     [messages],
   );
 
-  const conversationStatus = summary?.status ?? "Open";
+  const conversationStatus = summary?.status;
+  const conversationStatusLabel = conversationStatus ?? "--";
   const startedTime = summary?.startedTime ?? "";
   const messageCount = summary?.messages;
   const kbArticles = summary?.kbArticles;
 
-  const statusLower = conversationStatus.toLowerCase();
-  let StatusIcon = Clock;
-  let statusColor: string = theme.palette.info.main;
-
-  if (statusLower === "resolved") {
-    StatusIcon = CircleCheck;
-    statusColor = theme.palette.success.main;
-  } else if (statusLower === "abandoned") {
-    StatusIcon = CircleAlert;
-    statusColor = theme.palette.warning.main;
-  } else if (statusLower === "converted") {
-    StatusIcon = CircleCheck;
-    statusColor = theme.palette.secondary.main;
-  } else if (statusLower === "open" || statusLower === "active") {
-    StatusIcon = Clock;
-    statusColor = theme.palette.info.main;
-  }
+  const conversationAction =
+    resolveConversationListRowAction(conversationStatus);
 
   const handleBack = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     if (returnTo) {
-      navigate(returnTo);
+      navigate(returnTo, { state: { fromBack: true } });
       return;
     }
     if (window.history.length > 1) {
       navigate(ROUTE_PREVIOUS_PAGE);
     } else if (projectId) {
-      navigate(`/projects/${projectId}/support/conversations`);
+      navigate(`/projects/${projectId}/support/conversations`, { state: { fromBack: true } });
     } else {
       navigate("/");
     }
@@ -162,38 +288,38 @@ export default function ConversationDetailsPage(): JSX.Element {
         >
           Back
         </Button>
-        <Box>
-          <Stack
-            direction="row"
-            spacing={1.5}
-            alignItems="center"
-            sx={{ mb: 1 }}
-          >
-            <Typography variant="h4" color="text.primary">
-              Chat Session
-            </Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              label={conversationStatus}
-              icon={<StatusIcon size={12} />}
-              sx={{
-                height: 22,
-                fontSize: "0.75rem",
-                bgcolor: alpha(statusColor, 0.1),
-                color: statusColor,
-                "& .MuiChip-icon": {
-                  color: "inherit",
-                  ml: "6px",
-                  mr: "6px",
-                },
-                "& .MuiChip-label": {
-                  pl: 0,
-                  pr: "6px",
-                },
-              }}
-            />
-          </Stack>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h4" color="text.primary">
+            Chat Session
+          </Typography>
+          {conversationAction === ConversationListRowAction.Resume &&
+            projectId &&
+            conversationId && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                startIcon={<Play size={14} />}
+                onClick={() =>
+                  navigate(
+                    `/projects/${projectId}/support/chat/${conversationId}`,
+                    {
+                      state: { chatNumber: summary?.chatNumber },
+                    },
+                  )
+                }
+                sx={{ textTransform: "none", fontWeight: 500 }}
+              >
+                Resume
+              </Button>
+            )}
         </Box>
       </Box>
 
@@ -201,15 +327,29 @@ export default function ConversationDetailsPage(): JSX.Element {
         <Paper variant="outlined" sx={{ p: 3 }}>
           <Box
             sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr 1fr", md: "1fr 1fr 1fr 1fr" },
-              gap: 2,
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+              justifyContent: "space-between",
+              width: "100%",
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <MessageSquare size={16} color={theme.palette.text.secondary} />
+              <Flag size={16} />
               <Box>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="body2" color="text.secondary">
+                  Status
+                </Typography>
+                <Typography variant="body2" color="text.primary">
+                  {conversationStatusLabel}
+                </Typography>
+              </Box>
+            </Box>
+            <Divider orientation="vertical" sx={{ height: 40 }} />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+              <Clock size={16} />
+              <Box>
+                <Typography variant="body2" color="text.secondary">
                   Started
                 </Typography>
                 <Typography variant="body2" color="text.primary">
@@ -217,10 +357,11 @@ export default function ConversationDetailsPage(): JSX.Element {
                 </Typography>
               </Box>
             </Box>
+            <Divider orientation="vertical" sx={{ height: 40 }} />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <MessageSquare size={16} color={theme.palette.text.secondary} />
+              <MessageSquare size={16} />
               <Box>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="body2" color="text.secondary">
                   Messages
                 </Typography>
                 <Typography variant="body2" color="text.primary">
@@ -228,10 +369,11 @@ export default function ConversationDetailsPage(): JSX.Element {
                 </Typography>
               </Box>
             </Box>
+            <Divider orientation="vertical" sx={{ height: 40 }} />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <FileText size={16} color={theme.palette.text.secondary} />
+              <FileText size={16} />
               <Box>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="body2" color="text.secondary">
                   KB Articles
                 </Typography>
                 <Typography variant="body2" color="text.primary">
@@ -239,10 +381,11 @@ export default function ConversationDetailsPage(): JSX.Element {
                 </Typography>
               </Box>
             </Box>
+            <Divider orientation="vertical" sx={{ height: 40 }} />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <MessageSquare size={16} color={theme.palette.text.secondary} />
+              <Hash size={16} />
               <Box>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="body2" color="text.secondary">
                   Chat Number
                 </Typography>
                 <Typography variant="body2" color="text.primary">
@@ -290,7 +433,10 @@ export default function ConversationDetailsPage(): JSX.Element {
           <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {chatMessages.map((m, index) => (
               <Box key={m.id}>
-                <ChatMessageBubble message={m} />
+                <ConversationMsgBubble
+                  message={m}
+                  isCurrentUser={m.sender === ChatSender.USER}
+                />
                 {index < chatMessages.length - 1 && <Divider sx={{ my: 3 }} />}
               </Box>
             ))}

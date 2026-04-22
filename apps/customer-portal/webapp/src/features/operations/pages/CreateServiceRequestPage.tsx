@@ -42,6 +42,7 @@ import { useSearchCatalogs } from "@features/operations/api/useSearchCatalogs";
 import { useGetCatalogItemVariables } from "@features/operations/api/useGetCatalogItemVariables";
 import { usePostCase } from "@features/operations/api/usePostCase";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -182,23 +183,27 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
+  const requestDetailsSectionRef = useRef<HTMLDivElement>(null);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
+  const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
 
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
+  const { data: projectFeatures, isLoading: isFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
   const srPermissions = useMemo(
     () =>
       getProjectPermissions(projectDetails?.type?.label, {
-        hasPdpSubscription: projectDetails?.hasPdpSubscription,
+        projectFeatures,
       }),
-    [projectDetails?.type?.label, projectDetails?.hasPdpSubscription],
+    [projectDetails?.type?.label, projectFeatures],
   );
   const hasSR = srPermissions.hasSR;
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
     projectId || "",
     {
       pageSize: 10,
-      enabled: !!projectId && !isProjectLoading && hasSR,
+      enabled: !!projectId && !isProjectLoading && !isFeaturesLoading && hasSR,
     },
   );
   const allProjectDeployments = useMemo(
@@ -361,6 +366,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
     [],
   );
 
+  useEffect(() => {
+    if (selectedCatalogItemId) {
+      requestDetailsSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [selectedCatalogItemId]);
+
   const handleVariableChange = useCallback(
     (variableId: string, value: string) => {
       setVariableValues((prev) => ({ ...prev, [variableId]: value }));
@@ -418,6 +432,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (isNavigatingAfterCreate) return;
 
     const deploymentMatch = resolveDeploymentMatch(
       deployment,
@@ -493,6 +508,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
     postCase(payload, {
       onSuccess: async (data) => {
+        setIsNavigatingAfterCreate(true);
         const srNumber = (data as { number?: string }).number;
         showSuccess(
           srNumber
@@ -518,6 +534,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
         );
       },
       onError: (error) => {
+        setIsNavigatingAfterCreate(false);
         const msg =
           error?.message?.trim() ||
           "We couldn't create your service request. Please try again.";
@@ -535,10 +552,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
     productId,
     selectedCatalogId,
     selectedCatalogItemId,
-    isCreatePending,
+    isCreatePending: isCreatePending || isNavigatingAfterCreate,
   });
 
-  if (!isProjectLoading && projectDetails && !srPermissions.hasSR) {
+  if (
+    !isProjectLoading &&
+    !isFeaturesLoading &&
+    projectDetails &&
+    !srPermissions.hasSR
+  ) {
     return (
       <Box sx={{ width: "100%", pt: 0, position: "relative", p: 3 }}>
         <CaseCreationHeader
@@ -605,6 +627,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
           }}
           hasMoreProducts={!!deploymentProductsQuery.hasNextPage}
           isFetchingMoreProducts={deploymentProductsQuery.isFetchingNextPage}
+          projectTypeLabel={projectDetails?.type?.label}
         />
 
         {!!productId && (
@@ -618,22 +641,24 @@ export default function CreateServiceRequestPage(): JSX.Element {
         )}
 
         {!!selectedCatalogId && !!selectedCatalogItemId && (
-          <VariableFormFields
-            variables={variablesData?.variables}
-            isLoading={isVariablesLoading}
-            values={variableValues}
-            onChange={handleVariableChange}
-            selectedRequestTypeLabel={selectedCatalogItemLabel}
-            contextValues={{
-              projectDisplay: projectDisplay,
-              deploymentDisplay: deployment,
-              productDisplay:
-                sortedProductOptions.find((p) => p.id === product)?.label ?? "",
-            }}
-            attachments={attachments}
-            onAttachmentClick={handleAttachmentClick}
-            onAttachmentRemove={handleAttachmentRemove}
-          />
+          <div ref={requestDetailsSectionRef}>
+            <VariableFormFields
+              variables={variablesData?.variables}
+              isLoading={isVariablesLoading}
+              values={variableValues}
+              onChange={handleVariableChange}
+              selectedRequestTypeLabel={selectedCatalogItemLabel}
+              contextValues={{
+                projectDisplay: projectDisplay,
+                deploymentDisplay: deployment,
+                productDisplay:
+                  sortedProductOptions.find((p) => p.id === product)?.label ?? "",
+              }}
+              attachments={attachments}
+              onAttachmentClick={handleAttachmentClick}
+              onAttachmentRemove={handleAttachmentRemove}
+            />
+          </div>
         )}
 
         <UploadAttachmentModal
@@ -653,7 +678,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit}
           >
-            {isCreatePending ? "Creating..." : "Create Service Request"}
+            {isCreatePending
+              ? "Creating..."
+              : isNavigatingAfterCreate
+                ? "Opening request..."
+                : "Create Service Request"}
           </Button>
         </Box>
       </Box>

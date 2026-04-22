@@ -36,6 +36,7 @@ export type ProjectCardProps = {
   id: string;
   activeCasesCount: number;
   activeChatsCount: number;
+  closureState?: string | null;
   onViewDashboard?: () => void;
   projectKey: string;
   slaStatus: string;

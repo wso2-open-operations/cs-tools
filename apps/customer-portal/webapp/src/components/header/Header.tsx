@@ -18,6 +18,7 @@ import { useEffect, type JSX, useMemo, useCallback } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useNavigate, useLocation, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useLogger } from "@hooks/useLogger";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
@@ -26,6 +27,7 @@ import ProjectSwitcher from "@components/header/ProjectSwitcher";
 import { useAsgardeo } from "@asgardeo/react";
 import { shouldExcludeS0 } from "@utils/permission";
 import { setLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
+import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -46,6 +48,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     projectId?: string;
   }>();
   const { isLoading: isAuthLoading } = useAsgardeo();
+  const { isProjectSuspended } = useErrorPageContext();
 
   const isProjectHub = location.pathname === "/";
 
@@ -73,6 +76,7 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     if (!projectId) return undefined;
     return projects.find((p) => p.id === projectId);
   }, [projectId, projects]);
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
 
   useEffect(() => {
     const id = projectId?.trim();
@@ -81,7 +85,9 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
     }
   }, [projectId]);
 
-  const excludeS0 = shouldExcludeS0(selectedProject?.type?.label);
+  const excludeS0 = shouldExcludeS0(selectedProject?.type?.label, {
+    projectFeatures,
+  });
 
   /**
    * Handles the project change.
@@ -121,7 +127,9 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
             isError={isError}
           />
           {/* header search bar */}
-          <SearchBar projectId={projectId} excludeS0={excludeS0} />
+          {!isProjectSuspended && (
+            <SearchBar projectId={projectId} excludeS0={excludeS0} />
+          )}
         </>
       )}
       {/* header spacer */}

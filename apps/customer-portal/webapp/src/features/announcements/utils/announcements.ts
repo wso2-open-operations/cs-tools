@@ -31,6 +31,7 @@ import {
   ANNOUNCEMENT_CASE_STATE_ALLOWED_VALUES,
   ANNOUNCEMENTS_CLEAR_FILTERS_LABEL,
 } from "@features/announcements/constants/announcementsConstants";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 /**
  * Builds the case search payload for the announcements list (announcement case type only).
@@ -38,12 +39,14 @@ import {
  * @param filters - Filter field values from the UI.
  * @param searchTerm - Raw search string.
  * @param sortOrder - List sort direction.
+ * @param sortField - List sort field.
  * @returns Search request body without pagination (offset/limit passed separately).
  */
 export function buildAnnouncementCaseSearchRequest(
   filters: AnnouncementFilterValues,
   searchTerm: string,
   sortOrder: SortOrder,
+  sortField: AnnouncementSortField = AnnouncementSortField.CreatedOn,
 ): Omit<CaseSearchRequest, "pagination"> {
   return {
     filters: {
@@ -52,7 +55,7 @@ export function buildAnnouncementCaseSearchRequest(
       searchQuery: searchTerm.trim() || undefined,
     },
     sortBy: {
-      field: AnnouncementSortField.CreatedOn,
+      field: sortField,
       order: sortOrder,
     },
   };
@@ -228,17 +231,9 @@ export function formatAnnouncementDateDisplay(
   if (raw == null || String(raw).trim() === "") {
     return "--";
   }
-  try {
-    const normalized = String(raw).trim().replace(" ", "T");
-    const date = new Date(normalized);
-    if (Number.isNaN(date.getTime())) {
-      return "--";
-    }
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date);
-  } catch {
-    return "--";
-  }
+  const formatted = formatBackendTimestampForDisplay(String(raw), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  return formatted ?? "--";
 }

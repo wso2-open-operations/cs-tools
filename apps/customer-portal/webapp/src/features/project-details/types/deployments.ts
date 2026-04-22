@@ -133,8 +133,6 @@ export type DeploymentProductItem = AuditMetadata & {
   version?: IdLabelRef | string | null;
   cores?: number | null;
   tps?: number | null;
-  releasedOn?: string | null;
-  endOfLifeOn?: string | null;
   updates?: ProductUpdate[] | null;
   instanceCount?: number;
   instances?: DeploymentProductInstance[] | null;

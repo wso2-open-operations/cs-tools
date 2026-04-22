@@ -15,7 +15,7 @@
 // under the License.
 
 import { useIdleTimer } from "react-idle-timer";
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 import SessionWarningDialog from "@components/SessionWarningDialog";
@@ -23,9 +23,8 @@ import {
   IDLE_TIMEOUT_MS,
   IDLE_PROMPT_BEFORE_MS,
   IDLE_THROTTLE_MS,
-  CONTINUE_LOADER_MS,
-  CONTINUE_LOADER_IDLE_THRESHOLD_MS,
 } from "@constants/authConstants";
+import { clearUserPreferredTimeZone } from "@utils/dateTime";
 
 interface IdleTimeoutProviderProps {
   children: ReactNode;
@@ -33,8 +32,7 @@ interface IdleTimeoutProviderProps {
 
 /**
  * Provider that detects user idle time and shows a session warning dialog
- * before timeout. Continue shows a brief loader then resets the timer;
- * Logout signs out.
+ * before timeout. Continue resets the timer; Logout signs out.
  *
  * @param {IdleTimeoutProviderProps} props - children.
  * @returns {JSX.Element} Children wrapped with idle timeout behavior.
@@ -43,8 +41,6 @@ export default function IdleTimeoutProvider({
   children,
 }: IdleTimeoutProviderProps): JSX.Element {
   const [sessionWarningOpen, setSessionWarningOpen] = useState(false);
-  const [isContinuing, setIsContinuing] = useState(false);
-  const continueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
   const { signOut, isSignedIn, isLoading } = useAsgardeo();
 
@@ -54,7 +50,7 @@ export default function IdleTimeoutProvider({
     }
   };
 
-  const { activate, getIdleTime } = useIdleTimer({
+  const { activate } = useIdleTimer({
     onPrompt,
     timeout: IDLE_TIMEOUT_MS,
     promptBeforeIdle: IDLE_PROMPT_BEFORE_MS,
@@ -62,64 +58,30 @@ export default function IdleTimeoutProvider({
   });
 
   const handleContinue = () => {
-    if (continueTimerRef.current !== null) {
-      clearTimeout(continueTimerRef.current);
-      continueTimerRef.current = null;
-    }
-
-    if (getIdleTime() < CONTINUE_LOADER_IDLE_THRESHOLD_MS) {
-      setSessionWarningOpen(false);
-      activate();
-      return;
-    }
-
-    setIsContinuing(true);
-    continueTimerRef.current = setTimeout(() => {
-      setIsContinuing(false);
-      setSessionWarningOpen(false);
-      activate();
-    }, CONTINUE_LOADER_MS);
+    setSessionWarningOpen(false);
+    activate();
   };
 
   const handleLogout = async () => {
-    if (continueTimerRef.current !== null) {
-      clearTimeout(continueTimerRef.current);
-      continueTimerRef.current = null;
-    }
-    setIsContinuing(false);
     setSessionWarningOpen(false);
     try {
       await signOut();
     } finally {
+      clearUserPreferredTimeZone();
       navigate("/home");
     }
   };
 
   useEffect(() => {
     if (!isSignedIn) {
-      if (continueTimerRef.current !== null) {
-        clearTimeout(continueTimerRef.current);
-        continueTimerRef.current = null;
-      }
-      setIsContinuing(false);
       setSessionWarningOpen(false);
     }
   }, [isSignedIn]);
-
-  // Clean up the timer on unmount.
-  useEffect(() => {
-    return () => {
-      if (continueTimerRef.current !== null) {
-        clearTimeout(continueTimerRef.current);
-      }
-    };
-  }, []);
 
   return (
     <>
       <SessionWarningDialog
         open={sessionWarningOpen}
-        isContinuing={isContinuing}
         onContinue={handleContinue}
         onLogout={handleLogout}
       />

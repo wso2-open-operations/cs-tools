@@ -17,12 +17,10 @@
 import type { OutstandingCasesListProps } from "@features/support/types/supportComponents";
 import {
   Box,
-  Chip,
   Form,
   Stack,
   Tooltip,
   Typography,
-  alpha,
   useTheme,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
@@ -35,7 +33,6 @@ import {
   formatRelativeTime,
   getAssignedEngineerLabel,
   getStatusColor,
-  getStatusIcon,
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
@@ -54,21 +51,34 @@ export default function OutstandingCasesList({
 }: OutstandingCasesListProps): JSX.Element {
   const theme = useTheme();
 
+  const listShellSx = {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 1.5,
+    width: "100%",
+    flex: 1,
+    minHeight: 0,
+  };
+
   if (isError) {
     return <ErrorIndicator entityName="outstanding cases" size="medium" />;
   }
 
   if (isLoading) {
-    return <OutstandingCasesSkeleton />;
+    return (
+      <Box sx={listShellSx}>
+        <OutstandingCasesSkeleton />
+      </Box>
+    );
   }
 
   if (cases.length === 0) {
     return (
       <Box
         sx={{
-          display: "flex",
-          flexDirection: "column",
+          ...listShellSx,
           alignItems: "center",
+          justifyContent: "center",
           py: 2,
         }}
       >
@@ -88,13 +98,10 @@ export default function OutstandingCasesList({
   }
 
   return (
-    <Box
-      sx={{ display: "flex", flexDirection: "column", gap: 1.5, width: "100%" }}
-    >
+    <Box sx={listShellSx}>
       {cases.map((c) => {
         const colorPath = getStatusColor(c.status?.label);
         const resolvedColor = resolveColorFromTheme(colorPath, theme);
-        const StatusIcon = getStatusIcon(c.status?.label);
 
         return (
           <Form.CardButton
@@ -102,10 +109,14 @@ export default function OutstandingCasesList({
             onClick={() => onCaseClick?.(c)}
             sx={{
               p: 2,
+              width: "100%",
+              minWidth: 0,
+              overflow: "hidden",
               display: "flex",
               flexDirection: "column",
               alignItems: "stretch",
               gap: 1,
+              minHeight: "180px",
             }}
           >
             <Form.CardHeader
@@ -124,28 +135,20 @@ export default function OutstandingCasesList({
                   >
                     {c.number}
                   </Typography>
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={c.status?.label ?? NULL_PLACEHOLDER}
-                    icon={<StatusIcon size={12} />}
-                    sx={{
-                      bgcolor: alpha(resolvedColor, 0.1),
-                      color: resolvedColor,
-                      height: 20,
-                      fontSize: "0.75rem",
-                      px: 0,
-                      "& .MuiChip-icon": {
-                        color: "inherit",
-                        ml: "6px",
-                        mr: "6px",
-                      },
-                      "& .MuiChip-label": {
-                        pl: 0,
-                        pr: "6px",
-                      },
-                    }}
-                  />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        bgcolor: resolvedColor,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ color: resolvedColor }}>
+                      {c.status?.label ?? NULL_PLACEHOLDER}
+                    </Typography>
+                  </Box>
                 </Stack>
               }
             />
@@ -180,19 +183,40 @@ export default function OutstandingCasesList({
               </Box>
             </Form.CardContent>
 
-            <Form.CardActions sx={{ p: 0, justifyContent: "flex-end" }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Form.CardActions sx={{ p: 0, justifyContent: "flex-end", minWidth: 0 }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.5,
+                  minWidth: 0,
+                  maxWidth: "100%",
+                }}
+              >
                 {(() => {
                   const label = getAssignedEngineerLabel(c.assignedEngineer);
                   return label ? (
                     <Tooltip title={`Assigned to ${label}`}>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         Assigned to {label}
                       </Typography>
                     </Tooltip>
                   ) : null;
                 })()}
-                <Typography variant="caption" color="text.secondary">
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ flexShrink: 0 }}
+                >
                   {formatRelativeTime(c.createdOn ?? undefined)}
                 </Typography>
               </Box>

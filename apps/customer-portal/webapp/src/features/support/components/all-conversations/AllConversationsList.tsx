@@ -17,12 +17,9 @@
 import {
   Box,
   Button,
-  Chip,
   Form,
   Stack,
   Typography,
-  alpha,
-  useTheme,
 } from "@wso2/oxygen-ui";
 import {
   Calendar,
@@ -34,10 +31,10 @@ import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
 import {
   formatDateTime,
-  getStatusColor,
-  getStatusIcon,
-  resolveColorFromTheme,
+  getChatActionColor,
+  getConversationStatusColor,
 } from "@features/support/utils/support";
+import { ChatAction } from "@features/support/constants/supportConstants";
 import { resolveConversationListRowAction } from "@features/support/utils/conversationsList";
 import {
   ALL_CONVERSATIONS_LIST_ACTION_RESUME_LABEL,
@@ -75,8 +72,6 @@ export default function AllConversationsList({
   hasListRefinement = false,
   onConversationClick,
 }: AllConversationsListProps): JSX.Element {
-  const theme = useTheme();
-
   if (isLoading) {
     return <AllConversationsListSkeleton />;
   }
@@ -153,9 +148,7 @@ export default function AllConversationsList({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {conversations.map((conv) => {
-        const StatusIcon = getStatusIcon(conv.state?.label);
-        const colorPath = getStatusColor(conv.state?.label);
-        const resolvedColor = resolveColorFromTheme(colorPath, theme);
+        const statusColorPath = getConversationStatusColor(conv.state?.label ?? "");
         const action = resolveConversationListRowAction(conv.state?.label);
 
         return (
@@ -186,28 +179,20 @@ export default function AllConversationsList({
                   >
                     {conv.number || NULL_PLACEHOLDER}
                   </Typography>
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label={conv.state?.label || NULL_PLACEHOLDER}
-                    icon={<StatusIcon size={12} />}
-                    sx={{
-                      bgcolor: alpha(resolvedColor, 0.1),
-                      color: resolvedColor,
-                      height: 20,
-                      fontSize: "0.75rem",
-                      px: 0,
-                      "& .MuiChip-icon": {
-                        color: "inherit",
-                        ml: "6px",
-                        mr: "6px",
-                      },
-                      "& .MuiChip-label": {
-                        pl: 0,
-                        pr: "6px",
-                      },
-                    }}
-                  />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Box
+                      sx={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        bgcolor: statusColorPath,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="caption" sx={{ color: statusColorPath }}>
+                      {conv.state?.label || NULL_PLACEHOLDER}
+                    </Typography>
+                  </Box>
                 </Stack>
               }
             />
@@ -282,9 +267,11 @@ export default function AllConversationsList({
                 size="small"
                 variant="text"
                 color={
-                  action === ConversationListRowAction.View
-                    ? "secondary"
-                    : "primary"
+                  getChatActionColor(
+                    action === ConversationListRowAction.View
+                      ? ChatAction.VIEW
+                      : ChatAction.RESUME,
+                  ) as "info" | "warning" | "primary" | "success" | "error"
                 }
                 disableRipple
                 onClick={(e) => {
@@ -293,12 +280,17 @@ export default function AllConversationsList({
                 }}
                 startIcon={
                   action === ConversationListRowAction.View ? (
-                    <ExternalLink size={14} />
+                    <ExternalLink size={12} />
                   ) : (
-                    <Play size={14} />
+                    <Play size={12} />
                   )
                 }
-                sx={{ textTransform: "none", fontWeight: 500 }}
+                sx={{
+                  textTransform: "none",
+                  fontWeight: 500,
+                  minWidth: 0,
+                  p: 0,
+                }}
               >
                 {action === ConversationListRowAction.View
                   ? ALL_CONVERSATIONS_LIST_ACTION_VIEW_LABEL

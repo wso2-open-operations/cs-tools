@@ -66,6 +66,7 @@ export type ProjectMetadataProps = {
   slaStatus: string;
   goLivePlanDate: string;
   onboardingStatus: string;
+  hideOnboardingStatus?: boolean;
   isLoading?: boolean;
   isError?: boolean;
 };
@@ -82,6 +83,7 @@ export type ProjectMetadataSecondaryRowProps = {
   slaStatus: string;
   goLivePlanDate: string;
   onboardingStatus: string;
+  hideOnboardingStatus?: boolean;
   isLoading?: boolean;
   isError?: boolean;
 };

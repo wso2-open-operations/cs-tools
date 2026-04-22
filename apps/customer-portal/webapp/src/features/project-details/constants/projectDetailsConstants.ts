@@ -21,11 +21,9 @@ import {
   Rocket,
   Server,
 } from "@wso2/oxygen-ui-icons-react";
-import { User, Shield } from "@wso2/oxygen-ui-icons-react";
 import type { TabOption } from "@components/tab-bar/TabBar";
-import { colors } from "@wso2/oxygen-ui";
 import { ProjectDetailsTabId } from "@features/project-details/types/projectDetails";
-import type { Contact, Stat } from "@features/project-details/types/projectDetails";
+import type { Stat } from "@features/project-details/types/projectDetails";
 import type { UpdateHistoryFormData } from "@features/project-details/types/projectDetailsComponents";
 
 /** Generic placeholder when a project detail value is missing (labels, stats, documents). */
@@ -60,21 +58,6 @@ export const PROJECT_DETAILS_TABS: TabOption[] = [
     id: ProjectDetailsTabId.TIME_TRACKING,
     label: "Time Tracking",
     icon: Clock,
-  },
-];
-
-export const contacts: Contact[] = [
-  {
-    role: "Account Manager",
-    email: "TODO:[EMAIL_ADDRESS]",
-    icon: User,
-    bgColor: colors.blue[700],
-  },
-  {
-    role: "Technical Owner",
-    email: "TODO:[EMAIL_ADDRESS]",
-    icon: Shield,
-    bgColor: colors.purple[400],
   },
 ];
 
@@ -113,38 +96,15 @@ export const SUPPORT_TIER = {
   STANDARD: "Standard",
 } as const;
 
-export type SupportTier = (typeof SUPPORT_TIER)[keyof typeof SUPPORT_TIER];
-
 export const PROJECT_TYPE = {
   SUBSCRIPTION: "Subscription",
   FREE: "Free",
 } as const;
 
-export type ProjectType = (typeof PROJECT_TYPE)[keyof typeof PROJECT_TYPE];
-
 export const SYSTEM_HEALTH = {
   HEALTHY: "Healthy",
   CRITICAL: "Critical",
 } as const;
-
-export type SystemHealth = (typeof SYSTEM_HEALTH)[keyof typeof SYSTEM_HEALTH];
-
-export const SLA_STATUS = {
-  ALL_GOOD: "All Good",
-  NEEDS_ATTENTION: "Needs attention",
-} as const;
-
-export type SLAStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
-
-export const CASE_SEVERITY = {
-  S0: "S0",
-  S1: "S1",
-  S2: "S2",
-  S3: "S3",
-  S4: "S4",
-} as const;
-
-export type CaseSeverity = (typeof CASE_SEVERITY)[keyof typeof CASE_SEVERITY];
 
 export const CASE_STATUS = {
   OPEN: "Open",
@@ -155,15 +115,6 @@ export const CASE_STATUS = {
   CLOSED: "Closed",
   REOPENED: "Reopened",
 } as const;
-
-export const CASE_TYPES = {
-  INCIDENT: "Incident",
-  QUERY: "Query",
-  SERVICE_REQUEST: "Service Request",
-  SECURITY_REPORT_ANALYSIS: "Security Report Analysis",
-} as const;
-
-export type CaseStatus = (typeof CASE_STATUS)[keyof typeof CASE_STATUS];
 
 export const PROJECT_USER_STATUSES = {
   INVITED: "invited",
@@ -190,17 +141,11 @@ export const TIME_CARD_STATE = {
   RECALLED: "Recalled",
 } as const;
 
-export type TimeCardState =
-  (typeof TIME_CARD_STATE)[keyof typeof TIME_CARD_STATE];
-
 export const DEPLOYMENT_STATUS = {
   HEALTHY: "Healthy",
   WARNING: "Warning",
   ERROR: "Error",
 } as const;
-
-export type DeploymentStatus =
-  (typeof DEPLOYMENT_STATUS)[keyof typeof DEPLOYMENT_STATUS];
 
 export const PRODUCT_SUPPORT_STATUS = {
   ACTIVE: "Active Support",
@@ -210,10 +155,10 @@ export const PRODUCT_SUPPORT_STATUS = {
   EXTENDED: "Extended Support",
 } as const;
 
-export type ProductSupportStatus =
-  (typeof PRODUCT_SUPPORT_STATUS)[keyof typeof PRODUCT_SUPPORT_STATUS];
-
-export type { ActivityItem, ProjectStatusChipColor } from "@features/project-details/types/projectDetails";
+export type {
+  ActivityItem,
+  ProjectStatusChipColor,
+} from "@features/project-details/types/projectDetails";
 
 export const UPDATE_HISTORY_INITIAL_FORM_DATA: UpdateHistoryFormData = {
   updateLevel: "",

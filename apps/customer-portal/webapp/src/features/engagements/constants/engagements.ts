@@ -79,5 +79,5 @@ export const ENGAGEMENTS_STAT_CARDS_CONFIG: SupportStatConfig<EngagementsStatKey
 export const ENGAGEMENTS_SORT_OPTIONS: readonly EngagementsSortOption[] = [
   { value: EngagementsSortField.CreatedOn, label: "Created on" },
   { value: EngagementsSortField.UpdatedOn, label: "Updated on" },
-  { value: EngagementsSortField.State, label: "State" },
+  { value: EngagementsSortField.State, label: "Status" },
 ];

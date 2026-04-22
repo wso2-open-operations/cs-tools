@@ -34,6 +34,7 @@ import type { JSX } from "react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { getProjectPermissions } from "@utils/permission";
 
 interface GetHelpMenuItem {
@@ -63,21 +64,27 @@ export default function GetHelpDropdown(): JSX.Element {
     () => flattenProjectPages(projectsData),
     [projectsData],
   );
-  const isProjectsListBusy =
-    isProjectsLoading || (isProjectsFetching && projects.length === 0);
-
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
+  const areProjectFeaturesReady = !projectId || !!projectFeatures;
 
   const projectTypeLabel = selectedProject?.type?.label;
-  const permissions = getProjectPermissions(projectTypeLabel, {
-    hasPdpSubscription: selectedProject?.hasPdpSubscription,
-  });
-  const isServiceRequestVisible = permissions.hasSR;
-  const isSecurityReportVisible = permissions.hasSecurityReportAnalysis;
-
+  const permissions = areProjectFeaturesReady
+    ? getProjectPermissions(projectTypeLabel, {
+        projectFeatures,
+      })
+    : undefined;
+  const isServiceRequestVisible = permissions?.hasSR ?? false;
+  const isSecurityReportVisible = permissions?.hasSecurityReportAnalysis ?? false;
+  const isFeaturesBusy = !!projectId && isProjectFeaturesLoading;
+  const isProjectsListBusy =
+    isProjectsLoading ||
+    (isProjectsFetching && projects.length === 0) ||
+    isFeaturesBusy;
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 

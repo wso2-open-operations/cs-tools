@@ -14,6 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ProjectFeatures } from "@features/project-hub/types/projects";
+
+/** Project closure state values returned by the API. */
+export enum ProjectClosureState {
+  SUSPENDED = "Suspended",
+  RESTRICTED = "Restricted",
+}
+
 /** API project type labels used for permission and visibility rules. */
 export enum ProjectType {
   MANAGED_CLOUD_SUBSCRIPTION = "Managed Cloud Subscription",
@@ -26,9 +34,9 @@ export enum ProjectType {
   PROFESSIONAL_SERVICES = "Professional Services",
 }
 
-/** Optional inputs when resolving permissions (e.g. PDP flag from project search/details). */
+/** Optional inputs when resolving permissions from project features API. */
 export type GetProjectPermissionsOptions = {
-  hasPdpSubscription?: boolean;
+  projectFeatures?: ProjectFeatures | null;
 };
 
 /** Feature flags derived from project type for UI visibility and stats. */
@@ -45,6 +53,7 @@ export type ProjectPermissions = {
   includeS0InSupportMetrics: boolean;
   showServiceHoursAllocationsCard: boolean;
   hasEngagements: boolean;
+  hasUpdates: boolean;
 };
 
 /** Aggregated operation counts for dashboard and related UI. */

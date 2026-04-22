@@ -22,13 +22,14 @@ import { PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE } from "@features/project-d
 import type { ServiceHoursStatCardsProps } from "@features/project-details/types/projectDetailsComponents";
 import {
   formatProjectDate,
-  formatServiceHoursDecimalAsHrMin,
+  formatServiceHoursDecimalCompact,
 } from "@features/project-details/utils/projectDetails";
 import { formatServiceHoursAllocationDisplay } from "@features/project-details/utils/serviceHoursFormat";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import { shouldHideOnboardingData } from "@utils/permission";
 
 function formatRemaining(value: number | undefined): string {
-  return formatServiceHoursDecimalAsHrMin(value);
+  return formatServiceHoursDecimalCompact(value);
 }
 
 /**
@@ -59,12 +60,16 @@ export default function ServiceHoursStatCards({
     project?.onboardingExpiryDate?.trim() && project.onboardingExpiryDate
       ? formatProjectDate(project.onboardingExpiryDate)
       : PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE;
+  const hideOnboardingCard = shouldHideOnboardingData(project?.onboardingStatus);
 
   return (
     <Box
       sx={{
         display: "grid",
-        gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+        gridTemplateColumns: {
+          xs: "1fr",
+          md: hideOnboardingCard ? "1fr" : "1fr 1fr",
+        },
         gap: 2,
         mb: 3,
       }}
@@ -117,7 +122,8 @@ export default function ServiceHoursStatCards({
       </Card>
 
       {/* Onboarding Hours Card */}
-      <Card sx={{ p: 2.5 }}>
+      {!hideOnboardingCard && (
+        <Card sx={{ p: 2.5 }}>
         <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
           <Box
             sx={{
@@ -174,7 +180,8 @@ export default function ServiceHoursStatCards({
             </>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      )}
     </Box>
   );
 }

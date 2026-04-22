@@ -25,16 +25,17 @@ import {
 import { type JSX, type ReactNode, useRef, useEffect, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
+import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
-import { useProactiveTokenRefresh } from "@hooks/useProactiveTokenRefresh";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
 import TopBanner from "@components/top-banner/TopBanner";
 import Footer from "@components/footer/Footer";
 import Header from "@components/header/Header";
 import SideBar from "@components/side-nav-bar/SideBar";
-import NoveraFloatingChat from "@components/novera-floating-chat/NoveraFloatingChat";
-import { FloatingNoveraVisibilityProvider } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import PortalAccessRequiredPage from "@/components/access-control/PortalAccessRequiredPage";
+import { isUnauthorizedError } from "@utils/ApiError";
 import {
   getSidebarCollapsed,
   setSidebarCollapsed,
@@ -56,8 +57,9 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   const location = useLocation();
   const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading } = useAsgardeo();
-
-  useProactiveTokenRefresh();
+  const { error: userDetailsError, isLoading: isUserDetailsLoading } =
+    useGetUserDetails();
+  const { isErrorPageDisplayed } = useErrorPageContext();
 
   // Scroll to top on route change
   useEffect(() => {
@@ -102,10 +104,12 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
 
   // Path Logic Constants
   const isProjectHub = location.pathname === "/" || location.pathname === "";
-  
+
   const isCaseDetailsPage =
-    /\/(?:projects\/[^/]+|[^/]+)\/support\/cases\/[^/]+$/.test(location.pathname);
-  
+    /\/(?:projects\/[^/]+|[^/]+)\/support\/cases\/[^/]+$/.test(
+      location.pathname,
+    );
+
   const isServiceRequestCreatePage = location.pathname.endsWith(
     "/service-requests/create",
   );
@@ -124,8 +128,9 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     );
 
   const isVulnerabilityDetailsPage =
-    (/\/(?:projects\/[^/]+|[^/]+)\/security-center\/[^/]+$/.test(location.pathname)) &&
-    !location.pathname.includes("security-report-analysis");
+    /\/(?:projects\/[^/]+|[^/]+)\/security-center\/[^/]+$/.test(
+      location.pathname,
+    ) && !location.pathname.includes("security-report-analysis");
 
   const isPendingUpdatesPage =
     /\/(?:projects\/[^/]+|[^/]+)\/updates\/pending$/.test(location.pathname);
@@ -144,6 +149,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
     isVulnerabilityDetailsPage ||
     isPendingUpdatesPage ||
     isUpdateLevelDetailsPage;
+  const hasPortalAccessError = isUnauthorizedError(userDetailsError);
 
   return (
     <IdleTimeoutProvider>
@@ -165,7 +171,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
             />
           </AppShell.Navbar>
 
-          {!isProjectHub && (
+          {!isProjectHub && !hasPortalAccessError && !isErrorPageDisplayed && (
             <AppShell.Sidebar>
               <SideBar
                 collapsed={shellState.sidebarCollapsed}
@@ -177,80 +183,81 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
           )}
 
           <AppShell.Main>
-            <FloatingNoveraVisibilityProvider>
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                width: "100%",
+                flex: 1,
+                minHeight: 0,
+                overflow: "hidden",
+                position: "relative",
+              }}
+            >
+              {isVisible && (
+                <LinearProgress
+                  color="warning"
+                  sx={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 1300,
+                    height: 3,
+                  }}
+                />
+              )}
               <Box
+                ref={mainContentRef}
                 sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "100%",
-                  width: "100%",
                   flex: 1,
                   minHeight: 0,
-                  overflow: "hidden",
-                  position: "relative",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "auto",
+                  ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
+                  ...(isAuthLoading
+                    ? { p: 0 }
+                    : isDetailsStylePage
+                      ? { px: 0, pb: 0, pt: 0 }
+                      : { p: 3 }),
                 }}
               >
-                {isVisible && (
-                  <LinearProgress
-                    color="warning"
+                {isAuthLoading || isUserDetailsLoading ? (
+                  <Box
                     sx={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      zIndex: 1300,
-                      height: 3,
+                      flex: 1,
+                      minHeight: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 2,
                     }}
-                  />
-                )}
-                <Box
-                  ref={mainContentRef}
-                  sx={{
-                    flex: 1,
-                    minHeight: 0,
-                    minWidth: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    overflow: "auto",
-                    ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
-                    ...(isAuthLoading
-                      ? { p: 0 }
-                      : isDetailsStylePage
-                        ? { px: 0, pb: 0, pt: 0 }
-                        : { p: 3 }),
-                  }}
-                >
-                  {isAuthLoading ? (
-                    <Box
-                      sx={{
-                        flex: 1,
-                        minHeight: 0,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 2,
+                  >
+                    <LinearProgress
+                      color="warning"
+                      sx={{ width: "80%", maxWidth: 400, height: 4 }}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {loadingMessage}
+                    </Typography>
+                  </Box>
+                ) : hasPortalAccessError ? (
+                  <PortalAccessRequiredPage />
+                ) : (
+                  children || (
+                    <Outlet
+                      context={{
+                        sidebarCollapsed: shellState.sidebarCollapsed,
                       }}
-                    >
-                      <LinearProgress
-                        color="warning"
-                        sx={{ width: "80%", maxWidth: 400, height: 4 }}
-                      />
-                      <Typography variant="body2" color="text.secondary">
-                        {loadingMessage}
-                      </Typography>
-                    </Box>
-                  ) : (
-                    children || (
-                      <Outlet
-                        context={{ sidebarCollapsed: shellState.sidebarCollapsed }}
-                      />
-                    )
-                  )}
-                </Box>
-                {!isProjectHub && <NoveraFloatingChat />}
+                    />
+                  )
+                )}
               </Box>
-            </FloatingNoveraVisibilityProvider>
+            </Box>
           </AppShell.Main>
 
           <AppShell.Footer>

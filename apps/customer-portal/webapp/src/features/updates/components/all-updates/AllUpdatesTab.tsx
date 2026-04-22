@@ -37,7 +37,7 @@ import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLe
 import { PendingUpdatesList } from "@features/updates/components/pending-updates/PendingUpdatesList";
 import PendingUpdatesListSkeleton from "@features/updates/components/pending-updates/PendingUpdatesListSkeleton";
 import EmptyState from "@components/empty-state/EmptyState";
-import Error500Page from "@components/error/Error500Page";
+import error500Svg from "@assets/error/error-500.svg";
 import UpdateLevelsReportModal from "@features/updates/components/all-updates/UpdateLevelsReportModal";
 import type {
   AllUpdatesTabFilterState,
@@ -210,7 +210,7 @@ export default function AllUpdatesTab(): JSX.Element {
           py: 5,
         }}
       >
-        <Error500Page style={{ width: 200, height: "auto" }} />
+        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE}
         </Typography>
@@ -402,7 +402,7 @@ export default function AllUpdatesTab(): JSX.Element {
             py: 5,
           }}
         >
-          <Error500Page style={{ width: 200, height: "auto" }} />
+          <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {ALL_UPDATES_SEARCH_ERROR_MESSAGE}
           </Typography>

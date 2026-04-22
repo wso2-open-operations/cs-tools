@@ -37,6 +37,7 @@ export default function OutstandingCasesSkeleton(): JSX.Element {
             flexDirection: "column",
             alignItems: "stretch",
             gap: 1,
+            minHeight: "180px",
           }}
         >
           <Form.CardHeader

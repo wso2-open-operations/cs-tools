@@ -15,7 +15,8 @@
 // under the License.
 
 import type { CallsPanelProps } from "@features/support/types/supportComponents";
-import { Box, Button, Pagination, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
+import ListPagination from "@components/list-view/ListPagination";
 import { MapPin, PhoneCall } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
@@ -403,18 +404,14 @@ export default function CallsPanel({
               onRejectClick={disableCallActions ? undefined : handleRejectClick}
             />
           )}
-          {callRequestTotalPages > 1 && (
-            <Box sx={{ display: "flex", justifyContent: "center", mt: 1 }}>
-              <Pagination
-                count={callRequestTotalPages}
-                page={boundedCallRequestPage}
-                onChange={handleCallRequestPageChange}
-                color="primary"
-                showFirstButton
-                showLastButton
-              />
-            </Box>
-          )}
+          <ListPagination
+            totalRecords={totalCallRequestRecords}
+            page={boundedCallRequestPage}
+            rowsPerPage={CALL_REQUESTS_PAGE_SIZE}
+            onPageChange={handleCallRequestPageChange}
+            onRowsPerPageChange={() => {}}
+            rowsPerPageOptions={[CALL_REQUESTS_PAGE_SIZE]}
+          />
         </Stack>
       )}
     </>

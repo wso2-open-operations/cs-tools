@@ -40,7 +40,7 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { showError } = useErrorBanner();
 
-  const { data, isLoading, isError } = useGetCaseDetails(
+  const { data, isLoading, isError, error } = useGetCaseDetails(
     projectId || "",
     serviceRequestId || "",
   );
@@ -76,13 +76,13 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
   const handleBack = () => {
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     if (returnTo) {
-      navigate(returnTo);
+      navigate(returnTo, { state: { fromBack: true } });
       return;
     }
     const basePath = location.pathname.includes("/operations/")
       ? "operations"
       : "support";
-    navigate(`/projects/${projectId}/${basePath}/service-requests`);
+    navigate(`/projects/${projectId}/${basePath}/service-requests`, { state: { fromBack: true } });
   };
 
   const handleOpenRelatedCase = () => {
@@ -106,6 +106,7 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
       data={data}
       isLoading={showSkeletons}
       isError={isError}
+      error={error}
       caseId={serviceRequestId || ""}
       projectId={projectId}
       onBack={handleBack}

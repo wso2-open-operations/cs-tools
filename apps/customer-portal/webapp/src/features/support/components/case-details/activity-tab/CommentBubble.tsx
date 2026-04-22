@@ -16,6 +16,7 @@
 
 import type { CommentBubbleProps } from "@features/support/types/supportComponents";
 import { Avatar, Box, Skeleton, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import { Bot } from "@wso2/oxygen-ui-icons-react";
 import { useMemo } from "react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
@@ -29,6 +30,7 @@ import {
   replaceInlineImageSources,
   formatCommentDate,
   INLINE_COMMENT_HTML_PURIFY,
+  isNoveraOrBotSender,
 } from "@features/support/utils/support";
 import DOMPurify from "dompurify";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
@@ -73,6 +75,7 @@ export default function CommentBubble({
     withoutLabel,
     comment.inlineAttachments,
   );
+  const renderAsMarkdown = isNoveraOrBotSender(comment.createdBy, comment.type);
   const sanitizedHtml = DOMPurify.sanitize(withImages, INLINE_COMMENT_HTML_PURIFY);
   const { resolvedHtml: htmlContent, isLoading: isImagesLoading } =
     useResolvedInlineImageHtml(sanitizedHtml, comment.inlineAttachments);
@@ -109,6 +112,7 @@ export default function CommentBubble({
   }, [isCurrentUser, comment, userDetails]);
 
   const isRight = isCurrentUser;
+  const isNovera = isNoveraOrBotSender(comment.createdBy, comment.type);
 
   return (
     <Stack
@@ -119,22 +123,39 @@ export default function CommentBubble({
         gap: 2,
       }}
     >
-      <Avatar
-        sx={{
-          width: 32,
-          height: 32,
-          fontSize: "0.75rem",
-          flexShrink: 0,
-          bgcolor: isCurrentUser
-            ? primaryBg
-            : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
-          color: isCurrentUser
-            ? theme.palette.primary.main
-            : (theme.palette.info?.main ?? "#0288d1"),
-        }}
-      >
-        {initials}
-      </Avatar>
+      {isNovera ? (
+        <Box
+          sx={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #EA580C 0%, #F97316 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Bot size={16} color="white" />
+        </Box>
+      ) : (
+        <Avatar
+          sx={{
+            width: 32,
+            height: 32,
+            fontSize: "0.75rem",
+            flexShrink: 0,
+            bgcolor: isCurrentUser
+              ? primaryBg
+              : alpha(theme.palette.info?.light ?? "#0288d1", 0.2),
+            color: isCurrentUser
+              ? theme.palette.primary.main
+              : (theme.palette.info?.main ?? "#0288d1"),
+          }}
+        >
+          {initials}
+        </Avatar>
+      )}
       <Stack
         spacing={0.75}
         sx={{
@@ -170,6 +191,8 @@ export default function CommentBubble({
         ) : (
           <ChatMessageCard
             htmlContent={htmlContent}
+            markdownContent={withoutLabel}
+            renderAsMarkdown={renderAsMarkdown}
             isCurrentUser={isCurrentUser}
             primaryBg={primaryBg}
             onImageClick={onImageClick}

@@ -2762,12 +2762,10 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
-          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
-          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -4517,6 +4515,7 @@ components:
       description: Valid product category values.
       enum:
       - cl
+      - pdp
     ProductClass:
       type: string
       description: Valid product class values.
@@ -5379,41 +5378,6 @@ components:
           - $ref: '#/components/schemas/Date'
       additionalProperties: false
       description: Reference item.
-    ReferenceTableItem:
-      required:
-      - id
-      - name
-      type: object
-      properties:
-        id:
-          type: string
-          description: ID
-        name:
-          type: string
-          description: Display name
-        number:
-          type: string
-          description: Number
-          nullable: true
-        count:
-          type: integer
-          description: Count value
-          format: int64
-        abbreviation:
-          type: string
-          description: Abbreviation
-          nullable: true
-        releasedOn:
-          description: Release date (for product versions)
-          nullable: true
-          allOf:
-          - $ref: '#/components/schemas/Date'
-        endOfLifeOn:
-          description: End of life date (for product versions)
-          nullable: true
-          allOf:
-          - $ref: '#/components/schemas/Date'
-      description: Basic table information.
     RegistryTokenCreatePayload:
       required:
       - robotName
@@ -5637,9 +5601,10 @@ components:
           type: string
           description: User who updated the case
         state:
-          $ref: '#/components/schemas/ChoiceListItem'
+          $ref: '#/components/schemas/ReferenceItem'
         type:
-          $ref: '#/components/schemas/ReferenceTableItem'
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
       description: Updated case details.
     UpdatedChangeRequest:
       required:

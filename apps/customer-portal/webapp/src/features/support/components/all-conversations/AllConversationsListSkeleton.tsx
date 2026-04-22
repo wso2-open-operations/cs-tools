@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Stack, Skeleton } from "@wso2/oxygen-ui";
+import { Box, Form, Stack, Skeleton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 /**
@@ -26,7 +26,16 @@ export default function AllConversationsListSkeleton(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {[1, 2, 3].map((i) => (
-        <Card key={i} sx={{ p: 3 }}>
+        <Form.CardButton
+          key={i}
+          sx={{
+            p: 3,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: 1,
+          }}
+        >
           <Box sx={{ mb: 1 }}>
             <Stack direction="row" spacing={1.5} sx={{ mb: 1 }}>
               <Skeleton
@@ -65,7 +74,10 @@ export default function AllConversationsListSkeleton(): JSX.Element {
               />
             </Stack>
           </Box>
-        </Card>
+          <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+            <Skeleton variant="text" width={80} height={20} />
+          </Box>
+        </Form.CardButton>
       ))}
     </Box>
   );

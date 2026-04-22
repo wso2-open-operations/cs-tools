@@ -18,6 +18,7 @@ import {
   PROJECT_CARD_DATE_CREATED_PREFIX,
   PROJECT_CARD_DATE_LOCALE,
 } from "@features/project-hub/constants/projectHubConstants";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 /**
  * Formats a date string into "Created DD MMM YYYY" format.
@@ -29,24 +30,14 @@ import {
 export const formatProjectDate = (dateString: string): string => {
   if (!dateString) return "";
 
-  try {
-    const date = new Date(dateString.replace(" ", "T"));
-
-    // Check if date is valid
-    if (isNaN(date.getTime())) {
-      return dateString;
-    }
-
-    const day = date.getDate();
-    const month = date.toLocaleString(PROJECT_CARD_DATE_LOCALE, {
-      month: "short",
-    });
-    const year = date.getFullYear();
-
-    return `${PROJECT_CARD_DATE_CREATED_PREFIX}${day} ${month} ${year}`;
-  } catch {
-    return dateString;
-  }
+  const formatted = formatBackendTimestampForDisplay(
+    dateString,
+    { day: "numeric", month: "short", year: "numeric" },
+    undefined,
+    PROJECT_CARD_DATE_LOCALE,
+  );
+  if (!formatted) return dateString;
+  return `${PROJECT_CARD_DATE_CREATED_PREFIX}${formatted}`;
 };
 
 /**

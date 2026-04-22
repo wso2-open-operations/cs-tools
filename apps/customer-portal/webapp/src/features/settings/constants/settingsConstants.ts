@@ -208,7 +208,7 @@ export const ADD_USER_EMAIL_INVALID_CONTACT_ERROR =
 export const ADD_USER_EMAIL_VALIDATE_ERROR =
   "Email validation failed. Please try again.";
 
-export const REGISTRY_TOKEN_ROBOT_NAME_REGEX = /^[a-zA-Z0-9-]+$/;
+export const REGISTRY_TOKEN_ROBOT_NAME_REGEX = /^[a-z0-9-]+$/;
 
 export const REGISTRY_TOKEN_EXPIRY_WARNING_DAYS = 7;
 

@@ -28,17 +28,9 @@ export default function ChangeRequestsCalendarSkeleton(): JSX.Element {
   return (
     <Paper sx={{ p: 0, overflow: "hidden" }}>
       {/* Header */}
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          p: 2,
-          borderBottom: 1,
-          borderColor: "divider",
-        }}
-      >
-        <Skeleton variant="rounded" width={40} height={40} />
+      <Box sx={{ px: 3, pt: 3 }}>
+        <Skeleton variant="text" width={180} height={30} />
+        <Skeleton variant="text" width={240} height={20} />
       </Box>
 
       {/* Days of week header */}
@@ -46,8 +38,11 @@ export default function ChangeRequestsCalendarSkeleton(): JSX.Element {
         sx={{
           display: "grid",
           gridTemplateColumns: "repeat(7, 1fr)",
+          borderTop: 1,
           borderBottom: 1,
           borderColor: "divider",
+          mt: 2,
+          mx: 3,
         }}
       >
         {DAYS_OF_WEEK.map((day) => (
@@ -70,6 +65,12 @@ export default function ChangeRequestsCalendarSkeleton(): JSX.Element {
         sx={{
           display: "grid",
           gridTemplateColumns: "repeat(7, 1fr)",
+          mx: 3,
+          mb: 3,
+          borderLeft: 1,
+          borderRight: 1,
+          borderBottom: 1,
+          borderColor: "divider",
         }}
       >
         {[...Array(35)].map((_, index) => (

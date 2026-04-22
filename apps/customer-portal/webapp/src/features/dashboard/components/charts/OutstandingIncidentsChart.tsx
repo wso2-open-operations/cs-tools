@@ -26,12 +26,14 @@ import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
   DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_DARK_MODE_SHADE,
   DASHBOARD_CHART_ERROR_ENTITY_OUTSTANDING_CASES,
   DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_INCIDENTS_PX,
   DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
   DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
   DASHBOARD_CHART_TITLE_OUTSTANDING_CASES,
 } from "@/features/dashboard/constants/charts";
+import { useDarkMode } from "@utils/useDarkMode";
 import type { OutstandingIncidentsChartProps } from "@/features/dashboard/types/charts";
 import {
   EMPTY_OUTSTANDING_INCIDENTS_DATA,
@@ -40,6 +42,7 @@ import {
   formatOutstandingIncidentsCenterTotal,
   resolveOutstandingIncidentsChartSource,
 } from "@features/dashboard/utils/dashboardCharts";
+import { SeverityLegendKey } from "@features/dashboard/types/dashboard";
 
 /**
  * Displays the Outstanding Incidents chart.
@@ -57,6 +60,7 @@ export const OutstandingIncidentsChart = ({
   restrictSeverityToLow = false,
   centerContent = false,
 }: OutstandingIncidentsChartProps): JSX.Element => {
+  const isDarkMode = useDarkMode();
   // safe data
   const safeData = data ?? EMPTY_OUTSTANDING_INCIDENTS_DATA;
   const displayedData = restrictSeverityToLow
@@ -74,17 +78,68 @@ export const OutstandingIncidentsChart = ({
     excludeS0,
     restrictSeverityToLow,
   );
+  const darkModeChartSource = chartSource.map((item) => {
+    let color;
+
+    switch (item.key) {
+      case SeverityLegendKey.Catastrophic:
+        color =
+          colors.red?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+          colors.red?.[300] ??
+          item.color;
+        break;
+
+      case SeverityLegendKey.Critical:
+        color =
+          colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+          colors.orange?.[300] ??
+          item.color;
+        break;
+
+      case SeverityLegendKey.High:
+        color =
+          colors.yellow?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+          colors.yellow?.[300] ??
+          item.color;
+        break;
+
+      case SeverityLegendKey.Medium:
+        color =
+          colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+          colors.blue?.[300] ??
+          item.color;
+        break;
+
+      default:
+        color =
+          colors.green?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+          colors.green?.[300] ??
+          item.color;
+    }
+
+    return {
+      ...item,
+      color,
+    };
+  });
+  const displayChartSource = isDarkMode ? darkModeChartSource : chartSource;
   // error grey
   const errorGrey = colors.grey?.[300] ?? "#D1D5DB";
 
   // chart data
   const chartData = buildOutstandingIncidentsPieSlices(
-    chartSource,
+    displayChartSource,
     displayedData,
     Boolean(isLoading),
     Boolean(isError),
     errorGrey,
   );
+  const displayLegendData = buildOutstandingIncidentsLegendRows(
+    displayChartSource,
+    displayedData,
+  );
+  const darkModeCenterTextColor =
+    colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ?? colors.blue?.[300];
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
@@ -177,7 +232,10 @@ export const OutstandingIncidentsChart = ({
               </Box>
             ) : (
               <>
-                <Typography variant="h4">
+                <Typography
+                  variant="h4"
+                  color={isDarkMode ? darkModeCenterTextColor : undefined}
+                >
                   {formatOutstandingIncidentsCenterTotal(
                     Boolean(data),
                     displayedData.total,
@@ -210,12 +268,14 @@ export const OutstandingIncidentsChart = ({
           ))}
         </Box>
       ) : (
-        <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
-          <ChartLegend
-            data={buildOutstandingIncidentsLegendRows(chartSource, displayedData)}
-            isError={isError}
-            showValues
-          />
+        <Box
+          sx={
+            centerContent
+              ? { maxWidth: 420, width: "100%", mx: "auto" }
+              : undefined
+          }
+        >
+          <ChartLegend data={displayLegendData} isError={isError} showValues />
         </Box>
       )}
     </Card>

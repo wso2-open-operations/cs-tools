@@ -24,6 +24,7 @@ import ProjectCardInfo from "@features/project-hub/components/project-card/Proje
 import ProjectCardStats from "@features/project-hub/components/project-card/ProjectCardStats";
 import { setLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
 import type { ProjectCardProps } from "@features/project-hub/types/projectHub";
+import { ProjectClosureState } from "@/types/permission";
 
 /**
  * ProjectCard component to display an overview of a project.
@@ -39,11 +40,12 @@ export default function ProjectCard({
   date,
   activeCasesCount,
   activeChatsCount,
+  closureState,
   onViewDashboard,
 }: ProjectCardProps): JSX.Element {
-  // Hook to navigate between routes.
   const navigate = useNavigate();
   const { hideLoader } = useLoader();
+  const isSuspended = closureState === ProjectClosureState.SUSPENDED;
 
   const handleViewDashboard = () => {
     setLastSelectedProjectId(id);
@@ -67,6 +69,8 @@ export default function ProjectCard({
         flexDirection: "column",
         width: "100%",
         minHeight: 260,
+        opacity: isSuspended ? 0.75 : 1,
+        position: "relative",
       }}
     >
       {/* project card badges */}

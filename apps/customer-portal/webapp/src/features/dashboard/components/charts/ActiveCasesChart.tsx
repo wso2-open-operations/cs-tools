@@ -26,12 +26,14 @@ import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
   DASHBOARD_CHART_CAPTION_TOTAL,
+  DASHBOARD_CHART_DARK_MODE_SHADE,
   DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES,
   DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX,
   DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
   DASHBOARD_CHART_PIE_SKELETON_SIZE_PX,
   DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS,
 } from "@/features/dashboard/constants/charts";
+import { useDarkMode } from "@utils/useDarkMode";
 import {
   OperationsChartMode,
   type ActiveCasesChartProps,
@@ -58,6 +60,7 @@ export const ActiveCasesChart = ({
   variant = OperationsChartMode.SrAndCr,
   centerContent = false,
 }: ActiveCasesChartProps): JSX.Element => {
+  const isDarkMode = useDarkMode();
   // safe data
   const safeData = data ?? EMPTY_ACTIVE_CASES_DATA;
   // series config
@@ -72,6 +75,34 @@ export const ActiveCasesChart = ({
     Boolean(isError),
     errorGrey,
   );
+  const darkModeColorByName = new Map<string, string>([
+    [
+      "Service Requests (SR)",
+      colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.orange?.[300] ??
+        "#FDBA74",
+    ],
+    [
+      "Change Requests (CR)",
+      colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+        colors.blue?.[300] ??
+        "#93C5FD",
+    ],
+  ]);
+  const displayChartData = isDarkMode
+    ? chartData.map((entry) => ({
+        ...entry,
+        color: darkModeColorByName.get(entry.name) ?? entry.color,
+      }))
+    : chartData;
+  const displayLegendData = isDarkMode
+    ? buildActiveCasesLegendRows(seriesConfig, safeData).map((entry) => ({
+        ...entry,
+        color: darkModeColorByName.get(entry.name) ?? entry.color,
+      }))
+    : buildActiveCasesLegendRows(seriesConfig, safeData);
+  const darkModeCenterTextColor =
+    colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ?? colors.blue?.[300];
 
   return (
     <Card sx={{ height: "100%", p: 2 }}>
@@ -113,7 +144,7 @@ export const ActiveCasesChart = ({
               tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
             >
               <Pie
-                data={chartData}
+                data={displayChartData}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
@@ -127,7 +158,7 @@ export const ActiveCasesChart = ({
                 label={false}
                 labelLine={false}
               >
-                {chartData.map((entry, index) => (
+                {displayChartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={entry.color}
@@ -164,7 +195,10 @@ export const ActiveCasesChart = ({
               </Box>
             ) : (
               <>
-                <Typography variant="h4">
+                <Typography
+                  variant="h4"
+                  color={isDarkMode ? darkModeCenterTextColor : undefined}
+                >
                   {formatActiveCasesCenterTotal(Boolean(data), safeData.total)}
                 </Typography>
                 <Typography variant="caption">
@@ -194,12 +228,14 @@ export const ActiveCasesChart = ({
           ))}
         </Box>
       ) : (
-        <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
-          <ChartLegend
-            data={buildActiveCasesLegendRows(seriesConfig, safeData)}
-            isError={isError}
-            showValues
-          />
+        <Box
+          sx={
+            centerContent
+              ? { maxWidth: 420, width: "100%", mx: "auto" }
+              : undefined
+          }
+        >
+          <ChartLegend data={displayLegendData} isError={isError} showValues />
         </Box>
       )}
     </Card>

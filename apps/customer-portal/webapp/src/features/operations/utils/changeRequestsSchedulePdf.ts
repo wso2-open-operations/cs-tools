@@ -21,6 +21,7 @@ import type {
   ChangeRequestStats,
 } from "@features/operations/types/changeRequests";
 import { formatImpactLabel } from "@features/operations/utils/changeRequestUi";
+import { formatBackendTimestampForDisplay, resolveDisplayTimeZone } from "@utils/dateTime";
 
 /**
  * Formats a date string for display in the PDF.
@@ -31,34 +32,15 @@ import { formatImpactLabel } from "@features/operations/utils/changeRequestUi";
  */
 function formatScheduledDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "N/A";
-
-  // Normalize ServiceNow format (YYYY-MM-DD HH:mm:ss) to ISO format with UTC timezone
-  let normalizedDateStr = dateStr;
-  if (dateStr.includes(" ")) {
-    // Replace space with "T" and append "Z" for UTC if no timezone info exists
-    normalizedDateStr = dateStr.replace(" ", "T");
-    if (
-      !normalizedDateStr.includes("Z") &&
-      !normalizedDateStr.includes("+") &&
-      !normalizedDateStr.includes("-", 10)
-    ) {
-      normalizedDateStr += "Z";
-    }
-  }
-
-  const d = new Date(normalizedDateStr);
-  if (isNaN(d.getTime())) return "N/A";
-
-  // Format with explicit UTC timezone for consistency
-  return d.toLocaleString("en-US", {
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "UTC",
   });
+  return formatted ?? "N/A";
 }
 
 /**
@@ -79,6 +61,7 @@ export function generateChangeRequestsSchedulePdf(
 
   // Generated date
   const now = new Date();
+  const displayTimeZone = resolveDisplayTimeZone();
   const generatedStr = now.toLocaleString("en-US", {
     year: "numeric",
     month: "long",
@@ -86,6 +69,7 @@ export function generateChangeRequestsSchedulePdf(
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: displayTimeZone,
   });
   doc.setFontSize(10);
   doc.text(`Generated on: ${generatedStr}`, 14, 28);
@@ -149,6 +133,7 @@ export function generateChangeRequestsSchedulePdf(
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: displayTimeZone,
   });
   const totalPages = doc.getNumberOfPages();
   const pageWidth = doc.internal.pageSize.getWidth();

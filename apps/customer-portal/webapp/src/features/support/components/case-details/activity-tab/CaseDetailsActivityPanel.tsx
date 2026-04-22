@@ -145,6 +145,8 @@ export default function CaseDetailsActivityPanel({
         display: "flex",
         flexDirection: "column",
         minHeight: "100%",
+        height: "100%",
+        overflow: "hidden",
       }}
     >
       {content}

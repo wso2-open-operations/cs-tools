@@ -49,20 +49,23 @@ import ServiceNowCaseRedirectPage from "@features/project-hub/pages/ServiceNowCa
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
 import Error404Page from "@components/error/Error404Page";
+import ErrorLayout from "@layouts/ErrorLayout";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
+import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
 
 export default function App(): JSX.Element {
   return (
     <LoaderProvider>
       <ErrorBannerProvider>
         <SuccessBannerProvider>
-          <Routes>
-            {/* Error Routes */}
-            <Route path="/401" element={<Error401Page />} />
-            <Route path="/403" element={<Error403Page />} />
-            <Route path="/404" element={<Error404Page />} />
+          <ErrorPageProvider>
+            <Routes>
+              {/* Error Routes */}
+              <Route path="/401" element={<ErrorLayout><Error401Page /></ErrorLayout>} />
+              <Route path="/403" element={<ErrorLayout><Error403Page /></ErrorLayout>} />
+              <Route path="/404" element={<ErrorLayout><Error404Page /></ErrorLayout>} />
 
             <Route element={<AuthGuard />}>
               {/* ProjectHub Page */}
@@ -192,8 +195,9 @@ export default function App(): JSX.Element {
             </Route>
 
             {/* Fallback */}
-            <Route path="*" element={<Error404Page />} />
+            <Route path="*" element={<ErrorLayout><Error404Page /></ErrorLayout>} />
           </Routes>
+          </ErrorPageProvider>
         </SuccessBannerProvider>
       </ErrorBannerProvider>
     </LoaderProvider>

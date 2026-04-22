@@ -16,6 +16,7 @@
 
 import type { ActivityItem } from "@features/project-details/types/projectDetails";
 import type { ProjectStatsResponse } from "@features/project-hub/types/projects";
+import type { ProjectFeatures } from "@features/project-hub/types/projects";
 import { PRIMARY_PRODUCTION_DEPLOYMENT_TYPE_LABEL } from "@constants/permissionConstants";
 import type {
   GetProjectPermissionsOptions,
@@ -24,6 +25,7 @@ import type {
 } from "@/types/permission";
 import { ProjectType } from "@/types/permission";
 import { convertMinutesToHours } from "@features/project-details/utils/projectDetails";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 export { PRIMARY_PRODUCTION_DEPLOYMENT_TYPE_LABEL } from "@constants/permissionConstants";
 export { ProjectType } from "@/types/permission";
@@ -37,6 +39,12 @@ export type ProjectSeverityPolicy = {
   excludeS0: boolean;
   restrictSeverityToLow: boolean;
 };
+
+const CATASTROPHIC_SEVERITY_TAG = "(P0)";
+const LOW_SEVERITY_TAG = "(P4)";
+const CATASTROPHIC_SEVERITY_ID = "14";
+const LOW_SEVERITY_ID = "13";
+const NOT_APPLICABLE_ONBOARDING_STATUS = "not-applicable";
 
 /**
  * Restrictive defaults for unknown or unlisted project types.
@@ -55,89 +63,51 @@ function restrictivePermissions(): ProjectPermissions {
     includeS0InSupportMetrics: false,
     showServiceHoursAllocationsCard: false,
     hasEngagements: false,
+    hasUpdates: false,
   };
 }
 
 /**
  * Returns UI and stats permissions for a project type label (API string).
  *
- * @param projectTypeLabel - Value from project.type.label.
- * @param options - Optional flags from project search/details (e.g. `hasPdpSubscription` for Cloud SR).
+ * @param projectTypeLabel - Kept for API parity with legacy callers; ignored when
+ * permissions are derived from project features.
+ * @param options - Optional API-driven feature payload from `/projects/{projectId}/features`.
  * @returns Permission flags for conditional rendering and aggregations.
  */
 export function getProjectPermissions(
-  projectTypeLabel: string | null | undefined,
+  _projectTypeLabel: string | null | undefined,
   options?: GetProjectPermissionsOptions,
 ): ProjectPermissions {
-  const permissions = restrictivePermissions();
-  const label = projectTypeLabel ?? "";
-  const hasPdpSubscription = options?.hasPdpSubscription === true;
+  const features = options?.projectFeatures;
+  if (!features) return restrictivePermissions();
 
-  switch (label) {
-    case ProjectType.MANAGED_CLOUD_SUBSCRIPTION:
-      permissions.hasOperations = true;
-      permissions.hasSR = true;
-      permissions.hasCR = true;
-      permissions.hasDeployments = true;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = true;
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.showOutstandingOpsChart = true;
-      permissions.includeChangeRequestsInDashboardTotals = true;
-      permissions.includeS0InSupportMetrics = true;
-      permissions.showServiceHoursAllocationsCard = true;
-      permissions.hasEngagements = true;
-      break;
+  const hasSR = features.hasServiceRequestReadAccess;
+  const hasCR = features.hasChangeRequestReadAccess;
+  const hasDeployments =
+    features.hasDeploymentReadAccess || features.hasDeploymentWriteAccess;
+  const hasTimeLogs = features.hasTimeLogsReadAccess;
+  const hasSra = features.hasSraReadAccess || features.hasSraWriteAccess;
+  const hasCatastrophicSeverity = hasAcceptedSeverityLabel(
+    features,
+    CATASTROPHIC_SEVERITY_TAG,
+  );
 
-    case ProjectType.CLOUD_SUPPORT:
-    case ProjectType.CLOUD_SUBSCRIPTION: {
-      permissions.hasOperations = true;
-      permissions.hasSR = hasPdpSubscription;
-      permissions.hasCR = false;
-      permissions.hasDeployments = false;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = false;
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.showOutstandingOpsChart = hasPdpSubscription;
-      permissions.includeChangeRequestsInDashboardTotals = false;
-      permissions.includeS0InSupportMetrics = false;
-      permissions.showServiceHoursAllocationsCard = false;
-      permissions.hasEngagements = true;
-      break;
-    }
-
-    case ProjectType.CLOUD_EVALUATION_SUPPORT:
-    case ProjectType.EVALUATION_SUBSCRIPTION:
-      break;
-
-    case ProjectType.DEVELOPMENT_SUPPORT:
-      permissions.hasSecurityReportAnalysis = true;
-      break;
-
-    case ProjectType.PROFESSIONAL_SERVICES:
-      permissions.hasSecurityReportAnalysis = true;
-      break;
-
-    case ProjectType.SUBSCRIPTION:
-      permissions.hasOperations = false;
-      permissions.hasSR = false;
-      permissions.hasCR = false;
-      permissions.hasDeployments = true;
-      permissions.hasQueryHours = true;
-      permissions.hasTimeLogs = true;
-      permissions.hasSecurityReportAnalysis = true;
-      permissions.showOutstandingOpsChart = false;
-      permissions.includeChangeRequestsInDashboardTotals = false;
-      permissions.includeS0InSupportMetrics = false;
-      permissions.showServiceHoursAllocationsCard = true;
-      permissions.hasEngagements = true;
-      break;
-
-    default:
-      break;
-  }
-
-  return permissions;
+  return {
+    hasOperations: hasSR || hasCR,
+    hasSR,
+    hasCR,
+    hasDeployments,
+    hasQueryHours: hasTimeLogs,
+    hasTimeLogs,
+    hasSecurityReportAnalysis: hasSra,
+    showOutstandingOpsChart: hasSR || hasCR,
+    includeChangeRequestsInDashboardTotals: hasCR,
+    includeS0InSupportMetrics: hasCatastrophicSeverity,
+    showServiceHoursAllocationsCard: hasTimeLogs,
+    hasEngagements: features.hasEngagementsReadAccess,
+    hasUpdates: features.hasUpdatesReadAccess,
+  };
 }
 
 /**
@@ -158,15 +128,21 @@ export function shouldExcludeS0(
  * Whether the severity must be locked to S4 (Low) for case creation.
  * Development Support projects always use S4 and the field must not be editable.
  *
- * @param projectTypeLabel - Value from project.type.label.
+ * @param projectTypeLabel - Kept for API parity with legacy callers; ignored when
+ * severity policy is derived from project features.
  * @returns True when severity must be forced to S4.
  */
 export function shouldForceSeverityS4(
-  projectTypeLabel: string | null | undefined,
+  _projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): boolean {
-  return (
-    projectTypeLabel === ProjectType.DEVELOPMENT_SUPPORT ||
-    projectTypeLabel === ProjectType.PROFESSIONAL_SERVICES
+  const acceptedSeverities =
+    options?.projectFeatures?.acceptedSeverityValues ?? [];
+  if (acceptedSeverities.length !== 1) return false;
+  return hasSeverityMatch(
+    acceptedSeverities[0],
+    LOW_SEVERITY_ID,
+    LOW_SEVERITY_TAG,
   );
 }
 
@@ -178,11 +154,38 @@ export function shouldForceSeverityS4(
  */
 export function getProjectSeverityPolicy(
   projectTypeLabel: string | null | undefined,
+  options?: GetProjectPermissionsOptions,
 ): ProjectSeverityPolicy {
   return {
-    excludeS0: shouldExcludeS0(projectTypeLabel),
-    restrictSeverityToLow: shouldForceSeverityS4(projectTypeLabel),
+    excludeS0: shouldExcludeS0(projectTypeLabel, options),
+    restrictSeverityToLow: shouldForceSeverityS4(projectTypeLabel, options),
   };
+}
+
+function hasAcceptedSeverityLabel(
+  features: ProjectFeatures,
+  labelFragment: string,
+): boolean {
+  const severityId =
+    labelFragment === CATASTROPHIC_SEVERITY_TAG
+      ? CATASTROPHIC_SEVERITY_ID
+      : LOW_SEVERITY_ID;
+  return features.acceptedSeverityValues.some((severity) =>
+    hasSeverityMatch(severity, severityId, labelFragment),
+  );
+}
+
+function hasSeverityMatch(
+  severity: { id?: string; label?: string },
+  expectedId: string,
+  fallbackLabelTag: string,
+): boolean {
+  if ((severity.id ?? "").trim() === expectedId) {
+    return true;
+  }
+  const normalizedLabel = (severity.label ?? "").trim().toLowerCase();
+  const normalizedFallback = fallbackLabelTag.trim().toLowerCase();
+  return normalizedLabel.includes(normalizedFallback);
 }
 
 /**
@@ -200,6 +203,31 @@ export function shouldRestrictToPrimaryProductionDeployments(
     projectTypeLabel === ProjectType.CLOUD_SUBSCRIPTION ||
     projectTypeLabel === ProjectType.CLOUD_EVALUATION_SUPPORT
   );
+}
+
+/**
+ * Whether the project is a cloud support project (Cloud Support, Cloud Subscription, or Cloud Evaluation).
+ *
+ * @param projectTypeLabel - Value from project.type.label.
+ * @returns True when the project is a cloud support type.
+ */
+export function isCloudSupportProject(
+  projectTypeLabel: string | null | undefined,
+): boolean {
+  return projectTypeLabel === ProjectType.CLOUD_SUPPORT;
+}
+
+/**
+ * Whether onboarding-specific UI should be hidden for the project.
+ *
+ * @param onboardingStatus - Project onboarding status value from API.
+ * @returns True when onboarding status is "Not-Applicable".
+ */
+export function shouldHideOnboardingData(
+  onboardingStatus: string | null | undefined,
+): boolean {
+  const normalized = (onboardingStatus ?? "").trim().toLowerCase();
+  return normalized === NOT_APPLICABLE_ONBOARDING_STATUS;
 }
 
 /**
@@ -261,28 +289,24 @@ export function calculateProjectStats(
 export function getRecentActivityItems(
   activity?: ProjectStatsResponse["recentActivity"],
   projectTypeLabel?: string | null,
+  options?: GetProjectPermissionsOptions,
 ): ActivityItem[] {
-  const permissions = getProjectPermissions(projectTypeLabel);
+  const permissions = getProjectPermissions(projectTypeLabel, options);
 
   const formatDateTime = (dateString: string): string => {
     if (!dateString) return "";
-    try {
-      const date = new Date(dateString.replace(" ", "T"));
-      if (isNaN(date.getTime())) return "";
-      const dateStr = date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-      const timeStr = date.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-      return `${dateStr} at ${timeStr}`;
-    } catch {
-      return "";
-    }
+    const dateStr = formatBackendTimestampForDisplay(dateString, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const timeStr = formatBackendTimestampForDisplay(dateString, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    if (!dateStr || !timeStr) return "";
+    return `${dateStr} at ${timeStr}`;
   };
 
   const items: ActivityItem[] = [];

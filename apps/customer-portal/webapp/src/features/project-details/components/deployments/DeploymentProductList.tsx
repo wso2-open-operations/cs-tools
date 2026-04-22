@@ -337,11 +337,12 @@ function ProductItemRow({
     typeof item.tps === "number"
       ? item.tps.toLocaleString()
       : displayValue(null, emptyVal);
-  const releasedStr = item.releasedOn
-    ? formatProjectDate(item.releasedOn)
+  const versionRef = typeof item.version === "object" && item.version !== null ? item.version : null;
+  const releasedStr = versionRef?.releasedOn
+    ? formatProjectDate(versionRef.releasedOn)
     : displayValue(null, emptyVal);
-  const eolStr = item.endOfLifeOn
-    ? formatProjectDate(item.endOfLifeOn)
+  const eolStr = versionRef?.endOfLifeOn
+    ? formatProjectDate(versionRef.endOfLifeOn)
     : displayValue(null, emptyVal);
   const updateLevelStr = (() => {
     const levels =

@@ -25,7 +25,6 @@ import {
   MessageCircle,
   PlayCircle,
   RotateCcw,
-  TriangleAlert,
   XCircle,
 } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -35,7 +34,6 @@ import {
   CaseStatus,
   CallRequestStatus,
   CaseType,
-  CaseSeverityLevel,
   type CaseTypeInput,
 } from "@features/support/constants/supportConstants";
 import { CaseReportType } from "@features/security/types/security";
@@ -48,6 +46,12 @@ import { alpha, colors, type Theme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
+import {
+  formatBackendTimestampForDisplay,
+  parseBackendTimestamp,
+  normalizeUserTimeZone,
+  resolveDisplayTimeZone,
+} from "@utils/dateTime";
 
 /**
  * Extracts Incident and Query case type IDs from caseTypes metadata.
@@ -270,58 +274,9 @@ export function stripCustomerPrefixFromReason(reason: string): string {
   return reason.replace(/^\[Customer\]\s*/i, "").trim();
 }
 
-const CALL_REQ_SHORT_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-function padClockMinute(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /**
- * Preferred times from call-request API: wall clock with `Z` suffix (not a real UTC offset).
- */
-const CALL_REQUEST_API_LITERAL_Z_RE =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?Z$/i;
-
-function formatWallClockShort(
-  month1to12: number,
-  day: number,
-  hour24: number,
-  minute: number,
-): string {
-  if (
-    month1to12 < 1 ||
-    month1to12 > 12 ||
-    day < 1 ||
-    day > 31 ||
-    hour24 < 0 ||
-    hour24 > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return "--";
-  }
-  const mon = CALL_REQ_SHORT_MONTHS[month1to12 - 1];
-  const h12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  const ampm = hour24 < 12 ? "AM" : "PM";
-  return `${mon} ${day}, ${h12}:${padClockMinute(minute)} ${ampm}`;
-}
-
-/**
- * Formats call-request timestamps exactly as returned by the API (wall-clock), with no timezone conversion.
- * Supports literal `YYYY-MM-DDTHH:mm:ss.sssZ`, `YYYY-MM-DD HH:mm:ss`, and `MM/DD/YYYY HH:mm:ss`.
+ * Formats call-request timestamps for display in user/browser timezone.
+ * Supports `YYYY-MM-DDTHH:mm:ss.sssZ`, `YYYY-MM-DD HH:mm:ss`, and `MM/DD/YYYY HH:mm:ss`.
  *
  * @param dateStr - Raw string from the backend.
  * @returns Short English date/time or "--" if unparseable.
@@ -330,42 +285,14 @@ export function formatCallRequestBackendDateTimeShort(
   dateStr: string | null | undefined,
 ): string {
   if (!dateStr?.trim()) return "--";
-  const t = dateStr.trim();
-
-  const literalZ = CALL_REQUEST_API_LITERAL_Z_RE.exec(t);
-  if (literalZ) {
-    const mo = Number(literalZ[2]);
-    const d = Number(literalZ[3]);
-    const h = Number(literalZ[4]);
-    const mi = Number(literalZ[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  const ymd =
-    /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (ymd) {
-    const mo = Number(ymd[2]);
-    const d = Number(ymd[3]);
-    const h = Number(ymd[4]);
-    const mi = Number(ymd[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  const mdy =
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
-      t,
-    );
-  if (mdy) {
-    const mo = Number(mdy[1]);
-    const d = Number(mdy[2]);
-    const h = Number(mdy[4]);
-    const mi = Number(mdy[5]);
-    return formatWallClockShort(mo, d, h, mi);
-  }
-
-  return "--";
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return formatted ?? "--";
 }
 
 /**
@@ -420,34 +347,41 @@ export function formatUtcToLocal(
   userTimeZone?: string,
 ): string {
   if (!dateStr) return "--";
-  const normalized = normalizeUtcDateString(dateStr);
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return "--";
   const tzOption = includeTimeZoneName
     ? { timeZoneName: "short" as const }
     : {};
-  const tzZone = userTimeZone ? { timeZone: userTimeZone } : {};
+  const timeZone = resolveDisplayTimeZone(userTimeZone);
+  const options: Intl.DateTimeFormatOptions =
+    formatStr === "short"
+      ? {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+          ...tzOption,
+        }
+      : {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+          ...tzOption,
+        };
+
+  const formatted = formatBackendTimestampForDisplay(
+    dateStr,
+    options,
+    timeZone,
+  );
+  if (!formatted) return "--";
+
   if (formatStr === "short") {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: true,
-      ...tzOption,
-      ...tzZone,
-    }).format(date);
+    return formatted;
   }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-    ...tzOption,
-    ...tzZone,
-  }).format(date);
+  return formatted;
 }
 
 /**
@@ -475,35 +409,26 @@ export function formatDateTime(
   dateStr: string | null | undefined,
   formatStr: "short" | "long" = "long",
 ): string {
-  if (!dateStr) {
-    return "Not Available";
-  }
-
-  // Handle API date format "YYYY-MM-DD HH:mm:ss" by converting space to 'T' for ISO format
-  const normalizedDateStr = dateStr.trim().replace(" ", "T");
-  const date = new Date(normalizedDateStr);
-
-  if (isNaN(date.getTime())) {
-    return "Not Available";
-  }
-
-  if (formatStr === "short") {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: true,
-    }).format(date);
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-  }).format(date);
+  if (!dateStr) return "Not Available";
+  const options: Intl.DateTimeFormatOptions =
+    formatStr === "short"
+      ? {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+        }
+      : {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: true,
+        };
+  const formatted = formatBackendTimestampForDisplay(dateStr, options);
+  return formatted ?? "Not Available";
 }
 
 /**
@@ -514,38 +439,12 @@ export function formatDateTime(
  */
 export function formatDateOnly(dateStr: string | null | undefined): string {
   if (!dateStr) return "Not Available";
-
-  const trimmed = dateStr.trim();
-
-  // Handle YYYY-MM-DD HH:mm:ss format (standard API format for chat history and case details)
-  const standardFormat =
-    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
-  if (standardFormat) {
-    const [, year, month, day, hour, minute, second] = standardFormat;
-    const isoDate = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-    const date = new Date(isoDate);
-    if (!Number.isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(date);
-    }
-  }
-
-  // Handle ISO format (YYYY-MM-DDTHH:mm:ssZ or similar)
-  if (/T\d{2}:\d{2}/.test(trimmed)) {
-    const date = new Date(trimmed);
-    if (!Number.isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(date);
-    }
-  }
-
-  return "Not Available";
+  const formatted = formatBackendTimestampForDisplay(dateStr, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return formatted ?? "Not Available";
 }
 
 export type ChatActionState =
@@ -687,6 +586,8 @@ export function getChatStatusAction(status: string): ChatAction {
 
   switch (true) {
     case normalized.includes("resolved"):
+    case normalized.includes("abandoned"):
+    case normalized.includes("converted"):
       return ChatAction.VIEW;
     default:
       return ChatAction.RESUME;
@@ -844,7 +745,11 @@ export function resolveColorFromTheme(path: string, theme: Theme): string {
 export function formatRelativeTime(date: string | Date | undefined): string {
   if (!date) return "--";
 
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d =
+    typeof date === "string"
+      ? parseBackendTimestamp(date)
+      : date;
+  if (!d) return "--";
   if (isNaN(d.getTime())) return "--";
 
   const now = new Date();
@@ -1041,34 +946,6 @@ export function isS0Case(caseItem: {
 }
 
 /**
- * Returns the icon component for a severity label (announcement cards).
- * S0/S1: TriangleAlert, S2: CircleAlert, S3: Clock, S4: CircleCheck.
- *
- * @param label - API severity label (e.g. "1 - Critical", "Critical (P1)").
- * @returns {ComponentType} Icon component.
- */
-export function getSeverityIcon(label?: string): ComponentType<{
-  size?: number;
-  color?: string;
-}> {
-  const display = mapSeverityToDisplay(label);
-  const upper = display.toUpperCase();
-  switch (upper) {
-    case CaseSeverityLevel.S0:
-    case CaseSeverityLevel.S1:
-      return TriangleAlert;
-    case CaseSeverityLevel.S2:
-      return CircleAlert;
-    case CaseSeverityLevel.S3:
-      return Clock;
-    case CaseSeverityLevel.S4:
-      return CircleCheck;
-    default:
-      return CircleAlert;
-  }
-}
-
-/**
  * Returns the Oxygen UI color path for a given severity label.
  *
  * @param {string} label - The severity label.
@@ -1076,17 +953,18 @@ export function getSeverityIcon(label?: string): ComponentType<{
  */
 export function getSeverityColor(label?: string): string {
   const normalized = mapSeverityToDisplay(label);
-  const upper = normalized.toUpperCase();
-  switch (upper) {
+  // Strip any parenthetical suffix (e.g. "S4(Query)" → "S4") before comparing.
+  const token = normalized.replace(/\s*\(.*$/, "").toUpperCase();
+  switch (token) {
     case "S0":
       return "error.main";
-    case CaseSeverityLevel.S1:
+    case "S1":
       return "warning.main";
-    case CaseSeverityLevel.S2:
+    case "S2":
       return "info.main";
-    case CaseSeverityLevel.S3:
+    case "S3":
       return "secondary.main";
-    case CaseSeverityLevel.S4:
+    case "S4":
       return "success.main";
     default:
       return "text.primary";
@@ -1149,10 +1027,7 @@ export function convertCodeTagsToHtml(content: string): string {
     .replace(/\[\\\/CODE\]/g, "[/code]")
     .replace(/\[\\code\]/gi, "[code]")
     .replace(/\[\\CODE\]/g, "[code]")
-    .replace(
-    /\[\/code\]\s*\[code\]/gi,
-    "[/code]\n[code]",
-  );
+    .replace(/\[\/code\]\s*\[code\]/gi, "[/code]\n[code]");
   return normalized
     .replace(/\[code\]([\s\S]*?)\[\/code\]/gi, "<code>$1</code>")
     .replace(/\[\/?code\]/gi, "\n");
@@ -1249,7 +1124,8 @@ export function hasDisplayableContent(comment: CaseComment): boolean {
   const stripped = stripCodeWrapper(raw);
   const withoutLabel = stripCustomerCommentAddedLabel(stripped);
   const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
-  return textOnly.length > 0;
+  if (textOnly.length > 0) return true;
+  return /<img\b/i.test(withoutLabel);
 }
 
 export type { InlineAttachment };
@@ -1293,7 +1169,12 @@ function resolveInlineImageDisplaySrc(
   if (originMatch && id) {
     return `${originMatch[1]}/${id}.iix`;
   }
-  return attachment.previewUrl ?? attachment.downloadUrl ?? attachment.url ?? originalSrc;
+  return (
+    attachment.previewUrl ??
+    attachment.downloadUrl ??
+    attachment.url ??
+    originalSrc
+  );
 }
 
 /**
@@ -1351,12 +1232,7 @@ export function replaceInlineImageSources(
  * @returns {string} Normalized string for Date constructor.
  */
 function normalizeCommentDateString(dateStr: string): string {
-  const trimmed = dateStr.trim();
-  // API sends wall-clock local time without offset; do not treat as UTC.
-  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-    return trimmed.replace(" ", "T");
-  }
-  return trimmed;
+  return dateStr.trim();
 }
 
 /**
@@ -1368,15 +1244,23 @@ function normalizeCommentDateString(dateStr: string): string {
 export function formatCommentDate(date: string | null | undefined): string {
   if (!date) return "--";
   const normalized = normalizeCommentDateString(date);
-  const d = new Date(normalized);
-  if (Number.isNaN(d.getTime())) return "--";
-  return d.toLocaleString(undefined, {
+  const localMs = parseApiLocalDateTimeMs(normalized);
+  const d = !Number.isNaN(localMs)
+    ? new Date(localMs)
+    : (() => {
+        const fallback = new Date(normalizeUtcDateString(normalized));
+        return Number.isNaN(fallback.getTime()) ? null : fallback;
+      })();
+  if (!d) return "--";
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    hour12: true,
+    timeZone: resolveDisplayTimeZone(),
+  }).format(d);
 }
 
 /**
@@ -1388,6 +1272,21 @@ export function formatCommentDate(date: string | null | undefined): string {
 export function stripHtml(html: string | null | undefined): string {
   if (!html || typeof html !== "string") return "";
   return html.replace(/<[^>]+>/g, "").trim();
+}
+
+/**
+ * Returns whether rich editor HTML has submit-worthy content.
+ * Treats plain text, inline images, and figure-wrapped images as content.
+ *
+ * @param html - Raw editor HTML.
+ * @returns {boolean} True when content can be submitted.
+ */
+export function hasSubmittableEditorContent(
+  html: string | null | undefined,
+): boolean {
+  const plainText = stripHtml(html).trim();
+  if (plainText.length > 0) return true;
+  return /<img\b|<figure\b/i.test(html ?? "");
 }
 
 /**
@@ -1543,8 +1442,8 @@ export function estimateLineCount(html: string): number {
 }
 
 /**
- * Parses API timestamps for ordering: unzoned `YYYY-MM-DD HH:mm:ss` or `YYYY-MM-DDTHH:mm:ss`
- * as local wall time; strings with `Z` or numeric offset use instant parsing.
+ * Parses API timestamps for ordering and display normalization.
+ * Unzoned backend timestamps are treated as UTC instants.
  *
  * @param dateStr - Raw timestamp from API.
  * @returns {number} Epoch ms or NaN if invalid.
@@ -1560,17 +1459,17 @@ export function parseApiLocalDateTimeMs(
     return Number.isNaN(t) ? Number.NaN : t;
   }
 
-  const local =
+  const utcLike =
     /^(\d{4})-(\d{2})-(\d{2})[\sT](\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
       trimmed,
     );
-  if (local) {
-    const y = Number(local[1]);
-    const mo = Number(local[2]);
-    const d = Number(local[3]);
-    const h = Number(local[4]);
-    const mi = Number(local[5]);
-    const s = Number(local[6]);
+  if (utcLike) {
+    const y = Number(utcLike[1]);
+    const mo = Number(utcLike[2]);
+    const d = Number(utcLike[3]);
+    const h = Number(utcLike[4]);
+    const mi = Number(utcLike[5]);
+    const s = Number(utcLike[6]);
     if (
       mo < 1 ||
       mo > 12 ||
@@ -1583,8 +1482,7 @@ export function parseApiLocalDateTimeMs(
     ) {
       return Number.NaN;
     }
-    const dt = new Date(y, mo - 1, d, h, mi, s);
-    return dt.getTime();
+    return Date.UTC(y, mo - 1, d, h, mi, s);
   }
 
   const t = Date.parse(trimmed);
@@ -1677,14 +1575,6 @@ export function computeMinScheduleDatetimeLocal(
 }
 
 /**
- * Filter API / profile may return IDs that are not valid for `Intl` `timeZone`
- * (e.g. WSO2/Colombo). Map those to canonical IANA zones.
- */
-const API_TIMEZONE_TO_INTL_ALIASES: Record<string, string> = {
-  "WSO2/Colombo": "Asia/Colombo",
-};
-
-/**
  * Returns an ID accepted by `Intl.DateTimeFormat` `{ timeZone }`, or null if unknown/invalid.
  *
  * @param apiTimeZone - Value from profile or filters metadata.
@@ -1692,17 +1582,7 @@ const API_TIMEZONE_TO_INTL_ALIASES: Record<string, string> = {
 function normalizeApiTimeZoneToIntlTimeZone(
   apiTimeZone: string | null | undefined,
 ): string | null {
-  const raw = apiTimeZone?.trim();
-  if (!raw) return null;
-  const candidate = API_TIMEZONE_TO_INTL_ALIASES[raw] ?? raw;
-  try {
-    Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(
-      new Date("2020-06-15T12:00:00Z"),
-    );
-    return candidate;
-  } catch {
-    return null;
-  }
+  return normalizeUserTimeZone(apiTimeZone);
 }
 
 /**
@@ -1782,10 +1662,10 @@ export function sortCallRequestPreferredTimeStringsAsc(
   times: string[],
 ): string[] {
   return [...times].sort((a, b) => {
-    const ta = Date.parse(a.trim());
-    const tb = Date.parse(b.trim());
-    const aOk = !Number.isNaN(ta);
-    const bOk = !Number.isNaN(tb);
+    const ta = parseBackendTimestamp(a.trim())?.getTime();
+    const tb = parseBackendTimestamp(b.trim())?.getTime();
+    const aOk = ta != null;
+    const bOk = tb != null;
     if (aOk && bOk && ta !== tb) return ta - tb;
     if (aOk && !bOk) return -1;
     if (!aOk && bOk) return 1;
@@ -1996,5 +1876,5 @@ export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";
 /** Hide terminal states from the Outstanding Cases overview list only. */
 export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {
   const normalized = statusLabel?.trim().toLowerCase() ?? "";
-  return normalized === CASE_STATUS.CLOSED;
+  return normalized === CASE_STATUS.CLOSED.toLowerCase();
 }

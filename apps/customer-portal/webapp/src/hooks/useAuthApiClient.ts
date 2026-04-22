@@ -21,7 +21,6 @@ import {
 } from "@constants/apiConstants";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
-import { recoverViaSilentSignIn } from "@hooks/authRecovery";
 
 // Waits for the provided duration.
 function sleep(delayMs: number): Promise<void> {
@@ -55,7 +54,7 @@ function isNonReplayableBody(body: unknown): boolean {
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken, signInSilently } = useAsgardeo();
+  const { getIdToken } = useAsgardeo();
   const logger = useLogger();
 
   const tryGetToken = async (): Promise<{
@@ -97,19 +96,6 @@ export function useAuthApiClient() {
 
       if (attempt < delays.length - 1) {
         await sleep(delays[attempt]);
-      }
-    }
-
-    logger.warn("[authFetch] attempting-silent-recovery");
-    const recovered = await recoverViaSilentSignIn(signInSilently, logger);
-    if (recovered) {
-      const { token, error } = await tryGetToken();
-      if (token) {
-        logger.info("[authFetch] silent-recovery-succeeded");
-        return token;
-      }
-      if (error !== undefined) {
-        lastError = error;
       }
     }
 
@@ -191,7 +177,6 @@ export function useAuthApiClient() {
         method: options?.method ?? "GET",
       });
 
-      await recoverViaSilentSignIn(signInSilently, logger);
       const retryToken = await resolveIdTokenWithRetry();
       response = await fetch(input, {
         ...options,

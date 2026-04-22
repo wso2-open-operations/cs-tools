@@ -58,6 +58,16 @@ const baseHtmlSx: SxProps<Theme> = {
     whiteSpace: "pre-wrap",
     overflowWrap: "break-word",
   },
+  // Prevent embedded rich-text images from expanding card width.
+  "& img": {
+    maxWidth: "100%",
+    width: "auto",
+    height: "auto",
+  },
+  "& figure": {
+    margin: 0,
+    maxWidth: "100%",
+  },
 };
 
 /**

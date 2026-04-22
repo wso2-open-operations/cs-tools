@@ -33,7 +33,7 @@ import type { JSX } from "react";
 import type { PendingUpdatesListProps } from "@features/updates/types/updates";
 import { getUpdateTypeChipColor } from "@features/updates/utils/updates";
 import EmptyState from "@components/empty-state/EmptyState";
-import Error500Page from "@components/error/Error500Page";
+import error500Svg from "@assets/error/error-500.svg";
 import {
   PENDING_UPDATES_LIST_EMPTY_DESCRIPTION,
   PENDING_UPDATES_LIST_ERROR_MESSAGE,
@@ -65,7 +65,7 @@ export function PendingUpdatesList({
           py: 5,
         }}
       >
-        <Error500Page style={{ width: 200, height: "auto" }} />
+        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {PENDING_UPDATES_LIST_ERROR_MESSAGE}
         </Typography>

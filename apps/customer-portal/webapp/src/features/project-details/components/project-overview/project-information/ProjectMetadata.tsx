@@ -33,6 +33,7 @@ const ProjectMetadata = ({
   slaStatus,
   goLivePlanDate,
   onboardingStatus,
+  hideOnboardingStatus,
   isLoading,
   isError,
 }: ProjectMetadataProps): JSX.Element => {
@@ -49,6 +50,7 @@ const ProjectMetadata = ({
         slaStatus={slaStatus}
         goLivePlanDate={goLivePlanDate}
         onboardingStatus={onboardingStatus}
+        hideOnboardingStatus={hideOnboardingStatus}
         isLoading={isLoading}
         isError={isError}
       />

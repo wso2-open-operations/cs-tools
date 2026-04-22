@@ -40,6 +40,7 @@ export interface ListSearchPanelProps {
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
+  hideDeploymentFilter?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
@@ -66,14 +67,17 @@ export default function ListSearchPanel({
   excludeS0 = false,
   restrictSeverityToLow = false,
   hideSeverityFilter = false,
+  hideDeploymentFilter = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
 }: ListSearchPanelProps): JSX.Element {
-  const filtersForCount = hideSeverityFilter
-    ? { ...filters, severityId: undefined }
-    : filters;
+  const filtersForCount = {
+    ...filters,
+    ...(hideSeverityFilter ? { severityId: undefined } : {}),
+    ...(hideDeploymentFilter ? { deploymentId: undefined } : {}),
+  };
   return (
     <ListSearchBar
       searchPlaceholder={searchPlaceholder}
@@ -96,6 +100,7 @@ export default function ListSearchPanel({
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter={hideSeverityFilter}
+          hideDeploymentFilter={hideDeploymentFilter}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}
           isFetchingMoreDeployments={isFetchingMoreDeployments}

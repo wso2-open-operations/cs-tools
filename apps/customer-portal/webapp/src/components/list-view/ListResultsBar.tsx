@@ -28,6 +28,7 @@ import { SortOrder } from "@/types/common";
 export interface SortFieldOption {
   value: string;
   label: string;
+  kind?: "chronological" | "ordinal";
 }
 
 export interface ListResultsBarProps {
@@ -69,6 +70,9 @@ export default function ListResultsBar({
     onSortFieldChange !== undefined &&
     sortOrder !== undefined &&
     onSortOrderChange !== undefined;
+
+  const isOrdinalSort =
+    sortFieldOptions?.find((o) => o.value === sortField)?.kind === "ordinal";
 
   return (
     <Box
@@ -116,10 +120,10 @@ export default function ListResultsBar({
                   }
                 >
                   <MenuItem value={SortOrder.DESC}>
-                    <Typography variant="body2">Newest first</Typography>
+                    <Typography variant="body2">{isOrdinalSort ? "Descending" : "Newest first"}</Typography>
                   </MenuItem>
                   <MenuItem value={SortOrder.ASC}>
-                    <Typography variant="body2">Oldest first</Typography>
+                    <Typography variant="body2">{isOrdinalSort ? "Ascending" : "Oldest first"}</Typography>
                   </MenuItem>
                 </Select>
               </FormControl>

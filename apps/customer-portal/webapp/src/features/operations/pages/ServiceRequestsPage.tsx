@@ -27,11 +27,13 @@ import {
   type JSX,
   type ChangeEvent,
 } from "react";
+import { useSessionState } from "@hooks/useSessionState";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
@@ -92,36 +94,37 @@ export default function ServiceRequestsPage(): JSX.Element {
   const navSegment = getOperationsNavSegment(location.pathname);
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const listMode = createdByMe ? "mine" : "all";
+  const sessionPrefix = `${projectId ?? "unknown"}-service-requests-${listMode}`;
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortField, setSortField] = useState<ServiceRequestCaseSortField>(
-    ServiceRequestCaseSortField.CreatedOn,
-  );
-  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
-  const [page, setPage] = useState(1);
-  const pageSize = OPERATIONS_LIST_PAGE_SIZE;
+  const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<ServiceRequestCaseSortField>(`${sessionPrefix}-sortField`, ServiceRequestCaseSortField.CreatedOn, undefined, { popOnly: true });
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
+  const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, OPERATIONS_LIST_PAGE_SIZE, undefined, { popOnly: true });
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const projectDetailsReady = !isProjectLoading && project !== undefined;
 
   const permissions = useMemo(() => {
     if (!projectDetailsReady || !project) {
-      return getProjectPermissions(undefined);
+      return getProjectPermissions(undefined, { projectFeatures: null });
     }
     return getProjectPermissions(project.type?.label, {
-      hasPdpSubscription: project.hasPdpSubscription,
+      projectFeatures,
     });
-  }, [projectDetailsReady, project]);
+  }, [projectDetailsReady, project, projectFeatures]);
 
   const severityPolicy = useMemo(
     () =>
       projectDetailsReady && project
-        ? getProjectSeverityPolicy(project.type?.label)
+        ? getProjectSeverityPolicy(project.type?.label, { projectFeatures })
         : { excludeS0: false, restrictSeverityToLow: false },
-    [projectDetailsReady, project],
+    [projectDetailsReady, project, projectFeatures],
   );
   const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
@@ -167,6 +170,7 @@ export default function ServiceRequestsPage(): JSX.Element {
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest, {
     enabled: !!projectId && permissions.hasSR,
+    pageSize: rowsPerPage,
   });
 
   const { showLoader, hideLoader } = useLoader();
@@ -226,10 +230,14 @@ export default function ServiceRequestsPage(): JSX.Element {
 
   const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
   const paginatedCases = filteredAndSearchedCases;
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -389,6 +397,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
         hideSeverityFilter
+        hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}
       />
 
@@ -418,9 +427,11 @@ export default function ServiceRequestsPage(): JSX.Element {
       />
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalItems}
         page={page}
-        onChange={handlePageChange}
+        rowsPerPage={rowsPerPage}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
       />
     </Stack>
   );

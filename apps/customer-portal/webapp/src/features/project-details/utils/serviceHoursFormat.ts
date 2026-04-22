@@ -15,10 +15,10 @@
 // under the License.
 
 import { PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY } from "@features/project-details/constants/projectDetailsConstants";
-import { formatServiceHoursDecimalAsHrMin } from "@features/project-details/utils/projectDetails";
+import { formatServiceHoursDecimalCompact } from "@features/project-details/utils/projectDetails";
 
 /**
- * Formats consumed/total service hours for stat cards (e.g. `1h 30m/4h 0m (38%)`).
+ * Formats consumed/total service hours for stat cards (e.g. `1h 30m/4h (38%)`).
  *
  * @param consumed - Consumed hours (optional).
  * @param total - Total allocated hours (optional).
@@ -34,5 +34,5 @@ export function formatServiceHoursAllocationDisplay(
   const c = Number(consumed ?? 0);
   const t = Number(total ?? 0);
   const pct = t === 0 ? 0 : Math.round((c / t) * 100);
-  return `${formatServiceHoursDecimalAsHrMin(c)}/${formatServiceHoursDecimalAsHrMin(t)} (${pct}%)`;
+  return `${formatServiceHoursDecimalCompact(c)}/${formatServiceHoursDecimalCompact(t)} (${pct}%)`;
 }

@@ -17,27 +17,11 @@
 import type { ChatHistoryListProps } from "@features/support/types/supportComponents";
 import {
   Box,
-  Button,
-  CardActions,
-  CardContent,
-  Chip,
-  Form,
-  Stack,
   Typography,
-  alpha,
-  type Theme,
 } from "@wso2/oxygen-ui";
-import { Bot, Clock, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { ChatAction } from "@features/support/constants/supportConstants";
-import {
-  getChatActionColor,
-  getChatStatusAction,
-  getStatusColor,
-  resolveColorFromTheme,
-  formatDateTime,
-} from "@features/support/utils/support";
 import ChatHistorySkeleton from "@features/support/components/support-overview-cards/ChatHistorySkeleton";
+import ChatHistoryCard from "@features/support/components/support-overview-cards/ChatHistoryCard";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 
@@ -53,21 +37,34 @@ export default function ChatHistoryList({
   isError,
   onItemAction,
 }: ChatHistoryListProps): JSX.Element {
+  const listShellSx = {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 1.5,
+    width: "100%",
+    flex: 1,
+    minHeight: 0,
+  };
+
   if (isError) {
     return <ErrorIndicator entityName="chat history" size="medium" />;
   }
 
   if (isLoading) {
-    return <ChatHistorySkeleton />;
+    return (
+      <Box sx={listShellSx}>
+        <ChatHistorySkeleton />
+      </Box>
+    );
   }
 
   if (!items || items.length === 0) {
     return (
       <Box
         sx={{
-          display: "flex",
-          flexDirection: "column",
+          ...listShellSx,
           alignItems: "center",
+          justifyContent: "center",
           py: 2,
         }}
       >
@@ -87,135 +84,14 @@ export default function ChatHistoryList({
   }
 
   return (
-    <Box
-      sx={{ display: "flex", flexDirection: "column", gap: 1.5, width: "100%" }}
-    >
-      {items.map((item) => {
-        const action = getChatStatusAction(item.status);
-        const chipColorPath = getStatusColor(item.status);
-
-        return (
-          <Form.CardButton
-            key={item.chatId}
-            onClick={() => onItemAction?.(item.chatId, ChatAction.VIEW)}
-            sx={{
-              p: 2,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: 1,
-              cursor: "pointer",
-              "&:hover": {
-                bgcolor: "action.hover",
-              },
-            }}
-          >
-            <CardContent
-              sx={{
-                p: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 1,
-              }}
-            >
-              <Box sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
-                <Box sx={{ display: "flex", flexShrink: 0 }}>
-                  <Bot size={20} />
-                </Box>
-                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                  <Typography
-                    variant="body2"
-                    fontWeight={500}
-                    color="text.primary"
-                    sx={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      display: "-webkit-box",
-                      WebkitLineClamp: 1,
-                      WebkitBoxOrient: "vertical",
-                    }}
-                  >
-                    {item.title}
-                  </Typography>
-                </Box>
-              </Box>
-              <Box sx={{ pl: 4 }}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography variant="caption" color="text.secondary">
-                    {formatDateTime(item.startedTime, "short") ?? "--"}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    •
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {item.messages}{" "}
-                    {item.messages === 1 ? "message" : "messages"}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    •
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {item.kbArticles}{" "}
-                    {item.kbArticles === 1 ? "KB article" : "KB articles"}
-                  </Typography>
-                </Stack>
-              </Box>
-            </CardContent>
-
-            <CardActions sx={{ p: 0, justifyContent: "space-between" }}>
-              <Chip
-                size="small"
-                variant="outlined"
-                label={item.status}
-                icon={<Clock size={12} />}
-                sx={{
-                  bgcolor: (theme: Theme) =>
-                    alpha(resolveColorFromTheme(chipColorPath, theme), 0.1),
-                  color: chipColorPath,
-                  px: 0,
-                  height: 20,
-                  fontSize: "0.75rem",
-                  "& .MuiChip-icon": {
-                    color: "inherit",
-                    ml: "6px",
-                    mr: "6px",
-                    marginTop: "-1px",
-                  },
-                  "& .MuiChip-label": {
-                    pl: 0,
-                    pr: "6px",
-                  },
-                }}
-              />
-              <Button
-                size="small"
-                variant="text"
-                color={getChatActionColor(action)}
-                disableRipple
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onItemAction?.(item.chatId, action);
-                }}
-                startIcon={
-                  action === ChatAction.VIEW ? (
-                    <ExternalLink size={12} />
-                  ) : (
-                    <Play size={12} />
-                  )
-                }
-                sx={{
-                  textTransform: "none",
-                  fontWeight: 500,
-                  minWidth: 0,
-                  p: 0,
-                }}
-              >
-                {action === ChatAction.VIEW ? "View" : "Resume"}
-              </Button>
-            </CardActions>
-          </Form.CardButton>
-        );
-      })}
+    <Box sx={listShellSx}>
+      {items.map((item) => (
+        <ChatHistoryCard
+          key={item.chatId}
+          item={item}
+          onItemAction={onItemAction}
+        />
+      ))}
     </Box>
   );
 }

@@ -23,7 +23,7 @@ const mockItems: ChatHistoryItem[] = [
   {
     chatId: "1628192673",
     title: "How do I configure custom claims in JWT tokens?",
-    startedTime: "2 hours ago",
+    startedTime: "2026-06-15 14:30:00",
     messages: 8,
     kbArticles: 3,
     status: "Resolved",
@@ -31,7 +31,7 @@ const mockItems: ChatHistoryItem[] = [
   {
     chatId: "1628192674",
     title: "Getting error 401 when calling the API endpoint...",
-    startedTime: "1 day ago",
+    startedTime: "2026-06-14 10:00:00",
     messages: 5,
     kbArticles: 2,
     status: "Still Open",
@@ -54,7 +54,8 @@ describe("ChatHistoryList", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Resolved")).toBeInTheDocument();
     expect(screen.getByText("Still Open")).toBeInTheDocument();
-    expect(screen.getByText("2 hours ago")).toBeInTheDocument();
+    expect(screen.getByText(/Jun 15/)).toBeInTheDocument();
+    expect(screen.getByText(/Jun 14/)).toBeInTheDocument();
     expect(screen.getByText(/8 messages/)).toBeInTheDocument();
     expect(screen.getByText(/3 KB articles/)).toBeInTheDocument();
   });

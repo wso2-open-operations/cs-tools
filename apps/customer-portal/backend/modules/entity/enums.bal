@@ -73,5 +73,6 @@ public enum ProductClass {
 
 # Valid product category values.
 public enum ProductCategory {
+    PRIVATE_DATA_PLANE = "pdp",
     CLOUD = "cl"
 }

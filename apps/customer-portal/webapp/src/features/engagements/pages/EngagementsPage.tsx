@@ -41,13 +41,14 @@ export default function EngagementsPage(): JSX.Element {
     sortField,
     sortOrder,
     page,
+    rowsPerPage,
     paginatedCases,
     isCasesAreaLoading,
     isCasesError,
     listHasRefinement,
     totalItems,
-    totalPages,
     handlePageChange,
+    handleRowsPerPageChange,
     handleFilterChange,
     handleClearFilters,
     handleSortChange,
@@ -86,9 +87,10 @@ export default function EngagementsPage(): JSX.Element {
         listHasRefinement={listHasRefinement}
         totalItems={totalItems}
         onCaseClick={onCaseClick}
-        totalPages={totalPages}
         page={page}
+        rowsPerPage={rowsPerPage}
         onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
       />
     </Stack>
   );

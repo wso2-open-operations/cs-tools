@@ -16,6 +16,7 @@
 
 import { useParams, useNavigate } from "react-router";
 import { useState, useMemo, type JSX, type ChangeEvent } from "react";
+import { useSessionState } from "@hooks/useSessionState";
 import { Stack } from "@wso2/oxygen-ui";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
@@ -44,7 +45,6 @@ import {
 } from "@features/announcements/constants/announcementsConstants";
 import {
   buildAnnouncementCaseSearchRequest,
-  getAnnouncementTotalPages,
   resolveAnnouncementListFilterOptions,
 } from "@features/announcements/utils/announcements";
 
@@ -57,37 +57,58 @@ export default function AnnouncementsPage(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const sessionPrefix = `${projectId ?? "unknown"}-announcements`;
+  const validSortFields = Object.values(AnnouncementSortField) as string[];
+  const isValidAnnouncementSortField = (v: unknown): v is AnnouncementSortField =>
+    typeof v === "string" && validSortFields.includes(v);
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AnnouncementFilterValues>({});
-  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
-  const [page, setPage] = useState(1);
-  const pageSize = ANNOUNCEMENTS_PAGE_SIZE;
+  const [filters, setFilters] = useSessionState<AnnouncementFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<AnnouncementSortField>(
+    `${sessionPrefix}-sortField`,
+    AnnouncementSortField.CreatedOn,
+    isValidAnnouncementSortField,
+    { popOnly: true },
+  );
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
+  const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, ANNOUNCEMENTS_PAGE_SIZE, undefined, { popOnly: true });
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
   const caseSearchRequest = useMemo(
     () =>
-      buildAnnouncementCaseSearchRequest(filters, searchTerm, sortOrder),
-    [filters, searchTerm, sortOrder],
+      buildAnnouncementCaseSearchRequest(filters, searchTerm, sortOrder, sortField),
+    [filters, searchTerm, sortOrder, sortField],
   );
 
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * rowsPerPage;
 
   const { data, isLoading: isCasesQueryLoading } = useGetProjectCasesPage(
     projectId || "",
     caseSearchRequest,
     offset,
-    pageSize,
+    rowsPerPage,
   );
 
   const cases = data?.cases ?? [];
   const totalRecords = data?.totalRecords ?? 0;
-  const totalPages = getAnnouncementTotalPages(totalRecords, pageSize);
-  const shownCount = Math.max(0, Math.min(pageSize, totalRecords - offset));
+  const shownCount = Math.max(0, Math.min(rowsPerPage, totalRecords - offset));
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
+  };
+
+  const handleSortFieldChange = (value: string) => {
+    if (isValidAnnouncementSortField(value)) {
+      setSortField(value);
+    }
+    setPage(1);
   };
 
   const handleSortChange = (value: SortOrder) => {
@@ -147,8 +168,8 @@ export default function AnnouncementsPage(): JSX.Element {
         totalCount={totalRecords}
         entityLabel={ANNOUNCEMENTS_LIST_ENTITY_LABEL}
         sortFieldOptions={ANNOUNCEMENTS_SORT_FIELD_OPTIONS}
-        sortField={AnnouncementSortField.CreatedOn}
-        onSortFieldChange={() => undefined}
+        sortField={sortField}
+        onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
       />
@@ -163,9 +184,11 @@ export default function AnnouncementsPage(): JSX.Element {
       />
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalRecords}
         page={page}
-        onChange={handlePageChange}
+        rowsPerPage={rowsPerPage}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
       />
     </Stack>
   );

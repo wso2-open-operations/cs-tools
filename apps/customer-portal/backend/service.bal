@@ -1252,7 +1252,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + payload - Case update payload
     # + return - Updated case details or error response
     resource function patch cases/[entity:IdString id](http:RequestContext ctx, entity:CaseUpdatePayload payload)
-        returns entity:UpdatedCase|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns types:UpdatedCase|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -1319,7 +1319,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 }
             };
         }
-        return response.case;
+        return mapUpdatedCaseResponse(response.case);
     }
 
     # Search cases for a specific project with filters and pagination.

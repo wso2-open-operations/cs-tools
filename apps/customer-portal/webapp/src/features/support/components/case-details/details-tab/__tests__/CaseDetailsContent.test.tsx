@@ -18,7 +18,6 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { MemoryRouter } from "react-router";
-import { FloatingNoveraVisibilityProvider } from "@context/floating-novera-visibility/FloatingNoveraVisibilityContext";
 import CaseDetailsContent from "@case-details-details/CaseDetailsContent";
 
 const mockCaseDetails = {
@@ -107,17 +106,15 @@ function renderContent(
 ) {
   return render(
     <MemoryRouter>
-      <FloatingNoveraVisibilityProvider>
-        <ThemeProvider theme={createTheme()}>
-          <CaseDetailsContent
-            data={props.data ?? mockCaseDetails}
-            isLoading={props.isLoading ?? false}
-            isError={props.isError ?? false}
-            caseId={props.caseId ?? "case-001"}
-            onBack={props.onBack ?? vi.fn()}
-          />
-        </ThemeProvider>
-      </FloatingNoveraVisibilityProvider>
+      <ThemeProvider theme={createTheme()}>
+        <CaseDetailsContent
+          data={props.data ?? mockCaseDetails}
+          isLoading={props.isLoading ?? false}
+          isError={props.isError ?? false}
+          caseId={props.caseId ?? "case-001"}
+          onBack={props.onBack ?? vi.fn()}
+        />
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }

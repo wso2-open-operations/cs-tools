@@ -21,13 +21,14 @@ import { PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE } from "@features/project-d
 import type { ServiceHoursAllocationsCardProps } from "@features/project-details/types/projectDetailsComponents";
 import {
   formatProjectDate,
-  formatServiceHoursDecimalAsHrMin,
+  formatServiceHoursDecimalCompact,
 } from "@features/project-details/utils/projectDetails";
 import { formatServiceHoursAllocationDisplay } from "@features/project-details/utils/serviceHoursFormat";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import { shouldHideOnboardingData } from "@utils/permission";
 
 function formatRemaining(value: number | undefined): string {
-  return formatServiceHoursDecimalAsHrMin(value);
+  return formatServiceHoursDecimalCompact(value);
 }
 
 /**
@@ -58,6 +59,7 @@ export default function ServiceHoursAllocationsCard({
     project?.onboardingExpiryDate?.trim() && project.onboardingExpiryDate
       ? formatProjectDate(project.onboardingExpiryDate)
       : PROJECT_DETAILS_SERVICE_HOURS_NOT_AVAILABLE;
+  const hideOnboardingSection = shouldHideOnboardingData(project?.onboardingStatus);
 
   return (
     <Card sx={{ height: "100%" }}>
@@ -118,7 +120,8 @@ export default function ServiceHoursAllocationsCard({
           </Box>
 
           {/* Onboarding Hours */}
-          <Box sx={{ borderTop: 1, borderColor: "divider", pt: 2 }}>
+          {!hideOnboardingSection && (
+            <Box sx={{ borderTop: 1, borderColor: "divider", pt: 2 }}>
             <Box
               sx={{
                 display: "flex",
@@ -175,7 +178,8 @@ export default function ServiceHoursAllocationsCard({
                 <Typography variant="caption">{onboardingExpiry}</Typography>
               )}
             </Box>
-          </Box>
+            </Box>
+          )}
         </Box>
       </CardContent>
     </Card>

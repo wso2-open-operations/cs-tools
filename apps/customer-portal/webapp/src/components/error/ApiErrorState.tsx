@@ -14,14 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Stack, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Stack, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import Error400Page from "@components/error/Error400Page";
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
+import Error404Page from "@components/error/Error404Page";
 import Error500Page from "@components/error/Error500Page";
 import {
   getApiErrorMessage,
+  isBadRequestError,
   isForbiddenError,
+  isNotFoundError,
   isUnauthorizedError,
 } from "@utils/ApiError";
 
@@ -35,7 +39,7 @@ export interface ApiErrorStateProps {
  * Renders a consistent API error state for support pages/panels.
  *
  * @param {ApiErrorStateProps} props - Error payload and optional fallback copy.
- * @returns {JSX.Element} Error401/Error403/Error500 UI.
+ * @returns {JSX.Element} Error400/401/403/404/500 UI based on {@link ApiError} status.
  */
 export default function ApiErrorState({
   error,
@@ -67,21 +71,27 @@ export default function ApiErrorState({
     );
   }
 
+  if (isNotFoundError(error)) {
+    return (
+      <Stack spacing={2} sx={mergedContainerSx}>
+        <Error404Page message={getApiErrorMessage(error) ?? fallbackMessage} />
+      </Stack>
+    );
+  }
+
+  if (isBadRequestError(error)) {
+    return (
+      <Stack spacing={2} sx={mergedContainerSx}>
+        <Error400Page message={getApiErrorMessage(error) ?? fallbackMessage} />
+      </Stack>
+    );
+  }
+
   return (
     <Stack spacing={2} sx={mergedContainerSx}>
-      <Box
-        sx={{
-          width: 160,
-          maxWidth: "100%",
-          "& img, & svg": { width: "100%", height: "auto" },
-        }}
-        aria-hidden
-      >
-        <Error500Page />
-      </Box>
-      <Typography variant="body2" color="text.secondary">
-        {fallbackMessage}
-      </Typography>
+      <Error500Page
+        message={getApiErrorMessage(error) ?? fallbackMessage}
+      />
     </Stack>
   );
 }

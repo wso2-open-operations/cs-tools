@@ -44,7 +44,7 @@ export function useGetProjectChangeRequestStats(
     (options?.enabled ?? true) && !!projectId && isSignedIn && !isAuthLoading;
 
   return useQuery<ChangeRequestStats, Error>({
-    queryKey: [ApiQueryKeys.CHANGE_REQUEST_STATS, projectId],
+    queryKey: [ApiQueryKeys.CHANGE_REQUEST_STATS, projectId, "mapped"],
     queryFn: async (): Promise<ChangeRequestStats> => {
       logger.debug(
         `[useGetProjectChangeRequestStats] Fetching change request stats for project ID: ${projectId}`,

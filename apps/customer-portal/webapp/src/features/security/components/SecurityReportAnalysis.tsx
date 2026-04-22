@@ -21,13 +21,14 @@ import {
   useMemo,
   useEffect,
   type JSX,
-  type ChangeEvent,
 } from "react";
 import { useNavigate, useParams } from "react-router";
+import { useSessionState } from "@hooks/useSessionState";
 import { CaseType } from "@features/support/constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { SortOrder } from "@/types/common";
 import SecurityReportAnalysisSkeleton from "@features/security/components/SecurityReportAnalysisSkeleton";
 import TabBar from "@components/tab-bar/TabBar";
@@ -74,22 +75,33 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const { projectId } = useParams<{ projectId: string }>();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
-  const canCreateSecurityReport = getProjectPermissions(
-    projectDetails?.type?.label,
-    { hasPdpSubscription: projectDetails?.hasPdpSubscription },
-  ).hasSecurityReportAnalysis;
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
+  const areFeaturePermissionsReady =
+    !isProjectLoading && !isProjectFeaturesLoading && !!projectFeatures;
+  const canCreateSecurityReport = areFeaturePermissionsReady
+    ? getProjectPermissions(projectDetails?.type?.label, { projectFeatures })
+        .hasSecurityReportAnalysis
+    : false;
 
   const [viewMode, setViewMode] = useState<SecurityReportViewMode>(
     SecurityReportViewMode.ALL,
   );
-  const [searchTerm, setSearchTerm] = useState("");
+  const sessionPrefix = `${projectId ?? "unknown"}-security-reports`;
+  const validSecuritySortFields = SECURITY_REPORT_SORT_OPTIONS.map((o) => o.value as string);
+  const isValidSecuritySortField = (v: unknown): v is SecurityReportCaseSortField =>
+    typeof v === "string" && validSecuritySortFields.includes(v);
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortField, setSortField] = useState<SecurityReportCaseSortField>(
+  const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<SecurityReportCaseSortField>(
+    `${sessionPrefix}-sortField`,
     SecurityReportCaseSortField.createdOn,
+    isValidSecuritySortField,
+    { popOnly: true },
   );
-  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
-  const [page, setPage] = useState(1);
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
   const pageSize = SECURITY_REPORT_ANALYSIS_PAGE_SIZE;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
@@ -117,7 +129,10 @@ const SecurityReportAnalysis = (): JSX.Element => {
   const { data, isLoading, hasNextPage, fetchNextPage } = useGetProjectCases(
     projectId || "",
     caseSearchRequest,
-    { enabled: !!projectId && canCreateSecurityReport },
+    {
+      enabled:
+        !!projectId && areFeaturePermissionsReady && canCreateSecurityReport,
+    },
   );
 
   useEffect(() => {
@@ -136,8 +151,6 @@ const SecurityReportAnalysis = (): JSX.Element => {
     const startIndex = (page - 1) * pageSize;
     return displayedCases.slice(startIndex, startIndex + pageSize);
   }, [displayedCases, page, pageSize]);
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   const handleCreateReport = () => {
     navigate(`/projects/${projectId}/support/security-report/create`);
@@ -175,7 +188,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     setPage(1);
   };
 
-  const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
+  const handlePageChange = (_event: unknown, value: number) => {
     setPage(value);
   };
 
@@ -186,7 +199,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     [],
   );
 
-  if (!isProjectLoading && projectDetails && !canCreateSecurityReport) {
+  if (areFeaturePermissionsReady && projectDetails && !canCreateSecurityReport) {
     return (
       <Paper
         sx={{
@@ -328,9 +341,12 @@ const SecurityReportAnalysis = (): JSX.Element => {
       </Box>
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalItems}
         page={page}
-        onChange={handlePageChange}
+        rowsPerPage={pageSize}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={() => undefined}
+        rowsPerPageOptions={[pageSize]}
       />
     </Paper>
   );

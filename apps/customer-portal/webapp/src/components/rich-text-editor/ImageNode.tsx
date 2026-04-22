@@ -16,6 +16,7 @@
 
 import {
   DecoratorNode,
+  $getNodeByKey,
   type DOMConversionMap,
   type EditorConfig,
   type LexicalEditor,
@@ -23,8 +24,64 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from "lexical";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import type { JSX } from "react";
 import { deriveAltFromFilename, sanitizeUrl } from "@features/support/utils/richTextEditor";
+
+function ImageComponent({
+  src,
+  altText,
+  nodeKey,
+}: {
+  src: string;
+  altText: string;
+  nodeKey: NodeKey;
+}): JSX.Element {
+  const [editor] = useLexicalComposerContext();
+
+  const handleRemove = () => {
+    editor.update(() => {
+      $getNodeByKey(nodeKey)?.remove();
+    });
+  };
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <img
+        src={sanitizeUrl(src)}
+        alt={altText}
+        style={{ maxWidth: "100%", borderRadius: "8px", display: "block" }}
+      />
+      <button
+        type="button"
+        onClick={handleRemove}
+        aria-label="Remove image"
+        style={{
+          position: "absolute",
+          top: 4,
+          right: 4,
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          border: "solid",
+          background: "rgba(0,0,0,0.55)",
+          color: "#fff",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 14,
+          lineHeight: 1,
+          padding: 0,
+          opacity: 1,
+          pointerEvents: "auto",
+        }}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
 
 export type SerializedImageNode = Spread<
   {
@@ -105,10 +162,10 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 
   decorate(): JSX.Element {
     return (
-      <img
-        src={sanitizeUrl(this.__src)}
-        alt={this.__altText}
-        style={{ maxWidth: "100%", borderRadius: "8px", display: "block" }}
+      <ImageComponent
+        src={this.__src}
+        altText={this.__altText}
+        nodeKey={this.__key}
       />
     );
   }

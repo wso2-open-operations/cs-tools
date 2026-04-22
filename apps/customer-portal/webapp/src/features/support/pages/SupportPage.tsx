@@ -26,6 +26,7 @@ import OutstandingCasesList from "@features/support/components/support-overview-
 import ChatHistoryList from "@features/support/components/support-overview-cards/ChatHistoryList";
 import { useGetProjectSupportStats } from "@features/support/api/useGetProjectSupportStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useSearchConversations } from "@features/support/api/useSearchConversations";
 import { useLogger } from "@hooks/useLogger";
@@ -51,9 +52,14 @@ export default function SupportPage(): JSX.Element {
   const supportPath = `/projects/${projectId}/support`;
 
   const { data: project } = useGetProjectDetails(projectId || "");
-  const includeS0InSupportMetrics = getProjectPermissions(
-    project?.type?.label,
-  ).includeS0InSupportMetrics;
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
+  const includeS0InSupportMetrics =
+    !isProjectFeaturesLoading && projectFeatures
+      ? getProjectPermissions(project?.type?.label, {
+          projectFeatures,
+        }).includeS0InSupportMetrics
+      : undefined;
 
   const {
     data: stats,
@@ -67,6 +73,9 @@ export default function SupportPage(): JSX.Element {
     data,
     isLoading: isCasesLoading,
     isError: isCasesError,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
   } = useGetProjectCases(
     projectId || "",
     {
@@ -91,13 +100,14 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const rawCases =
-    data?.pages?.[0]?.cases
-      ?.filter((c) => !isClosedLikeCaseStatus(c.status?.label))
-      .slice(0, SUPPORT_OVERVIEW_CASES_LIMIT) ?? [];
-  const cases = !includeS0InSupportMetrics
-    ? rawCases.filter((c) => !isS0Case(c))
-    : rawCases;
+  const allFetchedCases = data?.pages.flatMap((p) => p.cases) ?? [];
+  const openCases = allFetchedCases.filter(
+    (c) => !isClosedLikeCaseStatus(c.status?.label),
+  );
+  const openCasesFiltered = includeS0InSupportMetrics === false
+    ? openCases.filter((c) => !isS0Case(c))
+    : openCases;
+  const cases = openCasesFiltered.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT);
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??
@@ -111,6 +121,27 @@ export default function SupportPage(): JSX.Element {
     kbArticles: 0,
     status: c.state?.label ?? "Open",
   }));
+
+  useEffect(() => {
+    if (includeS0InSupportMetrics === undefined) {
+      return;
+    }
+    if (
+      !isCasesLoading &&
+      !isFetchingNextPage &&
+      hasNextPage &&
+      openCasesFiltered.length < SUPPORT_OVERVIEW_CASES_LIMIT
+    ) {
+      void fetchNextPage();
+    }
+  }, [
+    includeS0InSupportMetrics,
+    isCasesLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    openCasesFiltered.length,
+    fetchNextPage,
+  ]);
 
   const isActuallyLoading = isAuthLoading || isLoading || (!stats && !isError);
 
@@ -127,17 +158,22 @@ export default function SupportPage(): JSX.Element {
   }, [stats, projectId, logger]);
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={3} sx={{ width: "100%", minWidth: 0 }}>
       <CasesOverviewStatCard
         isLoading={isActuallyLoading}
         isError={isError}
         stats={stats}
       />
-      <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
-        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>
+      <Grid
+        container
+        spacing={3}
+        sx={{ alignItems: "stretch", minWidth: 0, width: "100%", overflowX: "hidden" }}
+      >
+        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex", minWidth: 0 }}>
           <SupportOverviewCard
+            sx={{ flex: 1, width: "100%", minWidth: 0 }}
             title="Outstanding Cases"
-            subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} support tickets`}
+            subtitle={`Latest ${SUPPORT_OVERVIEW_CASES_LIMIT} outstanding support tickets`}
             icon={FileText}
             iconVariant={SupportOverviewIconVariant.Orange}
             footerButtons={[
@@ -170,8 +206,9 @@ export default function SupportPage(): JSX.Element {
             />
           </SupportOverviewCard>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex" }}>
+        <Grid size={{ xs: 12, lg: 6 }} sx={{ display: "flex", minWidth: 0 }}>
           <SupportOverviewCard
+            sx={{ flex: 1, width: "100%", minWidth: 0 }}
             title="Chat History"
             subtitle="Recent Novera conversations"
             icon={MessageSquare}

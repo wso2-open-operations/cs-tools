@@ -18,6 +18,7 @@ import { useCallback, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import SecurityStats from "@features/security/components/SecurityStats";
 import TabBar from "@components/tab-bar/TabBar";
 import ProductVulnerabilitiesTable from "@features/security/components/ProductVulnerabilitiesTable";
@@ -32,12 +33,13 @@ const SecurityPage = (): JSX.Element => {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
 
   const tabParam = searchParams.get("tab");
   const rawActiveTab = parseSecurityTabQueryParam(tabParam);
-  const permissions = getProjectPermissions(projectDetails?.type?.label, {
-    hasPdpSubscription: projectDetails?.hasPdpSubscription,
-  });
+  const areFeaturePermissionsReady =
+    !isProjectFeaturesLoading && projectFeatures !== undefined;
 
   const handleTabChange = useCallback(
     (tabId: string) => {
@@ -57,12 +59,16 @@ const SecurityPage = (): JSX.Element => {
 
   const tabs = useMemo(
     () =>
-      SECURITY_PAGE_TABS.filter((tab) =>
-        tab.id === SecurityTabId.VULNERABILITIES
-          ? permissions.hasSecurityReportAnalysis
-          : true,
-      ),
-    [permissions.hasSecurityReportAnalysis],
+      areFeaturePermissionsReady
+        ? SECURITY_PAGE_TABS.filter((tab) =>
+            tab.id === SecurityTabId.VULNERABILITIES
+              ? getProjectPermissions(projectDetails?.type?.label, {
+                  projectFeatures,
+                }).hasSecurityReportAnalysis
+              : true,
+          )
+        : SECURITY_PAGE_TABS,
+    [areFeaturePermissionsReady, projectDetails?.type?.label, projectFeatures],
   );
   const activeTab = useMemo(() => {
     const hasRawActive = tabs.some((tab) => tab.id === rawActiveTab);

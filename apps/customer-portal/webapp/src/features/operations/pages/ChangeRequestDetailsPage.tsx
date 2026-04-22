@@ -47,7 +47,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import Error500Page from "@components/error/Error500Page";
+import ApiErrorState from "@components/error/ApiErrorState";
 import useGetChangeRequestDetails from "@features/operations/api/useGetChangeRequestDetails";
 import { usePatchChangeRequest } from "@features/operations/api/usePatchChangeRequest";
 import ScheduledMaintenanceWindowCard from "@features/operations/components/change-requests/ScheduledMaintenanceWindowCard";
@@ -56,9 +56,7 @@ import ChangeRequestDetailsLoadingSkeleton from "@features/operations/components
 import {
   buildChangeRequestWorkflowStages,
   generateChangeRequestDetailsPdf,
-  getChangeRequestDecisionMode,
 } from "@features/operations/utils/changeRequests";
-import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequests";
 import { formatDateTime } from "@features/support/utils/support";
 import {
   formatImpactLabel,
@@ -98,22 +96,26 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
     () => buildChangeRequestWorkflowStages(changeRequest),
     [changeRequest],
   );
-  const decisionMode = getChangeRequestDecisionMode(changeRequest);
-  const canShowApprovalActions =
-    decisionMode !== ChangeRequestDecisionMode.NONE;
-  const canShowProposeNewTime =
-    decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL;
+  const hasCustomerApproved = changeRequest?.hasCustomerApproved === true;
+  const hasCustomerReviewed = changeRequest?.hasCustomerReviewed === true;
+  const canShowProposeNewTime = hasCustomerApproved;
+  const canShowApprovalActions = hasCustomerApproved || hasCustomerReviewed;
 
   const impactColor = getChangeRequestImpactColorShades(
     changeRequest?.impact?.label,
   );
   const handleApproveChange = () => {
-    if (!changeRequest || decisionMode === ChangeRequestDecisionMode.NONE)
-      return;
+    if (!changeRequest) return;
+
+    const payload = !hasCustomerApproved
+      ? { isCustomerApproved: true }
+      : !hasCustomerReviewed
+        ? { isCustomerReviewed: true }
+        : null;
+    if (!payload) return;
+
     patchChangeRequest.mutate(
-      decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL
-        ? { isCustomerApproved: true }
-        : { isCustomerReviewed: true },
+      payload,
       {
         onSuccess: () => {
           showSuccess("Change request approved successfully.");
@@ -126,12 +128,17 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   };
 
   const handleRejectChange = () => {
-    if (!changeRequest || decisionMode === ChangeRequestDecisionMode.NONE)
-      return;
+    if (!changeRequest) return;
+
+    const payload = !hasCustomerApproved
+      ? { isCustomerApproved: false }
+      : !hasCustomerReviewed
+        ? { isCustomerReviewed: false }
+        : null;
+    if (!payload) return;
+
     patchChangeRequest.mutate(
-      decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL
-        ? { isCustomerApproved: false }
-        : { isCustomerReviewed: false },
+      payload,
       {
         onSuccess: () => {
           showSuccess("Change request rejected successfully.");
@@ -145,7 +152,23 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
 
   // Loading state with skeleton (or if fetching/no data yet)
   if (isLoading || (isFetching && !changeRequest)) {
-    return <ChangeRequestDetailsLoadingSkeleton />;
+    return (
+      <Stack spacing={2}>
+        <Button
+          startIcon={<ArrowLeft size={16} />}
+          onClick={() =>
+            returnTo
+              ? navigate(returnTo)
+              : navigate(`/projects/${projectId}/${basePath}/change-requests`)
+          }
+          sx={{ alignSelf: "flex-start" }}
+          variant="text"
+        >
+          Back to Change Requests
+        </Button>
+        <ChangeRequestDetailsLoadingSkeleton />
+      </Stack>
+    );
   }
 
   // Error state - only show error if we have an actual error and not loading
@@ -164,15 +187,10 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
         >
           Back to Change Requests
         </Button>
-        <Paper variant="outlined" sx={{ p: 6, textAlign: "center" }}>
-          <Error500Page style={{ width: 200, height: "auto" }} />
-          <Typography variant="h6" color="text.primary" sx={{ mt: 3, mb: 1 }}>
-            Error Loading Change Request
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {error?.message || "Could not load change request details"}
-          </Typography>
-        </Paper>
+        <ApiErrorState
+          error={error}
+          fallbackMessage="Could not load change request details."
+        />
       </Stack>
     );
   }
@@ -820,18 +838,32 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                                 {stage.name}
                               </Typography>
                               {stage.current && !stage.disabled && (
-                                <Chip
-                                  label="Current"
-                                  size="small"
+                                <Box
                                   sx={{
-                                    bgcolor: alpha(colors.blue[500], 0.1),
-                                    color: colors.blue[800],
-                                    borderColor: alpha(colors.blue[500], 0.2),
-                                    border: "1px solid",
-                                    height: 20,
-                                    fontSize: "0.7rem",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 0.5,
                                   }}
-                                />
+                                >
+                                  <Box
+                                    sx={{
+                                      width: 6,
+                                      height: 6,
+                                      bgcolor: colors.blue[600],
+                                      borderRadius: "50%",
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      color: colors.blue[800],
+                                      fontSize: "0.7rem",
+                                    }}
+                                  >
+                                    Current
+                                  </Typography>
+                                </Box>
                               )}
                             </Box>
                             <Typography

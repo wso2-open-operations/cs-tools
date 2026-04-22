@@ -22,6 +22,7 @@ import ProjectHeader from "@features/project-details/components/project-overview
 import ProjectName from "@features/project-details/components/project-overview/project-information/ProjectName";
 import ProjectMetadata from "@features/project-details/components/project-overview/project-information/ProjectMetadata";
 import SubscriptionDetails from "@features/project-details/components/project-overview/project-information/SubscriptionDetails";
+import { shouldHideOnboardingData } from "@utils/permission";
 
 const ProjectInformationCard = ({
   project,
@@ -48,6 +49,7 @@ const ProjectInformationCard = ({
     return val?.trim() ? formatProjectDate(val.trim()) : "--";
   };
   const getOnboardingStatus = () => project?.onboardingStatus?.trim() || "--";
+  const hideOnboardingStatus = shouldHideOnboardingData(project?.onboardingStatus);
 
   return (
     <Card sx={{ height: "100%" }}>
@@ -69,6 +71,7 @@ const ProjectInformationCard = ({
             slaStatus={slaStatus}
             goLivePlanDate={getGoLivePlanDate()}
             onboardingStatus={getOnboardingStatus()}
+            hideOnboardingStatus={hideOnboardingStatus}
             isLoading={isLoading}
             isError={isError}
           />

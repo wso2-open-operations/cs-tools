@@ -129,12 +129,17 @@ describe("CaseDetailsDetailsPanel", () => {
   });
 
   it("should render Customer Information card with API data", () => {
-    renderDetailsPanel();
+    renderDetailsPanel({
+      data: {
+        ...mockCaseDetails,
+        csManager: "Jane Doe",
+      },
+    });
     expect(screen.getByText("Customer Information")).toBeInTheDocument();
     expect(screen.getByText("Organization")).toBeInTheDocument();
     expect(screen.getByText("Account")).toBeInTheDocument();
     expect(screen.getByText("Account Type")).toBeInTheDocument();
-    expect(screen.getByText("CS Manager")).toBeInTheDocument();
+    expect(screen.queryByText("CS Manager")).not.toBeInTheDocument();
     expect(screen.getAllByText("Project").length).toBeGreaterThan(0);
   });
 
@@ -179,7 +184,9 @@ describe("CaseDetailsDetailsPanel", () => {
 
   it("should show Error500Page and error message when isError is true", () => {
     renderDetailsPanel({ data: undefined, isError: true });
-    expect(screen.getByText("Something Went Wrong")).toBeInTheDocument();
+    expect(
+      screen.getByText("Something went wrong while loading case details."),
+    ).toBeInTheDocument();
     const img = document.querySelector("img");
     expect(img).toBeInTheDocument();
   });

@@ -14,41 +14,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Pagination } from "@wso2/oxygen-ui";
-import type { ChangeEvent, JSX } from "react";
+import { TablePagination } from "@wso2/oxygen-ui";
+import type { JSX } from "react";
+import type React from "react";
 
 export interface ListPaginationProps {
-  totalPages: number;
+  totalRecords: number;
   page: number;
-  onChange: (event: ChangeEvent<unknown>, value: number) => void;
+  rowsPerPage: number;
+  onPageChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
+  onRowsPerPageChange: (newSize: number) => void;
+  rowsPerPageOptions?: number[];
 }
 
-/**
- * ListPagination renders the standard pagination footer shared across all list
- * pages. Renders nothing when totalPages is 1 or less.
- *
- * @param {ListPaginationProps} props - Pagination state and change handler.
- * @returns {JSX.Element | null} The rendered pagination or null.
- */
 export default function ListPagination({
-  totalPages,
+  totalRecords,
   page,
-  onChange,
+  rowsPerPage,
+  onPageChange,
+  onRowsPerPageChange,
+  rowsPerPageOptions = [5, 10, 25, 50],
 }: ListPaginationProps): JSX.Element | null {
-  if (totalPages <= 1) {
+  if (totalRecords <= rowsPerPage) {
     return null;
   }
 
   return (
-    <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
-      <Pagination
-        count={totalPages}
-        page={page}
-        onChange={onChange}
-        color="primary"
-        variant="outlined"
-        shape="rounded"
-      />
-    </Box>
+    <TablePagination
+      component="div"
+      count={totalRecords}
+      page={page - 1}
+      onPageChange={(_e, newPage) => onPageChange(_e as React.ChangeEvent<unknown>, newPage + 1)}
+      rowsPerPage={rowsPerPage}
+      onRowsPerPageChange={(e) => onRowsPerPageChange(Number(e.target.value))}
+      rowsPerPageOptions={rowsPerPageOptions}
+    />
   );
 }

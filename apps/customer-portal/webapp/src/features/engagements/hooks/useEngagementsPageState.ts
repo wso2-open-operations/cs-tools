@@ -18,6 +18,7 @@ import { useNavigate, useParams } from "react-router";
 import { useState, useMemo, useEffect, type ChangeEvent } from "react";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useLoader } from "@context/linear-loader/LoaderContext";
@@ -36,7 +37,6 @@ import {
   computeEngagementsInitialPageLoading,
   computeEngagementsStatsLoading,
   computeEngagementsTotalItems,
-  computeEngagementsTotalPages,
   getEngagementsCurrentPageCases,
   parseEngagementsSortField,
 } from "@features/engagements/utils/engagements";
@@ -58,13 +58,18 @@ export function useEngagementsPageState() {
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(ENGAGEMENTS_PAGE_SIZE);
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
   const projectReady = !isProjectLoading && project !== undefined;
-  const severityPolicy = projectReady
-    ? getProjectSeverityPolicy(project?.type?.label)
+  const areFeaturePermissionsReady =
+    projectReady && !isProjectFeaturesLoading && projectFeatures !== undefined;
+  const severityPolicy = areFeaturePermissionsReady
+    ? getProjectSeverityPolicy(project?.type?.label, { projectFeatures })
     : { excludeS0: false, restrictSeverityToLow: false };
   const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
@@ -94,6 +99,7 @@ export function useEngagementsPageState() {
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", engagementSearchRequest, {
     enabled: !!projectId,
+    pageSize: rowsPerPage,
   });
 
   const { showLoader, hideLoader } = useLoader();
@@ -151,14 +157,15 @@ export function useEngagementsPageState() {
     apiTotalRecords,
     filteredCases.length,
   );
-  const totalPages = computeEngagementsTotalPages(
-    totalItems,
-    ENGAGEMENTS_PAGE_SIZE,
-  );
   const paginatedCases = filteredCases;
 
   const handlePageChange = (_e: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -217,13 +224,14 @@ export function useEngagementsPageState() {
     sortField,
     sortOrder,
     page,
+    rowsPerPage,
     paginatedCases,
     isCasesAreaLoading,
     isCasesError,
     listHasRefinement,
     totalItems,
-    totalPages,
     handlePageChange,
+    handleRowsPerPageChange,
     handleFilterChange,
     handleClearFilters,
     handleSortChange,

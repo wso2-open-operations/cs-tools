@@ -94,4 +94,10 @@ describe("ProjectMetadata", () => {
     );
     expect(screen.getByText("Good")).toHaveAttribute("data-color", "success");
   });
+
+  it("should hide onboarding status when hideOnboardingStatus is true", () => {
+    render(<ProjectMetadata {...defaultProps} hideOnboardingStatus={true} />);
+    expect(screen.queryByText("Onboarding Status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not-Applicable")).not.toBeInTheDocument();
+  });
 });

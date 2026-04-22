@@ -1065,3 +1065,19 @@ public isolated function mapTimeCardSearchResponseGroupedByCases(entity:CaseTime
         };
     return {caseTimeCards, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
 }
+
+# Map updated case response to the desired structure.
+#
+# + updatedCase - Updated case response from the entity service
+# + return - Mapped updated case response
+public isolated function mapUpdatedCaseResponse(entity:UpdatedCase updatedCase) returns types:UpdatedCase {
+    entity:ChoiceListItem state = updatedCase.state;
+    entity:ReferenceTableItem 'type = updatedCase.'type;
+    return {
+        id: updatedCase.id,
+        updatedOn: updatedCase.updatedOn,
+        state: {id: state.id.toString(), label: state.label},
+        'type: {id: 'type.id, label: 'type.name},
+        updatedBy: updatedCase.updatedBy
+    };
+}

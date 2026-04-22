@@ -23,6 +23,7 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { isForbiddenError, getForbiddenMessage } from "@utils/ApiError";
 import Error403Page from "@components/error/Error403Page";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
@@ -92,6 +93,10 @@ export default function DashboardPage(): JSX.Element {
     isFetching: isProjectDetailsFetching,
     error: projectDetailsError,
   } = useGetProjectDetails(projectId || "");
+  const {
+    data: projectFeatures,
+    isFetching: isProjectFeaturesFetching,
+  } = useGetProjectFeatures(projectId || "");
 
   // forbidden
   const isForbidden =
@@ -108,21 +113,23 @@ export default function DashboardPage(): JSX.Element {
   // awaiting project context
   const awaitingProjectContext =
     !!projectId &&
-    resolvedProject === undefined &&
-    (isProjectsLoading || isProjectDetailsFetching);
+    (resolvedProject === undefined ||
+      (resolvedProject !== undefined && isProjectFeaturesFetching)) &&
+    (isProjectsLoading || isProjectDetailsFetching || isProjectFeaturesFetching);
 
   // permissions
   const permissions = useMemo(
     () =>
       getProjectPermissions(resolvedProject?.type?.label, {
-        hasPdpSubscription: resolvedProject?.hasPdpSubscription,
+        projectFeatures,
       }),
-    [resolvedProject?.type?.label, resolvedProject?.hasPdpSubscription],
+    [resolvedProject?.type?.label, projectFeatures],
   );
 
   // severity policy
   const { excludeS0, restrictSeverityToLow } = getProjectSeverityPolicy(
     resolvedProject?.type?.label,
+    { projectFeatures },
   );
 
   // has agent

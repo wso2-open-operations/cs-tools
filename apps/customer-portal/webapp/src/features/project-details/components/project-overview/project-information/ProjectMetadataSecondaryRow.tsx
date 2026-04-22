@@ -31,6 +31,7 @@ export default function ProjectMetadataSecondaryRow({
   slaStatus,
   goLivePlanDate,
   onboardingStatus,
+  hideOnboardingStatus = false,
   isLoading,
   isError,
 }: ProjectMetadataSecondaryRowProps): JSX.Element {
@@ -105,25 +106,43 @@ export default function ProjectMetadataSecondaryRow({
           )}
         </Box>
       </Grid>
-      <Grid size={{ xs: 12, md: 4 }}>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: { xs: "center", md: "flex-end" },
-          }}
-        >
-          <Typography
-            variant="body2"
-            fontWeight="medium"
-            sx={{ display: "block", mb: 0.5 }}
+      {hideOnboardingStatus && (
+        <Grid
+          size={{ xs: 12, md: 4 }}
+          sx={{ display: { xs: "none", md: "block" } }}
+        />
+      )}
+      {!hideOnboardingStatus && (
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: { xs: "center", md: "flex-end" },
+            }}
           >
-            Onboarding Status
-          </Typography>
-          {isLoading || isError ? (
-            <Skeleton variant="rounded" width={80} height={24} />
-          ) : onboardingStatus ? (
-            <Tooltip title={onboardingStatus} arrow>
+            <Typography
+              variant="body2"
+              fontWeight="medium"
+              sx={{ display: "block", mb: 0.5 }}
+            >
+              Onboarding Status
+            </Typography>
+            {isLoading ? (
+              <Skeleton variant="rounded" width={80} height={24} />
+            ) : isError ? (
+              <ErrorIndicator entityName="onboarding status" />
+            ) : onboardingStatus ? (
+              <Tooltip title={onboardingStatus} arrow>
+                <Chip
+                  label={onboardingStatus}
+                  size="small"
+                  color="info"
+                  variant="outlined"
+                  sx={PROJECT_METADATA_CHIP_SX}
+                />
+              </Tooltip>
+            ) : (
               <Chip
                 label={onboardingStatus}
                 size="small"
@@ -131,18 +150,10 @@ export default function ProjectMetadataSecondaryRow({
                 variant="outlined"
                 sx={PROJECT_METADATA_CHIP_SX}
               />
-            </Tooltip>
-          ) : (
-            <Chip
-              label={onboardingStatus}
-              size="small"
-              color="info"
-              variant="outlined"
-              sx={PROJECT_METADATA_CHIP_SX}
-            />
-          )}
-        </Box>
-      </Grid>
+            )}
+          </Box>
+        </Grid>
+      )}
     </Grid>
   );
 }

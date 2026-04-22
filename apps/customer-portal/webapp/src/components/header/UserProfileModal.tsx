@@ -42,6 +42,7 @@ import {
   validatePhoneE164,
   type PhoneCountryOption,
 } from "@features/settings/utils/phone";
+import { resolveDisplayTimeZone } from "@utils/dateTime";
 
 const PASSWORD_RESET_URL = "https://wso2.com/user/password";
 
@@ -64,19 +65,12 @@ const formatLastPasswordUpdate = (
 
     const date = new Date(timestamp);
 
-    if (!timeZone) {
-      return date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      });
-    }
-
+    const displayTimeZone = resolveDisplayTimeZone(timeZone);
     return date.toLocaleDateString("en-US", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-      timeZone,
+      timeZone: displayTimeZone,
     });
   } catch {
     return "Not Available";
@@ -195,6 +189,8 @@ export default function UserProfileModal({
         const isTimeZoneUpdated =
           !hasTimeZoneInPayload || response?.timeZone === payload.timeZone;
         const isSuccessfulUpdate = isPhoneUpdated && isTimeZoneUpdated;
+        const shouldReloadForTimeZone =
+          hasTimeZoneInPayload && isTimeZoneUpdated;
 
         if (!isSuccessfulUpdate) {
           if (hasPhoneInPayload && hasTimeZoneInPayload) {
@@ -210,6 +206,10 @@ export default function UserProfileModal({
         }
 
         showSuccess("Profile updated successfully");
+        if (shouldReloadForTimeZone) {
+          window.location.reload();
+          return;
+        }
         onClose();
       },
       onError: (err) => {

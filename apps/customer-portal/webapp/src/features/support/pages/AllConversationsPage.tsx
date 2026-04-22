@@ -27,6 +27,7 @@ import {
   type JSX,
   type ChangeEvent,
 } from "react";
+import { useSessionState } from "@hooks/useSessionState";
 import { Box, Stack } from "@wso2/oxygen-ui";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -68,15 +69,14 @@ export default function AllConversationsPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const sessionPrefix = `${projectId ?? "unknown"}-conversations`;
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllConversationsFilterValues>({});
-  const [sortField, setSortField] = useState<"createdOn" | "updatedOn">(
-    "updatedOn",
-  );
-  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [filters, setFilters] = useSessionState<AllConversationsFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<"createdOn" | "updatedOn">(`${sessionPrefix}-sortField`, "updatedOn", undefined, { popOnly: true });
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
+  const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, 10, undefined, { popOnly: true });
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
@@ -88,8 +88,8 @@ export default function AllConversationsPage(): JSX.Element {
         createdByMe: createdByMe || undefined,
       },
       pagination: {
-        offset: (page - 1) * pageSize,
-        limit: pageSize,
+        offset: (page - 1) * rowsPerPage,
+        limit: rowsPerPage,
       },
       sortBy: {
         field: sortField,
@@ -100,7 +100,7 @@ export default function AllConversationsPage(): JSX.Element {
       searchTerm,
       filters.stateId,
       page,
-      pageSize,
+      rowsPerPage,
       sortField,
       sortOrder,
       createdByMe,
@@ -150,7 +150,6 @@ export default function AllConversationsPage(): JSX.Element {
 
   const conversations = data?.conversations ?? [];
   const totalRecords = data?.totalRecords ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
 
   const handleConversationClick = (conv: Conversation) => {
     if (!projectId) return;
@@ -172,6 +171,11 @@ export default function AllConversationsPage(): JSX.Element {
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -281,9 +285,11 @@ export default function AllConversationsPage(): JSX.Element {
       />
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalRecords}
         page={page}
-        onChange={handlePageChange}
+        rowsPerPage={rowsPerPage}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
       />
     </Stack>
   );

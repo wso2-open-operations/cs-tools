@@ -33,7 +33,7 @@ import {
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { getFileIcon, scrollElement } from "@features/support/utils/richTextEditor";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {
   type ToolbarVariant,
 } from "@components/rich-text-editor/ToolBar";
@@ -50,7 +50,15 @@ import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
-import { KEY_ENTER_COMMAND, COMMAND_PRIORITY_HIGH } from "lexical";
+import {
+  KEY_ENTER_COMMAND,
+  COMMAND_PRIORITY_HIGH,
+  $getSelection,
+  $isRangeSelection,
+  INSERT_PARAGRAPH_COMMAND,
+} from "lexical";
+import { $isListItemNode } from "@lexical/list";
+import { $findMatchingParent } from "@lexical/utils";
 
 /**
  * Internal component to handle editable state changes.
@@ -74,12 +82,9 @@ const InitialValuePlugin = ({ initialHtml }: { initialHtml?: string }) => {
   const appliedRef = useRef(false);
 
   useEffect(() => {
-    if (!initialHtml?.trim()) return;
+    if (!initialHtml?.trim() || appliedRef.current) return;
     editor.update(() => {
       const root = $getRoot();
-      const currentContent = root.getTextContent();
-      const isEmpty = currentContent.trim() === "";
-      if (!isEmpty && appliedRef.current) return;
       const parser = new DOMParser();
       const dom = parser.parseFromString(initialHtml, "text/html");
       const nodes = $generateNodesFromDOM(editor, dom);
@@ -115,15 +120,20 @@ const OnChangeHTMLPlugin = ({
 };
 
 /**
- * Plugin to call onSubmit only on Ctrl+Enter / Cmd+Enter.
- * Plain Enter is left to Lexical (new lines, list items, paragraphs).
+ * Plugin to handle Enter key for submit.
+ *
+ * When enterToSubmit=false (default): Ctrl+Enter / Cmd+Enter submits; plain Enter stays in editor.
+ * When enterToSubmit=true: plain Enter submits; Shift+Enter in a list inserts a new list item;
+ *   Shift+Enter outside a list passes through for a soft line break; Ctrl/Cmd+Enter is ignored.
  */
 const EnterSubmitPlugin = ({
   onSubmit,
   disabled,
+  enterToSubmit = false,
 }: {
   onSubmit?: () => void;
   disabled?: boolean;
+  enterToSubmit?: boolean;
 }) => {
   const [editor] = useLexicalComposerContext();
 
@@ -134,9 +144,31 @@ const EnterSubmitPlugin = ({
       KEY_ENTER_COMMAND,
       (event: KeyboardEvent | null) => {
         if (event === null) return false;
-        if (!event.ctrlKey && !event.metaKey) {
-          return false;
+
+        if (enterToSubmit) {
+          if (event.isComposing) return false;
+          if (event.ctrlKey || event.metaKey) return false;
+
+          if (event.shiftKey) {
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) {
+              const anchorNode = selection.anchor.getNode();
+              const listItem = $findMatchingParent(anchorNode, $isListItemNode);
+              if (listItem) {
+                event.preventDefault();
+                editor.dispatchCommand(INSERT_PARAGRAPH_COMMAND, undefined);
+                return true;
+              }
+            }
+            return false;
+          }
+
+          event.preventDefault();
+          onSubmit();
+          return true;
         }
+
+        if (!event.ctrlKey && !event.metaKey) return false;
         event.preventDefault?.();
         onSubmit();
         return true;
@@ -145,7 +177,7 @@ const EnterSubmitPlugin = ({
     );
 
     return unregEnter;
-  }, [editor, onSubmit, disabled]);
+  }, [editor, onSubmit, disabled, enterToSubmit]);
 
   return null;
 };
@@ -209,12 +241,14 @@ const Editor = ({
   showToolbar = true,
   toolbarVariant = "full",
   onSubmitKeyDown,
+  enterToSubmit = false,
   placeholder = "Enter description...",
   id,
   showKeyboardHint = false,
   maxHeight = "300px",
   onFocus,
   onBlur,
+  overlayElement,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -226,14 +260,16 @@ const Editor = ({
   minHeight?: number | string;
   showToolbar?: boolean;
   toolbarVariant?: ToolbarVariant;
-  /** When provided, Ctrl+Enter / Cmd+Enter triggers submit; plain Enter stays in the editor (lists, paragraphs). */
   onSubmitKeyDown?: () => void;
+  enterToSubmit?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
   maxHeight?: string | number;
   onFocus?: () => void;
   onBlur?: () => void;
+  /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
+  overlayElement?: ReactNode;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -320,6 +356,7 @@ const Editor = ({
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
+              enterToSubmit={enterToSubmit}
             />
             <Divider sx={{ my: 1 }} />
           </>
@@ -412,7 +449,22 @@ const Editor = ({
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
-          <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} />
+          <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
+          {overlayElement && (
+            <Box
+              sx={{
+                position: "absolute",
+                bottom: 8,
+                right: 8,
+                zIndex: 10,
+                display: "flex",
+                gap: 1,
+                pointerEvents: "auto",
+              }}
+            >
+              {overlayElement}
+            </Box>
+          )}
         </Box>
         {attachments.length > 0 && (
           <>

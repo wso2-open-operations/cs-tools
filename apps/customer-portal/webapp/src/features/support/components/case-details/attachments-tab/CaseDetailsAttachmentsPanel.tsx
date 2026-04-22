@@ -15,7 +15,8 @@
 // under the License.
 
 import type { CaseDetailsAttachmentsPanelProps } from "@features/support/types/supportComponents";
-import { Box, Button, Pagination, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
+import ListPagination from "@components/list-view/ListPagination";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import {
@@ -26,7 +27,7 @@ import type { CaseAttachment } from "@features/support/types/cases";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { useGetAttachment } from "@api/useGetAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
 import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSkeleton";
@@ -34,10 +35,7 @@ import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentMod
 import EditCaseAttachmentModal from "@case-details-attachments/EditCaseAttachmentModal";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
-import {
-  ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED,
-  ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER,
-} from "@features/support/constants/supportConstants";
+
 
 const ITEMS_PER_PAGE = 10;
 
@@ -54,7 +52,6 @@ export default function CaseDetailsAttachmentsPanel({
   isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const { showError } = useErrorBanner();
-  const { data: userDetails } = useGetUserDetails();
   const { downloadAttachment, isDownloading, downloadingId } =
     useGetAttachment();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -78,7 +75,6 @@ export default function CaseDetailsAttachmentsPanel({
   const deleteAttachment = useDeleteAttachment();
 
   const allAttachments = useMemo(() => flattenCaseAttachments(data), [data]);
-  const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
 
   const totalRecords = data?.pages?.[0]?.totalRecords ?? 0;
   const totalPages = Math.ceil(totalRecords / ITEMS_PER_PAGE);
@@ -233,47 +229,28 @@ export default function CaseDetailsAttachmentsPanel({
               <AttachmentsListSkeleton />
             ) : (
               paginatedAttachments.map((att) => {
-                // Only the uploader can edit/delete their own attachments.
-                const createdByEmail = att.createdBy?.trim().toLowerCase() ?? "";
-                const isOwner =
-                  createdByEmail.length > 0 &&
-                  currentUserEmail.length > 0 &&
-                  createdByEmail === currentUserEmail;
-                const deleteDisabled = isCaseClosed || !isOwner;
-                const deleteTooltip = isCaseClosed
-                  ? ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED
-                  : !isOwner
-                    ? ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER
-                    : undefined;
                 return (
                   <AttachmentListItem
                     key={att.id}
                     attachment={att}
                     onDownload={handleDownload}
                     onDelete={handleDeleteClick}
-                    deleteDisabled={deleteDisabled}
-                    deleteTooltip={deleteTooltip}
-                    onEdit={
-                      isOwner && !isCaseClosed ? handleEditClick : undefined
-                    }
+                    deleteDisabled={isCaseClosed}
+                    onEdit={isCaseClosed ? undefined : handleEditClick}
                     hideDescription
                     isDownloadLoading={isDownloading && downloadingId === att.id}
                   />
                 );
               })
             )}
-            {totalPages > 1 && (
-              <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
-                <Pagination
-                  count={totalPages}
-                  page={boundedPage}
-                  onChange={handlePageChange}
-                  color="primary"
-                  showFirstButton
-                  showLastButton
-                />
-              </Box>
-            )}
+            <ListPagination
+              totalRecords={totalRecords}
+              page={boundedPage}
+              rowsPerPage={ITEMS_PER_PAGE}
+              onPageChange={handlePageChange}
+              onRowsPerPageChange={() => {}}
+              rowsPerPageOptions={[ITEMS_PER_PAGE]}
+            />
           </Stack>
         )}
       </Stack>

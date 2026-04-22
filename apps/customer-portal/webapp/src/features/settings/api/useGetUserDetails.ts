@@ -20,6 +20,8 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import type { UserDetails } from "@features/settings/types/users";
 import { useLogger } from "@hooks/useLogger";
 import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
+import { setUserPreferredTimeZone } from "@utils/dateTime";
+import { ApiError } from "@utils/ApiError";
 
 /**
  * Hook to get user details.
@@ -54,11 +56,21 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
         logger.debug(`[useGetUserDetails] Response status: ${response.status}`);
 
         if (!response.ok) {
-          const err = new Error(
-            `Error fetching user details: ${response.status} ${response.statusText}`,
-          ) as Error & { status?: number };
-          err.status = response.status;
-          throw err;
+          let apiMessage: string | undefined;
+          try {
+            const errBody = await response.json();
+            if (typeof errBody?.message === "string") {
+              apiMessage = errBody.message;
+            }
+          } catch {
+            // ignore – body may not be JSON
+          }
+          throw new ApiError(
+            response.status,
+            response.statusText,
+            apiMessage ??
+              `Error fetching user details: ${response.status} ${response.statusText}`,
+          );
         }
 
         const data = (await response.json()) as Record<string, unknown>;
@@ -70,6 +82,7 @@ const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
             : tzRaw != null
               ? String(tzRaw)
               : "";
+        setUserPreferredTimeZone(timeZone);
         return { ...data, timeZone } as UserDetails;
       } catch (error) {
         if (

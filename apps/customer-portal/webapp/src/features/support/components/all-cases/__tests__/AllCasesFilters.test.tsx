@@ -59,6 +59,21 @@ describe("ListFilters", () => {
     expect(screen.getAllByText("Deployment")[0]).toBeInTheDocument();
   });
 
+  it("should not render deployment filter when hideDeploymentFilter is true", () => {
+    render(
+      <ThemeProvider theme={theme}>
+        <ListFilters
+          filters={defaultFilters}
+          filterMetadata={mockCaseMetadata}
+          onFilterChange={mockOnFilterChange}
+          hideDeploymentFilter
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByRole("combobox", { name: /Deployment/i })).toBeNull();
+  });
+
   it("should call onFilterChange when a filter is changed", async () => {
     render(
       <ThemeProvider theme={theme}>

@@ -15,7 +15,15 @@
 // under the License.
 
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { COMMAND_PRIORITY_EDITOR, $insertNodes } from "lexical";
+import {
+  COMMAND_PRIORITY_EDITOR,
+  $insertNodes,
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
+  $createParagraphNode,
+  $isRootOrShadowRoot,
+} from "lexical";
 import { useEffect } from "react";
 import { $createImageNode } from "@components/rich-text-editor/ImageNode";
 import {
@@ -47,7 +55,36 @@ export default function ImagesPlugin(): null {
         const src = getPayloadSrc(payload);
         const altText = getPayloadAltText(payload);
         const imageNode = $createImageNode(src, altText);
+
+        // If the editor is empty or has no range selection, move cursor to end first
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) {
+          const root = $getRoot();
+          const lastChild = root.getLastChild();
+          if (lastChild) {
+            lastChild.selectEnd();
+          } else {
+            root.selectEnd();
+          }
+        }
+
         $insertNodes([imageNode]);
+
+        // After inserting a DecoratorNode the cursor is "at" the image and
+        // not in a text-editable position. Ensure a paragraph exists after
+        // the image and move the cursor there so the user can keep typing.
+        const parent = imageNode.getParentOrThrow();
+        if ($isRootOrShadowRoot(parent)) {
+          const nextSibling = imageNode.getNextSibling();
+          if (!nextSibling) {
+            const paragraph = $createParagraphNode();
+            imageNode.insertAfter(paragraph);
+            paragraph.select();
+          } else {
+            nextSibling.selectStart();
+          }
+        }
+
         return true;
       },
       COMMAND_PRIORITY_EDITOR,

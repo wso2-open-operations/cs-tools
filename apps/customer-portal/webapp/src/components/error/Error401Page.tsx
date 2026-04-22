@@ -22,12 +22,44 @@ interface Error401PageProps {
   message?: string;
 }
 
+/**
+ * Formats unauthorized response copy into a compact two-line message.
+ *
+ * @param {string | undefined} message - Raw API message.
+ * @returns {string | undefined} Formatted message.
+ */
+function formatUnauthorizedMessage(message?: string): string | undefined {
+  if (!message) {
+    return undefined;
+  }
+
+  const normalized = message.replace(/\s+/g, " ").trim();
+  const splitMarker = "Please try again.";
+
+  if (normalized.includes(splitMarker)) {
+    const [firstPart, secondPart] = normalized.split(splitMarker, 2);
+    return `${firstPart.trim()} ${splitMarker}\n${(secondPart ?? "").trim()}`.trim();
+  }
+
+  const firstSentenceEnd = normalized.indexOf(".");
+  if (firstSentenceEnd > -1 && firstSentenceEnd < normalized.length - 1) {
+    const firstLine = normalized.slice(0, firstSentenceEnd + 1).trim();
+    const secondLine = normalized.slice(firstSentenceEnd + 1).trim();
+    return `${firstLine}\n${secondLine}`.trim();
+  }
+
+  return normalized;
+}
+
 export default function Error401Page({ message }: Error401PageProps): JSX.Element {
   return (
     <ErrorPage
       illustration={illustration}
       illustrationAlt="401 unauthorized illustration"
-      description={message ?? "You need to sign in to view this page. Please authenticate and try again."}
+      description={
+        formatUnauthorizedMessage(message) ??
+        "You need to sign in to view this page.\nPlease authenticate and try again."
+      }
     />
   );
 }

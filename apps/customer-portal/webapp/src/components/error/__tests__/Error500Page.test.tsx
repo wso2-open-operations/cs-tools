@@ -19,18 +19,22 @@ import { describe, expect, it } from "vitest";
 import Error500Page from "@components/error/Error500Page";
 
 describe("Error500Page", () => {
-  it("should render the error state illustration", () => {
-    const { container } = render(<Error500Page />);
+  it("should render the default message and illustration", () => {
+    render(<Error500Page />);
 
-    const img = container.querySelector("img");
-    expect(img).toBeInTheDocument();
-    expect(img).toHaveAttribute("aria-hidden", "true");
-    expect(img).toHaveAttribute("src");
+    expect(
+      screen.getByAltText("500 server error illustration"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Something went wrong on our side\. Please try again in a few moments\./,
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("should accept and pass through img props", () => {
-    render(<Error500Page data-testid="custom-error-icon" />);
+  it("should render a custom message when provided", () => {
+    render(<Error500Page message="Upstream timeout." />);
 
-    expect(screen.getByTestId("custom-error-icon")).toBeInTheDocument();
+    expect(screen.getByText("Upstream timeout.")).toBeInTheDocument();
   });
 });

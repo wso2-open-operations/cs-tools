@@ -58,17 +58,8 @@ export default function ChangeRequestDetailsLoadingSkeleton(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 2,
-        }}
-      >
-        <Skeleton variant="rounded" width={200} height={36} />
-        <Skeleton variant="rounded" width={140} height={36} />
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <Skeleton variant="rounded" width={180} height={36} />
       </Box>
       <Paper variant="outlined" sx={{ p: 4 }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>

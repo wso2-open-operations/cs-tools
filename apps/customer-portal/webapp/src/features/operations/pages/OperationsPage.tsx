@@ -30,6 +30,7 @@ import {
   type OperationsStatKey,
 } from "@features/support/constants/supportConstants";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
@@ -67,6 +68,8 @@ export default function OperationsPage(): JSX.Element {
     isLoading: isProjectLoading,
     isError: isProjectDetailsError,
   } = useGetProjectDetails(projectId || "");
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
 
   const projectFetchSettled = !isProjectLoading;
   const projectLoadFailed =
@@ -74,11 +77,15 @@ export default function OperationsPage(): JSX.Element {
     projectFetchSettled &&
     (isProjectDetailsError || project === undefined);
   const permissionsReady =
-    projectFetchSettled && !!project && !isProjectDetailsError;
+    projectFetchSettled &&
+    !isProjectFeaturesLoading &&
+    projectFeatures !== undefined &&
+    !!project &&
+    !isProjectDetailsError;
 
   const projectTypeLabel = permissionsReady ? project?.type?.label : undefined;
   const permissions = getProjectPermissions(projectTypeLabel, {
-    hasPdpSubscription: project?.hasPdpSubscription,
+    projectFeatures,
   });
 
   const isServiceRequestEnabled = permissions.hasSR;
@@ -235,8 +242,8 @@ export default function OperationsPage(): JSX.Element {
         />
       </Box>
       {!permissionsReady ? (
-        <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
-          <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
+        <Grid container spacing={3}>
+          <Grid size={loadingOverviewGridSize}>
             <SupportOverviewCard
               title={OPERATIONS_HUB_CARD_TITLE_SR}
               subtitle={srOverviewSubtitle}
@@ -247,7 +254,7 @@ export default function OperationsPage(): JSX.Element {
               <OutstandingCasesList cases={[]} isLoading />
             </SupportOverviewCard>
           </Grid>
-          <Grid size={loadingOverviewGridSize} sx={{ display: "flex" }}>
+          <Grid size={loadingOverviewGridSize}>
             <SupportOverviewCard
               title={OPERATIONS_HUB_CARD_TITLE_CR}
               subtitle={crOverviewSubtitle}
@@ -261,9 +268,9 @@ export default function OperationsPage(): JSX.Element {
         </Grid>
       ) : isServiceRequestEnabled || isChangeRequestEnabled ? (
         <>
-          <Grid container spacing={3} sx={{ alignItems: "stretch" }}>
+          <Grid container spacing={3}>
             {isServiceRequestEnabled && (
-              <Grid size={overviewGridSize} sx={{ display: "flex" }}>
+              <Grid size={overviewGridSize}>
                 <SupportOverviewCard
                   title={OPERATIONS_HUB_CARD_TITLE_SR}
                   subtitle={srOverviewSubtitle}
@@ -313,7 +320,7 @@ export default function OperationsPage(): JSX.Element {
               </Grid>
             )}
             {isChangeRequestEnabled && (
-              <Grid size={overviewGridSize} sx={{ display: "flex" }}>
+              <Grid size={overviewGridSize}>
                 <SupportOverviewCard
                   title={OPERATIONS_HUB_CARD_TITLE_CR}
                   subtitle={crOverviewSubtitle}

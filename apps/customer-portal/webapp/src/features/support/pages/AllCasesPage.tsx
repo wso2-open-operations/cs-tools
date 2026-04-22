@@ -27,10 +27,12 @@ import {
   type JSX,
   type ChangeEvent,
 } from "react";
+import { useSessionState } from "@hooks/useSessionState";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { Box, Stack } from "@wso2/oxygen-ui";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
@@ -69,34 +71,34 @@ export default function AllCasesPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const sessionPrefix = `${projectId ?? "unknown"}-cases`;
+  const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllCasesFilterValues>({});
-  const [sortField, setSortField] = useState<
-    "createdOn" | "updatedOn" | "severity" | "state"
-  >("createdOn");
-  const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [sortField, setSortField] = useSessionState<"createdOn" | "updatedOn" | "severity" | "state">(`${sessionPrefix}-sortField`, "createdOn", undefined, { popOnly: true });
+  const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
+  const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
+  const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, 10, undefined, { popOnly: true });
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
   );
+  const { data: projectFeatures } = useGetProjectFeatures(projectId || "");
   const projectDetailsReady = !isProjectLoading && project !== undefined;
 
   const permissions = useMemo(() => {
     if (!projectDetailsReady || !project) {
-      return getProjectPermissions(undefined);
+      return getProjectPermissions(undefined, { projectFeatures: null });
     }
-    return getProjectPermissions(project.type?.label);
-  }, [projectDetailsReady, project]);
+    return getProjectPermissions(project.type?.label, { projectFeatures });
+  }, [projectDetailsReady, project, projectFeatures]);
 
   const severityPolicy = useMemo(
     () =>
       projectDetailsReady && project
-        ? getProjectSeverityPolicy(project.type?.label)
+        ? getProjectSeverityPolicy(project.type?.label, { projectFeatures })
         : { excludeS0: false, restrictSeverityToLow: false },
-    [projectDetailsReady, project],
+    [projectDetailsReady, project, projectFeatures],
   );
   const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
@@ -162,6 +164,7 @@ export default function AllCasesPage(): JSX.Element {
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest, {
     enabled: !!projectId,
+    pageSize: rowsPerPage,
   });
 
   const { showLoader, hideLoader } = useLoader();
@@ -223,10 +226,13 @@ export default function AllCasesPage(): JSX.Element {
 
   const paginatedCases = filteredAndSearchedCases;
 
-  const totalPages = Math.ceil(totalItems / pageSize);
-
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
+  };
+
+  const handleRowsPerPageChange = (newSize: number) => {
+    setRowsPerPage(newSize);
+    setPage(1);
   };
 
   const handleFilterChange = (field: string, value: string) => {
@@ -314,6 +320,7 @@ export default function AllCasesPage(): JSX.Element {
         onClearFilters={handleClearFilters}
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
+        hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}
       />
 
@@ -324,8 +331,8 @@ export default function AllCasesPage(): JSX.Element {
         sortFieldOptions={[
           { value: "createdOn", label: "Created on" },
           { value: "updatedOn", label: "Updated on" },
-          { value: "severity", label: "Severity" },
-          { value: "state", label: "State" },
+          { value: "severity", label: "Severity", kind: "ordinal" as const },
+          { value: "state", label: "Status", kind: "ordinal" as const },
         ]}
         sortField={sortField}
         onSortFieldChange={(v) =>
@@ -349,9 +356,11 @@ export default function AllCasesPage(): JSX.Element {
       />
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalItems}
         page={page}
-        onChange={handlePageChange}
+        rowsPerPage={rowsPerPage}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
       />
     </Stack>
   );

@@ -43,6 +43,10 @@ export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
 }
 
+export function isBadRequestError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 400;
+}
+
 /**
  * Extracts the human-readable message from an ApiError (parsed from the
  * API response body, e.g. `{"message":"..."}`).  Returns undefined when the

@@ -51,6 +51,10 @@ import type {
   UpdateHistoryTabProps,
   UpdateHistoryTimelineItemProps,
 } from "@features/project-details/types/projectDetailsComponents";
+import {
+  formatBackendTimestampForDisplay,
+  parseBackendTimestamp,
+} from "@utils/dateTime";
 
 /**
  * Displays update history timeline and allows adding/editing/deleting updates.
@@ -141,8 +145,8 @@ export default function UpdateHistoryTab({
 
   const sortedUpdates = useMemo(() => {
     return [...updates].sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
+      const dateA = parseBackendTimestamp(a.date)?.getTime() ?? 0;
+      const dateB = parseBackendTimestamp(b.date)?.getTime() ?? 0;
       return dateB - dateA;
     });
   }, [updates]);
@@ -268,12 +272,17 @@ export default function UpdateHistoryTab({
         const [, year, month, day] = match;
         return `${day}/${month}/${year}`;
       }
-      const date = new Date(dateStr);
-      return date.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
+      const formatted = formatBackendTimestampForDisplay(
+        dateStr,
+        {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        },
+        undefined,
+        "en-GB",
+      );
+      return formatted ?? dateStr;
     } catch {
       return dateStr;
     }

@@ -19,15 +19,16 @@ import {
   Box,
   CircularProgress,
   IconButton,
+  Tooltip,
   colors,
 } from "@wso2/oxygen-ui";
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useAsgardeo } from "@asgardeo/react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { stripHtml } from "@features/support/utils/support";
+import { hasSubmittableEditorContent } from "@features/support/utils/support";
 import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
@@ -54,6 +55,16 @@ export default function ActivityCommentInput({
   // Attachment state
   type AttachmentItem = { id: string; file: File };
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+
+  // Refs so handleSend always reads the latest value/attachments even when
+  // called from a stale closure (e.g. via the Ctrl+Enter command handler in
+  // EnterSubmitPlugin, which may hold an outdated render's callback).
+  const valueRef = useRef(value);
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    valueRef.current = value;
+    attachmentsRef.current = attachments;
+  }, [value, attachments]);
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
@@ -149,26 +160,41 @@ export default function ActivityCommentInput({
   };
 
   const handleSend = async () => {
-    const hasText = stripHtml(value).trim().length > 0;
-    const hasAttachments = attachments.length > 0;
+    const currentValue = valueRef.current;
+    const currentAttachments = attachmentsRef.current;
+    const hasText = hasSubmittableEditorContent(currentValue);
+    const hasAttachments = currentAttachments.length > 0;
     if ((!hasText && !hasAttachments) || isDisabled) return;
 
     // Snapshot attachments before posting
-    const attachmentsSnapshot = [...attachments];
+    const attachmentsSnapshot = [...currentAttachments];
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
-    const contentToSend = hasText ? value.trim() : "<p></p>";
 
+    const clearUI = () => {
+      setValue("");
+      setResetTrigger((prev) => prev + 1);
+      setAttachments([]);
+      attachmentNamesRef.current.clear();
+    };
+
+    // Attachment-only: skip comment endpoint, upload directly
+    if (!hasText && hasAttachments) {
+      const ok = await uploadAttachmentsFromSnapshot(
+        attachmentsSnapshot,
+        attachmentNamesSnapshot,
+      );
+      if (ok) {
+        clearUI();
+      }
+      return;
+    }
+
+    // Text (with or without attachments): post comment first, then upload attachments
     postComment.mutate(
-      { caseId, body: { content: contentToSend, type: CommentType.COMMENT } },
+      { caseId, body: { content: currentValue.trim(), type: CommentType.COMMENT } },
       {
         onSuccess: async () => {
-          // Clear UI immediately to prevent duplicate posts
-          setValue("");
-          setResetTrigger((prev) => prev + 1);
-          setAttachments([]);
-          attachmentNamesRef.current.clear();
-
-          // Upload attachments using snapshot
+          clearUI();
           if (attachmentsSnapshot.length > 0) {
             await uploadAttachmentsFromSnapshot(
               attachmentsSnapshot,
@@ -197,11 +223,14 @@ export default function ActivityCommentInput({
           px: 2,
           py: 1.5,
           flexShrink: 0,
+          position: "sticky",
+          bottom: 0,
+          zIndex: 1,
+          bgcolor: "background.paper",
         }}
       >
-        <Box sx={{ flex: 1, position: "relative" }}>
+        <Box sx={{ flex: 1 }}>
           <Editor
-            value={value}
             onChange={setValue}
             disabled={isDisabled}
             resetTrigger={resetTrigger}
@@ -213,48 +242,53 @@ export default function ActivityCommentInput({
                 : "Write a comment..."
             }
             onSubmitKeyDown={handleSend}
+            enterToSubmit={!isCaseClosed}
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
             showKeyboardHint={!isCaseClosed}
             maxHeight="310px"
+            overlayElement={
+              <Tooltip
+                title={
+                  isCaseClosed
+                    ? "Commenting is disabled for closed cases"
+                    : "Send comment"
+                }
+              >
+                <span>
+                  <IconButton
+                    disabled={
+                      (!hasSubmittableEditorContent(value) &&
+                        attachments.length === 0) ||
+                      isDisabled
+                    }
+                    onClick={handleSend}
+                    aria-label="Send comment"
+                    sx={{
+                      bgcolor: "warning.main",
+                      color: "white",
+                      "&:hover": { bgcolor: "warning.dark" },
+                      "&.Mui-disabled": {
+                        bgcolor: colors.grey[200],
+                        color: colors.grey[400],
+                      },
+                      boxShadow: 3,
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                    }}
+                  >
+                    {postComment.isPending || isUploadingAttachments ? (
+                      <CircularProgress color="inherit" size={18} />
+                    ) : (
+                      <ArrowUp size={18} />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            }
           />
-          <Box
-            sx={{
-              position: "absolute",
-              bottom: 8,
-              right: 8,
-              zIndex: 1,
-              display: "flex",
-              gap: 1,
-            }}
-          >
-            <IconButton
-              disabled={
-                (stripHtml(value).trim().length === 0 &&
-                  attachments.length === 0) ||
-                isDisabled
-              }
-              onClick={handleSend}
-              color="warning"
-              aria-label="Send comment"
-              sx={{
-                bgcolor: colors.grey[100],
-                "&:hover": { bgcolor: colors.grey[200]},
-                boxShadow: 1,
-                width: 32,
-                height: 32,
-                border: "1px solid",
-                borderColor: "warning.main",
-              }}
-            >
-              {postComment.isPending || isUploadingAttachments ? (
-                <CircularProgress color="inherit" size={18} />
-              ) : (
-                <ArrowUp size={18} />
-              )}
-            </IconButton>
-          </Box>
         </Box>
       </Box>
 

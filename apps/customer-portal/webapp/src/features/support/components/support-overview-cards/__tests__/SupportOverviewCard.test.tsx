@@ -26,7 +26,7 @@ describe("SupportOverviewCard", () => {
     render(
       <SupportOverviewCard
         title="Outstanding Cases"
-        subtitle="Latest 5 support tickets"
+        subtitle="Latest 5 outstanding support tickets"
         icon={MockIcon}
         footerButtonLabel="View all cases"
         onFooterClick={vi.fn()}
@@ -36,7 +36,7 @@ describe("SupportOverviewCard", () => {
     );
 
     expect(screen.getByText("Outstanding Cases")).toBeInTheDocument();
-    expect(screen.getByText("Latest 5 support tickets")).toBeInTheDocument();
+    expect(screen.getByText("Latest 5 outstanding support tickets")).toBeInTheDocument();
     expect(screen.getByText("View all cases")).toBeInTheDocument();
     expect(screen.getByText("List content")).toBeInTheDocument();
     expect(screen.getByTestId("mock-icon")).toBeInTheDocument();

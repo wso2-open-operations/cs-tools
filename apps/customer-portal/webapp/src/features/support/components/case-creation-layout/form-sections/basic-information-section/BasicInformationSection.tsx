@@ -32,6 +32,7 @@ import { type JSX, type UIEvent } from "react";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/common";
 import { paginatedSelectMenuListProps } from "@utils/common";
+import { isCloudSupportProject } from "@utils/permission";
 
 /**
  * Renders the Basic Information section used during case creation.
@@ -62,7 +63,8 @@ export function BasicInformationSection({
   onLoadMoreProducts,
   hasMoreProducts = false,
   isFetchingMoreProducts = false,
-}: BasicInformationSectionProps): JSX.Element {
+  projectTypeLabel,
+}: BasicInformationSectionProps & { projectTypeLabel?: string | null }): JSX.Element {
   const handleDeploymentsMenuScroll = (e: UIEvent<HTMLElement>) => {
     if (
       !onLoadMoreDeployments ||
@@ -237,7 +239,7 @@ export function BasicInformationSection({
           {/* product field label container */}
           <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
             <Typography variant="caption">
-              Product Version{" "}
+              {isCloudSupportProject(projectTypeLabel) ? "Product" : "Product Version"}{" "}
               <Box component="span" sx={{ color: "warning.main" }}>
                 *
               </Box>
@@ -272,7 +274,8 @@ export function BasicInformationSection({
                     if (showNoProductsHint) {
                       return EMPTY_DROPDOWN_PLACEHOLDER;
                     }
-                    return "Select Product Version...";
+                    const productLabel = isCloudSupportProject(projectTypeLabel) ? "Product" : "Product Version";
+                    return `Select ${productLabel}...`;
                   }
                   if (useProductOptionList && hasProductRows) {
                     const opt = productOptionList!.find((o) => o.id === value);
@@ -292,7 +295,7 @@ export function BasicInformationSection({
                     ? "Select deployment first"
                     : showNoProductsHint
                       ? EMPTY_DROPDOWN_PLACEHOLDER
-                      : "Select Product Version..."}
+                      : `Select ${isCloudSupportProject(projectTypeLabel) ? "Product" : "Product Version"}...`}
                 </MenuItem>
                 {useProductOptionList
                   ? productOptionList!.map((p) => (

@@ -32,6 +32,7 @@ import ServiceHoursAllocationsCard from "@features/project-details/components/pr
 import ProjectDeployments from "@features/project-details/components/deployments/ProjectDeployments";
 import ProjectTimeTracking from "@features/project-details/components/time-tracking/ProjectTimeTracking";
 import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useGetProjectStat } from "@features/project-details/api/useGetProjectStat";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import { useLogger } from "@hooks/useLogger";
@@ -69,6 +70,8 @@ export default function ProjectDetails(): JSX.Element {
     isLoading: isProjectLoading,
     error: projectError,
   } = useGetProjectDetails(projectId || "");
+  const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
+    useGetProjectFeatures(projectId || "");
 
   const projectTypeLabel = currentProject?.type?.label ?? project?.type?.label;
 
@@ -78,7 +81,9 @@ export default function ProjectDetails(): JSX.Element {
     error: statsError,
   } = useGetProjectStat(projectId || "");
 
-  const isDetailsLoading = getProjectDetailsLoadingState({
+  const isDetailsLoading =
+    isProjectFeaturesLoading ||
+    getProjectDetailsLoadingState({
     isAuthLoading,
     isProjectLoading,
     isStatsLoading,
@@ -86,7 +91,7 @@ export default function ProjectDetails(): JSX.Element {
     projectError,
     stats,
     statsError,
-  });
+    });
 
   useEffect(() => {
     if (isDetailsLoading) {
@@ -109,20 +114,20 @@ export default function ProjectDetails(): JSX.Element {
   const permissions = useMemo(
     () =>
       getProjectPermissions(projectTypeLabel, {
-        hasPdpSubscription:
-          currentProject?.hasPdpSubscription ?? project?.hasPdpSubscription,
+        projectFeatures,
       }),
     [
       projectTypeLabel,
-      currentProject?.hasPdpSubscription,
-      project?.hasPdpSubscription,
+      projectFeatures,
     ],
   );
 
   const visibleTabs = useMemo(
     () =>
-      filterProjectDetailsTabsByPermissions(PROJECT_DETAILS_TABS, permissions),
-    [permissions],
+      isProjectFeaturesLoading
+        ? PROJECT_DETAILS_TABS
+        : filterProjectDetailsTabsByPermissions(PROJECT_DETAILS_TABS, permissions),
+    [isProjectFeaturesLoading, permissions],
   );
   const effectiveTab = useMemo(() => {
     const tabIds = visibleTabs.map((tab) => tab.id);

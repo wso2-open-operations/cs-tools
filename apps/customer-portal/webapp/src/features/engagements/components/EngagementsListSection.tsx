@@ -54,9 +54,10 @@ export default function EngagementsListSection({
   listHasRefinement,
   totalItems,
   onCaseClick,
-  totalPages,
   page,
+  rowsPerPage,
   onPageChange,
+  onRowsPerPageChange,
 }: EngagementsListSectionProps): JSX.Element {
   return (
     <>
@@ -74,6 +75,7 @@ export default function EngagementsListSection({
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
         hideSeverityFilter
+        hideDeploymentFilter
         isProjectContextLoading={isProjectContextLoading}
       />
 
@@ -99,9 +101,11 @@ export default function EngagementsListSection({
       />
 
       <ListPagination
-        totalPages={totalPages}
+        totalRecords={totalItems}
         page={page}
-        onChange={onPageChange}
+        rowsPerPage={rowsPerPage}
+        onPageChange={onPageChange}
+        onRowsPerPageChange={onRowsPerPageChange}
       />
     </>
   );
