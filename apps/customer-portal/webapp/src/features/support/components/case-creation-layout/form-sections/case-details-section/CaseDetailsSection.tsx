@@ -208,7 +208,7 @@ export function CaseDetailsSection({
               />
             )}
           </Box>
-          <Box>
+          
             <Editor
               key={
                 isRelatedCaseMode
@@ -227,7 +227,7 @@ export function CaseDetailsSection({
               onChange={setDescription}
               maxHeight="210px"
             />
-          </Box>
+          
           {!isRelatedCaseMode && (
             <Typography
               variant="caption"
