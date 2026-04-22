@@ -48,13 +48,6 @@ export default function Actions({
     <HeaderUI.Actions>
       {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, or suspended project) */}
       {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && <GetHelpDropdown />}
-      {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && (
-        <Divider
-          orientation="vertical"
-          flexItem
-          sx={{ mx: 1, display: { xs: "none", sm: "block" } }}
-        />
-      )}
       {/* theme switcher */}
       <ColorSchemeToggle />
       {/* header action divider */}

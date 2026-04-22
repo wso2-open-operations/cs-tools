@@ -204,11 +204,16 @@ export default function NoveraChatPage(): JSX.Element {
     return [botWelcome];
   });
 
-  // Load and convert conversation history when resuming — runs once per conversation ID.
+  // Load and convert conversation history when resuming.
   useEffect(() => {
     if (!urlConversationId || !conversationHistory?.pages) return;
-    if (historyInitializedRef.current) return;
-    historyInitializedRef.current = true;
+    if (lastProcessedConversationIdRef.current !== urlConversationId) {
+      lastProcessedConversationIdRef.current = urlConversationId;
+      processedHistoryPageCountRef.current = 0;
+    }
+    const pageCount = conversationHistory.pages.length;
+    if (pageCount <= processedHistoryPageCountRef.current) return;
+    processedHistoryPageCountRef.current = pageCount;
 
     const allMessages = conversationHistory.pages.flatMap(
       (page) => page.comments,
@@ -238,7 +243,10 @@ export default function NoveraChatPage(): JSX.Element {
       }
       return convertedMessages;
     });
-  }, [urlConversationId, conversationHistory]);
+    queryClient.invalidateQueries({
+      queryKey: [ApiQueryKeys.CONVERSATION_MESSAGES, urlConversationId, 10],
+    });
+  }, [urlConversationId, conversationHistory, queryClient]);
 
 
   // Update URL with conversationId from describe-issue flow
@@ -326,7 +334,8 @@ export default function NoveraChatPage(): JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeBotMessageIdRef = useRef<string | null>(null);
   const initialMessageSentRef = useRef(false);
-  const historyInitializedRef = useRef(false);
+  const processedHistoryPageCountRef = useRef(0);
+  const lastProcessedConversationIdRef = useRef<string | null>(null);
   const tokenQueueRef = useRef<string[]>([]);
   const pendingFinalRef = useRef<{
     payload: Record<string, unknown>;
@@ -519,6 +528,12 @@ export default function NoveraChatPage(): JSX.Element {
           }
           pendingFinalRef.current = { payload, finalMessage };
           flushPendingFinalIfReady();
+          const activeConversationId = nextConversationId || urlConversationId;
+          if (activeConversationId) {
+            queryClient.invalidateQueries({
+              queryKey: [ApiQueryKeys.CONVERSATION_MESSAGES, activeConversationId, 10],
+            });
+          }
           break;
         }
         case "error":

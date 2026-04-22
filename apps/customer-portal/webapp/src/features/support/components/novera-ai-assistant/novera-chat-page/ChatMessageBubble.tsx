@@ -27,6 +27,7 @@ import {
 } from "@features/support/constants/chatConstants";
 import RecommendationsCard from "@features/support/components/novera-ai-assistant/novera-chat-page/RecommendationsCard";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
+import { buildBotMarkdownComponents } from "@features/support/utils/markdown";
 
 /** Tighter line breaks while tokens stream (model often sends blank lines). */
 function collapseStreamLineBreaks(s: string): string {
@@ -60,86 +61,11 @@ const primaryWaveTextSx = {
   },
 } as const;
 
-/** Safe URL protocols for markdown links. Blocks javascript:, data:, etc. */
-const SAFE_PROTOCOLS = ["http:", "https:"];
-
-function isSafeHref(href: string | undefined): href is string {
-  if (!href || typeof href !== "string") return false;
-  try {
-    const parsed = new URL(href, "https://invalid.invalid");
-    return SAFE_PROTOCOLS.includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
-
 function MarkdownContent({ text }: { text: string }) {
   const markdownComponents: React.ComponentProps<
     typeof ReactMarkdown
   >["components"] = useMemo(
-    () => ({
-      a: ({ href, children }) =>
-        isSafeHref(href) ? (
-          <Box
-            component="a"
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{ color: "primary.main", textDecoration: "underline" }}
-          >
-            {children}
-          </Box>
-        ) : (
-          <Box component="span">{children}</Box>
-        ),
-      table: ({ children }) => (
-        <Box sx={{ width: "100%", overflowX: "auto", mb: 1 }}>
-          <Box
-            component="table"
-            sx={{
-              width: "100%",
-              borderCollapse: "collapse",
-              minWidth: 420,
-            }}
-          >
-            {children}
-          </Box>
-        </Box>
-      ),
-      thead: ({ children }) => <Box component="thead">{children}</Box>,
-      tbody: ({ children }) => <Box component="tbody">{children}</Box>,
-      tr: ({ children }) => (
-        <Box component="tr" sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-          {children}
-        </Box>
-      ),
-      th: ({ children }) => (
-        <Box
-          component="th"
-          sx={{
-            textAlign: "left",
-            p: 1,
-            fontSize: "0.75rem",
-            fontWeight: 600,
-            color: "text.secondary",
-          }}
-        >
-          {children}
-        </Box>
-      ),
-      td: ({ children }) => (
-        <Box
-          component="td"
-          sx={{
-            p: 1,
-            fontSize: "0.8125rem",
-            verticalAlign: "top",
-          }}
-        >
-          {children}
-        </Box>
-      ),
-    }),
+    () => buildBotMarkdownComponents(),
     [],
   );
 
@@ -167,15 +93,18 @@ function MarkdownContent({ text }: { text: string }) {
           fontSize: "inherit",
           backgroundColor: "action.hover",
           px: 0.75,
-          py: 0.5,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          display: "block",
-          boxSizing: "border-box",
+          py: 0,
+          whiteSpace: "normal",
+          display: "inline",
         },
         "& pre code": {
           backgroundColor: "transparent",
-          p: 0,
+          display: "block",
+          boxSizing: "border-box",
+          px: 0,
+          py: 0.5,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
         },
       }}
     >

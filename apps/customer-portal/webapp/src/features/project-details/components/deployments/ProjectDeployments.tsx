@@ -84,6 +84,7 @@ export default function ProjectDeployments({
 
   const isPageLoaded =
     (deploymentsQuery.data?.pages?.length ?? 0) > currentPageIndex;
+  const isPendingPageFetch = !isPageLoaded && deploymentsQuery.isFetchingNextPage;
   const isShowingDeployments = currentDeployments.length > 0;
 
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = deploymentsQuery;
@@ -226,7 +227,7 @@ export default function ProjectDeployments({
   );
 
   const renderContent = () => {
-    if (showLoading) {
+    if (showLoading || isPendingPageFetch) {
       return (
         <>
           {deploymentsToolbar(0, true)}
@@ -270,7 +271,7 @@ export default function ProjectDeployments({
     if (!isShowingDeployments && (totalRecords ?? 0) === 0) {
       return (
         <>
-          <DeploymentHeader count={0} onAddClick={handleOpenModal} />
+          <DeploymentHeader count={0} onAddClick={isRestricted ? undefined : handleOpenModal} />
           <EmptyState description="It seems there are no deployments associated with this project." />
         </>
       );

@@ -86,7 +86,6 @@ import UploadAttachmentModal from "@features/support/components/case-details/att
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import type {
-  ChatMessageForClassification,
   RelatedCaseState,
 } from "@features/support/types/createCasePage";
 import { ChatSender, type Message } from "@features/support/types/conversations";
@@ -249,7 +248,7 @@ export default function CreateCasePage(): JSX.Element {
   const queryClient = useQueryClient();
 
   const locationState = location.state as {
-    messages?: ChatMessageForClassification[];
+    messages?: Message[];
     classificationResponse?: {
       issueType?: string;
       severityLevel?: string;
@@ -303,14 +302,19 @@ export default function CreateCasePage(): JSX.Element {
     try {
       const stored = sessionStorage.getItem(CHAT_MESSAGES_STORAGE_KEY);
       if (!stored) return [];
-      const parsed = JSON.parse(stored) as ChatMessageForClassification[];
-      return parsed.map((message, index) => ({
-        id: `restored-${index}`,
-        text: message.text,
-        sender:
-          message.sender === ChatSender.BOT ? ChatSender.BOT : ChatSender.USER,
-        timestamp: new Date(),
-      }));
+      const parsed = JSON.parse(stored) as Message[];
+      return parsed.map((message) => {
+        const parsedTimestamp = new Date(message.timestamp);
+        return {
+          id: message.id || `restored-${crypto.randomUUID()}`,
+          text: message.text,
+          sender:
+            message.sender === ChatSender.BOT ? ChatSender.BOT : ChatSender.USER,
+          timestamp: Number.isNaN(parsedTimestamp.getTime())
+            ? new Date()
+            : parsedTimestamp,
+        };
+      });
     } catch {
       return [];
     }
@@ -872,6 +876,7 @@ export default function CreateCasePage(): JSX.Element {
         try {
           sessionStorage.removeItem(STORAGE_KEY);
           sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
+          sessionStorage.removeItem(CHAT_MESSAGES_STORAGE_KEY);
         } catch (e) {
           logger.error(
             "Failed to cleanup sessionStorage after case creation",

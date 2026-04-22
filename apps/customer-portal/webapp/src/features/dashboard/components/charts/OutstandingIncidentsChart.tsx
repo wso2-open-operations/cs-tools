@@ -21,7 +21,7 @@ import {
   Cell,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
-import type { JSX } from "react";
+import { useMemo, type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
@@ -79,50 +79,46 @@ export const OutstandingIncidentsChart = ({
     excludeS0,
     restrictSeverityToLow,
   );
-  const darkModeChartSource = chartSource.map((item) => {
-    let color;
-
-    switch (item.key) {
-      case SeverityLegendKey.Catastrophic:
-        color =
+  const darkModeSeverityColorByKey = useMemo(
+    () =>
+      new Map<SeverityLegendKey, string>([
+        [
+          SeverityLegendKey.Catastrophic,
           colors.red?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-          colors.red?.[300] ??
-          item.color;
-        break;
-
-      case SeverityLegendKey.Critical:
-        color =
+            colors.red?.[300] ??
+            "#e57373",
+        ],
+        [
+          SeverityLegendKey.Critical,
           colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-          colors.orange?.[300] ??
-          item.color;
-        break;
-
-      case SeverityLegendKey.High:
-        color =
+            colors.orange?.[300] ??
+            "#FDBA74",
+        ],
+        [
+          SeverityLegendKey.High,
           colors.yellow?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-          colors.yellow?.[300] ??
-          item.color;
-        break;
-
-      case SeverityLegendKey.Medium:
-        color =
+            colors.yellow?.[300] ??
+            "#FDE047",
+        ],
+        [
+          SeverityLegendKey.Medium,
           colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-          colors.blue?.[300] ??
-          item.color;
-        break;
-
-      default:
-        color =
+            colors.blue?.[300] ??
+            "#93C5FD",
+        ],
+        [
+          SeverityLegendKey.Low,
           colors.green?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-          colors.green?.[300] ??
-          item.color;
-    }
-
-    return {
-      ...item,
-      color,
-    };
-  });
+            colors.green?.[300] ??
+            "#86EFAC",
+        ],
+      ]),
+    [],
+  );
+  const darkModeChartSource = chartSource.map((item) => ({
+    ...item,
+    color: darkModeSeverityColorByKey.get(item.key) ?? item.color,
+  }));
   const displayChartSource = isDarkMode ? darkModeChartSource : chartSource;
   // error grey
   const errorGrey = colors.grey?.[300] ?? "#D1D5DB";

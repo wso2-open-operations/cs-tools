@@ -51,7 +51,7 @@ interface GetHelpMenuItem {
  *
  * @returns {JSX.Element} The Get Help dropdown component.
  */
-export default function GetHelpDropdown(): JSX.Element {
+function GetHelpDropdownContent(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
 
@@ -156,12 +156,8 @@ export default function GetHelpDropdown(): JSX.Element {
       : []),
   ];
 
-  if (isProjectRestricted(selectedProject?.closureState)) {
-    return <></>;
-  }
-
   return (
-    <Box>
+    <Box sx={{ display: "flex", alignItems: "center" }}>
       <Button
         id="get-help-trigger"
         aria-controls={open ? "get-help-menu" : undefined}
@@ -254,6 +250,40 @@ export default function GetHelpDropdown(): JSX.Element {
           ))
         )}
       </Menu>
+      <Divider
+        orientation="vertical"
+        flexItem
+        sx={{ mx: 1, display: { xs: "none", sm: "block" } }}
+      />
     </Box>
   );
+}
+
+/**
+ * Get Help dropdown wrapper that avoids mounting data hooks
+ * when the selected project is in restricted mode.
+ *
+ * @returns {JSX.Element} Get Help dropdown with optional divider.
+ */
+export default function GetHelpDropdown(): JSX.Element {
+  const { projectId } = useParams<{ projectId?: string }>();
+  const {
+    data: projectsData,
+    isLoading: isProjectsLoading,
+    isFetching: isProjectsFetching,
+  } = useInfiniteProjects({ pageSize: 20 });
+  const projects = useMemo(
+    () => flattenProjectPages(projectsData),
+    [projectsData],
+  );
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId),
+    [projects, projectId],
+  );
+  const isProjectsListBusy =
+    isProjectsLoading || (isProjectsFetching && projects.length === 0);
+  if (!isProjectsListBusy && isProjectRestricted(selectedProject?.closureState)) {
+    return <></>;
+  }
+  return <GetHelpDropdownContent />;
 }

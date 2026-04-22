@@ -79,12 +79,13 @@ const SecurityReportAnalysis = (): JSX.Element => {
     useGetProjectFeatures(projectId || "");
   const areFeaturePermissionsReady =
     !isProjectLoading && !isProjectFeaturesLoading && !!projectFeatures;
-  const canCreateSecurityReport =
+  const isSecurityReportAvailable =
     areFeaturePermissionsReady &&
-    !isProjectRestricted(projectDetails?.closureState)
-      ? getProjectPermissions(projectDetails?.type?.label, { projectFeatures })
-          .hasSecurityReportAnalysis
-      : false;
+    getProjectPermissions(projectDetails?.type?.label, { projectFeatures })
+      .hasSecurityReportAnalysis;
+  const canCreateSecurityReport =
+    isSecurityReportAvailable &&
+    !isProjectRestricted(projectDetails?.closureState);
 
   const [viewMode, setViewMode] = useState<SecurityReportViewMode>(
     SecurityReportViewMode.ALL,
@@ -133,7 +134,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     caseSearchRequest,
     {
       enabled:
-        !!projectId && areFeaturePermissionsReady && canCreateSecurityReport,
+        !!projectId && areFeaturePermissionsReady && isSecurityReportAvailable,
     },
   );
 
@@ -201,7 +202,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
     [],
   );
 
-  if (areFeaturePermissionsReady && projectDetails && !canCreateSecurityReport) {
+  if (areFeaturePermissionsReady && projectDetails && !isSecurityReportAvailable) {
     return (
       <Paper
         sx={{

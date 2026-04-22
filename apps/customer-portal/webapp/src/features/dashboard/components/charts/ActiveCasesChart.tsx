@@ -21,7 +21,7 @@ import {
   Cell,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
-import type { JSX } from "react";
+import { useMemo, type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
@@ -76,20 +76,24 @@ export const ActiveCasesChart = ({
     Boolean(isError),
     errorGrey,
   );
-  const darkModeColorByName = new Map<string, string>([
-    [
-      "Service Requests (SR)",
-      colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-        colors.orange?.[300] ??
-        "#FDBA74",
-    ],
-    [
-      "Change Requests (CR)",
-      colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-        colors.blue?.[300] ??
-        "#93C5FD",
-    ],
-  ]);
+  const darkModeColorByName = useMemo(
+    () =>
+      new Map<string, string>([
+        [
+          "Service Requests (SR)",
+          colors.orange?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+            colors.orange?.[300] ??
+            "#FDBA74",
+        ],
+        [
+          "Change Requests (CR)",
+          colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+            colors.blue?.[300] ??
+            "#93C5FD",
+        ],
+      ]),
+    [],
+  );
   const displayChartData = isDarkMode
     ? chartData.map((entry) => ({
         ...entry,

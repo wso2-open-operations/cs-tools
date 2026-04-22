@@ -441,6 +441,7 @@ export default function SettingsRegistryTokens({
                             setMenuToken(token);
                           }}
                           aria-label="Token actions"
+                          disabled={isRestricted}
                         >
                           <MoreVertical size={18} />
                         </IconButton>
@@ -540,6 +541,7 @@ export default function SettingsRegistryTokens({
                             setMenuToken(token);
                           }}
                           aria-label="Token actions"
+                          disabled={isRestricted}
                         >
                           <MoreVertical size={18} />
                         </IconButton>
@@ -565,7 +567,9 @@ export default function SettingsRegistryTokens({
         transformOrigin={{ vertical: "top", horizontal: "right" }}
       >
         <MenuItem
+          disabled={isRestricted}
           onClick={() => {
+            if (isRestricted) return;
             setRegenerateToken(menuToken);
             setMenuAnchor(null);
             setMenuToken(null);
@@ -577,7 +581,9 @@ export default function SettingsRegistryTokens({
           <ListItemText>{REGISTRY_MENU_REGENERATE}</ListItemText>
         </MenuItem>
         <MenuItem
+          disabled={isRestricted}
           onClick={() => {
+            if (isRestricted) return;
             setDeleteToken(menuToken);
             setMenuAnchor(null);
             setMenuToken(null);

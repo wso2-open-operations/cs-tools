@@ -60,18 +60,7 @@ import { resolveConversationListRowAction } from "@features/support/utils/conver
 import { NOVERA_DISPLAY_NAME } from "@features/support/constants/chatConstants";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-const SAFE_PROTOCOLS = ["http:", "https:"];
-
-function isSafeHref(href: string | undefined): href is string {
-  if (!href || typeof href !== "string") return false;
-  try {
-    const parsed = new URL(href, "https://invalid.invalid");
-    return SAFE_PROTOCOLS.includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
+import { buildBotMarkdownComponents } from "@features/support/utils/markdown";
 
 function ConversationMsgBubble({
   message,
@@ -99,69 +88,7 @@ function ConversationMsgBubble({
   const markdownComponents: React.ComponentProps<
     typeof ReactMarkdown
   >["components"] = useMemo(
-    () => ({
-      a: ({ href, children }) =>
-        isSafeHref(href) ? (
-          <Box
-            component="a"
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{ color: "primary.main", textDecoration: "underline" }}
-          >
-            {children}
-          </Box>
-        ) : (
-          <Box component="span">{children}</Box>
-        ),
-      table: ({ children }) => (
-        <Box sx={{ width: "100%", overflowX: "auto", mb: 1 }}>
-          <Box
-            component="table"
-            sx={{
-              width: "100%",
-              borderCollapse: "collapse",
-              minWidth: 420,
-            }}
-          >
-            {children}
-          </Box>
-        </Box>
-      ),
-      thead: ({ children }) => <Box component="thead">{children}</Box>,
-      tbody: ({ children }) => <Box component="tbody">{children}</Box>,
-      tr: ({ children }) => (
-        <Box component="tr" sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-          {children}
-        </Box>
-      ),
-      th: ({ children }) => (
-        <Box
-          component="th"
-          sx={{
-            textAlign: "left",
-            p: 1,
-            fontSize: "0.75rem",
-            fontWeight: 600,
-            color: "text.secondary",
-          }}
-        >
-          {children}
-        </Box>
-      ),
-      td: ({ children }) => (
-        <Box
-          component="td"
-          sx={{
-            p: 1,
-            fontSize: "0.8125rem",
-            verticalAlign: "top",
-          }}
-        >
-          {children}
-        </Box>
-      ),
-    }),
+    () => buildBotMarkdownComponents(),
     [],
   );
 
@@ -243,37 +170,13 @@ function ConversationMsgBubble({
             "& ul, & ol": { mt: 0, mb: 1, pl: 2.5 },
             "& li": { mb: 0.5 },
             "& a": { color: "primary.main", textDecoration: "underline" },
-            "& table": {
-              width: "100%",
-              minWidth: 420,
-              borderCollapse: "collapse",
-              mb: 1,
-            },
-            "& tr": {
-              borderBottom: "1px solid",
-              borderColor: "divider",
-            },
-            "& th": {
-              textAlign: "left",
-              p: 1,
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "text.secondary",
-            },
-            "& td": {
-              p: 1,
-              fontSize: "0.8125rem",
-              verticalAlign: "top",
-            },
             "& code": {
               fontFamily: "monospace",
               backgroundColor: "action.hover",
               px: 0.75,
-              py: 0.5,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              display: "block",
-              boxSizing: "border-box",
+              py: 0,
+              whiteSpace: "normal",
+              display: "inline",
             },
             "& pre": {
               overflowX: "auto",
@@ -287,7 +190,12 @@ function ConversationMsgBubble({
             },
             "& pre code": {
               backgroundColor: "transparent",
-              p: 0,
+              display: "block",
+              boxSizing: "border-box",
+              px: 0,
+              py: 0.5,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
             },
           }}
         >
