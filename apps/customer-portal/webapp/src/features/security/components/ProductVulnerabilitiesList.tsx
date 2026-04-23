@@ -59,12 +59,18 @@ const ProductVulnerabilitiesList = ({
         <Table sx={{ minWidth: 650 }}>
           <TableHead>
             <TableRow>
-              <TableCell>CVE ID</TableCell>
+              <TableCell>CVE</TableCell>
               <TableCell>Vulnerability ID</TableCell>
               <TableCell>Severity</TableCell>
+              <TableCell>Product Name</TableCell>
+              <TableCell>Product Version</TableCell>
               <TableCell>Component Name</TableCell>
-              <TableCell>Version</TableCell>
-              <TableCell>Type</TableCell>
+              <TableCell>Component Version</TableCell>
+              <TableCell>Component Type</TableCell>
+              <TableCell>WSO2 Resolution</TableCell>
+              <TableCell>Usecase</TableCell>
+              <TableCell>Justification</TableCell>
+              <TableCell>Resolution</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -135,6 +141,16 @@ const ProductVulnerabilitiesList = ({
                         }}
                       />
                     </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.productName ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.productVersion ?? "--"}
+                      </Typography>
+                    </TableCell>
                     <TableCell sx={{ maxWidth: 180 }}>
                       <Typography
                         variant="body2"
@@ -150,7 +166,29 @@ const ProductVulnerabilitiesList = ({
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip label={row.type} variant="outlined" size="small" />
+                      <Typography variant="body2" color="text.secondary">
+                        {row.componentType ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.updateLevel ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.useCase ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.justification ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.resolution ?? "--"}
+                      </Typography>
                     </TableCell>
                   </TableRow>
                 );

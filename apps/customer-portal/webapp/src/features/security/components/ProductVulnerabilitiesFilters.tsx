@@ -15,8 +15,9 @@
 // under the License.
 
 import {
+  Box,
+  Button,
   FormControl,
-  Grid,
   InputLabel,
   MenuItem,
   Select,
@@ -25,54 +26,133 @@ import {
 import type { JSX } from "react";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import {
+  PRODUCT_VULNERABILITIES_ALL_PRODUCTS_LABEL,
+  PRODUCT_VULNERABILITIES_ALL_VERSIONS_LABEL,
+  PRODUCT_VULNERABILITIES_CLEAR_FILTERS_LABEL,
+  PRODUCT_VULNERABILITIES_PRODUCT_LABEL,
+  PRODUCT_VULNERABILITIES_PRODUCT_VERSION_LABEL,
   PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL,
   PRODUCT_VULNERABILITIES_SEVERITY_LABEL,
 } from "@features/security/constants/securityConstants";
 import type { ProductVulnerabilitiesFiltersProps } from "@features/security/types/security";
 
 /**
- * ProductVulnerabilitiesFilters component to display filter dropdowns.
+ * ProductVulnerabilitiesFilters component to display filter dropdowns for
+ * severity, product name, and product version.
  *
- * @param {ProductVulnerabilitiesFiltersProps} props - Filter values and change handler.
+ * @param {ProductVulnerabilitiesFiltersProps} props - Filter values and change handlers.
  * @returns {JSX.Element} The rendered filter dropdowns.
  */
 export default function ProductVulnerabilitiesFilters({
   filters,
   severityOptions = [],
+  productOptions = [],
+  productVersionOptions = [],
   onFilterChange,
+  onClearFilters,
 }: ProductVulnerabilitiesFiltersProps): JSX.Element {
-  const handleSelectChange = (event: SelectChangeEvent<string | number>) => {
-    const val = event.target.value;
-    onFilterChange("severityId", val);
+  const handleSeverityChange = (event: SelectChangeEvent<string | number>) => {
+    onFilterChange("severityId", event.target.value);
+  };
+
+  const handleProductChange = (event: SelectChangeEvent<string | number>) => {
+    // Changing product resets version
+    onFilterChange("productVersion", "");
+    onFilterChange("productName", event.target.value);
+  };
+
+  const handleVersionChange = (event: SelectChangeEvent<string | number>) => {
+    onFilterChange("productVersion", event.target.value);
   };
 
   return (
-    <Grid container spacing={2} sx={{ mt: 1 }}>
-      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-        <FormControl fullWidth size="small">
-          <InputLabel id="severity-label">
-            {PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
-          </InputLabel>
-          <Select
-            labelId="severity-label"
-            id="severityId"
-            value={filters.severityId || ""}
-            label={PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
-            onChange={handleSelectChange}
-          >
-            <MenuItem value="">
-              <Typography variant="body2">
-                {PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL}
-              </Typography>
+    <Box sx={{ display: "flex", gap: 2, alignItems: "flex-end", flexWrap: "wrap" }}>
+      {/* Severity */}
+      <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+        <InputLabel id="severity-label">
+          {PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
+        </InputLabel>
+        <Select
+          labelId="severity-label"
+          value={filters.severityId || ""}
+          label={PRODUCT_VULNERABILITIES_SEVERITY_LABEL}
+          onChange={handleSeverityChange}
+        >
+          <MenuItem value="">
+            <Typography variant="body2">
+              {PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL}
+            </Typography>
+          </MenuItem>
+          {severityOptions.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              <Typography variant="body2">{option.label}</Typography>
             </MenuItem>
-            {severityOptions.map((option) => (
-              <MenuItem key={option.value} value={option.value}>
-                <Typography variant="body2">{option.label}</Typography>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-    </Grid>
+          ))}
+        </Select>
+      </FormControl>
+
+      {/* Product */}
+      <FormControl size="small" sx={{ flex: 1, minWidth: 180 }}>
+        <InputLabel id="product-label">
+          {PRODUCT_VULNERABILITIES_PRODUCT_LABEL}
+        </InputLabel>
+        <Select
+          labelId="product-label"
+          value={filters.productName || ""}
+          label={PRODUCT_VULNERABILITIES_PRODUCT_LABEL}
+          onChange={handleProductChange}
+        >
+          <MenuItem value="">
+            <Typography variant="body2">
+              {PRODUCT_VULNERABILITIES_ALL_PRODUCTS_LABEL}
+            </Typography>
+          </MenuItem>
+          {productOptions.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              <Typography variant="body2">{option.label}</Typography>
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      {/* Product Version */}
+      <FormControl
+        size="small"
+        sx={{ flex: 1, minWidth: 200 }}
+        disabled={!filters.productName}
+      >
+        <InputLabel id="product-version-label">
+          {PRODUCT_VULNERABILITIES_PRODUCT_VERSION_LABEL}
+        </InputLabel>
+        <Select
+          labelId="product-version-label"
+          value={filters.productVersion || ""}
+          label={PRODUCT_VULNERABILITIES_PRODUCT_VERSION_LABEL}
+          onChange={handleVersionChange}
+        >
+          <MenuItem value="">
+            <Typography variant="body2">
+              {PRODUCT_VULNERABILITIES_ALL_VERSIONS_LABEL}
+            </Typography>
+          </MenuItem>
+          {productVersionOptions.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              <Typography variant="body2">{option.label}</Typography>
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      {/* Clear Filters */}
+      <Button
+        variant="outlined"
+        color="warning"
+        size="small"
+        onClick={onClearFilters}
+        sx={{ whiteSpace: "nowrap", height: 40 }}
+      >
+        {PRODUCT_VULNERABILITIES_CLEAR_FILTERS_LABEL}
+      </Button>
+    </Box>
   );
 }

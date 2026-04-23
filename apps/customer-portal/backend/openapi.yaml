@@ -4636,9 +4636,21 @@ components:
           description: Vulnerability identifier
         severity:
           $ref: '#/components/schemas/ReferenceItem'
+        productName:
+          type: string
+          description: Name of the product
+        productVersion:
+          type: string
+          description: Version of the product
         componentName:
           type: string
           description: Name of the component
+        componentType:
+          type: string
+          description: Type of the component
+        updateLevel:
+          type: string
+          description: Update level for the vulnerability
         version:
           type: string
           description: Version of the component

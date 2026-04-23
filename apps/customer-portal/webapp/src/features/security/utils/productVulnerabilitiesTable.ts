@@ -31,7 +31,9 @@ export function countProductVulnerabilityTableActiveFilters(
 ): number {
   const searchCount = searchInput.trim() ? 1 : 0;
   const severityCount = filters.severityId ? 1 : 0;
-  return searchCount + severityCount;
+  const productCount = filters.productName ? 1 : 0;
+  const productVersionCount = filters.productVersion ? 1 : 0;
+  return searchCount + severityCount + productCount + productVersionCount;
 }
 
 /**

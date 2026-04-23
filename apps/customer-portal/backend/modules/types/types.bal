@@ -814,6 +814,10 @@ public type ProductVulnerabilitySearchFilters record {|
     int statusId?;
     # Severity ID
     int severityId?;
+    # Product name filter
+    string productName?;
+    # Product version filter
+    string productVersion?;
 |};
 
 # Base product vulnerability.
@@ -826,12 +830,20 @@ public type ProductVulnerability record {|
     string vulnerabilityId;
     # Severity level
     ReferenceItem severity;
+    # Name of the product
+    string productName?;
+    # Version of the product
+    string productVersion?;
     # Name of the component
     string componentName;
     # Version of the component
     string version;
     # Type
     string 'type;
+    # Type of the component
+    string componentType?;
+    # Update level for the vulnerability
+    string updateLevel?;
     # Use case description
     string? useCase;
     # Justification

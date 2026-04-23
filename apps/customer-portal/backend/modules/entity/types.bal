@@ -1407,6 +1407,10 @@ public type ProductVulnerabilitySearchPayload record {|
         int statusId?;
         # Severity ID
         int severityId?;
+        # Product name filter
+        string productName?;
+        # Product version filter
+        string productVersion?;
     } filters?;
     # Sort configuration
     SortBy sortBy?; // TODO: Check the correct sort by fields for vulnerabilities
@@ -1424,12 +1428,20 @@ public type ProductVulnerability record {|
     string vulnerabilityId;
     # Severity level
     ChoiceListItem severity;
+    # Name of the product
+    string productName?;
+    # Version of the product
+    string productVersion?;
     # Name of the component
     string componentName;
     # Version of the component
     string version;
     # Type
     string 'type;
+    # Type of the component
+    string componentType?;
+    # Update level for the vulnerability
+    string updateLevel?;
     # Use case description
     string? useCase;
     # Justification for the vulnerability
@@ -1442,10 +1454,6 @@ public type ProductVulnerability record {|
 # Product vulnerability information.
 public type ProductVulnerabilityResponse record {|
     *ProductVulnerability;
-    # Type of the component
-    string componentType?;
-    # Update level for the vulnerability
-    string updateLevel;
     json...;
 |};
 
