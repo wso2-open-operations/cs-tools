@@ -641,6 +641,22 @@ public type ProjectStatsResponse record {|
     int deployedProductCount;
     # Instance count associated with the project
     int instanceCount;
+    # Outstanding count breakdown
+    record {|
+        # Outstanding case count
+        int caseCount;
+        # Outstanding service request count
+        int serviceRequestCount;
+        # Outstanding engagement count
+        int engagementCount;
+        # Outstanding SRA count
+        int sraCount;
+        # Outstanding change request count
+        int changeRequestCount;
+        # Outstanding announcement count
+        int announcementCount;
+        json...;
+    |} outstandingCount;
     json...;
 |};
 

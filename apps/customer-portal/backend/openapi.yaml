@@ -1,7 +1,7 @@
 openapi: 3.0.1
 info:
   title: Service Openapi Yaml
-  version: 1.0.0-rc.3
+  version: 1.0.0
 servers:
 - url: "{server}:{port}/"
   variables:
@@ -2795,10 +2795,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -5228,6 +5230,30 @@ components:
         slaStatus:
           type: string
           description: SLA status
+        outstandingCaseCount:
+          type: integer
+          description: Outstanding case count
+          format: int64
+        outstandingServiceRequestCount:
+          type: integer
+          description: Outstanding service request count
+          format: int64
+        outstandingEngagementCount:
+          type: integer
+          description: Outstanding engagement count
+          format: int64
+        outstandingSraCount:
+          type: integer
+          description: Outstanding SRA count
+          format: int64
+        outstandingChangeRequestCount:
+          type: integer
+          description: Outstanding change request count
+          format: int64
+        outstandingAnnouncementCount:
+          type: integer
+          description: Outstanding announcement count
+          format: int64
       additionalProperties: false
       description: Project statistics.
     ProjectStatsResponse:

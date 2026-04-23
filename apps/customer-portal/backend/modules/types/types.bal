@@ -507,6 +507,18 @@ public type ProjectStats record {|
     int deployments?;
     # SLA status
     string slaStatus?;
+    # Outstanding case count
+    int outstandingCaseCount?;
+    # Outstanding service request count
+    int outstandingServiceRequestCount?;
+    # Outstanding engagement count
+    int outstandingEngagementCount?;
+    # Outstanding SRA count
+    int outstandingSraCount?;
+    # Outstanding change request count
+    int outstandingChangeRequestCount?;
+    # Outstanding announcement count
+    int outstandingAnnouncementCount?;
 |};
 
 # Recent activity details.

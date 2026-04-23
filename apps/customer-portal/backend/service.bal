@@ -983,7 +983,19 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 activeChats: conversationStats is entity:ProjectConversationStatsResponse ?
                     conversationStats.activeCount : (),
                 deployments: deploymentStats is entity:ProjectDeploymentStatsResponse ? deploymentStats.totalCount : (),
-                slaStatus: projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.slaStatus : ()
+                slaStatus: projectActivityStats is entity:ProjectStatsResponse ? projectActivityStats.slaStatus : (),
+                outstandingCaseCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.caseCount : (),
+                outstandingServiceRequestCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.serviceRequestCount : (),
+                outstandingEngagementCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.engagementCount : (),
+                outstandingSraCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.sraCount : (),
+                outstandingChangeRequestCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.changeRequestCount : (),
+                outstandingAnnouncementCount: projectActivityStats is entity:ProjectStatsResponse ?
+                    projectActivityStats.outstandingCount.announcementCount : ()
             },
             recentActivity: {
                 totalHours:

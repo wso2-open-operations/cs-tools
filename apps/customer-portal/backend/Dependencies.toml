@@ -345,7 +345,7 @@ modules = [
 [[package]]
 org = "wso2"
 name = "customer_portal"
-version = "1.0.0-rc.3"
+version = "1.0.0"
 dependencies = [
 	{org = "ballerina", name = "constraint"},
 	{org = "ballerina", name = "http"},
