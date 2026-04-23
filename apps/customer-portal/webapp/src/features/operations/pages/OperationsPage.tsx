@@ -95,7 +95,7 @@ export default function OperationsPage(): JSX.Element {
   const isRestricted = isProjectRestricted(project?.closureState);
   const operationsPath = `/projects/${projectId}/operations`;
 
-  const { data: filterMetadata, isLoading: isFilterMetadataLoading } =
+  const { data: filterMetadata, isLoading: isFilterMetadataLoading, isError: isFilterMetadataError } =
     useGetProjectFilters(projectId || "");
 
   const nonClosedStatusIds = useMemo(
@@ -127,6 +127,7 @@ export default function OperationsPage(): JSX.Element {
     },
   );
   const isSrLoading = isSrDataLoading || isFilterMetadataLoading;
+  const combinedIsSrError = isSrError || isFilterMetadataError;
   const serviceRequests = srData?.cases ?? [];
 
   const {
@@ -355,7 +356,7 @@ export default function OperationsPage(): JSX.Element {
                         ),
                     },
                   ]}
-                  isError={isSrError}
+                  isError={combinedIsSrError}
                 >
                   <OutstandingCasesList
                     cases={serviceRequests}
