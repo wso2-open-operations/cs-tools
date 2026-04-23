@@ -14,10 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Grid, Skeleton, Stack, Typography, alpha, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
-import { PROJECT_METRIC_META, PROJECT_STATUS_META } from "@root/src/config/constants";
+import { PROJECT_METRIC_META } from "@root/src/config/constants";
 import type { Project, ProjectMetricKey, ProjectMetricValue } from "@src/types";
 
 export interface ProjectMetricMeta {
@@ -35,31 +35,15 @@ export function ProjectCard({
   metrics,
   onClick,
 }: Project & { onClick?: () => void }) {
-  const statusChipColorVariant = status ? PROJECT_STATUS_META[status]?.color : undefined;
-
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
           <Typography variant="subtitle2">{projectKey}</Typography>
-          {status ? (
-            <Chip
-              label={status}
-              size="small"
-              sx={(theme) => ({
-                bgcolor: statusChipColorVariant ? alpha(theme.palette[statusChipColorVariant].light, 0.1) : undefined,
-                color: statusChipColorVariant ? theme.palette[statusChipColorVariant].light : undefined,
-              })}
-            />
-          ) : (
-            <Skeleton variant="rounded" width={80} height={24} />
-          )}
         </Stack>
         <Typography variant="h6" mt={-0.8}>
           {name}
         </Typography>
-        <Chip label={type} size="small" sx={{ alignSelf: "start" }} />
-        <Typography variant="body2">{description}</Typography>
       </Stack>
       <Grid p={2} spacing={1.5} sx={{ bgcolor: "background.default" }} container>
         {Object.keys(metrics).map((key, index) => {

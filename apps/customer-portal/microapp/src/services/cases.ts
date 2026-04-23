@@ -34,6 +34,8 @@ import type {
   CreateCommentRequestDto,
   PaginatedArray,
   GetCasesStatsRequestDto,
+  EditCaseResponseDto,
+  EditCaseRequestDto,
 } from "@src/types";
 
 import {
@@ -69,6 +71,11 @@ export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Pr
 const getCase = async (id: string): Promise<Case> => {
   const response = (await apiClient.get<CaseDto>(CASE_DETAILS_ENDPOINT(id))).data;
   return toCase(response);
+};
+
+const editCase = async (id: string, body: EditCaseRequestDto): Promise<EditCaseResponseDto> => {
+  const response = await apiClient.patch<EditCaseResponseDto>(CASE_DETAILS_ENDPOINT(id), body);
+  return response.data;
 };
 
 const getFilters = async (id: string): Promise<CasesFiltersDto> => {
@@ -120,7 +127,7 @@ export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
     title: dto.title,
     description: dto.description ?? "",
     assigned: dto.assignedEngineer?.label,
-    statusId: dto.status?.id,
+    statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
     deployment: dto.deployment?.label,
@@ -139,7 +146,7 @@ export function toCase(dto: CaseDto): Case {
     title: dto.title,
     description: dto.description ?? "",
     assigned: dto.assignedEngineer?.label,
-    statusId: dto.status?.id,
+    statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
     product: dto.product?.label,
@@ -171,6 +178,11 @@ export function toComment(dto: CommentDto): Comment {
 /* Query Options */
 export const cases = {
   get: (id: string) => queryOptions({ queryKey: ["case", id], queryFn: () => getCase(id) }),
+
+  edit: (id: string) =>
+    mutationOptions({
+      mutationFn: (body: EditCaseRequestDto) => editCase(id, body),
+    }),
 
   all: (id: string, body: GetCasesRequestDto = {}) =>
     queryOptions({

@@ -33,6 +33,11 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
   const lastVisitedProjectId = getLastVisitedProjectId();
   const { data: meData, isLoading: meLoading, error: meError } = useQuery(users.me());
   const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useQuery({ ...projects.all() });
+  const { isLoading: isFeaturesLoading, isError: isFeaturesError } = useQuery({
+    ...projects.features(lastVisitedProjectId!),
+    enabled: !!lastVisitedProjectId,
+  });
+
   const [initialized, setInitialized] = useState(false);
 
   const lastVisitedProject = useMemo(() => {
@@ -52,7 +57,7 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
     }
   }, [initialized, lastVisitedProject, setProjectId, navigate]);
 
-  if (meLoading || projectsLoading) return <LoadingFallback />;
+  if (meLoading || projectsLoading || isFeaturesLoading || isFeaturesError) return <LoadingFallback />;
 
   if (axios.isAxiosError(meError) || axios.isAxiosError(projectsError)) return <AuthorizationFallback />;
 

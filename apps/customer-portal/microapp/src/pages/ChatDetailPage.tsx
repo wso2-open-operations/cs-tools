@@ -36,7 +36,7 @@ dayjs.extend(relativeTime);
 
 export default function ChatDetailPage() {
   const layout = useLayout();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<(ChatMessage & { id: string })[]>([]);
 
   const { id } = useParams();
   const { data } = useQuery(chats.get(id!));
@@ -47,6 +47,7 @@ export default function ChatDetailPage() {
   useEffect(() => {
     setMessages(
       comments?.map((comment) => ({
+        id: comment.id,
         author: comment.createdBy === "Novera" ? "assistant" : "you",
         blocks: [{ type: "text", value: comment.content || "" }],
         timestamp: dayjs(comment.createdOn).fromNow(),
@@ -130,15 +131,18 @@ export default function ChatDetailPage() {
             <MessagesListContentSkeleton />
           ) : (
             <Stack gap={2} mt={1}>
-              {messages.map((message, index) => (
-                <MessageBubble
-                  key={index}
-                  {...message}
-                  sx={{ bgcolor: "background.default" }}
-                  thinking={false}
-                  animated={false}
-                />
-              ))}
+              {messages
+                .slice()
+                .reverse()
+                .map(({ id, ...message }) => (
+                  <MessageBubble
+                    key={id}
+                    {...message}
+                    sx={{ bgcolor: "background.default" }}
+                    thinking={false}
+                    animated={false}
+                  />
+                ))}
             </Stack>
           )}
         </SectionCard>

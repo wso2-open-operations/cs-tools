@@ -37,7 +37,7 @@ export interface CaseSummaryDto {
   issueType?: EntityReference;
   deployment?: EntityReference;
   severity?: EntityReference;
-  status?: EntityReference;
+  status: EntityReference;
   engagementType?: EntityReference;
 }
 
@@ -67,7 +67,7 @@ export interface CaseDto {
   issueType: EntityReference | null;
   deployment: (EntityReference & { type: string }) | null;
   severity: EntityReference | null;
-  status: EntityReference | null;
+  status: EntityReference;
 }
 
 export interface CasesFiltersDto {
@@ -116,6 +116,7 @@ export interface GetCasesRequestDto {
 }
 
 export interface CreateCaseRequestDto {
+  relatedCaseId?: string;
   type: string;
   projectId: string;
   deploymentId: string;
@@ -136,11 +137,20 @@ export interface CreateCaseResponseDto {
   type: EntityReference;
 }
 
+export interface EditCaseRequestDto {
+  stateKey: number;
+}
+
+export interface EditCaseResponseDto {
+  state: EntityReference;
+}
+
 export interface CaseClassificationRequestDto {
   chatHistory: string;
   envProducts: Record<string, string[]>;
   region: string;
   tier: string;
+  projectTypeId?: string;
 }
 
 export interface CaseClassificationResponseDto {

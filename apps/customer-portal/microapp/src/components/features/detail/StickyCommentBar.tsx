@@ -23,6 +23,7 @@ interface StickyCommentBarProps {
   value: string;
   placeholder?: string;
   topSlot?: ReactNode;
+  bottomSlot?: ReactNode;
   loading?: boolean;
   disabled?: boolean;
 
@@ -34,6 +35,7 @@ export function StickyCommentBar({
   value,
   placeholder,
   topSlot,
+  bottomSlot,
   loading = false,
   disabled = false,
   onChange,
@@ -88,6 +90,8 @@ export function StickyCommentBar({
           )}
         </IconButton>
       </Stack>
+
+      {bottomSlot && <Box sx={{ m: -2 }}>{bottomSlot}</Box>}
     </Stack>
   );
 }

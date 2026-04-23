@@ -25,7 +25,7 @@ export interface Case {
   description: string;
   slaResponseTime: string;
   assigned?: string;
-  statusId?: string;
+  statusId: string;
   severityId?: string;
   issueTypeId?: string;
   product?: string;

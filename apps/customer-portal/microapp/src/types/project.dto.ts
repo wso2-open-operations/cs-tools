@@ -108,3 +108,16 @@ export interface DeploymentProductDto {
   endOfLifeOn: string | null;
   updateLevel: string;
 }
+
+export interface ProjectFeaturesDto {
+  acceptedSeverityValues: EntityReference[];
+  hasServiceRequestWriteAccess: boolean;
+  hasServiceRequestReadAccess: boolean;
+  hasSraWriteAccess: boolean;
+  hasChangeRequestReadAccess: boolean;
+  hasEngagementsReadAccess: boolean;
+  hasUpdatesReadAccess: boolean;
+  hasTimeLogsReadAccess: boolean;
+  hasDeploymentWriteAccess: boolean;
+  hasDeploymentReadAccess: boolean;
+}

@@ -20,14 +20,14 @@ export const RichText = styled(Box)(({ theme }) => ({
   fontSize: pxToRem(13),
   lineHeight: 1.5,
 
-  "& h1": { fontSize: pxToRem(28) },
-  "& h2": { fontSize: pxToRem(24) },
-  "& h3": { fontSize: pxToRem(20) },
-  "& h4": { fontSize: pxToRem(18) },
-  "& h5": { fontSize: pxToRem(16) },
-  "& h6": { fontSize: pxToRem(14) },
+  "& h1": { fontSize: pxToRem(28), margin: 0 },
+  "& h2": { fontSize: pxToRem(24), margin: 0 },
+  "& h3": { fontSize: pxToRem(20), margin: 0 },
+  "& h4": { fontSize: pxToRem(18), margin: 0 },
+  "& h5": { fontSize: pxToRem(16), margin: 0 },
+  "& h6": { fontSize: pxToRem(14), margin: 0 },
 
-  "& p": { fontSize: pxToRem(13) },
+  "& p": { fontSize: pxToRem(13), margin: 0 },
 
   "& pre": {
     padding: 12,

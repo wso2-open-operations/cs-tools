@@ -26,24 +26,58 @@ import { Fab } from "../components/core";
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
 
 export default function HomePage() {
-  const { projectId } = useProject();
+  const {
+    projectId,
+    features: { hasServiceRequestReadAccess, hasChangeRequestReadAccess, hasEngagementsReadAccess } = {},
+  } = useProject();
   const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["default_case"] }));
-  const { data: enagagementCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["engagement"] }));
-  const { data: serviceRequestCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["service_request"] }));
-  const { data: changeRequestCaseTypeStats } = useQuery(changeRequests.stats(projectId!));
+  const { data: engagementCaseTypeStats } = useQuery({
+    ...cases.stats(projectId!, { caseTypes: ["engagement"] }),
+    enabled: hasEngagementsReadAccess,
+  });
+
+  const { data: serviceRequestCaseTypeStats } = useQuery({
+    ...cases.stats(projectId!, { caseTypes: ["service_request"] }),
+    enabled: hasServiceRequestReadAccess,
+  });
+
+  const { data: changeRequestCaseTypeStats } = useQuery({
+    ...changeRequests.stats(projectId!),
+    enabled: !!hasChangeRequestReadAccess,
+  });
+
   const { data: multipleCaseTypesStats } = useQuery(
-    cases.stats(projectId!, { caseTypes: ["default_case", "engagement", "service_request"] }),
+    cases.stats(projectId!, {
+      caseTypes: [
+        "default_case",
+        ...(hasEngagementsReadAccess ? ["engagement"] : []),
+        ...(hasServiceRequestReadAccess ? ["service_request"] : []),
+      ],
+    }),
   );
 
-  const totalInteractions =
-    multipleCaseTypesStats?.totalCount != undefined && changeRequestCaseTypeStats?.totalCount != undefined
-      ? multipleCaseTypesStats.totalCount + changeRequestCaseTypeStats.totalCount
-      : undefined;
+  const isInteractionsLoading =
+    multipleCaseTypesStats === undefined || (hasChangeRequestReadAccess && changeRequestCaseTypeStats === undefined);
 
-  const activeInteractions =
-    multipleCaseTypesStats?.activeCount != undefined && changeRequestCaseTypeStats?.activeCount != undefined
-      ? multipleCaseTypesStats.activeCount + changeRequestCaseTypeStats.activeCount
-      : undefined;
+  // const totalInteractions =
+  //   multipleCaseTypesStats?.totalCount != undefined && changeRequestCaseTypeStats?.totalCount != undefined
+  //     ? multipleCaseTypesStats.totalCount + changeRequestCaseTypeStats.totalCount
+  //     : undefined;
+
+  const totalInteractions = isInteractionsLoading
+    ? undefined
+    : (multipleCaseTypesStats?.totalCount ?? 0) +
+      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.totalCount ?? 0) : 0);
+
+  // const activeInteractions =
+  //   multipleCaseTypesStats?.activeCount != undefined && changeRequestCaseTypeStats?.activeCount != undefined
+  //     ? multipleCaseTypesStats.activeCount + changeRequestCaseTypeStats.activeCount
+  //     : undefined;
+
+  const activeInteractions = isInteractionsLoading
+    ? undefined
+    : (multipleCaseTypesStats?.activeCount ?? 0) +
+      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.activeCount ?? 0) : 0);
 
   const resolvedThisMonth = defaultCaseTypeStats?.resolvedCases.pastThirtyDays;
   const resolvedThisMonthChangeRate = defaultCaseTypeStats?.changeRate.resolvedEngagements;
@@ -56,7 +90,7 @@ export default function HomePage() {
     color: PROJECT_SEVERITY_PIE_COLORS[item.id] || colors.grey[500],
   }));
 
-  const outstandingEngagementsPieData = enagagementCaseTypeStats?.outstandingEngagementTypeCount.map((item) => ({
+  const outstandingEngagementsPieData = engagementCaseTypeStats?.outstandingEngagementTypeCount.map((item) => ({
     label: overrideOrDefault(item.label),
     value: item.count,
     color: ENGAGEMENTS_TYPE_PIE_COLORS[item.label] || colors.grey[500],
@@ -84,21 +118,21 @@ export default function HomePage() {
       <Grid spacing={1.5} container>
         <Grid size={6}>
           <MetricWidget
-            label="Total Interactions"
+            label="Action Required"
             value={totalInteractions}
             icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Active Interactions"
+            label="Outstanding"
             value={activeInteractions}
             icon={<OctagonAlert size={pxToRem(18)} color={colors.yellow[700]} />}
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Resolved This Month"
+            label="Resolved"
             value={resolvedThisMonth}
             trend={{ direction: "up", value: `${resolvedThisMonthChangeRate ?? 0}%` }}
             icon={<CircleCheck size={pxToRem(18)} color={colors.green[700]} />}
@@ -112,15 +146,22 @@ export default function HomePage() {
             icon={<Clock4 size={pxToRem(18)} color={colors.purple[500]} />}
           />
         </Grid>
+
         <Grid size={6}>
           <PieChartWidget title="Outstanding Support Cases" data={outstandingSupportCasesPieData} />
         </Grid>
-        <Grid size={6}>
-          <PieChartWidget title="Outstanding Operations" data={outstandingOperationsPieData} />
-        </Grid>
-        <Grid size={6}>
-          <PieChartWidget title="Outstanding Engagements" data={outstandingEngagementsPieData} />
-        </Grid>
+
+        {(hasServiceRequestReadAccess || hasChangeRequestReadAccess) && (
+          <Grid size={6}>
+            <PieChartWidget title="Outstanding Operations" data={outstandingOperationsPieData} />
+          </Grid>
+        )}
+
+        {hasEngagementsReadAccess && (
+          <Grid size={6}>
+            <PieChartWidget title="Outstanding Engagements" data={outstandingEngagementsPieData} />
+          </Grid>
+        )}
       </Grid>
 
       {/* Floating Action Button */}

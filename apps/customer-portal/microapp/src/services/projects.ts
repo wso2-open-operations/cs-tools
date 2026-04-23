@@ -25,6 +25,7 @@ import type {
   ProjectDeploymentDto,
   ProjectDeploymentsDto,
   ProjectDto,
+  ProjectFeaturesDto,
   ProjectInfo,
   ProjectsDto,
   ProjectStatus,
@@ -34,6 +35,7 @@ import {
   PROJECTS_ENDPOINT,
   PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT,
   PROJECT_DETAILS_ENDPOINT,
+  PROJECT_FEATURES_ENDPOINT,
 } from "@config/endpoints";
 import apiClient from "@src/services/apiClient";
 import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
@@ -53,6 +55,10 @@ const getProject = async (id: string): Promise<ProjectInfo> => {
 
 const editProject = async (id: string, body: { hasAgent?: boolean; hasKbReferences?: boolean }): Promise<void> => {
   await apiClient.patch(PROJECT_DETAILS_ENDPOINT(id), body);
+};
+
+const getProjectFeatures = async (id: string): Promise<ProjectFeaturesDto> => {
+  return (await apiClient.get<ProjectFeaturesDto>(PROJECT_FEATURES_ENDPOINT(id))).data;
 };
 
 const getDeploymentsByProject = async (
@@ -117,6 +123,7 @@ function mapProjectDtoToProject(project: ProjectDto): ProjectInfo {
     type: project.type?.label ?? "N/A",
     agentEnabled: project.account.hasAgent,
     kbReferencesEnabled: project.account.hasKbReferences,
+    typeId: project.type?.id,
   };
 }
 
@@ -157,6 +164,12 @@ export const projects = {
     queryOptions({
       queryKey: ["project", id],
       queryFn: () => getProject(id),
+    }),
+
+  features: (id: string) =>
+    queryOptions({
+      queryKey: ["project", id, "features"],
+      queryFn: () => getProjectFeatures(id),
     }),
 
   edit: (id: string) =>

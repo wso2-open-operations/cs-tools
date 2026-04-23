@@ -28,6 +28,11 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
     enabled: !!projectId,
   });
 
+  const { data: features } = useQuery({
+    ...projects.features(projectId!),
+    enabled: !!projectId,
+  });
+
   const setAndStoreProjectId = (id: string | null) => {
     setProjectId(id);
     setLastVisitedProjectId(id); // local storage
@@ -40,6 +45,8 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
         noveraEnabled: data?.agentEnabled ?? false,
         kbReferencesEnabled: data?.kbReferencesEnabled ?? false,
         setProjectId: setAndStoreProjectId,
+        features,
+        projectTypeId: data?.typeId,
       }}
     >
       {children}

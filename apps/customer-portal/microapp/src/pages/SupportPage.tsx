@@ -44,7 +44,7 @@ export default function SupportPage() {
   const tabFromParams = allowedTabs.find((t) => t === rawTab) ?? "case";
   const [tab, setTab] = useState<TabType>(tabFromParams);
 
-  const { projectId } = useProject();
+  const { projectId, features } = useProject();
   const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
   const { data: serviceRequestCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["service_request"] }));
   const { data: changeRequestCaseTypeStats } = useQuery(changeRequests.stats(projectId!));
@@ -79,10 +79,10 @@ export default function SupportPage() {
       <Tabs variant="scrollable" sx={{ mt: 3 }} value={tab} onChange={(_, value) => handleTabChange(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
-        <Tab label="Service Requests" value="service" disableRipple />
-        <Tab label="Change Requests" value="change" disableRipple />
+        {features?.hasServiceRequestReadAccess && <Tab label="Service Requests" value="service" disableRipple />}
+        {features?.hasChangeRequestReadAccess && <Tab label="Change Requests" value="change" disableRipple />}
         <Tab label="Security Report Analysis" value="sra" disableRipple />
-        <Tab label="Engagements" value="engagement" disableRipple />
+        {features?.hasEngagementsReadAccess && <Tab label="Engagements" value="engagement" disableRipple />}
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>

@@ -14,27 +14,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ms from "ms";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { User, Users } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeftRightIcon, CheckIcon, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
+import {
+  CommentSkeleton,
+  InfoField,
+  MenuOptions,
+  OverlineSlot,
+  StickyCommentBar,
+  type MenuOptionProps,
+} from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
 import { RichText, SectionCard } from "@components/shared";
 import { useLayout } from "@context/layout";
 import { cases } from "@src/services/cases";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
-import ms from "ms";
+import { useNavigate, useParams } from "react-router-dom";
 import { Comment } from "@components/features/detail";
 import { useFilters } from "../context/filters";
 import DOMPurify from "dompurify";
+import { useNotify } from "../context/snackbar";
 
 dayjs.extend(relativeTime);
 
 export default function CaseDetailPage() {
+  const notify = useNotify();
   const layout = useLayout();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
 
@@ -74,6 +84,22 @@ export default function CaseDetailPage() {
   const ref = useRef<HTMLSpanElement>(null);
   const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
 
+  const editCaseMutation = useMutation({
+    ...cases.edit(id!),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: cases.get(id!).queryKey }),
+    onError: () => notify.error("Failed to update case. Please try again."),
+  });
+
+  const menuOptions = data
+    ? getCaseMenuOptions(data.statusId, {
+        onResolve: () => {
+          editCaseMutation.mutate({ stateKey: 3 });
+        },
+        onMarkWaiting: () => editCaseMutation.mutate({ stateKey: 1003 }),
+        onCreateRelated: () => navigate("/create", { state: { case: data } }),
+      })
+    : [];
+
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -104,6 +130,16 @@ export default function CaseDetailPage() {
       layout.setTitleOverride(undefined);
     };
   }, [data, overlineSlotVariant]);
+
+  useLayoutEffect(() => {
+    layout.setEndSlotOverride(
+      <MenuOptions disabled={!data || menuOptions.every((option) => option.hidden)} options={menuOptions} />,
+    );
+
+    return () => {
+      layout.setEndSlotOverride(undefined);
+    };
+  }, [data]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -225,4 +261,36 @@ export default function CaseDetailPage() {
       <div ref={bottomRef} />
     </>
   );
+}
+
+function getCaseMenuOptions(
+  stateKey: string,
+  actions?: Partial<{
+    onResolve: () => void;
+    onMarkWaiting: () => void;
+    onCreateRelated: () => void;
+  }>,
+): MenuOptionProps[] {
+  return [
+    {
+      label: "Mark as Resolved",
+      color: "success",
+      icon: <CheckIcon />,
+      hidden: !["1", "10", "1003", "6", "18", "1006"].includes(stateKey),
+      onClick: actions?.onResolve,
+    },
+    {
+      label: "Mark as Waiting on WSO2",
+      color: "warning",
+      icon: <ArrowLeftRightIcon />,
+      hidden: !["6", "18"].includes(stateKey),
+      onClick: actions?.onMarkWaiting,
+    },
+    {
+      label: "Created Related Case",
+      icon: <PlusIcon />,
+      hidden: !["3"].includes(stateKey),
+      onClick: actions?.onCreateRelated,
+    },
+  ];
 }

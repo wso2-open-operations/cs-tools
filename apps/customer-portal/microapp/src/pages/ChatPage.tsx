@@ -35,7 +35,7 @@ dayjs.extend(relativeTime);
 
 export default function ChatPage() {
   const navigate = useNavigate();
-  const { projectId } = useProject();
+  const { projectId, projectTypeId } = useProject();
   const { id: userId } = useMe();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");
@@ -233,6 +233,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (isAwaitingCreateCase) {
       mutation.mutate({
+        projectTypeId,
         chatHistory: toString(messages),
         envProducts: deployments.reduce((acc, deployment, index) => {
           const products = productQueries[index]?.data ?? [];

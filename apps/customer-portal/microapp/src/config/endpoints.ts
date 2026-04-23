@@ -22,6 +22,7 @@ if (!BACKEND_URL) {
 
 export const PROJECTS_ENDPOINT = "/projects/search";
 export const PROJECT_DETAILS_ENDPOINT = (id: string) => `/projects/${id}`;
+export const PROJECT_FEATURES_ENDPOINT = (id: string) => `/projects/${id}/features`;
 export const PROJECT_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats`;
 export const PROJECT_CASES_ENDPOINT = (id: string) => `/projects/${id}/cases/search`;
 export const PROJECT_CHATS_ENDPOINT = (id: string) => `/projects/${id}/conversations/search`;
@@ -51,8 +52,8 @@ export const USER_ACTIONS_ENDPOINT = (id: string, email: string) => `/projects/$
 export const METADATA_ENDPOINT = "/metadata";
 export const NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT = (sessionId: string) =>
   import.meta.env.VITE_BACKEND_URL.replace("https://", "wss://").replace(
-    "/v1.0",
-    `/websocket/v1.0/ws?sessionId=${sessionId}`,
+    "/v1.3",
+    `/websocket/v1.3/ws?sessionId=${sessionId}`,
   );
 
 export const CHANGE_PASSWORD_URL = "https://wso2.com/user/password";

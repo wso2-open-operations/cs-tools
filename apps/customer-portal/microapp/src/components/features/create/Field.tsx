@@ -127,6 +127,7 @@ export function TextField({
   helperText,
   aiLabel,
   startAdornment,
+  disabled = false,
   onChange,
 }: {
   name: string;
@@ -140,6 +141,7 @@ export function TextField({
   startAdornment?: React.ReactNode;
   error?: boolean;
   helperText?: string;
+  disabled?: boolean;
 
   onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onBlur?: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -158,6 +160,7 @@ export function TextField({
         {aiLabel && <AILabel label={aiLabel} />}
       </Stack>
       <MuiTextField
+        disabled={disabled}
         error={error}
         name={name}
         value={value}
