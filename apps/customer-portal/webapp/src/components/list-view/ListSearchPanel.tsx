@@ -43,6 +43,7 @@ export interface ListSearchPanelProps {
   hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
+  hideFiltersButton?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
@@ -73,6 +74,7 @@ export default function ListSearchPanel({
   hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
+  hideFiltersButton = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,

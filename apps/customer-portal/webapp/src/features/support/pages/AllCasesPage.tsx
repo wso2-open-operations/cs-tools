@@ -44,7 +44,7 @@ import {
   getDashboardOutstandingCasesDescription,
   getDashboardOutstandingCasesTitle,
 } from "@features/dashboard/utils/dashboardNavigation";
-import { CaseType } from "@features/support/constants/supportConstants";
+import { CaseStatus, CaseType } from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
 import {
   getProjectPermissions,
