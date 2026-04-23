@@ -431,6 +431,8 @@ public type CaseSearchFilters record {|
     int[] stateKeys?;
     # Severity key
     int severityKey?;
+    # Engagement type key (required for engagement type cases)
+    int engagementTypeKey?;
     # Deployment ID
     string deploymentId?;
     # Case created by the logged in user
