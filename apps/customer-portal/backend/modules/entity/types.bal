@@ -585,6 +585,10 @@ public type ProjectFeatures record {|
     boolean hasDeploymentWriteAccess;
     # Indicates if deployment read access is enabled
     boolean hasDeploymentReadAccess;
+    # Allowed categories for default case creation in deployed product search
+    ProductCategory[]? defaultCaseProductCategories;
+    # Allowed categories for service request creation in deployed product search
+    ProductCategory[]? srProductCategories;
     json...;
 |};
 
@@ -1999,6 +2003,8 @@ public type ChangeRequest record {|
     string number;
     # Change request title
     string? title;
+    # Change request description
+    string? description;
     # Associated project information
     ReferenceTableItem? project;
     # Service request information (case)
@@ -2093,8 +2099,6 @@ public type CatalogItemVariablesResponse record {|
 # Change request details information.
 public type ChangeRequestResponse record {|
     *ChangeRequest;
-    # Change request description
-    string? description;
     # User who created the change request
     string createdBy;
     # Justification for the change request

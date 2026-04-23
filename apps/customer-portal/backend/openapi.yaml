@@ -2795,10 +2795,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -3441,6 +3443,7 @@ components:
       - createdOn
       - deployedProduct
       - deployment
+      - description
       - duration
       - endDate
       - id
@@ -3463,6 +3466,10 @@ components:
         title:
           type: string
           description: Change request title
+          nullable: true
+        description:
+          type: string
+          description: Change request description
           nullable: true
         project:
           description: Project
@@ -3549,7 +3556,6 @@ components:
         - approvedOn
         - communicationPlan
         - createdBy
-        - description
         - hasCustomerApproved
         - hasCustomerReviewed
         - impactDescription
@@ -3559,10 +3565,6 @@ components:
         - testPlan
         type: object
         properties:
-          description:
-            type: string
-            description: Change request description
-            nullable: true
           createdBy:
             type: string
             description: User who created the change request
@@ -4864,6 +4866,7 @@ components:
     ProjectFeatures:
       required:
       - acceptedSeverityValues
+      - defaultCaseProductCategories
       - hasChangeRequestReadAccess
       - hasDeploymentReadAccess
       - hasDeploymentWriteAccess
@@ -4874,6 +4877,7 @@ components:
       - hasSraWriteAccess
       - hasTimeLogsReadAccess
       - hasUpdatesReadAccess
+      - srProductCategories
       type: object
       properties:
         acceptedSeverityValues:
@@ -4911,6 +4915,20 @@ components:
         hasDeploymentReadAccess:
           type: boolean
           description: Indicates if deployment read access is enabled
+        defaultCaseProductCategories:
+          type: array
+          description: Allowed categories for default case creation in deployed product
+            search.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductCategory'
+        srProductCategories:
+          type: array
+          description: Allowed categories for service request creation in deployed
+            product search.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductCategory'
       additionalProperties: false
       description: Project feature access configuration.
     ProjectFilterOptions:

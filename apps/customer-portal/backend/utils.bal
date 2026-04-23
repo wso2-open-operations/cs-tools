@@ -102,11 +102,11 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
     };
 }
 
-# Get project features for a given project.
+# Map project features for a given project.
 #
 # + projectMetadata - Project metadata response
 # + return - Project features or error
-public isolated function getProjectFeatures(entity:ProjectMetadataResponse projectMetadata)
+public isolated function mapProjectFeatures(entity:ProjectMetadataResponse projectMetadata)
     returns types:ProjectFeatures {
 
     types:ReferenceItem[] acceptedSeverityValues =
@@ -123,7 +123,9 @@ public isolated function getProjectFeatures(entity:ProjectMetadataResponse proje
         hasUpdatesReadAccess: projectMetadata.features.hasUpdatesReadAccess,
         hasTimeLogsReadAccess: projectMetadata.features.hasTimeLogsReadAccess,
         hasDeploymentWriteAccess: projectMetadata.features.hasDeploymentWriteAccess,
-        hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess
+        hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess,
+        defaultCaseProductCategories: projectMetadata.features.defaultCaseProductCategories,
+        srProductCategories: projectMetadata.features.srProductCategories
     };
 }
 
@@ -753,6 +755,7 @@ public isolated function mapChangeRequestSearchResponse(entity:ChangeRequestSear
             startDate: changeRequest.plannedStartOn,
             endDate: changeRequest.plannedEndOn,
             duration: changeRequest.duration,
+            description: changeRequest.description,
             hasServiceOutage: changeRequest.hasServiceOutage,
             createdOn: changeRequest.createdOn,
             updatedOn: changeRequest.updatedOn,

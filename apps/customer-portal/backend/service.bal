@@ -1478,7 +1478,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        return getProjectFeatures(projectMetadata);
+        return mapProjectFeatures(projectMetadata);
     }
 
     # Classify the case using AI chat agent.
