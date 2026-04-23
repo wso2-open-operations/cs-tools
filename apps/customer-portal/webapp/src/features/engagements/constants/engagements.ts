@@ -40,8 +40,7 @@ export const ENGAGEMENTS_LIST_ENTITY_LABEL = "engagements";
 export const ENGAGEMENTS_STAT_GRID_ENTITY_NAME = "engagement statistics";
 
 /** Stat card labels (Engagements overview). */
-export const ENGAGEMENTS_STAT_LABEL_TOTAL = "Total Engagements";
-export const ENGAGEMENTS_STAT_LABEL_ACTIVE = "Active Engagements";
+export const ENGAGEMENTS_STAT_LABEL_ACTIVE = "Outstanding Engagements";
 export const ENGAGEMENTS_STAT_LABEL_COMPLETED = "Completed";
 export const ENGAGEMENTS_STAT_LABEL_ON_HOLD = "On Hold";
 

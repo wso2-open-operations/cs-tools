@@ -281,9 +281,9 @@ export default function OperationsPage(): JSX.Element {
               <OutstandingCasesList cases={[]} isLoading />
             </SupportOverviewCard>
           </Grid>
-          <Grid size={loadingOverviewGridSize} sx={{ display: "flex", minWidth: 0, alignSelf: "flex-start" }}>
+          <Grid size={loadingOverviewGridSize} sx={{ display: "flex", minWidth: 0 }}>
             <SupportOverviewCard
-              sx={{ width: "100%", minWidth: 0, height: "auto" }}
+              sx={{ flex: 1, width: "100%", minWidth: 0 }}
               title={OPERATIONS_HUB_CARD_TITLE_CR}
               subtitle={crOverviewSubtitle}
               icon={FileText}
@@ -353,9 +353,9 @@ export default function OperationsPage(): JSX.Element {
               </Grid>
             )}
             {isChangeRequestEnabled && (
-              <Grid size={overviewGridSize} sx={{ display: "flex", minWidth: 0, alignSelf: "flex-start" }}>
+              <Grid size={overviewGridSize} sx={{ display: "flex", minWidth: 0 }}>
                 <SupportOverviewCard
-                  sx={{ width: "100%", minWidth: 0, height: "auto" }}
+                  sx={{ flex: 1, width: "100%", minWidth: 0 }}
                   title={OPERATIONS_HUB_CARD_TITLE_CR}
                   subtitle={crOverviewSubtitle}
                   icon={FileText}
