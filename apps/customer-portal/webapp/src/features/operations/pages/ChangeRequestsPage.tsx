@@ -46,13 +46,18 @@ import ChangeRequestsCalendarView from "@features/operations/components/change-r
 import TabBar from "@components/tab-bar/TabBar";
 import { generateChangeRequestsSchedulePdf } from "@features/operations/utils/changeRequestsSchedulePdf";
 import { hasListSearchOrFilters, countListSearchAndFilters } from "@features/support/utils/support";
-import { ChangeRequestsViewMode } from "@features/operations/types/changeRequests";
+import {
+  ChangeRequestFilterDefinitionId,
+  ChangeRequestsViewMode,
+} from "@features/operations/types/changeRequests";
 import {
   CHANGE_REQUESTS_ENTITY_LABEL,
   CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL,
   CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL,
   CHANGE_REQUESTS_PAGE_DESCRIPTION,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
   CHANGE_REQUESTS_PAGE_TITLE,
+  CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING,
   CHANGE_REQUESTS_SEARCH_PLACEHOLDER,
   CHANGE_REQUESTS_VIEW_TABS_CONFIG,
   OPERATIONS_LIST_BACK_LABEL,
@@ -73,7 +78,8 @@ import {
 export default function ChangeRequestsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+  const returnTo = (location.state as { returnTo?: string; outstandingOnly?: boolean } | null)?.returnTo;
+  const outstandingOnly = (location.state as { outstandingOnly?: boolean } | null)?.outstandingOnly ?? false;
   const { projectId } = useParams<{ projectId: string }>();
   const navSegment = getOperationsNavSegment(location.pathname);
 
@@ -100,8 +106,8 @@ export default function ChangeRequestsPage(): JSX.Element {
   });
 
   const changeRequestSearchRequest = useMemo(
-    () => buildChangeRequestSearchRequest(filters, searchTerm),
-    [searchTerm, filters],
+    () => buildChangeRequestSearchRequest(filters, searchTerm, outstandingOnly),
+    [searchTerm, filters, outstandingOnly],
   );
 
   const offset = (page - 1) * rowsPerPage;
@@ -238,6 +244,15 @@ export default function ChangeRequestsPage(): JSX.Element {
   };
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+  const visibleFilterDefinitions = useMemo(
+    () =>
+      outstandingOnly
+        ? CHANGE_REQUEST_FILTER_DEFINITIONS.filter(
+            (def) => def.id !== ChangeRequestFilterDefinitionId.State,
+          )
+        : CHANGE_REQUEST_FILTER_DEFINITIONS,
+    [outstandingOnly],
+  );
   const normalizedStats = useMemo(
     () => ({
       totalRequests: stats?.totalRequests ?? 0,
@@ -273,22 +288,32 @@ export default function ChangeRequestsPage(): JSX.Element {
   return (
     <Stack spacing={3}>
       <ListPageHeader
-        title={CHANGE_REQUESTS_PAGE_TITLE}
-        description={CHANGE_REQUESTS_PAGE_DESCRIPTION}
+        title={
+          outstandingOnly
+            ? CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING
+            : CHANGE_REQUESTS_PAGE_TITLE
+        }
+        description={
+          outstandingOnly
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
+            : CHANGE_REQUESTS_PAGE_DESCRIPTION
+        }
         backLabel={returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={exportButton}
       />
 
-      <Box sx={{ mb: 3 }}>
-        <ListStatGrid
-          isLoading={isStatsLoading || (!isStatsFetched && !isStatsError)}
-          isError={isStatsError}
-          entityName="change request"
-          configs={CHANGE_REQUEST_STAT_CONFIGS}
-          stats={normalizedStats}
-        />
-      </Box>
+      {!outstandingOnly && (
+        <Box sx={{ mb: 3 }}>
+          <ListStatGrid
+            isLoading={isStatsLoading || (!isStatsFetched && !isStatsError)}
+            isError={isStatsError}
+            entityName="change request"
+            configs={CHANGE_REQUEST_STAT_CONFIGS}
+            stats={normalizedStats}
+          />
+        </Box>
+      )}
 
       <ListSearchBar
         searchPlaceholder={CHANGE_REQUESTS_SEARCH_PLACEHOLDER}
@@ -300,7 +325,7 @@ export default function ChangeRequestsPage(): JSX.Element {
         onClearFilters={handleClearFilters}
         filtersContent={
           <ListFiltersPanel
-            filterDefinitions={CHANGE_REQUEST_FILTER_DEFINITIONS}
+            filterDefinitions={visibleFilterDefinitions}
             filters={filters}
             resolveOptions={(def) =>
               resolveChangeRequestFilterListOptions(def, filterMetadata)

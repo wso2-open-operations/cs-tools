@@ -431,6 +431,8 @@ public type CaseSearchFilters record {|
     int[] stateKeys?;
     # Severity key
     int severityKey?;
+    # Engagement type key (required for engagement type cases)
+    int engagementTypeKey?;
     # Deployment ID
     string deploymentId?;
     # Case created by the logged in user
@@ -685,6 +687,8 @@ public type ProjectCaseStatsResponse record {|
     int activeCount;
     # Outstanding case count (cases that are not solution proposed or closed)
     int outstandingCount;
+    # Action required from customer case count
+    int actionRequiredCount;
     # Average response time
     decimal averageResponseTime;
     # Resolved case count breakdown
@@ -2132,6 +2136,8 @@ public type ProjectChangeRequestStatsResponse record {|
     int activeCount;
     # Outstanding change request count
     int outstandingCount;
+    # Action required from customer change request count
+    int actionRequiredCount;
     # Count of change requests by state
     ChoiceListItem[] stateCount;
     json...;

@@ -19,6 +19,8 @@ import {
   ComplexSelect,
   Header as HeaderUI,
   Skeleton,
+  Tooltip,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
@@ -133,9 +135,15 @@ export default function ProjectSwitcher({
           }}
         >
           <FolderOpen size={16} />
-          <ComplexSelect.MenuItem.Text
-            primary={project ? project.name : "Select Project"}
-          />
+          <Tooltip title={project ? project.name : "Select Project"}>
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}
+            >
+              {project ? project.name : "Select Project"}
+            </Typography>
+          </Tooltip>
         </Box>
       </HeaderUI.Switchers>
     );
@@ -184,9 +192,19 @@ export default function ProjectSwitcher({
           return (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <FolderOpen size={16} />
-              <ComplexSelect.MenuItem.Text
-                primary={project ? project.name : "Select Project"}
-              />
+              <Tooltip title={project ? project.name : "Select Project"}>
+                <Typography
+                  variant="body2"
+                  noWrap
+                  sx={{
+                    maxWidth: 220,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {project ? project.name : "Select Project"}
+                </Typography>
+              </Tooltip>
             </Box>
           );
         }}

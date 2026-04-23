@@ -33,7 +33,10 @@ import {
   OperationsNavSegment,
   ServiceRequestCaseSortField,
 } from "@features/operations/types/serviceRequests";
-import { ALLOWED_CHANGE_REQUEST_STATE_IDS } from "@features/operations/constants/operationsConstants";
+import {
+  ALLOWED_CHANGE_REQUEST_STATE_IDS,
+  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
+} from "@features/operations/constants/operationsConstants";
 import type { SortOrder } from "@/types/common";
 
 /**
@@ -82,9 +85,12 @@ export function formatOperationsOverviewChangeRequestsSubtitle(
 export function buildChangeRequestSearchRequest(
   filters: ChangeRequestFilterValues,
   searchTerm: string,
+  outstandingOnly: boolean = false,
 ): Omit<ChangeRequestSearchRequest, "pagination"> {
   const selectedStateId = filters.stateId ? Number(filters.stateId) : undefined;
-  const allowedStateIds: number[] = [...ALLOWED_CHANGE_REQUEST_STATE_IDS];
+  const allowedStateIds: number[] = outstandingOnly
+    ? [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS]
+    : [...ALLOWED_CHANGE_REQUEST_STATE_IDS];
   const stateKeys =
     selectedStateId === undefined
       ? allowedStateIds
@@ -156,16 +162,23 @@ export function buildServiceRequestsPageCaseSearchRequest(
   sortField: ServiceRequestCaseSortField,
   sortOrder: SortOrder,
   createdByMe: boolean,
+  outstandingStatusIds?: number[],
 ): Omit<CaseSearchRequest, "pagination"> {
   const normalizedSortField =
     sortField === ServiceRequestCaseSortField.Severity
       ? ServiceRequestCaseSortField.CreatedOn
       : sortField;
 
+  const resolvedStatusIds: number[] | undefined = filters.statusId
+    ? [Number(filters.statusId)]
+    : outstandingStatusIds?.length
+      ? outstandingStatusIds
+      : undefined;
+
   return {
     filters: {
       caseTypes: [CaseType.SERVICE_REQUEST],
-      statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+      statusIds: resolvedStatusIds,
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
       deploymentId: filters.deploymentId || undefined,
       searchQuery: searchTerm.trim() || undefined,

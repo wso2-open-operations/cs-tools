@@ -59,6 +59,11 @@ export function CaseDetailsHeaderSkeleton({
           <Skeleton variant="rounded" width={72} height={20} />
         )}
       </Stack>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+        <Skeleton variant="rounded" width={72} height={16} />
+        <Skeleton variant="rectangular" width={1} height={12} />
+        <Skeleton variant="rounded" width={180} height={16} />
+      </Stack>
       <Skeleton variant="text" width="70%" height={28} sx={{ maxWidth: 400 }} />
     </Box>
   );
@@ -82,7 +87,7 @@ export default function CaseDetailsSkeleton({
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <CaseDetailsHeaderSkeleton variant={headerVariant} />
 
-      {/* Action row: manage status label placeholder */}
+      {/* Action row: action buttons placeholder */}
       {!hideActionRow && (
         <Paper
           variant="outlined"
@@ -93,21 +98,19 @@ export default function CaseDetailsSkeleton({
             px: 2,
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
+            justifyContent: "flex-end",
             flexWrap: "wrap",
             gap: 1,
             bgcolor: "background.default",
             minHeight: 0,
           }}
         >
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            {!showEngineerOnly && (
-              <Stack direction="row" spacing={1.5} alignItems="center">
-                <Skeleton variant="circular" width={12} height={12} />
-                <Skeleton variant="text" width={100} height={14} />
-              </Stack>
-            )}
-          </Stack>
+          {!showEngineerOnly && (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Skeleton variant="rounded" width={88} height={22} />
+              <Skeleton variant="rounded" width={96} height={22} />
+            </Stack>
+          )}
         </Paper>
       )}
 

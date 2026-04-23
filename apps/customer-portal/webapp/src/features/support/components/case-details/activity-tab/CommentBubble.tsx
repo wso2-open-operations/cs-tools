@@ -111,7 +111,6 @@ export default function CommentBubble({
     return "?";
   }, [isCurrentUser, comment, userDetails]);
 
-  const isRight = isCurrentUser;
   const isNovera = isNoveraOrBotSender(comment.createdBy, comment.type);
 
   return (
@@ -119,7 +118,6 @@ export default function CommentBubble({
       direction="row"
       alignItems="flex-start"
       sx={{
-        flexDirection: isRight ? "row-reverse" : "row",
         gap: 2,
       }}
     >
@@ -160,9 +158,8 @@ export default function CommentBubble({
         spacing={0.75}
         sx={{
           width: "100%",
-          maxWidth: 1000,
           minWidth: 0,
-          alignItems: isRight ? "flex-end" : "flex-start",
+          alignItems: "flex-start",
         }}
       >
         <Stack
@@ -170,7 +167,6 @@ export default function CommentBubble({
           alignItems="center"
           flexWrap="wrap"
           sx={{
-            flexDirection: isRight ? "row-reverse" : "row",
             gap: 1,
             minHeight: 32,
           }}

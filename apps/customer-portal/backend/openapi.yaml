@@ -2795,12 +2795,10 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
-          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
-          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -3365,6 +3363,10 @@ components:
         severityId:
           type: integer
           description: Severity ID
+          format: int64
+        engagementTypeKey:
+          type: integer
+          description: Engagement type key (required for engagement type cases)
           format: int64
         deploymentId:
           type: string
@@ -4561,6 +4563,7 @@ components:
       type: string
       description: Valid product category values.
       enum:
+      - ms
       - cl
       - pdp
     ProductClass:
@@ -4731,6 +4734,7 @@ components:
             format: int64
     ProjectCaseStats:
       required:
+      - actionRequiredCount
       - activeCount
       - averageResponseTime
       - caseTypeCount
@@ -4758,6 +4762,10 @@ components:
           type: integer
           description: Outstanding case count (cases that are not solution proposed
             or closed)
+          format: int64
+        actionRequiredCount:
+          type: integer
+          description: Action required from customer case count
           format: int64
         averageResponseTime:
           type: number
@@ -4837,6 +4845,7 @@ components:
       description: Case statistics for a project.
     ProjectChangeRequestStatsResponse:
       required:
+      - actionRequiredCount
       - activeCount
       - outstandingCount
       - stateCount
@@ -4855,6 +4864,10 @@ components:
         outstandingCount:
           type: integer
           description: Outstanding change request count
+          format: int64
+        actionRequiredCount:
+          type: integer
+          description: Action required from customer change request count
           format: int64
         stateCount:
           type: array

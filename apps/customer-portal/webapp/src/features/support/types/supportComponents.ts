@@ -47,6 +47,7 @@ export type CaseDetailsHeaderProps = {
   title: string | null | undefined;
   severityLabel: string | null | undefined;
   statusLabel: string | null | undefined;
+  assignedEngineerLabel?: string | null;
   statusChipIcon: ReactNode;
   statusChipSx: Record<string, unknown>;
   isLoading?: boolean;

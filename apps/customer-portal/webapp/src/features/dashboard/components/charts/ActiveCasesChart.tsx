@@ -132,7 +132,7 @@ export const ActiveCasesChart = ({
           </Box>
         </>
       ) : isEmpty ? (
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", py: 5, gap: 1.5 }}>
+        <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX + 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
           <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.08), display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Inbox size={24} color={colors.grey?.[400] ?? "#9CA3AF"} />
           </Box>

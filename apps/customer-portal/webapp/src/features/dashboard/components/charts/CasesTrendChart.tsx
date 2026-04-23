@@ -61,7 +61,6 @@ export const CasesTrendChart = ({
   isLoading,
   isError,
   centerContent = false,
-  onSliceClick,
 }: CasesTrendChartProps): JSX.Element => {
   const isDarkMode = useDarkMode();
   // safe data
@@ -183,7 +182,7 @@ export const CasesTrendChart = ({
           </Box>
         </>
       ) : isEmpty ? (
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", py: 5, gap: 1.5 }}>
+        <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX + 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
           <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.08), display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Inbox size={24} color={colors.grey?.[400] ?? "#9CA3AF"} />
           </Box>
@@ -198,7 +197,6 @@ export const CasesTrendChart = ({
               opacity: isError ? 0.3 : 1,
               filter: isError ? "grayscale(1)" : "none",
               "& *:focus": { outline: "none" },
-              ...(onSliceClick && !isError && { "& .recharts-pie-sector": { cursor: "pointer" } }),
             }}
           >
             <ResponsiveContainer width="100%" height="100%">
@@ -220,7 +218,6 @@ export const CasesTrendChart = ({
                   endAngle={-270}
                   label={false}
                   labelLine={false}
-                  onClick={onSliceClick && !isError ? onSliceClick : undefined}
                 >
                   {displayChartData.map((entry, index) => (
                     <Cell
@@ -268,11 +265,10 @@ export const CasesTrendChart = ({
                 name: item.name,
                 value: item.value,
                 color: item.color,
-                id: item.name,
+                id: item.id ?? item.name,
               }))}
               isError={isError}
               showValues
-              onItemClick={onSliceClick ? (_id) => onSliceClick() : undefined}
             />
           </Box>
         </>

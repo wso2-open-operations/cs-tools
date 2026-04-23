@@ -317,12 +317,13 @@ export function buildEngagementsPieSlices(
           }
         })
         .map((category, index) => ({
-        name: category.name,
-        value: category.value,
-        color:
-          colorByLabel.get(category.name.toLowerCase()) ??
-          fallbackColors[index % fallbackColors.length] ??
-          fallbackGrey,
+          name: category.name,
+          value: category.value,
+          id: category.id,
+          color:
+            colorByLabel.get(category.name.toLowerCase()) ??
+            fallbackColors[index % fallbackColors.length] ??
+            fallbackGrey,
         }));
   }
 }

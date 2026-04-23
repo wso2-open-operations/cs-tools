@@ -67,14 +67,14 @@ export const DASHBOARD_STATS: StatConfigItem[] = [
   {
     id: "totalCases",
     label: "Action Required",
-    icon: Clock,
+    icon: AlertCircle,
     iconColor: "primary",
     tooltipText: "Total number of cases reported for this project",
   },
   {
     id: "openCases",
     label: "Outstanding",
-    icon: AlertCircle,
+    icon: Clock,
     iconColor: "warning",
     tooltipText: "Currently active and unresolved cases",
   },

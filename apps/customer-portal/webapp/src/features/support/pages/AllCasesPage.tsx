@@ -41,6 +41,11 @@ import {
   isS0Case,
 } from "@features/support/utils/support";
 import {
+  buildDashboardCaseSearchFilters,
+  getDashboardOutstandingCasesDescription,
+  getDashboardOutstandingCasesTitle,
+} from "@features/dashboard/utils/dashboardNavigation";
+import {
   CaseType,
   ALL_CASES_STAT_CONFIGS,
   getAllCasesFlattenedStats,
@@ -54,13 +59,6 @@ import {
 import type { AllCasesFilterValues } from "@features/support/types/cases";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 
-const SEVERITY_ID_TO_LABEL: Record<string, string> = {
-  "14": "S0",
-  "10": "S1",
-  "11": "S2",
-  "12": "S3",
-  "13": "S4",
-};
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
@@ -81,6 +79,7 @@ export default function AllCasesPage(): JSX.Element {
   const createdByMe = searchParams.get("createdByMe") === "true";
   const initialSeverityId = searchParams.get("severityId");
   const statusFilter = searchParams.get("statusFilter") as "active" | "resolved" | null;
+  const isDashboardSeverityNavigation = Boolean(initialSeverityId);
 
   const sessionPrefix = `${projectId ?? "unknown"}-cases`;
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
@@ -121,14 +120,6 @@ export default function AllCasesPage(): JSX.Element {
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
-  // When navigating from Dashboard with ?statusFilter=active, compute the IDs for all non-Closed statuses.
-  const activeStatusIds = useMemo(() => {
-    if (statusFilter !== "active" || !filterMetadata?.caseStates) return undefined;
-    return filterMetadata.caseStates
-      .filter((s) => s.label !== CaseStatus.CLOSED)
-      .map((s) => Number(s.id));
-  }, [statusFilter, filterMetadata]);
-
   // When navigating from Dashboard with ?statusFilter=resolved, set the Closed status in the filter UI
   // once metadata loads. The guard on filters.statusId prevents re-applying after user changes/clears it.
   useEffect(() => {
@@ -162,16 +153,21 @@ export default function AllCasesPage(): JSX.Element {
     () => ({
       filters: {
         caseTypes: [CaseType.DEFAULT_CASE],
-        statusIds:
-          activeStatusIds ??
-          (filters.statusId ? [Number(filters.statusId)] : undefined),
-        severityId: filters.severityId ? Number(filters.severityId) : undefined,
-        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-        deploymentId: permissions.hasDeployments
-          ? filters.deploymentId || undefined
-          : undefined,
-        searchQuery: searchTerm.trim() || undefined,
-        createdByMe: createdByMe || undefined,
+        ...buildDashboardCaseSearchFilters({
+          statusId: filters.statusId,
+          severityId: filters.severityId,
+          issueTypes: filters.issueTypes,
+          deploymentId: permissions.hasDeployments
+            ? filters.deploymentId || undefined
+            : undefined,
+          searchQuery: searchTerm,
+          createdByMe: createdByMe || undefined,
+          caseStates: filterMetadata?.caseStates,
+          isDashboardSeverityNavigation:
+            (isDashboardSeverityNavigation &&
+              filters.severityId === initialSeverityId) ||
+            statusFilter === "active",
+        }),
       },
       sortBy: {
         field: sortField,
@@ -179,13 +175,16 @@ export default function AllCasesPage(): JSX.Element {
       },
     }),
     [
-      activeStatusIds,
+      statusFilter,
       filters,
       searchTerm,
       sortField,
       sortOrder,
       createdByMe,
       permissions.hasDeployments,
+      filterMetadata?.caseStates,
+      isDashboardSeverityNavigation,
+      initialSeverityId,
     ],
   );
 
@@ -316,19 +315,26 @@ export default function AllCasesPage(): JSX.Element {
     <Stack spacing={3} sx={{ minWidth: 0 }}>
       <ListPageHeader
         title={(() => {
-          const sLabel = initialSeverityId ? SEVERITY_ID_TO_LABEL[initialSeverityId] : undefined;
-          if (sLabel) return `${sLabel} Cases`;
+          const dashboardTitle = getDashboardOutstandingCasesTitle(initialSeverityId);
+          if (dashboardTitle) return dashboardTitle;
           if (createdByMe) return "My Cases";
           if (statusFilter === "active") return "Outstanding Cases";
           if (statusFilter === "resolved") return "Resolved Cases";
           return "All Cases";
         })()}
         description={
-          createdByMe
-            ? "Manage and track your support cases"
-            : "Manage and track all your support cases"
+          (() => {
+            const dashboardDescription =
+              getDashboardOutstandingCasesDescription(initialSeverityId);
+            if (dashboardDescription) {
+              return dashboardDescription;
+            }
+            return createdByMe
+              ? "Manage and track your support cases"
+              : "Manage and track all your support cases";
+          })()
         }
-        backLabel={returnTo && (initialSeverityId || statusFilter === "resolved") ? "Back to Dashboard" : "Back to Support Center"}
+        backLabel={returnTo ? "Back to Dashboard" : "Back to Support Center"}
         onBack={() => {
           if (returnTo) {
             setFilters({});
@@ -379,6 +385,8 @@ export default function AllCasesPage(): JSX.Element {
         hideFiltersButton={statusFilter === "resolved"}
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
+        hideSeverityFilter={isDashboardSeverityNavigation}
+        hideStatusFilter={isDashboardSeverityNavigation}
         hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}
         excludeFromCount={

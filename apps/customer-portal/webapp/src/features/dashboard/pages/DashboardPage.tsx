@@ -65,35 +65,43 @@ export default function DashboardPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleSeverityClick = useCallback(
-    (severityId: string) => {
-      navigate(
-        `/projects/${projectId}/support/cases?severityId=${severityId}`,
-        { state: { returnTo: location.pathname } },
-      );
+  type ChartNavAction =
+    | { chart: "outstanding"; severityId: string }
+    | { chart: "operations"; key: string };
+
+  const handleChartNavigation = useCallback(
+    (action: ChartNavAction) => {
+      switch (action.chart) {
+        case "outstanding":
+          navigate(
+            `/projects/${projectId}/support/cases?severityId=${action.severityId}`,
+            { state: { returnTo: location.pathname } },
+          );
+          break;
+        case "operations": {
+          const segment =
+            action.key === "serviceRequests"
+              ? "service-requests"
+              : "change-requests";
+          navigate(`/projects/${projectId}/operations/${segment}`, {
+            state: { returnTo: location.pathname, outstandingOnly: true },
+          });
+          break;
+        }
+      }
     },
     [navigate, projectId, location.pathname],
+  );
+
+  const handleSeverityClick = useCallback(
+    (severityId: string) =>
+      handleChartNavigation({ chart: "outstanding", severityId }),
+    [handleChartNavigation],
   );
 
   const handleOperationsClick = useCallback(
-    (key: string) => {
-      const segment = key === "serviceRequests" ? "service-requests" : "change-requests";
-      navigate(
-        `/projects/${projectId}/operations/${segment}`,
-        { state: { returnTo: location.pathname } },
-      );
-    },
-    [navigate, projectId, location.pathname],
-  );
-
-  const handleEngagementsClick = useCallback(
-    () => {
-      navigate(
-        `/projects/${projectId}/engagements`,
-        { state: { returnTo: location.pathname } },
-      );
-    },
-    [navigate, projectId, location.pathname],
+    (key: string) => handleChartNavigation({ chart: "operations", key }),
+    [handleChartNavigation],
   );
 
   // loader
@@ -354,12 +362,23 @@ export default function DashboardPage(): JSX.Element {
       includeCrStats && !!changeRequestStats && !isErrorChangeRequestStats;
 
     const serviceRequestsCount = hasServiceRequests
-      ? (serviceRequestStats?.totalCount ??
-        serviceRequestStats?.totalCases ??
+      ? (serviceRequestStats?.activeCount ??
+        serviceRequestStats?.stateCount
+          ?.filter((state) => state.label !== "Closed")
+          .reduce((sum, state) => sum + state.count, 0) ??
+        serviceRequestStats?.outstandingCount ??
         0)
       : 0;
     const changeRequestsCount = hasChangeRequests
-      ? (changeRequestStats?.totalCount ?? 0)
+      ? (changeRequestStats?.activeCount ??
+        changeRequestStats?.stateCount
+          ?.filter(
+            (state) =>
+              state.label !== "Closed" && state.label !== "Canceled",
+          )
+          .reduce((sum, state) => sum + state.count, 0) ??
+        changeRequestStats?.outstandingCount ??
+        0)
       : 0;
 
     return calculateProjectStats(
@@ -384,6 +403,7 @@ export default function DashboardPage(): JSX.Element {
     const categories = outstanding.map((item) => ({
       name: normalizeEngagementLabel(item.label),
       value: item.count ?? 0,
+      id: item.id,
     }));
     const total = categories.reduce((sum, item) => sum + item.value, 0);
 
@@ -626,7 +646,6 @@ export default function DashboardPage(): JSX.Element {
         showEngagementsChart={permissions.hasEngagements}
         onSeverityClick={handleSeverityClick}
         onOperationsClick={handleOperationsClick}
-        onEngagementsClick={handleEngagementsClick}
       />
       {/* Cases Table */}
       {projectId && (

@@ -29,6 +29,7 @@ export type CasesTrendChartData = {
   categories: Array<{
     name: string;
     value: number;
+    id?: string;
   }>;
   total: number;
 };
@@ -71,7 +72,6 @@ export type CasesTrendChartProps = {
   isLoading?: boolean;
   isError?: boolean;
   centerContent?: boolean;
-  onSliceClick?: () => void;
 };
 
 // Active cases chart props.
@@ -108,5 +108,4 @@ export type ChartLayoutProps = {
   showEngagementsChart?: boolean;
   onSeverityClick?: (severityId: string) => void;
   onOperationsClick?: (key: string) => void;
-  onEngagementsClick?: () => void;
 };

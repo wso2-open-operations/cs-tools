@@ -50,6 +50,7 @@ export interface ListFiltersProps {
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
+  hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
@@ -70,6 +71,7 @@ export default function ListFilters({
   excludeS0 = false,
   restrictSeverityToLow = false,
   hideSeverityFilter = false,
+  hideStatusFilter = false,
   hideDeploymentFilter = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
@@ -87,6 +89,9 @@ export default function ListFilters({
     <Grid container spacing={2} sx={{ mt: 1 }}>
       {ALL_CASES_FILTER_DEFINITIONS.map((def) => {
         if (hideSeverityFilter && def.id === "severity") {
+          return null;
+        }
+        if (hideStatusFilter && def.id === "status") {
           return null;
         }
         if (hideDeploymentFilter && def.id === "deployment") {

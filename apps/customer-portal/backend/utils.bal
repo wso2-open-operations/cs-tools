@@ -451,6 +451,7 @@ public isolated function mapCaseStats(entity:ProjectCaseStatsResponse response) 
         changeRate: response.changeRate,
         activeCount: response.activeCount,
         outstandingCount: response.outstandingCount,
+        actionRequiredCount: response.actionRequiredCount,
         stateCount,
         severityCount,
         outstandingSeverityCount,
@@ -868,6 +869,7 @@ public isolated function mapProjectChangeRequestStatsResponse(entity:ProjectChan
         totalCount: response.totalCount,
         activeCount: response.activeCount,
         outstandingCount: response.outstandingCount,
+        actionRequiredCount: response.actionRequiredCount,
         stateCount
     };
 }

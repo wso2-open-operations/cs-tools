@@ -40,6 +40,7 @@ export interface ListSearchPanelProps {
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
+  hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideFiltersButton?: boolean;
   isProjectContextLoading?: boolean;
@@ -69,6 +70,7 @@ export default function ListSearchPanel({
   excludeS0 = false,
   restrictSeverityToLow = false,
   hideSeverityFilter = false,
+  hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideFiltersButton = false,
   isProjectContextLoading = false,
@@ -81,6 +83,7 @@ export default function ListSearchPanel({
   const filtersForCount = {
     ...filters,
     ...(hideSeverityFilter ? { severityId: undefined } : {}),
+    ...(hideStatusFilter ? { statusId: undefined } : {}),
     ...(hideDeploymentFilter ? { deploymentId: undefined } : {}),
     ...excluded,
   };
@@ -107,6 +110,7 @@ export default function ListSearchPanel({
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter={hideSeverityFilter}
+          hideStatusFilter={hideStatusFilter}
           hideDeploymentFilter={hideDeploymentFilter}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}

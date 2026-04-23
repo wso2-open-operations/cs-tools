@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useLocation } from "react-router";
 import { useState, useMemo, useEffect, type ChangeEvent } from "react";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -49,10 +49,17 @@ import {
 export function useEngagementsPageState() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const location = useLocation();
+
+  const initialEngagementTypeId = (
+    location.state as { engagementTypeId?: string } | null
+  )?.engagementTypeId;
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllCasesFilterValues>({});
+  const [filters, setFilters] = useState<AllCasesFilterValues>(() =>
+    initialEngagementTypeId ? { issueTypes: initialEngagementTypeId } : {},
+  );
   const [sortField, setSortField] = useState<EngagementsSortField>(
     EngagementsSortField.CreatedOn,
   );

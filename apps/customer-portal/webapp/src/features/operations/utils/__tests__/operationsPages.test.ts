@@ -55,6 +55,11 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(req.filters?.impactKey).toBe(1);
     expect(req.filters?.searchQuery).toBe("q");
   });
+
+  it("uses outstanding state keys when outstandingOnly is true", () => {
+    const req = buildChangeRequestSearchRequest({}, "", true);
+    expect(req.filters?.stateKeys).toEqual([5, -2, -1, 0, 1, 2]);
+  });
 });
 
 describe("resolveChangeRequestFilterListOptions", () => {

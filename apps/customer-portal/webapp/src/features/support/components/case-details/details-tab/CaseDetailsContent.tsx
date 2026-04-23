@@ -31,7 +31,7 @@ import {
   getStatusColor,
   resolveColorFromTheme,
   getStatusIconElement,
-  getInitials,
+  getAssignedEngineerLabel,
   hasSeverityLabelForChip,
   isSecurityReportAnalysisType,
 } from "@features/support/utils/support";
@@ -128,7 +128,7 @@ export default function CaseDetailsContent({
     undefined;
 
   const assignedEngineer = data?.assignedEngineer;
-  const engineerInitials = getInitials(assignedEngineer);
+  const assignedEngineerLabel = getAssignedEngineerLabel(assignedEngineer);
 
   const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
 
@@ -280,37 +280,52 @@ export default function CaseDetailsContent({
         ) : (
           !focusMode && (
             <>
-              <CaseDetailsHeader
-                caseNumber={data?.number}
-                title={data?.title}
-                severityLabel={severityLabel ?? undefined}
-                statusLabel={statusLabel}
-                statusChipIcon={statusChipIcon}
-                statusChipSx={statusChipSx}
-                isLoading={isLoading}
-                showSeverityChip={
-                  headerVariant === "default" &&
-                  !isSecurityReportAnalysis &&
-                  hasSeverityLabelForChip(severityLabel)
-                }
-                showStatusChip={headerVariant !== "engagement"}
-                variant={headerVariant}
-              />
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <CaseDetailsHeader
+                    caseNumber={data?.number}
+                    title={data?.title}
+                    severityLabel={severityLabel ?? undefined}
+                    statusLabel={statusLabel}
+                    assignedEngineerLabel={
+                      hideAssignedEngineer ? null : assignedEngineerLabel
+                    }
+                    statusChipIcon={statusChipIcon}
+                    statusChipSx={statusChipSx}
+                    isLoading={isLoading}
+                    showSeverityChip={
+                      headerVariant === "default" &&
+                      !isSecurityReportAnalysis &&
+                      hasSeverityLabelForChip(severityLabel)
+                    }
+                    showStatusChip={headerVariant !== "engagement"}
+                    variant={headerVariant}
+                  />
+                </Box>
 
-              {!isEngagementRoute && (!hideActionRow || showEngineerOnly) && (
-                <CaseDetailsActionRow
-                  assignedEngineer={assignedEngineer}
-                  engineerInitials={engineerInitials}
-                  statusLabel={statusLabel}
-                  closedOn={data?.closedOn}
-                  onOpenRelatedCase={onOpenRelatedCase}
-                  projectId={resolvedProjectId}
-                  caseId={caseId}
-                  isLoading={isLoading}
-                  showOnlyEngineer={showEngineerOnly}
-                  hideAssignedEngineer={hideAssignedEngineer}
-                />
-              )}
+                {!isEngagementRoute && (!hideActionRow || showEngineerOnly) && (
+                  <CaseDetailsActionRow
+                    assignedEngineer={assignedEngineer}
+                    engineerInitials=""
+                    statusLabel={statusLabel}
+                    closedOn={data?.closedOn}
+                    onOpenRelatedCase={onOpenRelatedCase}
+                    projectId={resolvedProjectId}
+                    caseId={caseId}
+                    isLoading={isLoading}
+                    showOnlyEngineer={showEngineerOnly}
+                    hideAssignedEngineer={hideAssignedEngineer}
+                  />
+                )}
+              </Box>
             </>
           )
         )}

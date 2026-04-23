@@ -213,9 +213,12 @@ export const OPERATIONS_LIST_BACK_LABEL = "Back";
 // --- Change requests page ----------------------------------------------------
 
 export const CHANGE_REQUESTS_PAGE_TITLE = "All Change Requests";
+export const CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING = "Outstanding Change Requests";
 
 export const CHANGE_REQUESTS_PAGE_DESCRIPTION =
   "Track and manage deployment changes and updates";
+export const CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING =
+  "Manage and track outstanding change requests";
 
 export const CHANGE_REQUESTS_SEARCH_PLACEHOLDER =
   "Search change requests by number, title, or description...";
@@ -283,11 +286,14 @@ export const SERVICE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE =
 // --- Service requests page ---------------------------------------------------
 
 export const SERVICE_REQUESTS_PAGE_TITLE_ALL = "All Service Requests";
+export const SERVICE_REQUESTS_PAGE_TITLE_OUTSTANDING = "Outstanding Service Requests";
 
 export const SERVICE_REQUESTS_PAGE_TITLE_MINE = "My Service Requests";
 
 export const SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL =
   "Manage deployments, operations, infrastructure change, and service configurations";
+export const SERVICE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING =
+  "Manage and track outstanding service requests";
 
 export const SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE =
   "Manage and track your service requests";
@@ -374,4 +380,16 @@ export const ALLOWED_CHANGE_REQUEST_STATE_IDS = [
   2, // Rollback
   3, // Closed
   4, // Canceled
+] as const;
+
+/**
+ * Outstanding-only CR states (exclude Closed/Canceled).
+ */
+export const OUTSTANDING_CHANGE_REQUEST_STATE_IDS = [
+  5, // Customer Approval
+  -2, // Scheduled
+  -1, // Implement
+  0, // Review
+  1, // Customer Review
+  2, // Rollback
 ] as const;

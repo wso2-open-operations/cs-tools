@@ -67,8 +67,10 @@ import {
   SERVICE_REQUESTS_NEW_BUTTON_LABEL,
   SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL,
   SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE,
+  SERVICE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
   SERVICE_REQUESTS_PAGE_TITLE_ALL,
   SERVICE_REQUESTS_PAGE_TITLE_MINE,
+  SERVICE_REQUESTS_PAGE_TITLE_OUTSTANDING,
   SERVICE_REQUESTS_SEARCH_PLACEHOLDER,
   SERVICE_REQUESTS_SORT_FIELD_OPTIONS,
   SERVICE_REQUESTS_STAT_ENTITY_NAME,
@@ -78,6 +80,7 @@ import {
   buildServiceRequestsPageCaseSearchRequest,
   getOperationsNavSegment,
 } from "@features/operations/utils/operationsPages";
+import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
 
 /**
  * ServiceRequestsPage lists service requests using the same filters, sort,
@@ -92,7 +95,8 @@ export default function ServiceRequestsPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
   const navSegment = getOperationsNavSegment(location.pathname);
-  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+  const returnTo = (location.state as { returnTo?: string; outstandingOnly?: boolean } | null)?.returnTo;
+  const outstandingOnly = (location.state as { outstandingOnly?: boolean } | null)?.outstandingOnly ?? false;
 
   const listMode = createdByMe ? "mine" : "all";
   const sessionPrefix = `${projectId ?? "unknown"}-service-requests-${listMode}`;
@@ -149,6 +153,14 @@ export default function ServiceRequestsPage(): JSX.Element {
     enabled: !!projectId && permissions.hasSR,
   });
 
+  const outstandingStatusIds = useMemo(
+    () =>
+      outstandingOnly
+        ? resolveCasesTableDefaultStatusIds(filterMetadata?.caseStates)
+        : [],
+    [outstandingOnly, filterMetadata?.caseStates],
+  );
+
   const caseSearchRequest = useMemo(
     () =>
       buildServiceRequestsPageCaseSearchRequest(
@@ -157,8 +169,9 @@ export default function ServiceRequestsPage(): JSX.Element {
         sortField,
         sortOrder,
         createdByMe,
+        outstandingStatusIds,
       ),
-    [filters, searchTerm, sortField, sortOrder, createdByMe],
+    [filters, searchTerm, sortField, sortOrder, createdByMe, outstandingStatusIds],
   );
 
   const {
@@ -280,7 +293,12 @@ export default function ServiceRequestsPage(): JSX.Element {
     ) {
       setFilters((prev) => ({ ...prev, deploymentId: undefined }));
     }
-  }, [projectDetailsReady, permissions.hasDeployments, filters.deploymentId]);
+  }, [
+    projectDetailsReady,
+    permissions.hasDeployments,
+    filters.deploymentId,
+    setFilters,
+  ]);
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, {
     ...filters,
@@ -345,12 +363,16 @@ export default function ServiceRequestsPage(): JSX.Element {
     <Stack spacing={3}>
       <ListPageHeader
         title={
-          createdByMe
+          outstandingOnly
+            ? SERVICE_REQUESTS_PAGE_TITLE_OUTSTANDING
+            : createdByMe
             ? SERVICE_REQUESTS_PAGE_TITLE_MINE
             : SERVICE_REQUESTS_PAGE_TITLE_ALL
         }
         description={
-          createdByMe
+          outstandingOnly
+            ? SERVICE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
+            : createdByMe
             ? SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE
             : SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL
         }
@@ -359,15 +381,17 @@ export default function ServiceRequestsPage(): JSX.Element {
         actions={newRequestButton}
       />
 
-      <Box sx={{ mb: 3 }}>
-        <ListStatGrid
-          isLoading={isStatsLoading}
-          isError={isStatsError}
-          entityName={SERVICE_REQUESTS_STAT_ENTITY_NAME}
-          configs={ALL_CASES_STAT_CONFIGS}
-          stats={getAllCasesFlattenedStats(stats)}
-        />
-      </Box>
+      {!outstandingOnly && (
+        <Box sx={{ mb: 3 }}>
+          <ListStatGrid
+            isLoading={isStatsLoading}
+            isError={isStatsError}
+            entityName={SERVICE_REQUESTS_STAT_ENTITY_NAME}
+            configs={ALL_CASES_STAT_CONFIGS}
+            stats={getAllCasesFlattenedStats(stats)}
+          />
+        </Box>
+      )}
 
       <ListSearchPanel
         searchTerm={searchTerm}
@@ -396,6 +420,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         onClearFilters={handleClearFilters}
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
+        hideStatusFilter={outstandingOnly}
         hideSeverityFilter
         hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}

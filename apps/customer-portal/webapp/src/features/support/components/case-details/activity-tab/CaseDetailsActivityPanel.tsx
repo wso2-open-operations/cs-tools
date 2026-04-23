@@ -119,7 +119,7 @@ export default function CaseDetailsActivityPanel({
         {[1, 2, 3].map((i) => (
           <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
             <Skeleton variant="circular" width={32} height={32} />
-            <Box sx={{ flex: 1 }}>
+            <Box sx={{ flex: 1, width: "100%" }}>
               <Skeleton variant="text" width="40%" height={20} />
               <Skeleton variant="rectangular" height={60} sx={{ mt: 1 }} />
             </Box>

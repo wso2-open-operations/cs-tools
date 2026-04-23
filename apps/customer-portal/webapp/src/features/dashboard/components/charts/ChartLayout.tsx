@@ -49,7 +49,6 @@ const ChartLayout = ({
   showEngagementsChart = true,
   onSeverityClick,
   onOperationsClick,
-  onEngagementsClick,
 }: ChartLayoutProps): JSX.Element => {
   const visibleChartsCount =
     1 + (showOperationsChart ? 1 : 0) + (showEngagementsChart ? 1 : 0);
@@ -95,7 +94,6 @@ const ChartLayout = ({
             isLoading={isLoading}
             isError={isErrorEngagements}
             centerContent={singleChartMode}
-            onSliceClick={onEngagementsClick}
           />
         </Grid>
       )}
