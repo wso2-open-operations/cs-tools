@@ -552,7 +552,14 @@ export default function DashboardPage(): JSX.Element {
                   ? combinedCasesStats.averageResponseTime
                   : 0;
 
-              value = `${avg} hrs`;
+              const totalMinutes = Math.round(avg * 60);
+              const hrs = Math.floor(totalMinutes / 60);
+              const mins = totalMinutes % 60;
+              value = hrs > 0 && mins > 0
+                ? `${hrs} hr${hrs !== 1 ? "s" : ""} ${mins} min`
+                : hrs > 0
+                  ? `${hrs} hr${hrs !== 1 ? "s" : ""}`
+                  : `${mins} min`;
               isCardError = isErrorCombinedCases;
               isCardLoading =
                 !isCardError && isCombinedCasesLoading && !combinedCasesStats;

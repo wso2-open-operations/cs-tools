@@ -34,6 +34,7 @@ export interface ListStatGridProps<T extends string> {
     xl?: number;
   };
   valueFormatter?: (value: number) => string | number;
+  onStatClick?: (key: T) => void;
 }
 
 /**
@@ -62,6 +63,7 @@ export default function ListStatGrid<T extends string>({
   spacing = 2,
   itemSize = { xs: 12, sm: 6, md: 3 },
   valueFormatter,
+  onStatClick,
 }: ListStatGridProps<T>): JSX.Element {
   const xs = itemSize.xs ?? 12;
   const sm = itemSize.sm ?? 6;
@@ -91,9 +93,23 @@ export default function ListStatGrid<T extends string>({
         return (
           <Box
             key={stat.key}
+            onClick={onStatClick ? () => onStatClick(stat.key) : undefined}
+            role={onStatClick ? "button" : undefined}
+            tabIndex={onStatClick ? 0 : undefined}
+            onKeyDown={
+              onStatClick
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onStatClick(stat.key);
+                    }
+                  }
+                : undefined
+            }
             sx={{
               position: "relative",
               minWidth: 0,
+              cursor: onStatClick ? "pointer" : undefined,
             }}
           >
             {SecondaryIcon && (

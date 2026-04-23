@@ -51,9 +51,13 @@ import {
   CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL,
   CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL,
   CHANGE_REQUESTS_PAGE_DESCRIPTION,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED,
   CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_SCHEDULED,
   CHANGE_REQUESTS_PAGE_TITLE,
+  CHANGE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED,
   CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING,
+  CHANGE_REQUESTS_PAGE_TITLE_SCHEDULED,
   CHANGE_REQUESTS_SEARCH_PLACEHOLDER,
   CHANGE_REQUESTS_VIEW_TABS_CONFIG,
   OPERATIONS_LIST_BACK_LABEL,
@@ -74,8 +78,16 @@ import {
 export default function ChangeRequestsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const returnTo = (location.state as { returnTo?: string; outstandingOnly?: boolean } | null)?.returnTo;
-  const outstandingOnly = (location.state as { outstandingOnly?: boolean } | null)?.outstandingOnly ?? false;
+  const locationState = location.state as {
+    returnTo?: string;
+    outstandingOnly?: boolean;
+    actionRequired?: boolean;
+    scheduledOnly?: boolean;
+  } | null;
+  const returnTo = locationState?.returnTo;
+  const outstandingOnly = locationState?.outstandingOnly ?? false;
+  const actionRequired = locationState?.actionRequired ?? false;
+  const scheduledOnly = locationState?.scheduledOnly ?? false;
   const { projectId } = useParams<{ projectId: string }>();
   const navSegment = getOperationsNavSegment(location.pathname);
 
@@ -100,8 +112,8 @@ export default function ChangeRequestsPage(): JSX.Element {
   });
 
   const changeRequestSearchRequest = useMemo(
-    () => buildChangeRequestSearchRequest(filters, searchTerm, outstandingOnly),
-    [searchTerm, filters, outstandingOnly],
+    () => buildChangeRequestSearchRequest(filters, searchTerm, outstandingOnly, actionRequired, scheduledOnly),
+    [searchTerm, filters, outstandingOnly, actionRequired, scheduledOnly],
   );
 
   const offset = (page - 1) * rowsPerPage;
@@ -240,12 +252,12 @@ export default function ChangeRequestsPage(): JSX.Element {
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
   const visibleFilterDefinitions = useMemo(
     () =>
-      outstandingOnly
+      outstandingOnly || actionRequired || scheduledOnly
         ? CHANGE_REQUEST_FILTER_DEFINITIONS.filter(
             (def) => def.id !== ChangeRequestFilterDefinitionId.State,
           )
         : CHANGE_REQUEST_FILTER_DEFINITIONS,
-    [outstandingOnly],
+    [outstandingOnly, actionRequired, scheduledOnly],
   );
   const exportButton = (
     <Button
@@ -273,12 +285,20 @@ export default function ChangeRequestsPage(): JSX.Element {
     <Stack spacing={3}>
       <ListPageHeader
         title={
-          outstandingOnly
+          actionRequired
+            ? CHANGE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED
+            : scheduledOnly
+            ? CHANGE_REQUESTS_PAGE_TITLE_SCHEDULED
+            : outstandingOnly
             ? CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING
             : CHANGE_REQUESTS_PAGE_TITLE
         }
         description={
-          outstandingOnly
+          actionRequired
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED
+            : scheduledOnly
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_SCHEDULED
+            : outstandingOnly
             ? CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
             : CHANGE_REQUESTS_PAGE_DESCRIPTION
         }

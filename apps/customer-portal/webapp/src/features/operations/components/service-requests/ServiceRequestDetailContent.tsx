@@ -18,7 +18,6 @@ import { useState, useMemo, type JSX } from "react";
 import {
   Box,
   Button,
-  Divider,
   Paper,
   Stack,
   Typography,
@@ -86,17 +85,6 @@ export interface ServiceRequestDetailContentProps {
   onBack: () => void;
 }
 
-interface RequestDetailSection {
-  label: string;
-  value: string;
-}
-
-const WSO2_PRODUCT_LABEL_REGEX = /^\s*wso2\s*product\s*:?\s*/i;
-
-/** Names of context fields to hide from Request Details (same as create flow). */
-const REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES =
-  /^(project|deployments?|product|wso2\s*product|environment)$/i;
-
 function isPlainTextComment(content: string): boolean {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return true;
@@ -105,54 +93,6 @@ function isPlainTextComment(content: string): boolean {
     trimmed.startsWith("[code]") && trimmed.endsWith("[/code]");
   const hasInlineImageRef = /\[img:\d+\]/.test(trimmed);
   return !hasHtmlTags && !isFullCodeBlock && !hasInlineImageRef;
-}
-
-function stripWso2ProductFromText(text: string): string {
-  if (!text?.trim()) return text ?? "";
-  return text
-    .split(/\r?\n/)
-    .filter((line) => !WSO2_PRODUCT_LABEL_REGEX.test(line.trim()))
-    .join("\n")
-    .trim();
-}
-
-function parseRequestDetails(
-  descriptionHtml: string | null | undefined,
-): RequestDetailSection[] {
-  if (!descriptionHtml) {
-    return [];
-  }
-
-  if (typeof document === "undefined") {
-    return [{ label: "Details", value: descriptionHtml }];
-  }
-
-  const sections: RequestDetailSection[] = [];
-  const strongRegex = /<strong[^>]*>([\s\S]*?)<\/strong>/gi;
-  let match: RegExpExecArray | null;
-
-  while ((match = strongRegex.exec(descriptionHtml)) !== null) {
-    const label = (match[1] ?? "")
-      .replace(/<[^>]+>/g, "")
-      .trim()
-      .replace(/:$/, "");
-    const valueStart = match.index + match[0].length;
-    const nextStrong = descriptionHtml
-      .slice(valueStart)
-      .search(/<strong[^>]*>/i);
-    const valueEnd =
-      nextStrong >= 0 ? valueStart + nextStrong : descriptionHtml.length;
-    const valueHtml = descriptionHtml.slice(valueStart, valueEnd).trim();
-    if (label && valueHtml) {
-      sections.push({ label, value: valueHtml });
-    }
-  }
-
-  if (sections.length === 0 && descriptionHtml.trim()) {
-    sections.push({ label: "Details", value: descriptionHtml.trim() });
-  }
-
-  return sections;
 }
 
 export default function ServiceRequestDetailContent({
@@ -214,11 +154,6 @@ export default function ServiceRequestDetailContent({
     (srMeta.openedBy as string | undefined) ??
     (srMeta.createdBy as string | undefined) ??
     null;
-
-  const requestDetailSections = useMemo(
-    () => parseRequestDetails(data?.description),
-    [data?.description],
-  );
 
   const commentsSorted = useMemo(() => {
     const list = commentsData?.comments ?? [];
@@ -472,157 +407,6 @@ export default function ServiceRequestDetailContent({
         }}
       >
         <Stack spacing={3}>
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
-            <Typography
-              variant="subtitle2"
-              color="text.primary"
-              sx={{ mb: 1.5 }}
-            >
-              Request Details
-            </Typography>
-            {(() => {
-              const apiVariables = data?.variables ?? [];
-              const filteredVariables = apiVariables.filter(
-                (v) =>
-                  !REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES.test(
-                    (v.name ?? "").trim(),
-                  ),
-              );
-              if (filteredVariables.length > 0) {
-                return filteredVariables.map((v, index) => {
-                  const rawValue = (v.value ?? "").trim();
-                  const hasHtml =
-                    rawValue.includes("<") || rawValue.includes(">");
-                  const processedValue = hasHtml
-                    ? DOMPurify.sanitize(
-                        convertCodeTagsToHtml(
-                          stripCustomerCommentAddedLabel(rawValue),
-                        ),
-                      )
-                    : "";
-                  return (
-                    <Box key={`${v.name}-${index}`} sx={{ mb: 1.5 }}>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mb: 0.5 }}
-                      >
-                        {v.name}
-                      </Typography>
-                      {hasHtml ? (
-                        // biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify
-                        <Box
-                          component="div"
-                          sx={{
-                            "& p": { mb: 0.5 },
-                            "& p:last-child": { mb: 0 },
-                            "& code": {
-                              display: "block",
-                              p: 1,
-                              bgcolor: "action.hover",
-                              fontSize: "0.875rem",
-                              whiteSpace: "pre-wrap",
-                              overflowWrap: "break-word",
-                            },
-                          }}
-                          dangerouslySetInnerHTML={{
-                            __html: processedValue || "--",
-                          }}
-                        />
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          color="text.primary"
-                          sx={{ whiteSpace: "pre-wrap" }}
-                        >
-                          {rawValue || "--"}
-                        </Typography>
-                      )}
-                      {index < filteredVariables.length - 1 && (
-                        <Divider sx={{ mt: 1.5 }} />
-                      )}
-                    </Box>
-                  );
-                });
-              }
-              const filtered = requestDetailSections.filter(
-                (s) =>
-                  !REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES.test(s.label.trim()),
-              );
-              if (filtered.length > 0) {
-                return filtered.map((section, index) => {
-                  const processedHtml = DOMPurify.sanitize(
-                    convertCodeTagsToHtml(
-                      stripCustomerCommentAddedLabel(section.value),
-                    ),
-                  );
-                  return (
-                    <Box key={`${section.label}-${index}`} sx={{ mb: 1.5 }}>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mb: 0.5 }}
-                      >
-                        {section.label}
-                      </Typography>
-                      {/* biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify */}
-                      <Box
-                        component="div"
-                        sx={{
-                          "& p": { mb: 0.5 },
-                          "& p:last-child": { mb: 0 },
-                          "& code": {
-                            display: "block",
-                            p: 1,
-                            bgcolor: "action.hover",
-                            fontSize: "0.875rem",
-                            whiteSpace: "pre-wrap",
-                            overflowWrap: "break-word",
-                          },
-                        }}
-                        dangerouslySetInnerHTML={{ __html: processedHtml }}
-                      />
-                      {index < filtered.length - 1 && (
-                        <Divider sx={{ mt: 1.5 }} />
-                      )}
-                    </Box>
-                  );
-                });
-              }
-              const fallbackHtml = stripWso2ProductFromText(
-                data?.description ?? "",
-              );
-              const processedFallback = fallbackHtml
-                ? DOMPurify.sanitize(
-                    convertCodeTagsToHtml(
-                      stripCustomerCommentAddedLabel(fallbackHtml),
-                    ),
-                  )
-                : "";
-              return (
-                // biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify
-                <Box
-                  component="div"
-                  sx={{
-                    "& p": { mb: 0.5 },
-                    "& p:last-child": { mb: 0 },
-                    "& code": {
-                      display: "block",
-                      p: 1,
-                      bgcolor: "action.hover",
-                      fontSize: "0.875rem",
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "break-word",
-                    },
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: processedFallback || "--",
-                  }}
-                />
-              );
-            })()}
-          </Paper>
-
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
             <Typography
               variant="subtitle2"

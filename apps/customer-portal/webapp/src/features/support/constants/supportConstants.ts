@@ -68,9 +68,9 @@ export const KB_ARTICLE_VIEW_BASE_URL =
 export const ChatAction = {
   VIEW: "view",
   RESUME: "resume",
-  ACTIVE : "active",
-  OPEN : "open",
-  ABANDONED: "abandoned"
+  ACTIVE: "active",
+  OPEN: "open",
+  ABANDONED: "abandoned",
 } as const;
 
 export type ChatAction = (typeof ChatAction)[keyof typeof ChatAction];
@@ -557,9 +557,9 @@ export const SERVICE_REQUEST_STAT_CONFIGS: SupportStatConfig<ServiceRequestStatK
  * Valid keys for operations statistics.
  */
 export type OperationsStatKey =
-  | "activeServiceRequests"
-  | "activeChangeRequests"
-  | "completedThisMonth"
+  | "actionRequiredServiceRequests"
+  | "outstandingServiceRequests"
+  | "actionRequiredChangeRequests"
   | "upcomingChanges";
 
 /**
@@ -569,20 +569,20 @@ export const OPERATIONS_STAT_CONFIGS: SupportStatConfig<OperationsStatKey>[] = [
   {
     icon: Server,
     iconColor: "info",
-    key: "activeServiceRequests",
-    label: "Outstanding Service Requests",
+    key: "actionRequiredServiceRequests",
+    label: "Action Required Service Requests",
   },
   {
     icon: CalendarDays,
     iconColor: "primary",
-    key: "activeChangeRequests",
-    label: "Outstanding Change Requests",
+    key: "outstandingServiceRequests",
+    label: "Outstanding Service Requests",
   },
   {
     icon: CircleCheck,
     iconColor: "success",
-    key: "completedThisMonth",
-    label: "Completed This Month",
+    key: "actionRequiredChangeRequests",
+    label: "Action Required Change Requests",
   },
   {
     icon: Calendar,
