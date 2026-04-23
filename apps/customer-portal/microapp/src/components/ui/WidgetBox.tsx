@@ -25,7 +25,7 @@ interface WidgetBoxProps extends Omit<CardProps, "variant"> {
 export function WidgetBox({ title, children, ...props }: WidgetBoxProps) {
   return (
     <Card sx={{ height: "100%", bgcolor: "background.paper" }} {...props}>
-      <CardActionArea disableRipple={!props.onClick} sx={{ p: 1.2 }}>
+      <CardActionArea disabled={!props.onClick} sx={{ p: 1.2 }}>
         <Stack gap={0.5}>
           {title && (
             <Stack direction="row" justifyContent="space-between" alignItems="center">
