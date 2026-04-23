@@ -58,7 +58,7 @@ const CasesList = ({
               <TableCell>Created</TableCell>
               <TableCell sx={{ maxWidth: 320 }}>Details</TableCell>
               <TableCell>Severity</TableCell>
-              <TableCell>Assigned to</TableCell>
+              <TableCell align="center">Assigned to</TableCell>
               <TableCell>Status</TableCell>
             </TableRow>
           </TableHead>
@@ -208,7 +208,7 @@ const CasesList = ({
                       );
                     })()}
                   </TableCell>
-                  <TableCell>
+                  <TableCell align={assignedEngineerName ? "left" : "center"}>
                     <Typography variant="body2" color="text.primary">
                       {assignedEngineerDisplay}
                     </Typography>

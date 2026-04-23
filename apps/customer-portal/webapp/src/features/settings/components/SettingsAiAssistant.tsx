@@ -23,7 +23,6 @@ import {
   Typography,
   alpha,
   colors,
-  useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useState, useMemo, useEffect, type JSX } from "react";
@@ -58,7 +57,6 @@ export default function SettingsAiAssistant({
   projectId,
   canEdit = true,
 }: SettingsAiAssistantProps): JSX.Element {
-  const theme = useTheme();
   const { showSuccess } = useSuccessBanner();
   const { showError } = useErrorBanner();
   const { refetch: refetchProjects } = useInfiniteProjects({

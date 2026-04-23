@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Card, Box, Typography, Chip, Divider, Stack } from "@wso2/oxygen-ui";
+import { Card, Box, Typography, Chip } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { formatMinutesAsHrMin } from "@features/project-details/utils/projectDetails";
 import { getPlainChipSx } from "@features/support/utils/support";
@@ -29,13 +29,12 @@ import type { TimeTrackingCardProps } from "@features/project-details/types/proj
 export default function TimeTrackingCard({
   card,
 }: TimeTrackingCardProps): JSX.Element {
-  const { case: caseData, totalTime, billable } = card;
+  const { case: caseData, totalTime } = card;
 
   const caseNumber = caseData?.number?.trim() || "--";
   const caseName = caseData?.name?.trim() || "--";
 
   const totalTimeDisplay = formatMinutesAsHrMin(totalTime);
-  const billableDisplay = formatMinutesAsHrMin(billable.totalTime);
 
   return (
     <Card sx={{ p: "20px", display: "flex", flexDirection: "column", gap: 2 }}>

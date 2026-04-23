@@ -22,7 +22,6 @@ import {
   Divider,
   Paper,
   Stack,
-  Tooltip,
   Typography,
   alpha,
   useTheme,
@@ -168,30 +167,20 @@ export default function CaseDetailsActionRow({
                 >
                   {engineerInitials}
                 </Box>
-                <Box sx={{ minWidth: 0 }}>
-                  <Tooltip title={getAssignedEngineerLabel(assignedEngineer)}>
-                    <Typography
-                      variant="caption"
-                      color="text.primary"
-                      sx={{
-                        fontSize: "0.7rem",
-                        display: "block",
-                        lineHeight: 1.3,
-                        maxWidth: 120,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {getAssignedEngineerLabel(assignedEngineer)}
-                    </Typography>
-                  </Tooltip>
+                <Box>
                   <Typography
                     variant="caption"
                     color="text.secondary"
                     sx={{ fontSize: "0.65rem", display: "block", lineHeight: 1.3 }}
                   >
                     Support Engineer
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.primary"
+                    sx={{ fontSize: "0.7rem", display: "block", lineHeight: 1.3 }}
+                  >
+                    {getAssignedEngineerLabel(assignedEngineer)}
                   </Typography>
                 </Box>
               </Box>
