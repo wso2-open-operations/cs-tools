@@ -1,0 +1,87 @@
+name: "🐞 Report a Bug"
+description: Create an issue if something does not work as expected.
+labels: ["Type/Bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use the title in the following format:
+
+        [App/Integration] [Area] Short issue title
+
+        Examples:
+        [Customer Portal] [BE] User update API returns 500 for valid payload
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Select the affected app, integration, service, or shared module.
+      options:
+        - Customer Portal
+        - Customer Service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend
+        - Frontend
+        - Docs
+        - QA
+        - Design
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if applicable)
+      description: Specify the frontend platform if relevant.
+      options:
+        - Web App
+        - Mobile App
+        - Other
+
+  - type: textarea
+    id: bug_description
+    attributes:
+      label: What happened?
+      description: Clearly describe the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what should have happened.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Production / Staging / Local
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add logs, screenshots, links, or related details if available.

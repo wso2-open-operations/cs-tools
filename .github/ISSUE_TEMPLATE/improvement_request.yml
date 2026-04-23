@@ -1,0 +1,70 @@
+name: "🚀 Improvement Request"
+description: Suggest an improvement to existing functionality.
+labels: ["Type/Improvement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use the title in the following format:
+
+        [App/Integration] [Area] Short issue title
+
+        Example:
+        [Customer Portal] [BE] Optimize project search query performance
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Select the affected app, integration, service, or shared module.
+      options:
+        - Customer Portal
+        - Customer Service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend
+        - Frontend
+        - Docs
+        - QA
+        - Design
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if applicable)
+      description: Specify the frontend platform if relevant.
+      options:
+        - Web App
+        - Mobile App
+        - Other
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current behavior
+      description: Describe the current implementation or limitation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested_improvement
+    attributes:
+      label: Suggested improvement
+      description: Describe the change you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Benefit
+      description: Explain the value or impact of this improvement.

@@ -1,0 +1,76 @@
+name: "✍️ Create a Task"
+description: Create a task for an app, module, or shared operation in the monorepo.
+labels: ["Type/Task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use the title in the following format:
+
+        [App/Integration] [Area] Short issue title
+
+        Example:
+        [Customer Portal] [BE] Bring user management business logic to the backend
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Select the affected app, integration, service, or shared module.
+      options:
+        - Customer Portal
+        - Customer Service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the impacted area.
+      options:
+        - Backend
+        - Frontend
+        - Docs
+        - QA
+        - Design
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if applicable)
+      description: Specify the frontend platform if relevant.
+      options:
+        - Web App
+        - Mobile App
+        - Other
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Briefly describe the task.
+      placeholder: Bring user management business logic to the backend
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Provide implementation details, context, or background.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the expected outcomes for this task.
+      placeholder: |
+        - Business logic is moved to the backend
+        - Frontend uses the updated API
+        - Existing functionality remains unchanged

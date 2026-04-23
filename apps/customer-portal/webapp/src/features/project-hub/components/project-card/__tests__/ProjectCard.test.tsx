@@ -1,0 +1,134 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import type { ReactElement } from "react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import ProjectCard from "@features/project-hub/components/ProjectCard";
+import { LoaderProvider } from "@context/linear-loader/LoaderContext";
+
+// Mock @wso2/oxygen-ui
+vi.mock("@wso2/oxygen-ui", () => ({
+  Form: {
+    CardButton: ({ children, onClick }: any) => (
+      <button data-testid="card-button" onClick={onClick}>
+        {children}
+      </button>
+    ),
+  },
+  Box: ({ children }: any) => <div>{children}</div>,
+  Skeleton: () => <div data-testid="skeleton" />,
+}));
+
+// Mock sub-components
+vi.mock("../ProjectCardBadges", () => ({
+  default: ({ projectKey, slaStatus, isError, isLoading }: any) => (
+    <div data-testid="badges">
+      {isError ? "Error" : isLoading ? "Loading" : `${projectKey} ${slaStatus}`}
+    </div>
+  ),
+}));
+
+vi.mock("../ProjectCardInfo", () => ({
+  default: ({ title }: { title: string }) => (
+    <div data-testid="info">{title}</div>
+  ),
+}));
+
+vi.mock("../ProjectCardStats", () => ({
+  default: ({
+    activeChatsCount,
+    date,
+    activeCasesCount,
+    isError,
+    isLoading,
+  }: any) => (
+    <div data-testid="stats">
+      {activeChatsCount} {date} {activeCasesCount}{" "}
+      {isError ? "Error" : "No Error"}{" "}
+      {isLoading ? "Loading" : "Not Loading"}
+    </div>
+  ),
+}));
+
+vi.mock("../ProjectCardActions", () => ({
+  default: () => <div data-testid="actions" />,
+}));
+
+// Mock react-router
+const mockNavigate = vi.fn();
+vi.mock("react-router", () => ({
+  useNavigate: () => mockNavigate,
+}));
+
+// Mock mockFunctions
+vi.mock("@/models/mockFunctions", () => ({
+  getMockActiveChats: vi.fn(() => 5),
+  getMockOpenCases: vi.fn(() => 10),
+  getMockStatus: vi.fn(() => "All Good"),
+}));
+
+const renderWithLoader = (ui: ReactElement) =>
+  render(<LoaderProvider>{ui}</LoaderProvider>);
+
+describe("ProjectCard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const defaultProps = {
+    id: "1",
+    projectKey: "PROJ",
+    slaStatus: "Needs Attention",
+    title: "Project Title",
+    date: "2026-01-17",
+    activeCasesCount: 10,
+    activeChatsCount: 5,
+  };
+
+  it("should render all sub-components with correct props", () => {
+    renderWithLoader(<ProjectCard {...defaultProps} />);
+
+    expect(screen.getByTestId("badges")).toBeInTheDocument();
+    expect(screen.getByTestId("info")).toBeInTheDocument();
+    expect(screen.getByTestId("stats")).toBeInTheDocument();
+    expect(screen.getByTestId("actions")).toBeInTheDocument();
+
+    expect(screen.getByTestId("badges")).toHaveTextContent("PROJ");
+    expect(screen.getByTestId("info")).toHaveTextContent("Project Title");
+    expect(screen.getByTestId("stats")).toHaveTextContent("2026-01-17");
+  });
+
+  it("should navigate to dashboard on click", () => {
+    renderWithLoader(<ProjectCard {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("card-button"));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/projects/1/dashboard");
+  });
+
+  it("should call onViewDashboard if provided", () => {
+    const onViewDashboard = vi.fn();
+    renderWithLoader(
+      <ProjectCard {...defaultProps} onViewDashboard={onViewDashboard} />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-button"));
+
+    expect(onViewDashboard).toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

@@ -1,0 +1,22 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: rest-api
+    displayName: REST API
+    service:
+      basePath: /
+      port: 9090
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml
+
+  - name: websocket
+    displayName: WebSocket
+    service:
+      basePath: /
+      port: 9091
+    type: WS
+    networkVisibilities:
+      - Public
+    schemaFilePath: asyncapi.yaml

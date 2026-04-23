@@ -1,0 +1,135 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import type {
+  CaseDetailsHeaderVariant,
+  CaseDetailsSkeletonProps,
+} from "@features/support/types/supportComponents";
+import { Box, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
+import type { JSX } from "react";
+
+export type CaseDetailsHeaderSkeletonProps = {
+  variant?: CaseDetailsHeaderVariant;
+};
+
+/**
+ * Header-only skeleton: case ID and optional chip placeholders, title.
+ * Used by CaseDetailsHeader when loading and by CaseDetailsSkeleton.
+ *
+ * @param props - Optional variant matching {@link CaseDetailsHeader}.
+ * @returns {JSX.Element} The header skeleton block.
+ */
+export function CaseDetailsHeaderSkeleton({
+  variant = "default",
+}: CaseDetailsHeaderSkeletonProps = {}): JSX.Element {
+  return (
+    <Box>
+      <Stack
+        direction="row"
+        spacing={1.5}
+        alignItems="center"
+        sx={{ mb: 0.5, flexWrap: "wrap" }}
+      >
+        <Skeleton variant="text" width={100} height={20} />
+        {variant === "default" && (
+          <>
+            <Skeleton
+              variant="rounded"
+              width={56}
+              height={20}
+              sx={{ borderRadius: "10px" }}
+            />
+            <Skeleton variant="rounded" width={72} height={20} />
+          </>
+        )}
+        {variant === "serviceRequest" && (
+          <Skeleton variant="rounded" width={72} height={20} />
+        )}
+      </Stack>
+      <Skeleton variant="text" width="70%" height={28} sx={{ maxWidth: 400 }} />
+    </Box>
+  );
+}
+
+/**
+ * Skeleton placeholder for case details loading: header and action row only.
+ * Sub nav tab items (tabs and tab panel content) are not shown as skeleton.
+ *
+ * @param {CaseDetailsSkeletonProps} props - Optional configuration.
+ * @returns {JSX.Element} The rendered skeleton.
+ */
+export default function CaseDetailsSkeleton({
+  hideActionRow = false,
+  showEngineerOnly = false,
+  hideAssignedEngineer = false,
+  headerVariant = "default",
+}: CaseDetailsSkeletonProps = {}): JSX.Element {
+  void hideAssignedEngineer;
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <CaseDetailsHeaderSkeleton variant={headerVariant} />
+
+      {/* Action row: manage status label placeholder */}
+      {!hideActionRow && (
+        <Paper
+          variant="outlined"
+          sx={{
+            mt: 2,
+            mb: 1,
+            py: 0.5,
+            px: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 1,
+            bgcolor: "background.default",
+            minHeight: 0,
+          }}
+        >
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            {!showEngineerOnly && (
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Skeleton variant="circular" width={12} height={12} />
+                <Skeleton variant="text" width={100} height={14} />
+              </Stack>
+            )}
+          </Stack>
+        </Paper>
+      )}
+
+      {/* Security Report Analysis Progress Skeleton */}
+      {hideActionRow && (
+        <Paper
+          variant="outlined"
+          sx={{
+            mt: 2,
+            mb: 1,
+            py: 1.5,
+            px: 2,
+            bgcolor: "background.default",
+          }}
+        >
+          <Box sx={{ mb: 1 }}>
+            <Skeleton variant="text" width="40%" height={20} sx={{ mb: 0.5 }} />
+            <Skeleton variant="text" width="20%" height={16} />
+          </Box>
+          <Skeleton variant="rounded" width="100%" height={8} />
+        </Paper>
+      )}
+    </Box>
+  );
+}

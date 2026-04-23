@@ -1,0 +1,70 @@
+name: "💡 New Feature Request"
+description: Suggest new functionality or features for the product.
+labels: ["Type/New Feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use the title in the following format:
+
+        [App/Integration] [Area] Short issue title
+
+        Example:
+        [Customer Portal] [FE] Add bulk user invite flow
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Select the affected app, integration, service, or shared module.
+      options:
+        - Customer Portal
+        - Customer Service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend
+        - Frontend
+        - Docs
+        - QA
+        - Design
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform (if applicable)
+      description: Specify the frontend platform if relevant.
+      options:
+        - Web App
+        - Mobile App
+        - Other
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: Describe the solution you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add references, mockups, or other helpful details.

@@ -1,0 +1,20 @@
+window.config = {
+  CUSTOMER_PORTAL_AUTH_BASE_URL: "https://api.asgardeo.io/t/<your-tenant>",
+  CUSTOMER_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
+  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
+  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
+  CUSTOMER_PORTAL_BACKEND_BASE_URL: "<your-backend-base-url>",
+  CUSTOMER_PORTAL_THEME: "acrylicOrange",
+  CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL: "<your-chatbot-websocket-url>",
+  CUSTOMER_PORTAL_LOG_LEVEL: "ERROR",
+  CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
+  // Optional maintenance banner overrides:
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY: "info",
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE: "Scheduled maintenance",
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE: "Some services may be unavailable.",
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL: "Learn more",
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://example.com",
+  CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED: true,
+  // Optional top banner rendered above the header (raw HTML string):
+  // CUSTOMER_PORTAL_TOP_BANNER_HTML: '<div style="background-color:#000;height:6.8rem"><a href="https://wso2.com/wso2con/" target="_blank"><img style="object-fit:cover;height:100%;width:100%" src="banner.png" role="presentation"></a></div>',
+};

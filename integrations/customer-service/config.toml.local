@@ -1,0 +1,9 @@
+[customer_service.entity]
+    salesEntityBaseUrl = "<sales_entity_base_url>"
+    csEntityBaseUrl = "<cs_entity_base_url>"
+
+[customer_service.entity.clientCredentialsOauth2Config]
+    tokenUrl = "<token_url>"
+    clientId = "<client_id>"
+    clientSecret = "<client_secret>"
+    scopes = ["<scopes>"]
