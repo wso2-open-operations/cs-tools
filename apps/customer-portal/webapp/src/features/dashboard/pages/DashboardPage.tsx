@@ -45,8 +45,6 @@ import { StatCard } from "@features/dashboard/components/stats/StatCard";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
 import CasesTable from "@features/dashboard/components/cases-table/CasesTable";
 import {
-  computeCrCardIsCardError,
-  computeCrCardIsCardLoading,
   getAllCoreFailedState,
   getDashboardChartsLoadingState,
   normalizeEngagementLabel,
@@ -424,38 +422,6 @@ export default function DashboardPage(): JSX.Element {
     isChangeRequestStatsLoading,
     includeEngagementStats: permissions.hasEngagements,
   });
-
-  // cr branch state
-  const crBranchState = useMemo(() => {
-    const hasCombined = !!combinedCasesStats && !isErrorCombinedCases;
-    const hasChange = !!changeRequestStats && !isErrorChangeRequestStats;
-    const isCardLoading = computeCrCardIsCardLoading(
-      includeCrStats,
-      combinedCasesStats,
-      changeRequestStats,
-      isCombinedCasesLoading,
-      isChangeRequestStatsLoading,
-      isErrorCombinedCases,
-      isErrorChangeRequestStats,
-    );
-    const isCardError = computeCrCardIsCardError(
-      includeCrStats,
-      isCardLoading,
-      combinedCasesStats,
-      changeRequestStats,
-      isErrorCombinedCases,
-      isErrorChangeRequestStats,
-    );
-    return { hasCombined, hasChange, isCardLoading, isCardError };
-  }, [
-    changeRequestStats,
-    combinedCasesStats,
-    includeCrStats,
-    isChangeRequestStatsLoading,
-    isCombinedCasesLoading,
-    isErrorChangeRequestStats,
-    isErrorCombinedCases,
-  ]);
 
   // render
   if (isForbidden) {
