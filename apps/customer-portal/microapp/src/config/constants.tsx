@@ -104,7 +104,7 @@ export const TIMELINE_META: Omit<ProgressTimelineEntryProps, "variant">[] = [
 ];
 
 export const TAB_CONFIG = {
-  case: { title: "Open Cases", subtitle: "Active support tickets" },
+  case: { title: "Outstanding Cases", subtitle: "Active support tickets" },
   chat: { title: "Chat History", subtitle: "Recent Novera conversations" },
   service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
   change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
@@ -131,3 +131,7 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   sra: "Search Security Report Analysis",
   engagement: "Search Engagement",
 };
+
+export const OUTSTANDING_CASE_STATUS_IDS = [1, 10, 18, 1003, 6, 1006];
+export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
+export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];

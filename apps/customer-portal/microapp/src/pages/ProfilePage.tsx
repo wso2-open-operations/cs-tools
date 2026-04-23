@@ -16,7 +16,7 @@
 
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { Card, Divider, Skeleton, Stack, Switch, Typography, colors } from "@wso2/oxygen-ui";
-import { Bell, BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-icons-react";
+import { BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-icons-react";
 import { useLayout } from "@context/layout";
 import { SettingListItem } from "@components/features/settings";
 import { Avatar } from "@components/features/users";
@@ -27,8 +27,9 @@ import { projects } from "../services/projects";
 import { useNotify } from "../context/snackbar";
 import { metadata } from "../services/metadata";
 import { getVersion, openUrl } from "../components/microapp-bridge";
-import { CHANGE_PASSWORD_URL } from "../config/endpoints";
 import { useMe } from "../context/me";
+
+import { CHANGE_PASSWORD_URL } from "../config/endpoints";
 
 export default function ProfilePage() {
   const layout = useLayout();
@@ -123,10 +124,6 @@ export default function ProfilePage() {
           }
         />
         <SettingListItem name="Update Profile" suffix="chevron" icon={User} to="/profile/update" />
-      </SectionCard>
-
-      <SectionCard title="Notifications">
-        <SettingListItem name="Push Notifications" icon={Bell} suffix={<Switch defaultChecked />} />
       </SectionCard>
 
       {isAdmin && (

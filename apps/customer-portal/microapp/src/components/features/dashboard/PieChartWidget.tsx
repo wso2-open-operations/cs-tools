@@ -35,14 +35,26 @@ interface PieChartWidgetProps {
 export function PieChartWidget({ title, data }: PieChartWidgetProps) {
   const loading = !data;
   const total = data?.reduce((sum, item) => sum + item.value, 0);
+  const isEmpty = !loading && total === 0;
 
   return (
     <WidgetBox title={title}>
-      <Box position="relative" display="flex" alignItems="center" width="100%">
+      <Box position="relative" display="flex" alignItems="center" justifyContent="center" width="100%">
         {loading ? (
           <Box display="flex" justifyContent="center" width="100%" py={1}>
             <Skeleton variant="circular" width={130} height={130} animation="wave" />
           </Box>
+        ) : isEmpty ? (
+          <Box
+            sx={{
+              width: 130,
+              height: 130,
+              borderRadius: "50%",
+              border: "3px dashed",
+              borderColor: "divider",
+              my: 2,
+            }}
+          />
         ) : (
           <PieChart
             height={150}
@@ -56,20 +68,22 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
           />
         )}
 
-        <Typography
-          variant="h5"
-          sx={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            height: "100%",
-            width: "100%",
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          {total}
-        </Typography>
+        {!isEmpty && (
+          <Typography
+            variant="h5"
+            sx={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              height: "100%",
+              width: "100%",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            {total}
+          </Typography>
+        )}
       </Box>
 
       <Stack gap={0.5} mt={1}>
@@ -97,22 +111,6 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
               </Stack>
             ))}
       </Stack>
-
-      {/* <Stack gap={0.5} mt={1}>
-        {data.map((item, index) => (
-          <Stack key={index} direction="row" justifyContent="space-between">
-            <Stack direction="row" alignItems="center" gap={1}>
-              <Circle sx={{ fontSize: 12, color: item.color }} />
-              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-                {item.label}
-              </Typography>
-            </Stack>
-            <Typography variant="subtitle2" color="text.secondary">
-              {item.value}
-            </Typography>
-          </Stack>
-        ))}
-      </Stack> */}
     </WidgetBox>
   );
 }

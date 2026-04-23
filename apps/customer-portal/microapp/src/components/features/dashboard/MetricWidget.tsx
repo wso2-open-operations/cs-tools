@@ -29,14 +29,15 @@ export interface MetricWidgetProps {
     direction: "up" | "down";
     value: number | string;
   };
+  onClick?: () => void;
 }
 
-export function MetricWidget({ label, value, icon, size, base, trend }: MetricWidgetProps) {
+export function MetricWidget({ label, value, icon, size, base, trend, onClick }: MetricWidgetProps) {
   const small = size === "small";
   const TrendIcon = trend?.direction === "up" ? TrendingUp : TrendingDown;
 
   return (
-    <WidgetBox>
+    <WidgetBox onClick={onClick}>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         {!base && icon}
 

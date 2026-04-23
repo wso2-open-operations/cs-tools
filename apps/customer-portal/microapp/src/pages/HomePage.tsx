@@ -15,7 +15,7 @@
 // under the License.
 
 import { Grid, colors, pxToRem } from "@wso2/oxygen-ui";
-import { CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
+import { Activity, CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget, PieChartWidget } from "@components/features/dashboard";
 import { useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
@@ -23,9 +23,13 @@ import { useProject } from "@context/project";
 import { changeRequests } from "../services/changes";
 import { overrideOrDefault } from "../utils/others";
 import { Fab } from "../components/core";
+import { useNavigate } from "react-router-dom";
+
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
+import type { ModeType } from "./AllItemsPage";
 
 export default function HomePage() {
+  const navigate = useNavigate();
   const {
     projectId,
     features: { hasServiceRequestReadAccess, hasChangeRequestReadAccess, hasEngagementsReadAccess } = {},
@@ -59,20 +63,10 @@ export default function HomePage() {
   const isInteractionsLoading =
     multipleCaseTypesStats === undefined || (hasChangeRequestReadAccess && changeRequestCaseTypeStats === undefined);
 
-  // const totalInteractions =
-  //   multipleCaseTypesStats?.totalCount != undefined && changeRequestCaseTypeStats?.totalCount != undefined
-  //     ? multipleCaseTypesStats.totalCount + changeRequestCaseTypeStats.totalCount
-  //     : undefined;
-
   const totalInteractions = isInteractionsLoading
     ? undefined
     : (multipleCaseTypesStats?.totalCount ?? 0) +
       (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.totalCount ?? 0) : 0);
-
-  // const activeInteractions =
-  //   multipleCaseTypesStats?.activeCount != undefined && changeRequestCaseTypeStats?.activeCount != undefined
-  //     ? multipleCaseTypesStats.activeCount + changeRequestCaseTypeStats.activeCount
-  //     : undefined;
 
   const activeInteractions = isInteractionsLoading
     ? undefined
@@ -80,9 +74,7 @@ export default function HomePage() {
       (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.activeCount ?? 0) : 0);
 
   const resolvedThisMonth = defaultCaseTypeStats?.resolvedCases.pastThirtyDays;
-  const resolvedThisMonthChangeRate = defaultCaseTypeStats?.changeRate.resolvedEngagements;
   const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
-  const averageResponseTimeChangeRate = defaultCaseTypeStats?.changeRate.averageResponseTime;
 
   const outstandingSupportCasesPieData = defaultCaseTypeStats?.outstandingSeverityCount.map((item) => ({
     label: overrideOrDefault(item.label),
@@ -121,29 +113,36 @@ export default function HomePage() {
             label="Action Required"
             value={totalInteractions}
             icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
+            onClick={() =>
+              navigate("/cases/all", { state: { mode: { type: "status", status: "action_required" } as ModeType } })
+            }
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
             label="Outstanding"
             value={activeInteractions}
-            icon={<OctagonAlert size={pxToRem(18)} color={colors.yellow[700]} />}
+            icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
+            onClick={() =>
+              navigate("/cases/all", { state: { mode: { type: "status", status: "outstanding" } as ModeType } })
+            }
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Resolved"
+            label="Closed"
             value={resolvedThisMonth}
-            trend={{ direction: "up", value: `${resolvedThisMonthChangeRate ?? 0}%` }}
-            icon={<CircleCheck size={pxToRem(18)} color={colors.green[700]} />}
+            icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
+            onClick={() =>
+              navigate("/cases/all", { state: { mode: { type: "status", status: "resolved" } as ModeType } })
+            }
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
             label="Average Response Time"
             value={averageResponseTime !== undefined ? `${averageResponseTime}h` : undefined}
-            trend={{ direction: "down", value: `${averageResponseTimeChangeRate ?? 0}%` }}
-            icon={<Clock4 size={pxToRem(18)} color={colors.purple[500]} />}
+            icon={<Activity size={pxToRem(18)} color={colors.cyan[500]} />}
           />
         </Grid>
 

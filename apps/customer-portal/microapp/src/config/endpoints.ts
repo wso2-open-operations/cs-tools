@@ -52,8 +52,8 @@ export const USER_ACTIONS_ENDPOINT = (id: string, email: string) => `/projects/$
 export const METADATA_ENDPOINT = "/metadata";
 export const NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT = (sessionId: string) =>
   import.meta.env.VITE_BACKEND_URL.replace("https://", "wss://").replace(
-    "/v1.3",
-    `/websocket/v1.3/ws?sessionId=${sessionId}`,
+    "/v1.0",
+    `/websocket/v1.0/ws?sessionId=${sessionId}`,
   );
 
 export const CHANGE_PASSWORD_URL = "https://wso2.com/user/password";

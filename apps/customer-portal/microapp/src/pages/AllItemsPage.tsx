@@ -25,20 +25,63 @@ import {
   type ItemCardProps,
 } from "@components/features/support";
 import { Skeleton, Stack } from "@wso2/oxygen-ui";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo } from "react";
 import { ErrorBoundary } from "../components/core";
 import { SecurityReportAnalysisListContent } from "../components/features/support/SecurityReportAnalysisListContent";
 import { EngagementListContent } from "../components/features/support/EngagementListContent";
 import ErrorState from "../components/shared/ErrorState";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 
+export type ModeType = OfStatusModeType | OfSeverityModeType;
+
+export interface OfStatusModeType {
+  type: "status";
+  status: "action_required" | "outstanding" | "resolved";
+}
+
+export interface OfSeverityModeType {
+  type: "severity";
+  severity: string;
+}
+
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const filter = searchParams.get("filter") ?? "all";
   const search = (searchParams.get("search") ?? "").toLowerCase();
   const { reset } = useQueryErrorResetBoundary();
+
+  const mode: ModeType | undefined = location.state?.mode;
+
+  const { setTitleOverride } = useLayout();
+
+  useEffect(() => {
+    if (!mode) return;
+
+    const value = (() => {
+      switch (mode.type) {
+        case "status":
+          switch (mode.status) {
+            case "action_required":
+              return "Action Required";
+
+            case "outstanding":
+              return "Outstanding";
+
+            case "resolved":
+              return "Resolved";
+          }
+      }
+    })();
+
+    setTitleOverride(value);
+
+    return () => {
+      setTitleOverride(undefined);
+    };
+  }, [mode]);
 
   return (
     <Stack gap={2}>
@@ -59,9 +102,12 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
 }
 
 function ItemsListContent({ type, filter, search }: { type: ItemCardProps["type"]; filter: string; search: string }) {
+  const location = useLocation();
+  const mode: ModeType | undefined = location.state?.mode;
+
   switch (type) {
     case "case":
-      return <CaseListContent filter={filter} search={search} />;
+      return <CaseListContent filter={filter} search={search} mode={mode} />;
     case "chat":
       return <ChatListContent filter={filter} search={search} />;
     case "service":
@@ -78,9 +124,19 @@ function ItemsListContent({ type, filter, search }: { type: ItemCardProps["type"
 }
 
 export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
+  const location = useLocation();
+  const mode: ModeType | undefined = location.state?.mode;
+
+  const showTabs = useMemo(() => {
+    if (mode?.type === "status") {
+      return (["action_required", "outstanding"] as (typeof mode.status)[]).includes(mode.status);
+    }
+    return true;
+  }, [mode]);
+
   return (
     <ErrorBoundary fallback={<FilterSlotBuilderSkeleton />}>
-      <FilterSlotContent type={type} />
+      <FilterSlotContent type={type} state={location.state} showTabs={showTabs} />
     </ErrorBoundary>
   );
 }

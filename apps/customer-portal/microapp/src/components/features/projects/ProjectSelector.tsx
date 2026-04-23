@@ -56,7 +56,7 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
         },
       }}
     >
-      <Typography color="text.secondary" fontWeight="medium" sx={{ fontSize: pxToRem(13) }} px={2}>
+      <Typography color="text.secondary" fontWeight="medium" sx={{ fontSize: pxToRem(12) }} px={2}>
         Select Project
       </Typography>
       <ErrorBoundary fallback={fallback}>

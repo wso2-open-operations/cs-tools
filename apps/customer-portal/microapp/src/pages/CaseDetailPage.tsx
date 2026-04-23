@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ms from "ms";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -57,10 +56,6 @@ export default function CaseDetailPage() {
   });
 
   const issueType = filters?.issueTypes.find((issueType) => issueType.id === data?.issueTypeId)?.label;
-
-  const slaResponseTimeInMilliseconds = Number.isFinite(Number(data?.slaResponseTime))
-    ? Number(data?.slaResponseTime)
-    : undefined;
 
   const mutation = useMutation({
     ...cases.createComment(id!),
@@ -189,16 +184,7 @@ export default function CaseDetailPage() {
               <InfoField label="Category" value={isLoading || isFiltersLoading ? undefined : (issueType ?? "N/A")} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="SLA Response Time"
-                value={
-                  isLoading
-                    ? undefined
-                    : slaResponseTimeInMilliseconds !== undefined
-                      ? ms(slaResponseTimeInMilliseconds, { long: true })
-                      : "N/A"
-                }
-              />
+              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
             </Grid>
             <Grid size={6}>
               <InfoField
@@ -214,9 +200,6 @@ export default function CaseDetailPage() {
                   })
                   .replace("at", " ")}
               />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
             </Grid>
           </Grid>
         </SectionCard>

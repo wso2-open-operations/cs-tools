@@ -1,5 +1,5 @@
 import { useProject } from "@root/src/context/project";
-import { ItemsListContentSkeleton, usePaginationSubtitleOverride } from "@root/src/pages/AllItemsPage";
+import { ItemsListContentSkeleton, usePaginationSubtitleOverride, type ModeType } from "@root/src/pages/AllItemsPage";
 import { cases } from "@root/src/services/cases";
 import type { GetCasesRequestDto } from "@root/src/types";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -10,10 +10,29 @@ import React from "react";
 import { ItemCardExtended } from "./ItemCardExtended";
 import { ITEM_DETAIL_PATHS } from "@root/src/config/constants";
 
-export function CaseListContent({ filter, search }: { filter: string; search: string }) {
+export function CaseListContent({ filter, search, mode }: { filter: string; search: string; mode?: ModeType }) {
   const { projectId } = useProject();
 
   const filters: GetCasesRequestDto["filters"] = {};
+
+  if (mode) {
+    switch (mode.type) {
+      case "status":
+        switch (mode.status) {
+          case "action_required":
+            filters.statusIds = [18, 6];
+            break;
+
+          case "outstanding":
+            filters.statusIds = [1, 10, 6, 1006];
+            break;
+
+          case "resolved":
+            filters.statusIds = [3];
+            break;
+        }
+    }
+  }
 
   if (filter !== "all") {
     filters.statusIds = [Number(filter)];
