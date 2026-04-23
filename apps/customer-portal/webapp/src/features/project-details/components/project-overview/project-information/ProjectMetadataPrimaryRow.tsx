@@ -16,10 +16,7 @@
 
 import { Box, Chip, Grid, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import {
-  getProjectTypeColor,
-  getSupportTierColor,
-} from "@features/project-details/utils/projectDetails";
+import { getSupportTierColor } from "@features/project-details/utils/projectDetails";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { PROJECT_METADATA_CHIP_SX } from "@features/project-details/constants/projectInformationConstants";
 import type { ProjectMetadataPrimaryRowProps } from "@features/project-details/types/projectDetailsComponents";
@@ -32,7 +29,6 @@ import type { ProjectMetadataPrimaryRowProps } from "@features/project-details/t
  */
 export default function ProjectMetadataPrimaryRow({
   createdDate,
-  type,
   supportTier,
   isLoading,
   isError,
@@ -68,44 +64,6 @@ export default function ProjectMetadataPrimaryRow({
             <ErrorIndicator entityName="project metadata" />
           ) : (
             <Typography variant="body2">{createdDate}</Typography>
-          )}
-        </Box>
-      </Grid>
-      <Grid size={{ xs: 12, md: 4 }}>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-          }}
-        >
-          <Typography
-            variant="body2"
-            fontWeight="medium"
-            sx={{ display: "block", mb: 0.5 }}
-          >
-            Project Type
-          </Typography>
-          {isLoading || isError ? (
-            <Skeleton variant="rounded" width={80} height={24} />
-          ) : type?.label ? (
-            <Tooltip title={type.label} arrow>
-              <Chip
-                label={type.label}
-                size="small"
-                variant="outlined"
-                color={getProjectTypeColor(type.label)}
-                sx={PROJECT_METADATA_CHIP_SX}
-              />
-            </Tooltip>
-          ) : (
-            <Chip
-              label=""
-              size="small"
-              variant="outlined"
-              color={getProjectTypeColor("")}
-              sx={PROJECT_METADATA_CHIP_SX}
-            />
           )}
         </Box>
       </Grid>

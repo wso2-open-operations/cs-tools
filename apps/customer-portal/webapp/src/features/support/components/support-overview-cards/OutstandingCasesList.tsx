@@ -36,6 +36,7 @@ import {
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
+import { getChangeRequestStateColor } from "@features/operations/utils/changeRequestUi";
 
 /**
  * Renders a list of outstanding case rows for the support overview card.
@@ -48,6 +49,7 @@ export default function OutstandingCasesList({
   isLoading,
   isError,
   onCaseClick,
+  useChangeRequestColors = false,
 }: OutstandingCasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -100,8 +102,9 @@ export default function OutstandingCasesList({
   return (
     <Box sx={listShellSx}>
       {cases.map((c) => {
-        const colorPath = getStatusColor(c.status?.label);
-        const resolvedColor = resolveColorFromTheme(colorPath, theme);
+        const resolvedColor = useChangeRequestColors
+          ? getChangeRequestStateColor(c.status)
+          : resolveColorFromTheme(getStatusColor(c.status?.label), theme);
 
         return (
           <Form.CardButton

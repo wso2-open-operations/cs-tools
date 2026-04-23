@@ -369,6 +369,7 @@ export default function OperationsPage(): JSX.Element {
                       cases={changeRequestsAsCases}
                       isLoading={isCrLoading}
                       isError={isCrError}
+                      useChangeRequestColors
                       onCaseClick={
                         projectId
                           ? (c) =>

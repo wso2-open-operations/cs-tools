@@ -20,11 +20,13 @@ import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
+import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { getProjectSeverityPolicy } from "@utils/permission";
 import { isS0Case } from "@features/support/utils/support";
 import { hasListSearchOrFilters } from "@features/support/utils/support";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
+import { CaseType } from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
 import { ENGAGEMENTS_PAGE_SIZE } from "@/features/engagements/constants/engagements";
 import { EngagementsSortField } from "@features/engagements/types/engagements";
@@ -32,6 +34,7 @@ import {
   buildEngagementSearchRequest,
   buildEngagementDetailPath,
   computeEngagementsCasesAreaLoading,
+  computeEngagementsStatsLoading,
   computeEngagementsTotalItems,
   getEngagementsCurrentPageCases,
   parseEngagementsSortField,
@@ -77,6 +80,22 @@ export function useEngagementsPageState() {
   const { excludeS0, restrictSeverityToLow } = severityPolicy;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
+
+  const {
+    data: stats,
+    isLoading: isStatsQueryLoading,
+    isError: isStatsError,
+  } = useGetProjectCasesStats(projectId || "", {
+    caseTypes: [CaseType.ENGAGEMENT],
+    enabled: !!projectId,
+  });
+
+  const hasStatsResponse = stats !== undefined;
+  const isStatsLoading = computeEngagementsStatsLoading(
+    isStatsQueryLoading,
+    hasStatsResponse,
+    projectId,
+  );
 
   const engagementSearchRequest = useMemo(
     () =>
@@ -199,6 +218,9 @@ export function useEngagementsPageState() {
     excludeS0,
     restrictSeverityToLow,
     filterMetadata,
+    stats,
+    isStatsLoading,
+    isStatsError,
     searchTerm,
     isFiltersOpen,
     setIsFiltersOpen,
