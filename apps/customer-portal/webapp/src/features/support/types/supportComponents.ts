@@ -63,6 +63,7 @@ export type OutstandingCasesListProps = {
   isError?: boolean;
   onCaseClick?: (caseItem: CaseListItem) => void;
   useChangeRequestColors?: boolean;
+  showInternalId?: boolean;
 };
 
 export type CaseDetailsDetailsPanelProps = {
