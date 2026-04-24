@@ -981,9 +981,9 @@ export function getStatusColor(label?: string): string {
     case CaseStatus.WORK_IN_PROGRESS:
       return colors.green[500];
     case CaseStatus.AWAITING_INFO:
-      return colors.orange[500];
+      return colors.orange[900];
     case CaseStatus.WAITING_ON_WSO2:
-      return colors.yellow[500];
+      return colors.yellow[800];
     case CaseStatus.SOLUTION_PROPOSED:
       return colors.purple[900];
     case CaseStatus.CLOSED:
