@@ -16,7 +16,7 @@
 
 import { Grid, colors, pxToRem } from "@wso2/oxygen-ui";
 import { Activity, CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
-import { MetricWidget, PieChartWidget } from "@components/features/dashboard";
+import { MetricWidget, PieChartWidget, type PieDataItem } from "@components/features/dashboard";
 import { useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { useProject } from "@context/project";
@@ -88,22 +88,48 @@ export default function HomePage() {
     color: ENGAGEMENTS_TYPE_PIE_COLORS[item.label] || colors.grey[500],
   }));
 
+  const data: PieDataItem[] = [];
+
+  if (hasServiceRequestReadAccess) {
+    data.push({
+      label: "Service Requests",
+      value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
+      color: colors.orange[500],
+    });
+  }
+
+  if (hasChangeRequestReadAccess) {
+    data.push({
+      label: "Change Requests",
+      value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
+      color: colors.blue[500],
+    });
+  }
+
   const outstandingOperationsPieData =
     serviceRequestCaseTypeStats?.outstandingCount != undefined ||
     changeRequestCaseTypeStats?.outstandingCount != undefined
-      ? [
-          {
-            label: "Service Requests",
-            value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
-            color: colors.orange[500],
-          },
-          {
-            label: "Change Requests",
-            value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
-            color: colors.blue[500],
-          },
-        ]
+      ? data
       : undefined;
+
+  // const outstandingOperationsPieData =
+  //   serviceRequestCaseTypeStats?.outstandingCount != undefined ||
+  //   changeRequestCaseTypeStats?.outstandingCount != undefined
+  //     ? [
+  //         hasServiceRequestReadAccess && {
+  //           label: "Service Requests",
+  //           value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
+  //           color: colors.orange[500],
+  //         },
+
+  //         hasChangeRequestReadAccess && {
+  //           label: "Change Requests",
+  //           value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
+  //           color: colors.blue[500],
+  //         },
+  //       ].filter(Boolean)
+  //       filter((item): item is PieDataItem => Boolean(item))
+  //     : undefined;
 
   return (
     <>
