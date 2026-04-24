@@ -169,6 +169,7 @@ export interface CaseClassificationResponseDto {
 
 export interface CasesStatsDto {
   totalCount: number;
+  actionRequiredCount: number;
   activeCount: number;
   outstandingCount: number;
   averageResponseTime: number;

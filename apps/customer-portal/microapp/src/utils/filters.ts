@@ -1,3 +1,4 @@
+import type { ItemCardProps } from "../components/features/support";
 import type { ModeType, OfStatusModeType } from "../pages/AllItemsPage";
 import type { EntityReference } from "../types";
 
@@ -21,3 +22,10 @@ export function getAllowedFilters(filters: EntityReference[], mode?: ModeType) {
       return filters;
   }
 }
+
+export const STATUS_MODE_TYPES: Partial<Record<OfStatusModeType["status"], Exclude<ItemCardProps["type"], "chat">[]>> =
+  {
+    action_required: ["case", "service", "change", "sra", "engagement"],
+    outstanding: ["case", "service", "change", "sra", "engagement"],
+    resolved: ["case", "service", "change", "sra", "engagement"],
+  };
