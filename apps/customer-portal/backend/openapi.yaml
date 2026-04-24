@@ -2795,10 +2795,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
@@ -3370,9 +3372,9 @@ components:
           items:
             type: integer
             format: int64
-        startDate:
+        closedStartDate:
           $ref: '#/components/schemas/UtcDateTimeString'
-        endDate:
+        closedEndDate:
           $ref: '#/components/schemas/UtcDateTimeString'
         deploymentId:
           type: string
@@ -3634,6 +3636,10 @@ components:
               type: integer
               description: Change request impact key
               format: int64
+            closedStartDate:
+              $ref: '#/components/schemas/UtcDateTimeString'
+            closedEndDate:
+              $ref: '#/components/schemas/UtcDateTimeString'
           additionalProperties: false
           description: Filter criteria
         pagination:
@@ -4854,6 +4860,7 @@ components:
       - actionRequiredCount
       - activeCount
       - outstandingCount
+      - resolvedCount
       - stateCount
       - totalCount
       type: object
@@ -4880,6 +4887,27 @@ components:
           description: Count of change requests by state
           items:
             $ref: '#/components/schemas/ReferenceItem'
+        resolvedCount:
+          required:
+          - currentMonth
+          - pastThirtyDays
+          - total
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total resolved count
+              format: int64
+            currentMonth:
+              type: integer
+              description: Current month resolved count
+              format: int64
+            pastThirtyDays:
+              type: integer
+              description: Past thirty days resolved count
+              format: int64
+          additionalProperties: false
+          description: Resolved change request count breakdown
       additionalProperties: false
       description: Change request statistics.
     ProjectFeatures:

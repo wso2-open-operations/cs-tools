@@ -46,8 +46,8 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             deploymentId: payload.filters?.deploymentId,
             createdByMe: payload.filters?.createdByMe,
             engagementTypeKeys: payload.filters?.engagementTypeKeys,
-            startDate: payload.filters?.startDate,
-            endDate: payload.filters?.endDate
+            closedStartDate: payload.filters?.closedStartDate,
+            closedEndDate: payload.filters?.closedEndDate
         },
         pagination: payload.pagination,
         sortBy: payload.sortBy
@@ -881,7 +881,12 @@ public isolated function mapProjectChangeRequestStatsResponse(entity:ProjectChan
         activeCount: response.activeCount,
         outstandingCount: response.outstandingCount,
         actionRequiredCount: response.actionRequiredCount,
-        stateCount
+        stateCount,
+        resolvedCount: {
+            total: response.resolvedCount.total,
+            currentMonth: response.resolvedCount.currentMonth,
+            pastThirtyDays: response.resolvedCount.pastThirtyDays
+        }
     };
 }
 

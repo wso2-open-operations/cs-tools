@@ -437,10 +437,10 @@ public type CaseSearchFilters record {|
     int severityKey?;
     # Engagement type keys (required for engagement type cases)
     int[] engagementTypeKeys?;
-    # Start date
-    UtcDateTimeString startDate?;
-    # End date
-    UtcDateTimeString endDate?;
+    # Start date for closed date
+    UtcDateTimeString closedStartDate?;
+    # End date for closed date
+    UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
     # Case created by the logged in user
@@ -2018,6 +2018,10 @@ public type ChangeRequestSearchPayload record {|
         int[] stateKeys?;
         # Change request impact key
         int impactKey?;
+        # Start date for closed date filter
+        UtcDateTimeString closedStartDate?;
+        # End date for closed date filter
+        UtcDateTimeString closedEndDate?;
     |} filters?;
     # Pagination details
     Pagination pagination?;
@@ -2164,6 +2168,16 @@ public type ProjectChangeRequestStatsResponse record {|
     int actionRequiredCount;
     # Count of change requests by state
     ChoiceListItem[] stateCount;
+    # Resolved change request count breakdown
+    record {|
+        # Total resolved count
+        int total;
+        # Current month resolved count
+        int currentMonth;
+        # Past thirty days resolved count
+        int pastThirtyDays;
+        json...;
+    |} resolvedCount;
     json...;
 |};
 

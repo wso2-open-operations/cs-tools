@@ -1352,7 +1352,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if isInvalidDateRange(payload.filters?.startDate, payload.filters?.endDate) {
+        if isInvalidDateRange(payload.filters?.closedStartDate, payload.filters?.closedEndDate) {
             return <http:BadRequest>{
                 body: {
                     message: "Start date must not be after End date"
@@ -3984,7 +3984,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                         projectIds: [id],
                         searchQuery: payload.filters?.searchQuery,
                         stateKeys: payload.filters?.stateKeys,
-                        impactKey: payload.filters?.impactKey
+                        impactKey: payload.filters?.impactKey,
+                        closedStartDate: payload.filters?.closedStartDate,
+                        closedEndDate: payload.filters?.closedEndDate
                     },
                     pagination: payload.pagination
                 });
