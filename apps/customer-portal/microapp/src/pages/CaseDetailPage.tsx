@@ -18,7 +18,7 @@ import ms from "ms";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeftRightIcon, CheckIcon, CircleX, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
+import { CheckIcon, CircleX, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
@@ -112,10 +112,6 @@ export default function CaseDetailPage() {
           editCaseMutation.mutate({ stateKey: closedStateKey });
         },
         onRejectSolution: () => {
-          if (waitingOnWso2StateKey === undefined) return;
-          editCaseMutation.mutate({ stateKey: waitingOnWso2StateKey });
-        },
-        onMarkWaiting: () => {
           if (waitingOnWso2StateKey === undefined) return;
           editCaseMutation.mutate({ stateKey: waitingOnWso2StateKey });
         },
@@ -299,7 +295,6 @@ function getCaseMenuOptions(
     onResolve: () => void;
     onAcceptSolution: () => void;
     onRejectSolution: () => void;
-    onMarkWaiting: () => void;
     onCreateRelated: () => void;
   }>,
 ): MenuOptionProps[] {
@@ -322,15 +317,8 @@ function getCaseMenuOptions(
       label: "Reject Solution",
       color: "error",
       icon: <CircleX />,
-      hidden: !isSolutionProposed,
+      hidden: !isSolutionProposed && !isAwaitingInfo,
       onClick: actions?.onRejectSolution,
-    },
-    {
-      label: "Mark as Waiting on WSO2",
-      color: "warning",
-      icon: <ArrowLeftRightIcon />,
-      hidden: !isAwaitingInfo,
-      onClick: actions?.onMarkWaiting,
     },
     {
       label: "Create Related Case",
