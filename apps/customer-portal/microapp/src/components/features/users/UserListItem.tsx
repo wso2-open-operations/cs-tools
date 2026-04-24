@@ -39,7 +39,7 @@ export function UserListItem({ firstName, lastName, email, roles }: User) {
       component={Link}
       elevation={0}
       to="/users/edit"
-      state={{ email, firstName, lastName, role: roles[0] }}
+      state={{ email, firstName, lastName, roles }}
       sx={{ textDecoration: "none", p: 1 }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>

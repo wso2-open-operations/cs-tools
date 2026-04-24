@@ -14,64 +14,112 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Stack, Chip, Radio, RadioGroup, FormControlLabel, Box, pxToRem, useRadioGroup } from "@wso2/oxygen-ui";
+import { Stack, Checkbox, FormControlLabel, Typography, Box, pxToRem } from "@wso2/oxygen-ui";
 import { ShieldUser } from "@wso2/oxygen-ui-icons-react";
 import { MOCK_ROLES } from "@src/mocks/data/users";
 import type { Role } from "@root/src/types";
 
-export type RoleName = (typeof MOCK_ROLES)[number]["name"];
+export type RoleName = Role;
 
 interface RoleSelectorProps {
-  value: Role;
-  onChange: (value: Role) => void;
-  lockOnSystemUser?: boolean;
+  value: Role[];
+  onChange: (value: Role[]) => void;
 }
 
-export function RoleSelector({ value, onChange, lockOnSystemUser = false }: RoleSelectorProps) {
-  const isSystemUserLocked = lockOnSystemUser && value === "System User";
+export function RoleSelector({ value, onChange }: RoleSelectorProps) {
+  const hasSystemUser = value.includes("System User");
+
+  const toggleRole = (role: Role) => {
+    if (role === "System User") {
+      onChange(hasSystemUser ? ["Portal User"] : ["System User"]);
+      return;
+    }
+
+    if (hasSystemUser) return;
+
+    if (value.includes(role)) {
+      const nextRoles = value.filter((existingRole) => existingRole !== role);
+      onChange(nextRoles.length > 0 ? nextRoles : ["Portal User"]);
+      return;
+    }
+
+    onChange([...value, role]);
+  };
 
   return (
-    <RadioGroup
-      value={value}
-      onChange={(event) => {
-        if (isSystemUserLocked) return;
-        onChange(event.target.value as Role);
-      }}
-    >
-      <Stack gap={0.5}>
-        {MOCK_ROLES.map((role) => (
-          <RoleOption key={role.name} role={role.name} disabled={isSystemUserLocked && role.name !== "System User"} />
-        ))}
-      </Stack>
-    </RadioGroup>
+    <Stack gap={1}>
+      {MOCK_ROLES.map((role) => (
+        <RoleOption
+          key={role.name}
+          role={role.name as RoleName}
+          description={role.description}
+          selected={value.includes(role.name as Role)}
+          disabled={hasSystemUser && role.name !== "System User"}
+          onClick={toggleRole}
+        />
+      ))}
+
+      {hasSystemUser && (
+        <Box
+          sx={(theme) => ({
+            px: 1.5,
+            py: 1,
+            borderRadius: 1,
+            border: "1px solid",
+            borderColor: theme.palette.warning.main,
+            bgcolor: theme.palette.warning[50],
+          })}
+        >
+          <Typography variant="caption" color="warning.dark" fontWeight="medium">
+            System Users are used for machine-to-machine integrations and cannot hold additional roles.
+          </Typography>
+        </Box>
+      )}
+    </Stack>
   );
 }
 
-export function RoleOption({ role, disabled = false }: { role: RoleName; disabled?: boolean }) {
-  const radioGroup = useRadioGroup();
-  const checked = radioGroup?.value === role;
-  const admin = role === "Admin";
+interface RoleOptionProps {
+  role: RoleName;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onClick: (role: RoleName) => void;
+}
+
+export function RoleOption({ role, description, selected, disabled = false, onClick }: RoleOptionProps) {
+  const admin = role === "Admin User";
 
   return (
-    <FormControlLabel
-      value={role}
-      disabled={disabled}
-      control={<Radio />}
-      labelPlacement="start"
+    <Box
       sx={{
-        m: 0,
-        justifyContent: "space-between",
+        px: 1.5,
+        py: 0.5,
+        borderRadius: 1,
+        border: "1px solid",
+        borderColor: selected ? "primary.main" : "divider",
+        bgcolor: "background.paper",
+        opacity: disabled ? 0.6 : 1,
       }}
-      label={
-        <Stack direction="row" alignItems="center" gap={1}>
-          <Chip size="small" label={role} color={checked ? "primary" : "default"} />
-          {admin && (
-            <Box color="primary.main">
-              <ShieldUser size={pxToRem(18)} />
-            </Box>
-          )}
-        </Stack>
-      }
-    ></FormControlLabel>
+    >
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1.5}>
+        <FormControlLabel
+          sx={{ m: 0, width: "100%" }}
+          disabled={disabled}
+          control={<Checkbox checked={selected} onChange={() => onClick(role)} disabled={disabled} />}
+          label={
+            <Stack>
+              <Typography variant="body2" fontWeight="medium">
+                {role}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {description}
+              </Typography>
+            </Stack>
+          }
+        />
+        {admin && <ShieldUser size={pxToRem(18)} />}
+      </Stack>
+    </Box>
   );
 }
