@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, CardActionArea, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { PieChart } from "@wso2/oxygen-ui-charts-react";
 import { Circle } from "@mui/icons-material";
 import { WidgetBox } from "@components/ui";
@@ -29,10 +29,11 @@ export interface PieDataItem {
 
 interface PieChartWidgetProps {
   title: string;
-  data?: PieDataItem[];
+  data?: (PieDataItem & { id: string | number })[];
+  onClick?: (id: string | number, type: string) => void;
 }
 
-export function PieChartWidget({ title, data }: PieChartWidgetProps) {
+export function PieChartWidget({ title, data, ...props }: PieChartWidgetProps) {
   const loading = !data;
   const total = data?.reduce((sum, item) => sum + item.value, 0);
   const isEmpty = !loading && total === 0;
@@ -60,7 +61,15 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
             height={150}
             data={data}
             colors={data.map((item) => item.color)}
-            pies={[{ nameKey: "label", dataKey: "value", innerRadius: "50%", paddingAngle: 0 }]}
+            pies={[
+              {
+                nameKey: "label",
+                dataKey: "value",
+                innerRadius: "50%",
+                paddingAngle: 0,
+                onClick: (data: PieDataItem & { id: string | number }) => props.onClick?.(data.id, data.label),
+              },
+            ]}
             margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
             legend={{ show: false }}
             tooltip={{ show: false }}
@@ -79,6 +88,7 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
               width: "100%",
               display: "grid",
               placeItems: "center",
+              pointerEvents: "none",
             }}
           >
             {total}
@@ -98,16 +108,22 @@ export function PieChartWidget({ title, data }: PieChartWidgetProps) {
               </Stack>
             ))
           : data.map((item, index) => (
-              <Stack key={index} direction="row" justifyContent="space-between">
-                <Stack direction="row" alignItems="center" gap={1}>
-                  <Circle sx={{ fontSize: 12, color: item.color }} />
-                  <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-                    {item.label}
+              <Stack key={index}>
+                <CardActionArea
+                  disabled={!props?.onClick}
+                  sx={{ display: "flex", direction: "row", justifyContent: "space-between" }}
+                  onClick={() => props.onClick?.(item.id, item.label)}
+                >
+                  <Stack direction="row" alignItems="center" gap={1}>
+                    <Circle sx={{ fontSize: 12, color: item.color }} />
+                    <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+                      {item.label}
+                    </Typography>
+                  </Stack>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    {item.value}
                   </Typography>
-                </Stack>
-                <Typography variant="subtitle2" color="text.secondary">
-                  {item.value}
-                </Typography>
+                </CardActionArea>
               </Stack>
             ))}
       </Stack>

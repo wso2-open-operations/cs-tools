@@ -100,6 +100,9 @@ const App: React.FC = () => {
                 <Route path="all" element={<AllItemsPage type="engagement" />} />
                 <Route path=":id" element={<EngagementDetailPage />} />
               </Route>
+              <Route path="/multiple">
+                <Route path="all" element={<AllItemsPage type="multiple" />} />
+              </Route>
             </Route>
           </Route>
         </Routes>
