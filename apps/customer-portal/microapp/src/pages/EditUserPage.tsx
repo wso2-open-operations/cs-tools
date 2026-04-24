@@ -127,7 +127,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         </SectionCard>
 
         <SectionCard title="User Role">
-          <RoleSelector value={role} onChange={setRole} />
+          <RoleSelector value={role} onChange={setRole} lockOnSystemUser={mode === "edit"} />
         </SectionCard>
 
         {mode === "invite" && (
@@ -165,13 +165,15 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 contactEmail: email,
                 contactFirstName: firstName,
                 contactLastName: lastName,
-                isCsIntegrationUser: role === "System User",
-                isSecurityContact: false,
+                isCsIntegrationUser: false,
+                isSecurityContact: role == "System User",
               });
 
             if (mode === "edit") {
+              const isSecurityContact = role === "System User";
+
               editUserMutation.mutate({
-                isCsIntegrationUser: role === "System User",
+                isSecurityContact,
               });
             }
           }}
