@@ -46,10 +46,9 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
   const queryClient = useQueryClient();
   const state = location.state as { email?: string; role?: Role; firstName?: string; lastName?: string };
 
-  const defaultUserRole = "Portal User";
-  const [role, setRole] = useState<Role>(
-    state?.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole,
-  );
+  const defaultUserRole: Role = "Portal User";
+  const initialRole: Role = state?.role && state.role !== "Admin" ? state.role : defaultUserRole;
+  const [role, setRole] = useState<Role>(initialRole);
   const [email, setEmail] = useState(state?.email ?? "");
   const [firstName, setFirstName] = useState(state?.firstName ?? "");
   const [lastName, setLastName] = useState(state?.lastName ?? "");
@@ -153,12 +152,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         )}
 
         <Button
-          disabled={
-            mode === "edit"
-              ? role === (state.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole) ||
-                editUserMutation.isPending
-              : createUserMutation.isPending
-          }
+          disabled={mode === "edit" ? role === initialRole || editUserMutation.isPending : createUserMutation.isPending}
           variant="contained"
           startIcon={
             createUserMutation.isPending || editUserMutation.isPending ? (
@@ -171,15 +165,13 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 contactEmail: email,
                 contactFirstName: firstName,
                 contactLastName: lastName,
-                isCsIntegrationUser: false,
-                isSecurityContact: role == "System User",
+                isCsIntegrationUser: role === "System User",
+                isSecurityContact: false,
               });
 
             if (mode === "edit") {
-              const isSecurityContact = role === "System User";
-
               editUserMutation.mutate({
-                isSecurityContact,
+                isCsIntegrationUser: role === "System User",
               });
             }
           }}
