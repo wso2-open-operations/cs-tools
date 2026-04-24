@@ -18,7 +18,7 @@ import ms from "ms";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeftRightIcon, CheckIcon, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeftRightIcon, CheckIcon, CircleX, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
@@ -57,7 +57,6 @@ export default function CaseDetailPage() {
   });
 
   const issueType = filters?.issueTypes.find((issueType) => issueType.id === data?.issueTypeId)?.label;
-
   const slaResponseTimeInMilliseconds = Number.isFinite(Number(data?.slaResponseTime))
     ? Number(data?.slaResponseTime)
     : undefined;
@@ -90,12 +89,42 @@ export default function CaseDetailPage() {
     onError: () => notify.error("Failed to update case. Please try again."),
   });
 
+  const getCaseStateKeyByLabel = (label: string): number | undefined => {
+    const id = filters?.caseStates.find((state) => state.label.toLowerCase() === label.toLowerCase())?.id;
+    if (!id) return undefined;
+    const value = Number(id);
+    return Number.isNaN(value) ? undefined : value;
+  };
+
+  const closedStateKey = getCaseStateKeyByLabel("Closed");
+  const waitingOnWso2StateKey = getCaseStateKeyByLabel("Waiting On WSO2");
+  const solutionProposedStateKey = getCaseStateKeyByLabel("Solution Proposed");
+  const awaitingInfoStateKey = getCaseStateKeyByLabel("Awaiting Info");
+
   const menuOptions = data
     ? getCaseMenuOptions(data.statusId, {
-        onResolve: () => {
-          editCaseMutation.mutate({ stateKey: 3 });
+        stateKeys: {
+          closed: closedStateKey,
+          waitingOnWso2: waitingOnWso2StateKey,
+          solutionProposed: solutionProposedStateKey,
+          awaitingInfo: awaitingInfoStateKey,
         },
-        onMarkWaiting: () => editCaseMutation.mutate({ stateKey: 1003 }),
+        onResolve: () => {
+          if (closedStateKey === undefined) return;
+          editCaseMutation.mutate({ stateKey: closedStateKey });
+        },
+        onAcceptSolution: () => {
+          if (closedStateKey === undefined) return;
+          editCaseMutation.mutate({ stateKey: closedStateKey });
+        },
+        onRejectSolution: () => {
+          if (waitingOnWso2StateKey === undefined) return;
+          editCaseMutation.mutate({ stateKey: waitingOnWso2StateKey });
+        },
+        onMarkWaiting: () => {
+          if (waitingOnWso2StateKey === undefined) return;
+          editCaseMutation.mutate({ stateKey: waitingOnWso2StateKey });
+        },
         onCreateRelated: () => navigate("/create", { state: { case: data } }),
       })
     : [];
@@ -264,32 +293,55 @@ export default function CaseDetailPage() {
 }
 
 function getCaseMenuOptions(
-  stateKey: string,
-  actions?: Partial<{
+  statusId: string | undefined,
+  context: {
+    stateKeys: Partial<{
+      closed: number;
+      waitingOnWso2: number;
+      solutionProposed: number;
+      awaitingInfo: number;
+    }>;
+  } & Partial<{
     onResolve: () => void;
+    onAcceptSolution: () => void;
+    onRejectSolution: () => void;
     onMarkWaiting: () => void;
     onCreateRelated: () => void;
   }>,
 ): MenuOptionProps[] {
+  const { stateKeys, ...actions } = context;
+  const currentStatusId = statusId ? Number(statusId) : undefined;
+  const isSolutionProposed = currentStatusId === stateKeys.solutionProposed;
+  const isClosed = currentStatusId === stateKeys.closed;
+  const isAwaitingInfo = currentStatusId === stateKeys.awaitingInfo;
+  const hasKnownStatus = currentStatusId !== undefined && !Number.isNaN(currentStatusId);
+
   return [
     {
-      label: "Mark as Resolved",
+      label: isSolutionProposed ? "Accept Solution" : "Mark as Resolved",
       color: "success",
       icon: <CheckIcon />,
-      hidden: !["1", "10", "1003", "6", "18", "1006"].includes(stateKey),
-      onClick: actions?.onResolve,
+      hidden: !hasKnownStatus || isClosed,
+      onClick: isSolutionProposed ? actions?.onAcceptSolution : actions?.onResolve,
+    },
+    {
+      label: "Reject Solution",
+      color: "error",
+      icon: <CircleX />,
+      hidden: !isSolutionProposed,
+      onClick: actions?.onRejectSolution,
     },
     {
       label: "Mark as Waiting on WSO2",
       color: "warning",
       icon: <ArrowLeftRightIcon />,
-      hidden: !["6", "18"].includes(stateKey),
+      hidden: !isAwaitingInfo,
       onClick: actions?.onMarkWaiting,
     },
     {
       label: "Created Related Case",
       icon: <PlusIcon />,
-      hidden: !["3"].includes(stateKey),
+      hidden: !isClosed,
       onClick: actions?.onCreateRelated,
     },
   ];
