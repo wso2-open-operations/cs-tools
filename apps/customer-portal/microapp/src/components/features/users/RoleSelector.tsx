@@ -24,20 +24,30 @@ export type RoleName = (typeof MOCK_ROLES)[number]["name"];
 interface RoleSelectorProps {
   value: Role;
   onChange: (value: Role) => void;
+  lockOnSystemUser?: boolean;
 }
 
-export function RoleSelector({ value, onChange }: RoleSelectorProps) {
+export function RoleSelector({ value, onChange, lockOnSystemUser = false }: RoleSelectorProps) {
+  const isSystemUserLocked = lockOnSystemUser && value === "System User";
+
   return (
-    <RadioGroup value={value} onChange={(event) => onChange(event.target.value as Role)}>
+    <RadioGroup
+      value={value}
+      onChange={(event) => {
+        if (isSystemUserLocked) return;
+        onChange(event.target.value as Role);
+      }}
+    >
       <Stack gap={0.5}>
-        <RoleOption role="Portal User" />
-        <RoleOption role="System User" />
+        {MOCK_ROLES.map((role) => (
+          <RoleOption key={role.name} role={role.name} disabled={isSystemUserLocked && role.name !== "System User"} />
+        ))}
       </Stack>
     </RadioGroup>
   );
 }
 
-export function RoleOption({ role }: { role: RoleName }) {
+export function RoleOption({ role, disabled = false }: { role: RoleName; disabled?: boolean }) {
   const radioGroup = useRadioGroup();
   const checked = radioGroup?.value === role;
   const admin = role === "Admin";
@@ -45,6 +55,7 @@ export function RoleOption({ role }: { role: RoleName }) {
   return (
     <FormControlLabel
       value={role}
+      disabled={disabled}
       control={<Radio />}
       labelPlacement="start"
       sx={{
