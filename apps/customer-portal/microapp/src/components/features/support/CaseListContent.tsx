@@ -8,7 +8,12 @@ import EmptyState from "../../shared/EmptyState";
 import { Typography } from "@wso2/oxygen-ui";
 import React, { useEffect } from "react";
 import { ItemCardExtended } from "./ItemCardExtended";
-import { ITEM_DETAIL_PATHS } from "@root/src/config/constants";
+import {
+  ACTION_REQUIRED_CASE_STATUS_IDS,
+  ITEM_DETAIL_PATHS,
+  OUTSTANDING_CASE_STATUS_IDS,
+  RESOLVED_CASE_STATUS_IDS,
+} from "@root/src/config/constants";
 import { GroupAccordion } from "../../ui/GroupAccordion";
 
 export function CaseListContent({
@@ -33,16 +38,24 @@ export function CaseListContent({
       case "status":
         switch (mode.status) {
           case "action_required":
-            filters.statusIds = [18, 6];
+            filters.statusIds = ACTION_REQUIRED_CASE_STATUS_IDS;
             break;
 
           case "outstanding":
-            filters.statusIds = [1, 10, 6, 1006];
+            filters.statusIds = OUTSTANDING_CASE_STATUS_IDS;
             break;
 
           case "resolved":
-            filters.statusIds = [3];
+            filters.statusIds = RESOLVED_CASE_STATUS_IDS;
             break;
+        }
+        break;
+
+      case "severity":
+        switch (mode.type) {
+          case "severity":
+            filters.statusIds = OUTSTANDING_CASE_STATUS_IDS;
+            filters.severityId = Number(mode.id);
         }
     }
   }

@@ -36,7 +36,9 @@ import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { STATUS_MODE_TYPES } from "../utils/filters";
 import EmptyState from "../components/shared/EmptyState";
 
-export type ModeType = OfStatusModeType | OfSeverityModeType;
+export type ModeType = (OfStatusModeType | OfSeverityModeType) & {
+  title: string;
+};
 
 export interface OfStatusModeType {
   type: "status";
@@ -45,10 +47,10 @@ export interface OfStatusModeType {
 
 export interface OfSeverityModeType {
   type: "severity";
-  severity: string;
+  id: string | number;
 }
 
-export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
+export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "multiple" }) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const filter = searchParams.get("filter") ?? "all";
@@ -62,31 +64,15 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) 
   useEffect(() => {
     if (!mode) return;
 
-    const value = (() => {
-      switch (mode.type) {
-        case "status":
-          switch (mode.status) {
-            case "action_required":
-              return "Action Required";
-
-            case "outstanding":
-              return "Outstanding";
-
-            case "resolved":
-              return "Resolved";
-          }
-      }
-    })();
-
-    setTitleOverride(value);
+    setTitleOverride(mode.title);
 
     return () => {
       setTitleOverride(undefined);
     };
   }, [mode]);
 
-  const resolvedTypes: ItemCardProps["type"] | ItemCardProps["type"][] =
-    mode?.type === "status" ? (STATUS_MODE_TYPES[mode.status] ?? type) : type;
+  const resolvedTypes =
+    type === "multiple" ? (mode?.type === "status" ? (STATUS_MODE_TYPES[mode.status] ?? []) : []) : type;
 
   return (
     <Stack gap={2}>
@@ -191,7 +177,6 @@ function ItemsListContent({
   const [counts, setCounts] = useState<Record<number, number | undefined>>({});
 
   const handleCountChange = useCallback((index: number, count: number | undefined) => {
-    console.log("handling count change");
     setCounts((prev) => ({ ...prev, [index]: count }));
   }, []);
 

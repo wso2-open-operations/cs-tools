@@ -77,21 +77,25 @@ export default function HomePage() {
   const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
 
   const outstandingSupportCasesPieData = defaultCaseTypeStats?.outstandingSeverityCount.map((item) => ({
+    id: item.id,
     label: overrideOrDefault(item.label),
     value: item.count,
     color: PROJECT_SEVERITY_PIE_COLORS[item.id] || colors.grey[500],
   }));
 
-  const outstandingEngagementsPieData = engagementCaseTypeStats?.outstandingEngagementTypeCount.map((item) => ({
-    label: overrideOrDefault(item.label),
-    value: item.count,
-    color: ENGAGEMENTS_TYPE_PIE_COLORS[item.label] || colors.grey[500],
-  }));
+  const outstandingEngagementsPieData: (PieDataItem & { id: string | number })[] =
+    engagementCaseTypeStats?.outstandingEngagementTypeCount.map((item) => ({
+      id: item.id,
+      label: overrideOrDefault(item.label),
+      value: item.count,
+      color: ENGAGEMENTS_TYPE_PIE_COLORS[item.label] || colors.grey[500],
+    })) ?? [];
 
-  const data: PieDataItem[] = [];
+  const data: (PieDataItem & { id: string | number })[] = [];
 
   if (hasServiceRequestReadAccess) {
     data.push({
+      id: "service",
       label: "Service Requests",
       value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
       color: colors.orange[500],
@@ -100,6 +104,7 @@ export default function HomePage() {
 
   if (hasChangeRequestReadAccess) {
     data.push({
+      id: "change",
       label: "Change Requests",
       value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
       color: colors.blue[500],
@@ -112,24 +117,24 @@ export default function HomePage() {
       ? data
       : undefined;
 
-  // const outstandingOperationsPieData =
-  //   serviceRequestCaseTypeStats?.outstandingCount != undefined ||
-  //   changeRequestCaseTypeStats?.outstandingCount != undefined
-  //     ? [
-  //         hasServiceRequestReadAccess && {
-  //           label: "Service Requests",
-  //           value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
-  //           color: colors.orange[500],
-  //         },
+  const navigateBySeverity = (id: string | number, label: string) => {
+    console.log("severity id: ", id);
+    navigate("/cases/all", {
+      state: { mode: { type: "severity", id, title: `Outstanding ${label} Cases` } as ModeType },
+    });
+  };
 
-  //         hasChangeRequestReadAccess && {
-  //           label: "Change Requests",
-  //           value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
-  //           color: colors.blue[500],
-  //         },
-  //       ].filter(Boolean)
-  //       filter((item): item is PieDataItem => Boolean(item))
-  //     : undefined;
+  const navigateByServiceRequestOrChageRequest = (_: string | number, type: string) => {
+    if (type === "Service Requests")
+      navigate("/services/all", {
+        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Service Requests" } as ModeType },
+      });
+
+    if (type === "Change Requests")
+      navigate("/changes/all", {
+        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Change Requests" } as ModeType },
+      });
+  };
 
   return (
     <>
@@ -140,7 +145,9 @@ export default function HomePage() {
             value={totalInteractions}
             icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
             onClick={() =>
-              navigate("/cases/all", { state: { mode: { type: "status", status: "action_required" } as ModeType } })
+              navigate("/multiple/all", {
+                state: { mode: { type: "status", status: "action_required", title: "Action Required" } as ModeType },
+              })
             }
           />
         </Grid>
@@ -150,7 +157,9 @@ export default function HomePage() {
             value={activeInteractions}
             icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
             onClick={() =>
-              navigate("/cases/all", { state: { mode: { type: "status", status: "outstanding" } as ModeType } })
+              navigate("/multiple/all", {
+                state: { mode: { type: "status", status: "outstanding", title: "Outstanding" } as ModeType },
+              })
             }
           />
         </Grid>
@@ -160,7 +169,9 @@ export default function HomePage() {
             value={resolvedThisMonth}
             icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
             onClick={() =>
-              navigate("/cases/all", { state: { mode: { type: "status", status: "resolved" } as ModeType } })
+              navigate("/multiple/all", {
+                state: { mode: { type: "status", status: "resolved", title: "Closed" } as ModeType },
+              })
             }
           />
         </Grid>
@@ -173,12 +184,20 @@ export default function HomePage() {
         </Grid>
 
         <Grid size={6}>
-          <PieChartWidget title="Outstanding Support Cases" data={outstandingSupportCasesPieData} />
+          <PieChartWidget
+            title="Outstanding Support Cases"
+            data={outstandingSupportCasesPieData}
+            onClick={navigateBySeverity}
+          />
         </Grid>
 
         {(hasServiceRequestReadAccess || hasChangeRequestReadAccess) && (
           <Grid size={6}>
-            <PieChartWidget title="Outstanding Operations" data={outstandingOperationsPieData} />
+            <PieChartWidget
+              title="Outstanding Operations"
+              data={outstandingOperationsPieData}
+              onClick={navigateByServiceRequestOrChageRequest}
+            />
           </Grid>
         )}
 
