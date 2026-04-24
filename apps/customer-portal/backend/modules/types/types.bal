@@ -1046,14 +1046,22 @@ public type ContactOnboardPayload record {|
     string contactLastName;
     # Whether the contact is System User or not
     boolean isCsIntegrationUser;
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is Security Contact or not
     boolean isSecurityContact = false;
 |};
 
-# Payload for updating membership security flag.
-public type MembershipSecurityPayload record {|
+# Payload for updating membership roles.
+public type MembershipRolePayload record {|
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is a security contact or not
-    boolean isSecurityContact;
+    boolean isSecurityContact = false;
 |};
 
 # The request payload to be validated.

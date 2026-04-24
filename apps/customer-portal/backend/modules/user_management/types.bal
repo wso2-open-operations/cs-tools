@@ -40,6 +40,8 @@ public type Contact record {|
     boolean isCsAdmin;
     # Whether the contact is an Integration user or not
     boolean isCsIntegrationUser;
+    # Whether the contact is a portal user or not
+    boolean? isPortalUser?;
     # Whether the contact is a Security contact or not
     boolean? isSecurityContact?;
     # Status of the Membership (Invited, Registered)
@@ -47,6 +49,13 @@ public type Contact record {|
     # Account information
     Account? account?;
     json...;
+|};
+
+# Contact details returned by the user management service.
+type UserManagementContact record {|
+    *Contact;
+    # Role of the Membership
+    string? role?;
 |};
 
 # Account details record
@@ -74,8 +83,28 @@ public type OnBoardContactPayload record {|
     string contactLastName;
     # Whether the contact is System User or not
     boolean isCsIntegrationUser;
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is Security Contact or not
-    boolean isSecurityContact;
+    boolean isSecurityContact = false;
+|};
+
+# Contact onboard payload sent to the user management service.
+type UserManagementOnBoardContactPayload record {|
+    # Email address of the Contact
+    string contactEmail;
+    # Email address of the Admin
+    string adminEmail;
+    # First name of the Contact
+    string contactFirstName;
+    # Last name of the Contact
+    string contactLastName;
+    # Whether the contact is System User or not
+    boolean isCsIntegrationUser;
+    # Role list of the contact in the project
+    string[]? role;
 |};
 
 # Membership details record.
@@ -84,11 +113,20 @@ public type Membership record {|
     string id;
     # State of the Membership
     string state;
+    # Whether the contact is a portal user or not
+    boolean? isPortalUser;
     # Whether the contact is a Security contact or not
     boolean? isSecurityContact;
     # Contact details
     ContactMinimal contact?;
     json...;
+|};
+
+# Membership details returned by the user management service.
+type UserManagementMembership record {|
+    *Membership;
+    # Role of the Membership
+    string? role;
 |};
 
 # ContactMinimal Details.
@@ -100,12 +138,24 @@ public type ContactMinimal record {|
     json...;
 |};
 
-# Payload for updating membership security flag.
-public type MembershipSecurityPayload record {|
+# Payload for updating membership roles.
+public type MembershipRolePayload record {|
     # Admin email
     string adminEmail;
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is a security contact or not
-    boolean isSecurityContact;
+    boolean isSecurityContact = false;
+|};
+
+# Payload for updating membership roles in the user management service.
+type UserManagementMembershipRolePayload record {|
+    # Admin email
+    string adminEmail;
+    # Role list to replace the current membership roles
+    string[] role;
 |};
 
 # The request payload to be validated.

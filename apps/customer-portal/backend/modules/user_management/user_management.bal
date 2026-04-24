@@ -18,12 +18,17 @@ import ballerina/log;
 
 public type CONFLICT_ERROR distinct error;
 
+const PORTAL_USER_ROLE = "Portal user";
+const SECURITY_CONTACT_ROLE = "Security Contact";
+
 # Get project contacts for the given project ID.
 #
 # + projectId - Salesforce ID of the project to get contacts for
 # + return - Array of contacts or error
 public isolated function getProjectContacts(string projectId) returns Contact[]|error {
-    return userManagementClient->/projects/[projectId]/contacts.get();
+    UserManagementContact[] contacts = check userManagementClient->/projects/[projectId]/contacts.get();
+    return from UserManagementContact contact in contacts
+        select toContact(contact);
 }
 
 # Create a new contact for the given project ID and payload.
@@ -36,7 +41,16 @@ public isolated function createProjectContact(string projectId, OnBoardContactPa
 
     string customError = "An error occurred while creating the contact for the project.";
 
-    http:Response userCreateResponse = check userManagementClient->/projects/[projectId]/contact.post(payload);
+    UserManagementOnBoardContactPayload userManagementPayload = {
+        contactEmail: payload.contactEmail,
+        adminEmail: payload.adminEmail,
+        contactFirstName: payload.contactFirstName,
+        contactLastName: payload.contactLastName,
+        isCsIntegrationUser: payload.isCsIntegrationUser,
+        role: getRoles(payload.isPortalUser, payload.isSecurityContact)
+    };
+
+    http:Response userCreateResponse = check userManagementClient->/projects/[projectId]/contact.post(userManagementPayload);
     if userCreateResponse.statusCode != http:STATUS_CREATED {
         json|error errBody = userCreateResponse.getJsonPayload();
         if errBody is error {
@@ -45,7 +59,8 @@ public isolated function createProjectContact(string projectId, OnBoardContactPa
         }
         return error(check errBody.message);
     }
-    return (check userCreateResponse.getJsonPayload()).cloneWithType();
+    UserManagementMembership membership = check (check userCreateResponse.getJsonPayload()).cloneWithType();
+    return toMembership(membership);
 }
 
 # Remove a contact from the given project ID using the contact's email and admin email.
@@ -69,21 +84,28 @@ public isolated function removeProjectContact(string projectId, string contactEm
         }
         return error(check errBody.message);
     }
-    return (check userRemoveResponse.getJsonPayload()).cloneWithType();
+    UserManagementMembership membership = check (check userRemoveResponse.getJsonPayload()).cloneWithType();
+    return toMembership(membership);
 }
 
-# Update the membership flag of a contact in the given project ID using the contact's email and payload.
+# Update the membership roles of a contact in the given project ID using the contact's email and payload.
 #
-# + projectId - Salesforce ID of the project to update the contact's membership flag for
-# + contactEmail - Email of the contact whose membership flag is to be updated
-# + payload - Payload containing the new membership flag information
+# + projectId - Salesforce ID of the project to update the contact's membership roles for
+# + contactEmail - Email of the contact whose membership roles are to be updated
+# + payload - Payload containing the new membership role information
 # + return - Updated membership information of the contact or error
-public isolated function updateMembershipFlag(string projectId, string contactEmail, MembershipSecurityPayload payload)
+public isolated function updateMembershipRole(string projectId, string contactEmail, MembershipRolePayload payload)
     returns Membership|error {
 
-    string customError = "An error occurred while updating the contact's membership flag.";
+    string customError = "An error occurred while updating the contact's membership roles.";
 
-    http:Response userUpdateResponse = check userManagementClient->/projects/[projectId]/contacts/[contactEmail].patch(payload);
+    UserManagementMembershipRolePayload userManagementPayload = {
+        adminEmail: payload.adminEmail,
+        role: getRoles(payload.isPortalUser, payload.isSecurityContact)
+    };
+
+    http:Response userUpdateResponse =
+        check userManagementClient->/projects/[projectId]/contacts/[contactEmail].patch(userManagementPayload);
     if userUpdateResponse.statusCode != http:STATUS_OK {
         json|error errBody = userUpdateResponse.getJsonPayload();
         if errBody is error {
@@ -92,7 +114,8 @@ public isolated function updateMembershipFlag(string projectId, string contactEm
         }
         return error(check errBody.message);
     }
-    return (check userUpdateResponse.getJsonPayload()).cloneWithType();
+    UserManagementMembership membership = check (check userUpdateResponse.getJsonPayload()).cloneWithType();
+    return toMembership(membership);
 }
 
 # Validate a project contact using the provided payload.
@@ -108,7 +131,8 @@ public isolated function validateProjectContact(ValidationPayload payload) retur
     // If there's an existing Deactivated contact, return the contact details.
     // If the contact is valid and can be onboarded, return nill.
     if userManagementResponse.statusCode == http:STATUS_CREATED {
-        return (check userManagementResponse.getJsonPayload()).cloneWithType();
+        UserManagementContact contact = check (check userManagementResponse.getJsonPayload()).cloneWithType();
+        return toContact(contact);
     } else if userManagementResponse.statusCode == http:STATUS_ACCEPTED {
         return;
     }
@@ -128,4 +152,53 @@ public isolated function validateProjectContact(ValidationPayload payload) retur
     // For any other error status code, return a generic error with the error message.
     log:printError(customError, info = errBody.toString());
     return error(check errBody.message);
+}
+
+isolated function getRoles(boolean isPortalUser, boolean isSecurityContact) returns string[] {
+    string[] roles = [];
+    if isPortalUser {
+        roles.push(PORTAL_USER_ROLE);
+    }
+    if isSecurityContact {
+        roles.push(SECURITY_CONTACT_ROLE);
+    }
+    return roles;
+}
+
+isolated function toContact(UserManagementContact contact) returns Contact {
+    return {
+        id: contact.id,
+        email: contact.email,
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        isCsAdmin: contact.isCsAdmin,
+        isCsIntegrationUser: contact.isCsIntegrationUser,
+        isPortalUser: hasRole(contact["role"], PORTAL_USER_ROLE),
+        isSecurityContact: hasRole(contact["role"], SECURITY_CONTACT_ROLE),
+        membershipStatus: contact["membershipStatus"],
+        account: contact["account"]
+    };
+}
+
+isolated function toMembership(UserManagementMembership membership) returns Membership {
+    return {
+        id: membership.id,
+        state: membership.state,
+        isPortalUser: hasRole(membership["role"], PORTAL_USER_ROLE),
+        isSecurityContact: hasRole(membership["role"], SECURITY_CONTACT_ROLE),
+        contact: membership["contact"]
+    };
+}
+
+isolated function hasRole(string? roleValue, string role) returns boolean {
+    if roleValue is () {
+        return false;
+    }
+
+    foreach string rolePart in re `;`.split(roleValue) {
+        if string:trim(rolePart) == role {
+            return true;
+        }
+    }
+    return false;
 }
