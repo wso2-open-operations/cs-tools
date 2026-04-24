@@ -46,7 +46,7 @@ export default function SupportPage() {
   const { features } = useProject();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
-  const allowedTabs: TabType[] = ["case", "chat", "service", "change"];
+  const allowedTabs: TabType[] = ["case", "chat", "service", "change", "sra", "engagement", "announcement"];
   const tabFromParams = allowedTabs.find((t) => t === rawTab) ?? "case";
   const [tab, setTab] = useState<TabType>(tabFromParams);
 
