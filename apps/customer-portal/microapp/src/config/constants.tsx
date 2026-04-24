@@ -164,5 +164,4 @@ export const PLURALS: Record<ItemCardProps["type"], string> = {
   engagement: "Engagements",
   announcement: "Announcements",
 };
-
 export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];
