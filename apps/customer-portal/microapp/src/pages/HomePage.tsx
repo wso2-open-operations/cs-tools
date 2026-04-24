@@ -54,6 +54,7 @@ export default function HomePage() {
     cases.stats(projectId!, {
       caseTypes: [
         "default_case",
+        "security_report_analysis",
         ...(hasEngagementsReadAccess ? ["engagement"] : []),
         ...(hasServiceRequestReadAccess ? ["service_request"] : []),
       ],
@@ -65,13 +66,13 @@ export default function HomePage() {
 
   const totalInteractions = isInteractionsLoading
     ? undefined
-    : (multipleCaseTypesStats?.totalCount ?? 0) +
-      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.totalCount ?? 0) : 0);
+    : (multipleCaseTypesStats?.actionRequiredCount ?? 0) +
+      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.actionRequiredCount ?? 0) : 0);
 
   const activeInteractions = isInteractionsLoading
     ? undefined
-    : (multipleCaseTypesStats?.activeCount ?? 0) +
-      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.activeCount ?? 0) : 0);
+    : (multipleCaseTypesStats?.outstandingCount ?? 0) +
+      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.outstandingCount ?? 0) : 0);
 
   const resolvedThisMonth = defaultCaseTypeStats?.resolvedCases.pastThirtyDays;
   const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
@@ -153,7 +154,7 @@ export default function HomePage() {
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Outstanding"
+            label="Outstanding Items"
             value={activeInteractions}
             icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
             onClick={() =>
