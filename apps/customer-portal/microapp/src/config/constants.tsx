@@ -131,3 +131,13 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   sra: "Search Security Report Analysis",
   engagement: "Search Engagement",
 };
+
+export const CASE_STATE_IDS = {
+  OPEN: 1,
+  WORK_IN_PROGRESS: 10,
+  AWAITING_INFO: 18,
+  WAITING_ON_WSO2: 1003,
+  SOLUTION_PROPOSED: 6,
+  CLOSED: 3,
+  REOPENED: 1006,
+} as const;
