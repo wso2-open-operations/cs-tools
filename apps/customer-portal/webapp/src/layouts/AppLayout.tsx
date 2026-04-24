@@ -229,7 +229,8 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                   minWidth: 0,
                   display: "flex",
                   flexDirection: "column",
-                  overflow: "auto",
+                  overflowY: "auto",
+                  overflowX: "hidden",
                   ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
                   ...(isAuthLoading
                     ? { p: 0 }

@@ -65,7 +65,7 @@ export default function AuthGuard(): JSX.Element {
       loader={<AppLayout />}
       onSignIn={(defaultSignIn, signInOptions) => {
         const intended = location.pathname + location.search;
-        if (intended !== "/" && intended !== "/home") {
+        if (intended !== "/") {
           sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended);
         }
         defaultSignIn(signInOptions);

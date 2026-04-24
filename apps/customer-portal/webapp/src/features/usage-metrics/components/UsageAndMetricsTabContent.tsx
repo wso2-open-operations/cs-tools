@@ -14,10 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box } from "@wso2/oxygen-ui";
+import { Box, IconButton } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
+import { ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import TabBar from "@components/tab-bar/TabBar";
 import UsageOverviewPanel from "@features/usage-metrics/components/UsageOverviewPanel";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
@@ -55,6 +56,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [customEnd, setCustomEnd] = useState<string>("");
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
+  const deploymentTabsScrollRef = useRef<HTMLDivElement | null>(null);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
@@ -68,6 +70,18 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const innerTabs = useMemo(
     () => buildUsageInnerTabs(deploymentsData),
     [deploymentsData],
+  );
+
+  const overviewTab = useMemo(
+    () =>
+      innerTabs.find((tab) => tab.id === UsageMetricsInnerTabId.OVERVIEW) ??
+      innerTabs[0],
+    [innerTabs],
+  );
+
+  const deploymentTabs = useMemo(
+    () => innerTabs.filter((tab) => tab.id !== overviewTab?.id),
+    [innerTabs, overviewTab],
   );
 
   const activeDeploymentId = useMemo(
@@ -115,6 +129,22 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     setTimeRange(UsageTimeRange.THREE_MONTHS);
   };
 
+  const handleScrollDeploymentTabs = (direction: "left" | "right") => {
+    const scrollContainer = deploymentTabsScrollRef.current;
+    if (!scrollContainer) {
+      return;
+    }
+    const scrollOffset = Math.max(220, Math.floor(scrollContainer.clientWidth * 0.6));
+    const nextScrollLeft =
+      direction === "left"
+        ? scrollContainer.scrollLeft - scrollOffset
+        : scrollContainer.scrollLeft + scrollOffset;
+    scrollContainer.scrollTo({
+      left: nextScrollLeft,
+      behavior: "smooth",
+    });
+  };
+
   const timeRangeSelector = (
     <UsageMetricsTimeRangeSelector
       innerTab={innerTab}
@@ -133,15 +163,100 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   );
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box sx={{ width: "100%", overflowX: "auto", overflowY: "hidden", pb: 0.5 }}>
-        <Box sx={{ minWidth: "max-content" }}>
-          <TabBar
-            tabs={innerTabs}
-            activeTab={innerTab}
-            onTabChange={setInnerTab}
-            sx={{ mb: 0 }}
-          />
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+        overflowX: "hidden",
+      }}
+    >
+      <Box
+        sx={{
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+          }}
+        >
+          {overviewTab && (
+            <TabBar
+              tabs={[overviewTab]}
+              activeTab={innerTab}
+              onTabChange={setInnerTab}
+              keepButtonWidth={true}
+              compact={true}
+              sx={{ mb: 0, border: "none", boxShadow: "none", flexShrink: 0 }}
+            />
+          )}
+          <Box
+            sx={{
+              flex: 1,
+              width: "100%",
+              minWidth: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 0,
+              maxWidth: { xs: "72%", md: "78%" },
+            }}
+          >
+            {deploymentTabs.length > 0 && (
+              <IconButton
+                size="small"
+                onClick={() => handleScrollDeploymentTabs("left")}
+                aria-label="Scroll deployment tabs left"
+                sx={{ flexShrink: 0 }}
+              >
+                <ChevronLeft size={16} />
+              </IconButton>
+            )}
+            <Box
+              ref={deploymentTabsScrollRef}
+              sx={{
+                flex: 1,
+                minWidth: 0,
+                overflowX: "auto",
+                overflowY: "hidden",
+                scrollbarWidth: "none",
+                "&::-webkit-scrollbar": { display: "none" },
+              }}
+            >
+              <Box sx={{ width: "max-content", minWidth: "100%" }}>
+                <TabBar
+                  tabs={deploymentTabs}
+                  activeTab={innerTab}
+                  onTabChange={setInnerTab}
+                  keepButtonWidth={true}
+                  compact={true}
+                  sx={{ mb: 0, border: "none", boxShadow: "none" }}
+                />
+              </Box>
+            </Box>
+            {deploymentTabs.length > 0 && (
+              <IconButton
+                size="small"
+                onClick={() => handleScrollDeploymentTabs("right")}
+                aria-label="Scroll deployment tabs right"
+                sx={{ flexShrink: 0 }}
+              >
+                <ChevronRight size={16} />
+              </IconButton>
+            )}
+          </Box>
         </Box>
       </Box>
 
