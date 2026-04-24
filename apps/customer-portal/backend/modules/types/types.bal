@@ -1043,6 +1043,12 @@ public type Conversation record {|
     ReferenceItem? case;
     # State information
     ReferenceItem? state;
+    # Total messages exchanged in the chatbot conversation
+    int messagesExchanged?;
+    # Number of troubleshooting tool invocations in the chatbot conversation
+    int troubleshootingAttempts?;
+    # Number of unique KB articles surfaced in the chatbot conversation
+    int kbArticlesReviewed?;
     json...;
 |};
 

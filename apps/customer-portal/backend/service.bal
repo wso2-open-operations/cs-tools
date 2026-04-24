@@ -83,7 +83,6 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         log:printInfo("Customer Portal backend started.");
     }
 
-    # Fetch metadata information for the customer portal.
     #
     # + return - Metadata information or error response
     resource function get metadata(http:RequestContext ctx)
@@ -1370,8 +1369,32 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        types:ConversationSearchResponse baseResponse = mapConversationSearchResponse(conversationResponse);
+
+        // Enrich each conversation with chatbot stats from the AI chat agent.
+        types:Conversation[] enrichedConversations = [];
+        foreach types:Conversation conv in baseResponse.conversations {
+            types:Conversation enriched = conv.clone();
+            ai_chat_agent:ConversationSummaryResponse|error summary = ai_chat_agent:getSummary(id, conv.id);
+            if summary is ai_chat_agent:ConversationSummaryResponse {
+                enriched.messagesExchanged = summary.messagesExchanged;
+                enriched.troubleshootingAttempts = summary.troubleshootingAttempts;
+                enriched.kbArticlesReviewed = summary.kbArticlesReviewed;
+            } else {
+                enriched.messagesExchanged = 0;
+                enriched.troubleshootingAttempts = 0;
+                enriched.kbArticlesReviewed = 0;
+            }
+            enrichedConversations.push(enriched);
+        }
+
         return <http:Ok>{
-            body: mapConversationSearchResponse(conversationResponse)
+            body: {
+                conversations: enrichedConversations,
+                totalRecords: baseResponse.totalRecords,
+                'limit: baseResponse.'limit,
+                offset: baseResponse.offset
+            }
         };
     }
 

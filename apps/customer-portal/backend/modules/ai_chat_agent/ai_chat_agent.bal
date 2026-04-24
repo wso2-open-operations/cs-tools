@@ -79,7 +79,7 @@ public isolated function getRecommendation(RecommendationRequest payload) return
 }
 
 # Get summary for a conversation.
-# 
+#
 # + projectId - Project ID
 # + conversationId - Conversation ID
 # + return - Summary response or error
