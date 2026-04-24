@@ -360,7 +360,7 @@ export default function AllCasesPage(): JSX.Element {
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
         hideSeverityFilter={isDashboardSeverityNavigation}
-        hideStatusFilter={isDashboardSeverityNavigation}
+        hideStatusFilter={isDashboardSeverityNavigation || statusFilter === "active"}
         hideDeploymentFilter={!permissions.hasDeployments}
         isProjectContextLoading={isProjectContextLoading}
         excludeFromCount={

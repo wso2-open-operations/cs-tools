@@ -297,6 +297,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds }: SecurityReportAnalysisProps)
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
         activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
         onClearFilters={handleClearFilters}
+        hideFiltersButton={fixedStatusIds !== undefined}
         filtersContent={
           <ListFiltersPanel
             filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}

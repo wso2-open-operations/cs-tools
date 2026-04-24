@@ -17,7 +17,6 @@
 import { UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useAsgardeo } from "@asgardeo/react";
 import { LogOut, User } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
@@ -30,7 +29,6 @@ import UserProfileModal from "@components/header/UserProfileModal";
  * @returns {JSX.Element} The User profile component.
  */
 export default function UserProfile(): JSX.Element {
-  const navigate = useNavigate();
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const { signOut, isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const { data: userDetails, isLoading, isError } = useGetUserDetails();
@@ -41,12 +39,11 @@ export default function UserProfile(): JSX.Element {
   }
 
   const handleLogout = async () => {
+    window.dispatchEvent(new CustomEvent("app:signing-out"));
     try {
       await signOut();
     } catch (error) {
       logger.error("Failed to sign out", error);
-    } finally {
-      navigate("/");
     }
   };
 

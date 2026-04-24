@@ -55,6 +55,7 @@ export type EngagementsListSectionProps = {
   filterMetadata: CaseMetadataResponse | undefined;
   onFilterChange: (field: string, value: string) => void;
   onClearFilters: () => void;
+  hideFiltersButton?: boolean;
   excludeS0: boolean;
   restrictSeverityToLow: boolean;
   isProjectContextLoading: boolean;

@@ -73,29 +73,42 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   });
 
   const { isVisible } = useLoader();
-  const [loadingMessage, setLoadingMessage] = useState<
-    "Authenticating…" | "Fetching user info…" | "Please wait…"
-  >("Authenticating…");
+  const isLoginCallback =
+    new URLSearchParams(location.search).has("code") &&
+    new URLSearchParams(location.search).has("state");
 
-  // Animate loading message during authentication
+  // Track when auth + user details have both settled for the first time.
+  // Using state (not a ref) so the component re-renders once ready.
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>(
+    isLoginCallback ? "Authenticating…" : "Loading…",
+  );
+
   useEffect(() => {
-    if (!isAuthLoading) return;
+    if (!isAuthLoading && !isUserDetailsLoading) {
+      setHasInitialized(true);
+    }
+  }, [isAuthLoading, isUserDetailsLoading]);
+
+  // Animate loading message only during the actual login callback flow.
+  useEffect(() => {
+    if (!isAuthLoading || !isLoginCallback) return;
 
     setLoadingMessage("Authenticating…");
+    const t1 = setTimeout(() => setLoadingMessage("Fetching user info…"), 1500);
+    const t2 = setTimeout(() => setLoadingMessage("Please wait…"), 3000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [isAuthLoading, isLoginCallback]);
 
-    const t1 = setTimeout(() => {
-      setLoadingMessage("Fetching user info…");
-    }, 1500);
-
-    const t2 = setTimeout(() => {
-      setLoadingMessage("Please wait…");
-    }, 3000);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [isAuthLoading]);
+  // Show "Signing out…" overlay the instant logout is triggered anywhere in the
+  // app (UserProfile, IdleTimeoutProvider). The overlay stays until the IDP
+  // redirect navigates the browser away.
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  useEffect(() => {
+    const handleSigningOut = () => setIsSigningOut(true);
+    window.addEventListener("app:signing-out", handleSigningOut);
+    return () => window.removeEventListener("app:signing-out", handleSigningOut);
+  }, []);
 
   // Persist sidebar state
   useEffect(() => {
@@ -225,7 +238,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                       : { p: 3 }),
                 }}
               >
-                {isAuthLoading || isUserDetailsLoading ? (
+                {isSigningOut || !hasInitialized ? (
                   <Box
                     sx={{
                       flex: 1,
@@ -242,7 +255,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                       sx={{ width: "80%", maxWidth: 400, height: 4 }}
                     />
                     <Typography variant="body2" color="text.secondary">
-                      {loadingMessage}
+                      {isSigningOut ? "Signing out…" : loadingMessage}
                     </Typography>
                   </Box>
                 ) : hasPortalAccessError ? (

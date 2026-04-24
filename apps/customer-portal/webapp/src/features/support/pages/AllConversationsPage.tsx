@@ -244,6 +244,7 @@ export default function AllConversationsPage(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
         activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
         onClearFilters={handleClearFilters}
+        hideFiltersButton={statusFilter === "active"}
         filtersContent={
           <ListFiltersPanel
             filterDefinitions={ALL_CONVERSATIONS_FILTER_DEFINITIONS}
@@ -253,10 +254,21 @@ export default function AllConversationsPage(): JSX.Element {
                 filterMetadata as CaseMetadataResponse | undefined
               )?.[def.metadataKey as keyof CaseMetadataResponse];
               if (!Array.isArray(raw)) return [];
-              return raw.map((item: { label: string; id: string }) => ({
+              const options = raw.map((item: { label: string; id: string }) => ({
                 label: item.label,
                 value: item.id,
               }));
+              if (
+                statusFilter === "resolvedViaChat" &&
+                def.filterKey === "stateId"
+              ) {
+                return options.filter(
+                  (option) =>
+                    option.label === ConversationStatus.RESOLVED ||
+                    option.label === ConversationStatus.CONVERTED,
+                );
+              }
+              return options;
             }}
             onFilterChange={handleFilterChange}
           />

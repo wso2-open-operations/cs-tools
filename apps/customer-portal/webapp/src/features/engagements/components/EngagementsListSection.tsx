@@ -41,6 +41,7 @@ export default function EngagementsListSection({
   filterMetadata,
   onFilterChange,
   onClearFilters,
+  hideFiltersButton = false,
   excludeS0,
   restrictSeverityToLow,
   isProjectContextLoading,
@@ -72,6 +73,7 @@ export default function EngagementsListSection({
         deployments={undefined}
         onFilterChange={onFilterChange}
         onClearFilters={onClearFilters}
+        hideFiltersButton={hideFiltersButton}
         excludeS0={excludeS0}
         restrictSeverityToLow={restrictSeverityToLow}
         hideSeverityFilter

@@ -16,6 +16,7 @@
 
 import { type JSX, useEffect } from "react";
 import { useAsgardeo } from "@asgardeo/react";
+import { ProtectedRoute } from "@asgardeo/react-router";
 import { useLocation, useNavigate } from "react-router";
 import AppLayout from "@layouts/AppLayout";
 import { getLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
@@ -33,19 +34,9 @@ const POST_LOGIN_REDIRECT_KEY = "post_login_redirect";
  * @returns {JSX.Element} AppLayout or redirect to home.
  */
 export default function AuthGuard(): JSX.Element {
-  const { isSignedIn, isLoading: isAuthLoading, signIn } = useAsgardeo();
+  const { isSignedIn } = useAsgardeo();
   const location = useLocation();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!isSignedIn && !isAuthLoading) {
-      const intended = location.pathname + location.search;
-      if (intended !== "/" && intended !== "/home") {
-        sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended);
-      }
-      void signIn();
-    }
-  }, [isSignedIn, isAuthLoading, signIn, location]);
 
   useEffect(() => {
     if (isSignedIn) {
@@ -69,5 +60,18 @@ export default function AuthGuard(): JSX.Element {
     }
   }, [isSignedIn, navigate, location.pathname]);
 
-  return <AppLayout />;
+  return (
+    <ProtectedRoute
+      loader={<AppLayout />}
+      onSignIn={(defaultSignIn, signInOptions) => {
+        const intended = location.pathname + location.search;
+        if (intended !== "/" && intended !== "/home") {
+          sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended);
+        }
+        defaultSignIn(signInOptions);
+      }}
+    >
+      <AppLayout />
+    </ProtectedRoute>
+  );
 }
