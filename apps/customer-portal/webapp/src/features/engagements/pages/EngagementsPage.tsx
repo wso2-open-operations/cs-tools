@@ -16,11 +16,19 @@
 
 import type { JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Box, Button, Stack } from "@wso2/oxygen-ui";
+import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import type { EngagementsStatKey } from "@features/engagements/types/engagements";
 import EngagementsListSection from "@features/engagements/components/EngagementsListSection";
 import EngagementsStatCards from "@features/engagements/components/EngagementsStatCards";
 import { useEngagementsPageState } from "@features/engagements/hooks/useEngagementsPageState";
+
+const ENGAGEMENT_STAT_FILTER_INFO: Record<EngagementsStatKey, { title: string; subtitle: string }> = {
+  total: { title: "All Engagements", subtitle: "All engagement cases" },
+  active: { title: "Outstanding Engagements", subtitle: "Active engagements without closed state" },
+  completed: { title: "Completed Engagements", subtitle: "Engagements in closed state" },
+  onHold: { title: "On Hold Engagements", subtitle: "Engagements awaiting info or action" },
+};
 
 /**
  * Engagements list: stats, search, filters, sort, and paginated cases.
@@ -60,27 +68,49 @@ export default function EngagementsPage(): JSX.Element {
     handleSortChange,
     handleSortFieldUiChange,
     handleSearchChange,
+    handleStatCardClick,
+    isStatFiltered,
+    activeStatKey,
+    clearStatFilter,
     onCaseClick,
   } = useEngagementsPageState();
 
   return (
     <Stack spacing={3}>
-      {returnTo && (
+      {(returnTo || isStatFiltered) && (
         <Box>
           <Button
             startIcon={<ArrowLeft size={16} />}
-            onClick={() => navigate(returnTo)}
+            onClick={() => {
+              if (isStatFiltered) {
+                clearStatFilter();
+              } else if (returnTo) {
+                navigate(returnTo);
+              }
+            }}
             variant="text"
           >
-            Back to Dashboard
+            Back
           </Button>
         </Box>
       )}
-      <EngagementsStatCards
-        stats={stats}
-        isLoading={isStatsLoading}
-        isError={isStatsError}
-      />
+      {isStatFiltered ? (
+        <Box>
+          <Typography variant="h5" color="text.primary" sx={{ mb: 0.5 }}>
+            {activeStatKey ? ENGAGEMENT_STAT_FILTER_INFO[activeStatKey].title : ""}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {activeStatKey ? ENGAGEMENT_STAT_FILTER_INFO[activeStatKey].subtitle : ""}
+          </Typography>
+        </Box>
+      ) : (
+        <EngagementsStatCards
+          stats={stats}
+          isLoading={isStatsLoading}
+          isError={isStatsError}
+          onStatClick={handleStatCardClick}
+        />
+      )}
       <EngagementsListSection
         searchTerm={searchTerm}
         onSearchChange={handleSearchChange}

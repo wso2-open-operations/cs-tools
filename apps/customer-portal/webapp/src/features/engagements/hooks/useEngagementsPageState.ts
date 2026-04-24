@@ -26,10 +26,10 @@ import { getProjectSeverityPolicy } from "@utils/permission";
 import { isS0Case } from "@features/support/utils/support";
 import { hasListSearchOrFilters } from "@features/support/utils/support";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
-import { CaseType } from "@features/support/constants/supportConstants";
+import { CaseStatus, CaseType } from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
 import { ENGAGEMENTS_PAGE_SIZE } from "@/features/engagements/constants/engagements";
-import { EngagementsSortField } from "@features/engagements/types/engagements";
+import { EngagementsSortField, type EngagementsStatKey } from "@features/engagements/types/engagements";
 import {
   buildEngagementSearchRequest,
   buildEngagementDetailPath,
@@ -65,6 +65,8 @@ export function useEngagementsPageState() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(ENGAGEMENTS_PAGE_SIZE);
+  const [fixedStatusIds, setFixedStatusIds] = useState<number[] | undefined>(undefined);
+  const [activeStatKey, setActiveStatKey] = useState<EngagementsStatKey | undefined>(undefined);
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
@@ -97,11 +99,19 @@ export function useEngagementsPageState() {
     projectId,
   );
 
-  const engagementSearchRequest = useMemo(
-    () =>
-      buildEngagementSearchRequest(filters, searchTerm, sortField, sortOrder),
-    [filters, searchTerm, sortField, sortOrder],
-  );
+  const engagementSearchRequest = useMemo(() => {
+    const base = buildEngagementSearchRequest(filters, searchTerm, sortField, sortOrder);
+    if (fixedStatusIds !== undefined) {
+      return {
+        ...base,
+        filters: {
+          ...base.filters,
+          statusIds: fixedStatusIds.length > 0 ? fixedStatusIds : undefined,
+        },
+      };
+    }
+    return base;
+  }, [filters, searchTerm, sortField, sortOrder, fixedStatusIds]);
 
   const {
     data,
@@ -183,6 +193,43 @@ export function useEngagementsPageState() {
   const handleClearFilters = () => {
     setFilters({});
     setSearchTerm("");
+    setFixedStatusIds(undefined);
+    setActiveStatKey(undefined);
+    setPage(1);
+  };
+
+  const handleStatCardClick = (key: EngagementsStatKey) => {
+    if (!filterMetadata?.caseStates) return;
+    const getStateId = (label: string): number | null => {
+      const s = filterMetadata.caseStates!.find((st) => st.label === label);
+      return s != null ? Number(s.id) : null;
+    };
+    let ids: number[] | undefined;
+    switch (key) {
+      case "active": {
+        const closedId = getStateId(CaseStatus.CLOSED);
+        ids = filterMetadata.caseStates
+          .map((s) => Number(s.id))
+          .filter((id) => id !== closedId);
+        break;
+      }
+      case "completed": {
+        const id = getStateId(CaseStatus.CLOSED);
+        ids = id != null ? [id] : undefined;
+        break;
+      }
+      case "onHold": {
+        const awaitingId = getStateId(CaseStatus.AWAITING_INFO);
+        const waitingId = getStateId(CaseStatus.WAITING_ON_WSO2);
+        ids = [awaitingId, waitingId].filter((id): id is number => id != null);
+        break;
+      }
+      default:
+        ids = undefined;
+    }
+    setFixedStatusIds(ids);
+    setActiveStatKey(key);
+    setFilters((prev) => ({ ...prev, statusId: undefined }));
     setPage(1);
   };
 
@@ -241,6 +288,10 @@ export function useEngagementsPageState() {
     handleSortChange,
     handleSortFieldUiChange,
     handleSearchChange,
+    handleStatCardClick,
+    isStatFiltered: fixedStatusIds !== undefined,
+    activeStatKey,
+    clearStatFilter: () => { setFixedStatusIds(undefined); setActiveStatKey(undefined); setPage(1); },
     onCaseClick,
   };
 }

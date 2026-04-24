@@ -421,7 +421,7 @@ export default function DashboardItemsPage({
             ? "Review items that require your attention"
             : "View all currently active and unresolved interactions"
         }
-        backLabel="Back to Dashboard"
+        backLabel="Back"
         onBack={() => navigate(returnTo ?? "..")}
       />
 

@@ -26,12 +26,16 @@ import {
 } from "@features/security/constants/securityConstants";
 import { SecurityStatKey } from "@features/security/types/security";
 
+type SecurityStatsProps = {
+  onStatClick?: (key: SecurityStatKey) => void;
+};
+
 /**
  * SecurityStats component displays security-related statistics cards.
  *
  * @returns {JSX.Element} The rendered SecurityStats component.
  */
-export default function SecurityStats(): JSX.Element {
+export default function SecurityStats({ onStatClick }: SecurityStatsProps): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
 
   const {
@@ -59,6 +63,7 @@ export default function SecurityStats(): JSX.Element {
         stats={stats}
         configs={SECURITY_STAT_CONFIGS}
         itemSize={{ xs: 12, sm: 4, md: 4 }}
+        onStatClick={onStatClick}
       />
     </Box>
   );

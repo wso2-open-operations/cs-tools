@@ -65,12 +65,16 @@ import {
 } from "@features/security/utils/securityPage";
 import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 
+type SecurityReportAnalysisProps = {
+  fixedStatusIds?: number[];
+};
+
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
  *
  * @returns {JSX.Element}
  */
-const SecurityReportAnalysis = (): JSX.Element => {
+const SecurityReportAnalysis = ({ fixedStatusIds }: SecurityReportAnalysisProps): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { data: projectDetails, isLoading: isProjectLoading } =
@@ -115,7 +119,9 @@ const SecurityReportAnalysis = (): JSX.Element => {
         caseTypes: [CaseType.SECURITY_REPORT_ANALYSIS],
         createdByMe:
           viewMode === SecurityReportViewMode.MY ? true : undefined,
-        statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+        statusIds: fixedStatusIds !== undefined
+          ? (fixedStatusIds.length > 0 ? fixedStatusIds : undefined)
+          : (filters.statusId ? [Number(filters.statusId)] : undefined),
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
@@ -126,7 +132,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortField, sortOrder, viewMode],
+    [filters, searchTerm, sortField, sortOrder, viewMode, fixedStatusIds],
   );
 
   const { data, isLoading, hasNextPage, fetchNextPage } = useGetProjectCases(

@@ -312,7 +312,7 @@ export default function ServiceRequestsPage(): JSX.Element {
             sx={{ mb: 2 }}
             variant="text"
           >
-            {returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+            {OPERATIONS_LIST_BACK_LABEL}
           </Button>
           <Typography variant="body2" color="text.secondary">
             Service requests are not available for this project.
@@ -332,7 +332,7 @@ export default function ServiceRequestsPage(): JSX.Element {
             sx={{ mb: 2 }}
             variant="text"
           >
-            {returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+            {OPERATIONS_LIST_BACK_LABEL}
           </Button>
           <ErrorIndicator entityName={SERVICE_REQUESTS_ERROR_ENTITY_NAME} size="medium" />
         </Box>
@@ -373,7 +373,7 @@ export default function ServiceRequestsPage(): JSX.Element {
             ? SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE
             : SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL
         }
-        backLabel={returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={newRequestButton}
       />

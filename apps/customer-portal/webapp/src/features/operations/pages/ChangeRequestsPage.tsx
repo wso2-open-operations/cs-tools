@@ -302,7 +302,7 @@ export default function ChangeRequestsPage(): JSX.Element {
             ? CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
             : CHANGE_REQUESTS_PAGE_DESCRIPTION
         }
-        backLabel={returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={exportButton}
       />

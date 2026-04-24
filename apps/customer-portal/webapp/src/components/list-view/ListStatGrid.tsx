@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, StatCard, Skeleton } from "@wso2/oxygen-ui";
+import { Box, StatCard, Skeleton, useTheme } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { type SupportStatConfig } from "@features/support/constants/supportConstants";
@@ -65,6 +65,7 @@ export default function ListStatGrid<T extends string>({
   valueFormatter,
   onStatClick,
 }: ListStatGridProps<T>): JSX.Element {
+  const theme = useTheme();
   const xs = itemSize.xs ?? 12;
   const sm = itemSize.sm ?? 6;
   const md = itemSize.md ?? 3;
@@ -110,6 +111,17 @@ export default function ListStatGrid<T extends string>({
               position: "relative",
               minWidth: 0,
               cursor: onStatClick ? "pointer" : undefined,
+              borderRadius: 1,
+              transition: onStatClick ? "box-shadow 0.2s ease, transform 0.15s ease" : undefined,
+              "&:hover": onStatClick
+                ? {
+                    boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
+                    transform: "translateY(-2px)",
+                  }
+                : undefined,
+              "&:focus-visible": onStatClick
+                ? { outline: "2px solid", outlineOffset: 2 }
+                : undefined,
             }}
           >
             {SecondaryIcon && (

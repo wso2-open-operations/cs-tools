@@ -38,6 +38,7 @@ export type EngagementsStatCardsProps = {
   stats?: ProjectCasesStats;
   isLoading: boolean;
   isError: boolean;
+  onStatClick?: (key: EngagementsStatKey) => void;
 };
 
 export type EngagementsSortOption = {

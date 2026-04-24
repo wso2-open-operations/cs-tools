@@ -77,6 +77,11 @@ export const StatCard = ({
         height: "100%",
         ...(onClick && {
           cursor: "pointer",
+          transition: "box-shadow 0.2s ease, transform 0.15s ease",
+          "&:hover": {
+            boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
+            transform: "translateY(-2px)",
+          },
           "&:focus-visible": {
             outline: `2px solid ${theme.palette.primary.main}`,
             outlineOffset: 2,

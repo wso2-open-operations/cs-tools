@@ -320,11 +320,7 @@ export default function AllCasesPage(): JSX.Element {
           })()
         }
         backLabel={
-          returnTo?.endsWith("/support")
-            ? "Back to Support Center"
-            : returnTo && (initialSeverityId || statusFilter !== null)
-              ? "Back to Dashboard"
-              : "Back to Support Center"
+          returnTo?.endsWith("/support") ? "Back to Support Center" : "Back"
         }
         onBack={() => {
           if (returnTo) {

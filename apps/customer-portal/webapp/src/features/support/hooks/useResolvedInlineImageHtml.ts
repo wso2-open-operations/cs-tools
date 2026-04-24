@@ -47,28 +47,9 @@ function extractIixAttachmentIds(html: string): string[] {
  */
 export function useResolvedInlineImageHtml(
   html: string,
-  inlineAttachments?: InlineAttachment[] | null,
+  _inlineAttachments?: InlineAttachment[] | null,
 ): { resolvedHtml: string; isLoading: boolean } {
   const idsFromHtml = useMemo(() => extractIixAttachmentIds(html), [html]);
-
-  // Map each iix ref id to the attachment id (from inlineAttachments) or use directly.
-  const attachmentIds = useMemo(() => {
-    return idsFromHtml.map((refId) => {
-      if (inlineAttachments?.length) {
-        const match = inlineAttachments.find(
-          (a) =>
-            (a.id && (a.id === refId || a.id.includes(refId) || refId.includes(a.id))) ||
-            (a.sys_id &&
-              (a.sys_id === refId ||
-                a.sys_id.includes(refId) ||
-                refId.includes(a.sys_id))),
-        );
-        if (match?.id) return match.id;
-        if (match?.sys_id) return match.sys_id;
-      }
-      return refId;
-    });
-  }, [idsFromHtml, inlineAttachments]);
 
   const { dataUrls, isLoading } = useAttachmentPreviews([]);
 
