@@ -6,11 +6,24 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { InfiniteScroll } from "../../shared";
 import EmptyState from "../../shared/EmptyState";
 import { Typography } from "@wso2/oxygen-ui";
-import React from "react";
+import React, { useEffect } from "react";
 import { ItemCardExtended } from "./ItemCardExtended";
 import { ITEM_DETAIL_PATHS } from "@root/src/config/constants";
+import { GroupAccordion } from "../../ui/GroupAccordion";
 
-export function CaseListContent({ filter, search, mode }: { filter: string; search: string; mode?: ModeType }) {
+export function CaseListContent({
+  filter,
+  search,
+  mode,
+  grouped = false,
+  onCountChange,
+}: {
+  filter: string;
+  search: string;
+  mode?: ModeType;
+  grouped?: boolean;
+  onCountChange?: (count: number | undefined) => void;
+}) {
   const { projectId } = useProject();
 
   const filters: GetCasesRequestDto["filters"] = {};
@@ -48,14 +61,18 @@ export function CaseListContent({ filter, search, mode }: { filter: string; sear
   const total = totalQuery.data?.pagination.totalRecords;
   const count = query.data?.pages[0].pagination.totalRecords;
 
-  usePaginationSubtitleOverride(count, total);
+  usePaginationSubtitleOverride(grouped ? null : count, grouped ? null : total);
 
-  return (
+  useEffect(() => {
+    onCountChange?.(count);
+  }, [count]);
+
+  const body = (
     <InfiniteScroll
       {...query}
       sentinel={<ItemsListContentSkeleton />}
       tail={
-        count === 0 ? (
+        grouped ? undefined : count === 0 ? (
           <EmptyState />
         ) : (
           <Typography variant="subtitle2" textAlign="center">
@@ -78,4 +95,13 @@ export function CaseListContent({ filter, search, mode }: { filter: string; sear
       )}
     </InfiniteScroll>
   );
+
+  if (grouped)
+    return (
+      <GroupAccordion type="case" count={count}>
+        {body}
+      </GroupAccordion>
+    );
+
+  return body;
 }

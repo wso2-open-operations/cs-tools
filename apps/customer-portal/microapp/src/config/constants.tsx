@@ -132,6 +132,20 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   engagement: "Search Engagement",
 };
 
+export const ACTION_REQUIRED_CASE_STATUS_IDS = [18, 6];
+export const ACTION_REQUIRED_CHANGE_REQUEST_STATUS_IDS = [1, 5];
+
 export const OUTSTANDING_CASE_STATUS_IDS = [1, 10, 18, 1003, 6, 1006];
 export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
 export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
+
+export const RESOLVED_CASE_STATUS_IDS = [3];
+
+export const PLURALS: Record<ItemCardProps["type"], string> = {
+  case: "Cases",
+  chat: "Chats",
+  service: "Service Requests",
+  change: "Change Requests",
+  sra: "Security Report Analysis",
+  engagement: "Engagements",
+};
