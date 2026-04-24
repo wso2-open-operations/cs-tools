@@ -110,6 +110,7 @@ export const TAB_CONFIG = {
   change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
   sra: { title: "Security Report Analysis", subtitle: "Security findings, assessments, and reviews" },
   engagement: { title: "Engagements", subtitle: "Ongoing and completed client engagements" },
+  announcement: { title: "Announcements", subtitle: "View and manage announcements for your project" },
 };
 
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
@@ -119,6 +120,7 @@ export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => st
   change: (id) => `/changes/${id}`,
   sra: (id) => `/sras/${id}`,
   engagement: (id) => `/engagements/${id}`,
+  announcement: (id) => `/announcements/${id}`,
 };
 
 export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";
@@ -130,6 +132,7 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   change: "Search Change Requests",
   sra: "Search Security Report Analysis",
   engagement: "Search Engagement",
+  announcement: "Search Announcements",
 };
 
 export const ACTION_REQUIRED_CASE_STATUS_IDS = [18, 6];
@@ -148,4 +151,5 @@ export const PLURALS: Record<ItemCardProps["type"], string> = {
   change: "Change Requests",
   sra: "Security Report Analysis",
   engagement: "Engagements",
+  announcement: "Announcements",
 };

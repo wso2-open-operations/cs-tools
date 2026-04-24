@@ -29,7 +29,7 @@ import type { ServiceRequestSummary } from "@root/src/types/service.model";
 
 dayjs.extend(relativeTime);
 
-export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement";
+export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement" | "announcement";
 
 export type Status =
   | "in progress"
@@ -76,13 +76,18 @@ interface EngagementItemCardProps extends BaseItemCardProps, CaseSummary {
   type: "engagement";
 }
 
+interface AnnouncementItemCardProps extends BaseItemCardProps, CaseSummary {
+  type: "announcement";
+}
+
 export type ItemCardProps =
   | CaseItemCardProps
   | ChatItemCardProps
   | ChangeItemCardProps
   | ServiceItemCardProps
   | SraItemCardProps
-  | EngagementItemCardProps;
+  | EngagementItemCardProps
+  | AnnouncementItemCardProps;
 
 export function ItemCard(props: ItemCardProps) {
   const theme = useTheme();
@@ -107,14 +112,23 @@ export function ItemCard(props: ItemCardProps) {
         </Stack>
 
         <Typography variant="body1" color="text.primary" mr={1} noWrap>
-          {(type === "case" || type === "sra" || type === "engagement" || type === "service" || type === "change") &&
+          {(type === "case" ||
+            type === "sra" ||
+            type === "engagement" ||
+            type === "service" ||
+            type === "change" ||
+            type === "announcement") &&
             props.title}
           {type === "chat" && props.description}
         </Typography>
 
         <Stack direction="row" alignItems="center" gap={1}>
-          <StatusChip type={type} size="small" id={props.statusId} />
-          <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
+          {type !== "announcement" && (
+            <>
+              <StatusChip type={type} size="small" id={props.statusId} />
+              <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
+            </>
+          )}
           <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
             {type === "case" && (props.assigned ?? "Not Assigned")}
             {type === "chat" && `${props.count} messages`}
@@ -148,7 +162,7 @@ export function ItemCard(props: ItemCardProps) {
           </Stack>
         )}
 
-        <Stack gap={0.5} mt={1}>
+        <Stack gap={0.5} mt={1} direction="row" justifyContent="space-between">
           <Stack direction="row" alignItems="center" gap={1}>
             <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
             <Typography
@@ -159,6 +173,7 @@ export function ItemCard(props: ItemCardProps) {
               {dayjs(props.createdOn).fromNow()}
             </Typography>
           </Stack>
+          {type === "announcement" && <StatusChip type={type} size="small" id={props.statusId} />}
         </Stack>
       </Stack>
     </Card>

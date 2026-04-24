@@ -191,6 +191,19 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     tabIndex: 1,
   },
   {
+    path: "/announcements/all",
+    title: "All Announcements",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+  },
+  {
+    path: "/announcements/:id",
+    appBarVariant: "minimal",
+    hasBackAction: true,
+    tabIndex: 1,
+  },
+  {
     path: "/multiple/all",
     appBarVariant: "minimal",
     hasBackAction: true,

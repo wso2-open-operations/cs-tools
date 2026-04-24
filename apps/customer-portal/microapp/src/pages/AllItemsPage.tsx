@@ -35,6 +35,7 @@ import ErrorState from "../components/shared/ErrorState";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { STATUS_MODE_TYPES } from "../utils/filters";
 import EmptyState from "../components/shared/EmptyState";
+import { AnnouncementListContent } from "../components/features/support/AnnouncementListContent";
 
 export type ModeType = (OfStatusModeType | OfSeverityModeType) & {
   title: string;
@@ -154,6 +155,8 @@ function ItemsListContentSingle({
           onCountChange={onCountChange}
         />
       );
+    case "announcement":
+      return <AnnouncementListContent filter={filter} search={search} />;
     default:
       return null;
   }

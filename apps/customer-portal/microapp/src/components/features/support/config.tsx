@@ -16,6 +16,7 @@
 
 import {
   Briefcase,
+  Megaphone,
   MessageSquare,
   OctagonAlert,
   RefreshCcw,
@@ -50,6 +51,10 @@ export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> 
   engagement: {
     icon: Briefcase,
     color: colors.grey[600],
+  },
+  announcement: {
+    icon: Megaphone,
+    color: colors.red[500],
   },
 };
 

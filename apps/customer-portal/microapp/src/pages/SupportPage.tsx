@@ -38,6 +38,7 @@ import {
 import { securityReportAnalysis } from "../services/sra";
 import { engagements } from "../services/engagements";
 import ErrorState from "../components/shared/ErrorState";
+import { announcements } from "../services/announcements";
 
 type TabType = ItemCardProps["type"];
 
@@ -69,6 +70,7 @@ export default function SupportPage() {
         {features?.hasChangeRequestReadAccess && <Tab label="Change Requests" value="change" disableRipple />}
         <Tab label="Security Report Analysis" value="sra" disableRipple />
         {features?.hasEngagementsReadAccess && <Tab label="Engagements" value="engagement" disableRipple />}
+        <Tab label="Announcements" value="announcement" disableRipple />
       </Tabs>
       <Card component={Stack} p={2} mt={2} gap={0.5}>
         <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
@@ -134,6 +136,15 @@ function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
         <ItemsListErrorBoundary>
           <Suspense fallback={<ItemsListContentSkeleton />}>
             <EngagementItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "announcement":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <AnnouncementItemListContent />
           </Suspense>
         </ItemsListErrorBoundary>
       );
@@ -270,6 +281,29 @@ function EngagementItemListContent() {
     <>
       {data.map((item) => (
         <ItemCard key={item.id} type="engagement" to={ITEM_DETAIL_PATHS["engagement"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function AnnouncementItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    announcements.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="announcement" to={ITEM_DETAIL_PATHS["announcement"](item.id)} {...item} />
       ))}
     </>
   );
