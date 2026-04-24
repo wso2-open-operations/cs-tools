@@ -1371,11 +1371,18 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
 
         types:ConversationSearchResponse baseResponse = mapConversationSearchResponse(conversationResponse);
 
-        // Enrich each conversation with chatbot stats from the AI chat agent.
-        types:Conversation[] enrichedConversations = [];
+        // Fan-out: fire all summary calls in parallel to avoid N serial round-trips.
+        future<ai_chat_agent:ConversationSummaryResponse|error>[] summaryFutures = [];
         foreach types:Conversation conv in baseResponse.conversations {
-            types:Conversation enriched = conv.clone();
-            ai_chat_agent:ConversationSummaryResponse|error summary = ai_chat_agent:getSummary(id, conv.id);
+            future<ai_chat_agent:ConversationSummaryResponse|error> f = start ai_chat_agent:getSummary(id, conv.id);
+            summaryFutures.push(f);
+        }
+
+        // Fan-in: collect results and enrich each conversation.
+        types:Conversation[] enrichedConversations = [];
+        foreach int i in 0 ..< baseResponse.conversations.length() {
+            types:Conversation enriched = baseResponse.conversations[i].clone();
+            ai_chat_agent:ConversationSummaryResponse|error summary = wait summaryFutures[i];
             if summary is ai_chat_agent:ConversationSummaryResponse {
                 enriched.messagesExchanged = summary.messagesExchanged;
                 enriched.troubleshootingAttempts = summary.troubleshootingAttempts;
