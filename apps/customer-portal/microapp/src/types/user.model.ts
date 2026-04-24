@@ -34,4 +34,4 @@ export interface User {
   lastActive: Date;
 }
 
-export type Role = "Admin" | "Portal User" | "System User";
+export type Role = "Portal User" | "System User" | "Admin User" | "Security User";

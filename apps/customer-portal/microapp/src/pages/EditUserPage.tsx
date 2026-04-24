@@ -44,11 +44,22 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const state = location.state as { email?: string; role?: Role; firstName?: string; lastName?: string };
+  const state = location.state as {
+    email?: string;
+    role?: Role;
+    roles?: Role[];
+    firstName?: string;
+    lastName?: string;
+  };
 
-  const defaultUserRole: Role = "Portal User";
-  const initialRole: Role = state?.role && state.role !== "Admin" ? state.role : defaultUserRole;
-  const [role, setRole] = useState<Role>(initialRole);
+  const defaultUserRole: Role[] = ["Portal User"];
+  const initialRoles: Role[] =
+    state?.roles && state.roles.length > 0
+      ? state.roles
+      : state?.role && state.role !== "Admin User"
+        ? [state.role]
+        : defaultUserRole;
+  const [roles, setRoles] = useState<Role[]>(initialRoles);
   const [email, setEmail] = useState(state?.email ?? "");
   const [firstName, setFirstName] = useState(state?.firstName ?? "");
   const [lastName, setLastName] = useState(state?.lastName ?? "");
@@ -127,7 +138,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         </SectionCard>
 
         <SectionCard title="User Role">
-          <RoleSelector value={role} onChange={setRole} lockOnSystemUser={mode === "edit"} />
+          <RoleSelector value={roles} onChange={setRoles} />
         </SectionCard>
 
         {mode === "invite" && (
@@ -137,7 +148,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 projectName={project?.name}
                 email={email}
                 name={firstName + " " + lastName}
-                role={role}
+                roles={roles}
               />
             </SectionCard>
             <ExpirationNotice />
@@ -152,7 +163,11 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         )}
 
         <Button
-          disabled={mode === "edit" ? role === initialRole || editUserMutation.isPending : createUserMutation.isPending}
+          disabled={
+            mode === "edit"
+              ? JSON.stringify(roles) === JSON.stringify(initialRoles) || editUserMutation.isPending
+              : createUserMutation.isPending
+          }
           variant="contained"
           startIcon={
             createUserMutation.isPending || editUserMutation.isPending ? (
@@ -165,15 +180,14 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 contactEmail: email,
                 contactFirstName: firstName,
                 contactLastName: lastName,
-                isCsIntegrationUser: false,
-                isSecurityContact: role == "System User",
+                isCsIntegrationUser: roles.includes("System User"),
+                isSecurityContact: roles.includes("Security User"),
               });
 
             if (mode === "edit") {
-              const isSecurityContact = role === "System User";
-
               editUserMutation.mutate({
-                isSecurityContact,
+                isCsIntegrationUser: roles.includes("System User"),
+                isSecurityContact: roles.includes("Security User"),
               });
             }
           }}

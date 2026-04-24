@@ -37,7 +37,7 @@ export default function UsersPage() {
   const total = data?.length;
   const registered = data?.filter((user) => user.status === "registered").length;
   const invited = data?.filter((user) => user.status === "invited").length;
-  const admins = data?.filter((user) => user.roles.includes("Admin")).length;
+  const admins = data?.filter((user) => user.roles.includes("Admin User")).length;
 
   const [search, setSearch] = useState("");
 
