@@ -61,14 +61,11 @@ export function RoleSelector({ value, onChange }: RoleSelectorProps) {
 
       {hasSystemUser && (
         <Box
-          sx={(theme) => ({
+          sx={{
             px: 1.5,
             py: 1,
-            borderRadius: 1,
-            border: "1px solid",
-            borderColor: theme.palette.warning.main,
-            bgcolor: theme.palette.warning[50],
-          })}
+            bgcolor: "warning.50",
+          }}
         >
           <Typography variant="caption" color="warning.dark" fontWeight="medium">
             System Users are used for machine-to-machine integrations and cannot hold additional roles.
@@ -95,10 +92,6 @@ export function RoleOption({ role, description, selected, disabled = false, onCl
       sx={{
         px: 1.5,
         py: 0.5,
-        borderRadius: 1,
-        border: "1px solid",
-        borderColor: selected ? "primary.main" : "divider",
-        bgcolor: "background.paper",
         opacity: disabled ? 0.6 : 1,
       }}
     >
