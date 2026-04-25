@@ -101,12 +101,15 @@ export function ItemCard(props: ItemCardProps) {
           <Stack direction="row" alignItems="center" gap={1}>
             <Icon size={pxToRem(18)} color={color} />
             <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+              {type !== "chat" && props.internalId && (
+                <>
+                  {props.internalId}
+                  <span style={{ opacity: 0.5, margin: "0 4px" }}>|</span>
+                </>
+              )}
+
               {props.number}
             </Typography>
-            {(type === "case" || type === "sra" || type === "service") && (
-              <PriorityChip size="small" id={props.severityId} />
-            )}
-            {type === "change" && <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />}
           </Stack>
           <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
         </Stack>
@@ -123,7 +126,7 @@ export function ItemCard(props: ItemCardProps) {
         </Typography>
 
         <Stack direction="row" alignItems="center" gap={1}>
-          {type !== "announcement" && (
+          {type !== "announcement" && type !== "engagement" && (
             <>
               <StatusChip type={type} size="small" id={props.statusId} />
               <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
@@ -173,7 +176,13 @@ export function ItemCard(props: ItemCardProps) {
               {dayjs(props.createdOn).fromNow()}
             </Typography>
           </Stack>
-          {type === "announcement" && <StatusChip type={type} size="small" id={props.statusId} />}
+          {(type === "case" || type === "sra" || type === "service") && (
+            <PriorityChip size="small" id={props.severityId} />
+          )}
+          {type === "change" && <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />}
+          {(type === "announcement" || type === "engagement") && (
+            <StatusChip type={type} size="small" id={props.statusId} />
+          )}
         </Stack>
       </Stack>
     </Card>

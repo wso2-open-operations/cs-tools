@@ -147,19 +147,21 @@ export default function HomePage() {
             icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
             onClick={() =>
               navigate("/multiple/all", {
-                state: { mode: { type: "status", status: "action_required", title: "Action Required" } as ModeType },
+                state: {
+                  mode: { type: "status", status: "action_required", title: "Action Required Items" } as ModeType,
+                },
               })
             }
           />
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Outstanding Items"
+            label="Outstanding"
             value={activeInteractions}
             icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
             onClick={() =>
               navigate("/multiple/all", {
-                state: { mode: { type: "status", status: "outstanding", title: "Outstanding" } as ModeType },
+                state: { mode: { type: "status", status: "outstanding", title: "Outstanding Items" } as ModeType },
               })
             }
           />

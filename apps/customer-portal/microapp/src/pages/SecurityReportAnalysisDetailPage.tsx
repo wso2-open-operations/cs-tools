@@ -90,7 +90,12 @@ export default function SecurityReportAnalysisDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="sra" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="sra"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {

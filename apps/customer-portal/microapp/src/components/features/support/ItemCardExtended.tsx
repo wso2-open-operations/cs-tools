@@ -91,10 +91,17 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
       <CardActionArea component={Link} to={to}>
         <Stack bgcolor="background.paper" p={2} gap={2}>
           <Stack gap={0.8}>
-            <Stack direction="row" justifyContent="space-between" gap={5}>
-              <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
-                <Icon size={pxToRem(19)} color={color} />
-                <Typography variant="subtitle2" color="text.secondary">
+            <Stack direction="row" justifyContent="space-between" gap={3}>
+              <Stack direction="row" alignItems="center" gap={1} sx={{ flex: 1, minWidth: 0 }}>
+                <Icon size={pxToRem(19)} color={color} style={{ flexShrink: 0 }} />
+                <Typography noWrap variant="subtitle2" color="text.secondary">
+                  {type !== "chat" && props.internalId && (
+                    <>
+                      {props.internalId}
+                      <span style={{ opacity: 0.5, margin: "0 4px" }}>|</span>
+                    </>
+                  )}
+
                   {props.number}
                 </Typography>
                 {(type === "case" || type === "service" || type === "sra") && (
@@ -104,8 +111,7 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                 {type === "engagement" && <Chip size="small" label={props.engagementType ?? "Unspecified"} />}
                 {type === "change" && (
                   <>
-                    <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />
-                    <Chip size="small" label={props.requestType ?? "N/A"} />
+                    <PriorityChip type="change" size="small" id={props.impactId} />
                   </>
                 )}
               </Stack>

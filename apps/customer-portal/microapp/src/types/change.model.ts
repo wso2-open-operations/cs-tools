@@ -16,6 +16,7 @@
 
 export interface ChangeRequest {
   id: string;
+  internalId?: string;
   number: string;
   title: string;
   description: string;
@@ -42,6 +43,7 @@ export interface ChangeRequest {
 export type ChangeRequestSummary = Pick<
   ChangeRequest,
   | "id"
+  | "internalId"
   | "number"
   | "title"
   | "description"

@@ -89,7 +89,12 @@ export default function ServiceDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="service" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="service"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {
