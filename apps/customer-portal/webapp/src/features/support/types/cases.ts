@@ -361,6 +361,8 @@ export type CaseSearchFilters = {
   searchQuery?: string;
   caseTypes?: string[];
   createdByMe?: boolean;
+  closedStartDate?: string;
+  closedEndDate?: string;
 };
 
 // Request type for searching cases.
