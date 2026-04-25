@@ -65,7 +65,6 @@ import ChatHeader from "@features/support/components/novera-ai-assistant/novera-
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageList";
 import ChatSkeleton from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatSkeleton";
-import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 import {
   displayTextFromConversationContent,
   getFinalMessageFromPayload,
@@ -99,11 +98,7 @@ export default function NoveraChatPage(): JSX.Element {
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
 
   const handleBack = () => {
-    if (projectId) {
-      navigate(`/projects/${projectId}/support`, { state: { fromBack: true } });
-    } else {
-      navigate(ROUTE_PREVIOUS_PAGE);
-    }
+    navigate(-1);
   };
 
   const {

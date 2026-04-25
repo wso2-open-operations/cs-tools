@@ -451,11 +451,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       navigate(returnTo);
       return;
     }
-    if (projectId) {
-      navigate(`/projects/${projectId}/${basePath}/service-requests`);
-    } else {
-      navigate("/");
-    }
+    navigate(-1);
   };
 
   const fileToBase64 = (file: File): Promise<string> =>
