@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { Card, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Circle } from "@mui/icons-material";
@@ -26,8 +24,7 @@ import { TYPE_CONFIG } from "./config";
 import type { CaseSummary, ChangeRequestSummary } from "@src/types";
 import type { Chat } from "@src/types/chat.model";
 import type { ServiceRequestSummary } from "@root/src/types/service.model";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "@root/src/utils/useDateTime";
 
 export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement" | "announcement";
 
@@ -91,6 +88,7 @@ export type ItemCardProps =
 
 export function ItemCard(props: ItemCardProps) {
   const theme = useTheme();
+  const { fromNow } = useDateTime();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
@@ -173,7 +171,7 @@ export function ItemCard(props: ItemCardProps) {
               color="text.tertiary"
               sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}
             >
-              {dayjs(props.createdOn).fromNow()}
+              {fromNow(props.createdOn)}
             </Typography>
           </Stack>
           {(type === "case" || type === "sra" || type === "service") && (

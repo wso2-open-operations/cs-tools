@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import {
   Box,
   Card,
@@ -37,8 +35,7 @@ import { stripHtmlTags } from "@root/src/utils/others";
 import type { ServiceRequestSummary } from "@root/src/types/service.model";
 
 import { TYPE_CONFIG } from "./config";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "@root/src/utils/useDateTime";
 
 interface BaseItemCardExtendedProps {
   to: string;
@@ -83,6 +80,7 @@ export type ItemCardExtendedProps =
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
   const theme = useTheme();
+  const { fromNow } = useDateTime();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
@@ -243,9 +241,9 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                   case "sra":
                   case "engagement":
                   case "announcement":
-                    return `Created ${dayjs(props.createdOn).fromNow()}`;
+                    return `Created ${fromNow(props.createdOn)}`;
                   case "change":
-                    return `Updated ${dayjs(props.updatedOn).fromNow()}`;
+                    return `Updated ${fromNow(props.updatedOn)}`;
                 }
               })()}
             </Typography>

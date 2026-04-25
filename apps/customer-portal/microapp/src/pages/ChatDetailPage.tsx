@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { StatusChip } from "@components/features/support";
@@ -31,13 +29,13 @@ import { SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { chats } from "@src/services/chats";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function ChatDetailPage() {
   const layout = useLayout();
   const [messages, setMessages] = useState<(ChatMessage & { id: string })[]>([]);
 
+  const { fromNow, format } = useDateTime();
   const { id } = useParams();
   const { data } = useQuery(chats.get(id!));
   const { data: comments, isLoading: isCommentsLoading } = useQuery(chats.comments(id!));
@@ -50,7 +48,7 @@ export default function ChatDetailPage() {
         id: comment.id,
         author: comment.createdBy === "Novera" ? "assistant" : "you",
         blocks: [{ type: "text", value: comment.content || "" }],
-        timestamp: dayjs(comment.createdOn).fromNow(),
+        timestamp: fromNow(comment.createdOn),
       })) || [],
     );
 
@@ -100,10 +98,7 @@ export default function ChatDetailPage() {
         <SectionCard>
           <Grid spacing={1.5} container>
             <Grid size={6}>
-              <InfoField
-                label="Started"
-                value={data?.createdOn ? dayjs(data.createdOn).format("MMM D, YYYY h:mm A") : undefined}
-              />
+              <InfoField label="Started" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
             <Grid size={6}>
               <InfoField

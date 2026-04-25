@@ -20,7 +20,7 @@ export interface MeDto {
   firstName: string;
   lastName: string;
   phoneNumber: string | null;
-  timeZone: string;
+  timeZone: string | null;
   roles: string[];
 }
 

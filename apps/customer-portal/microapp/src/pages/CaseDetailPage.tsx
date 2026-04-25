@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeftRightIcon,
@@ -47,14 +45,14 @@ import { useFilters } from "../context/filters";
 import DOMPurify from "dompurify";
 import { useNotify } from "../context/snackbar";
 import type { Attachment } from "@src/types";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function CaseDetailPage() {
   const notify = useNotify();
   const layout = useLayout();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { fromNow, format } = useDateTime();
   const [comment, setComment] = useState("");
 
   const { id } = useParams();
@@ -203,22 +201,10 @@ export default function CaseDetailPage() {
               <InfoField label="Category" value={isLoading || isFiltersLoading ? undefined : (issueType ?? "N/A")} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+              <InfoField label="Last Updated" value={data?.updatedOn && fromNow(data.updatedOn)} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="Created"
-                value={data?.createdOn
-                  ?.toLocaleString("en-US", {
-                    month: "short",
-                    day: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })
-                  .replace("at", " ")}
-              />
+              <InfoField label="Created" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
           </Grid>
         </SectionCard>
@@ -269,7 +255,7 @@ export default function CaseDetailPage() {
             {comments ? (
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
+                  <Comment key={id} author={createdBy} timestamp={fromNow(createdOn)}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
@@ -299,6 +285,7 @@ export default function CaseDetailPage() {
 
 function AttachmentCard({ attachment }: { attachment: Attachment }) {
   const queryClient = useQueryClient();
+  const { fromNow } = useDateTime();
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
@@ -351,7 +338,7 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
             {attachment.fileName}
           </Typography>
           <Typography variant="caption" color="text.secondary" noWrap>
-            {attachment.createdBy} · {dayjs(attachment.createdOn).fromNow()}
+            {attachment.createdBy} · {fromNow(attachment.createdOn)}
           </Typography>
         </Stack>
         <IconButton onClick={handleDownload} disabled={isDownloading}>

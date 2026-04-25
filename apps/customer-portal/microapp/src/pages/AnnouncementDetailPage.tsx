@@ -25,16 +25,14 @@ import { RichText, SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function AnnouncementDetailPage() {
   const layout = useLayout();
 
   const { id } = useParams();
   const { data } = useQuery(cases.get(id!));
+  const { fromNow, format } = useDateTime();
 
   const ref = useRef<HTMLSpanElement>(null);
   const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
@@ -95,19 +93,7 @@ export default function AnnouncementDetailPage() {
         <SectionCard>
           <Grid spacing={1.5} container>
             <Grid size={6}>
-              <InfoField
-                label="Created"
-                value={data?.createdOn
-                  ?.toLocaleString("en-US", {
-                    month: "short",
-                    day: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })
-                  .replace("at", " ")}
-              />
+              <InfoField label="Created" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
             <Grid size={6}>
               <InfoField
@@ -122,7 +108,7 @@ export default function AnnouncementDetailPage() {
               />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+              <InfoField label="Last Updated" value={data?.updatedOn ? fromNow(data.updatedOn) : undefined} />
             </Grid>
           </Grid>
         </SectionCard>

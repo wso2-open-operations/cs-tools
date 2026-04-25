@@ -47,6 +47,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
         setProjectId: setAndStoreProjectId,
         features,
         projectTypeId: data?.typeId,
+        type: data?.type,
       }}
     >
       {children}
