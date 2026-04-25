@@ -1161,17 +1161,10 @@ function resolveInlineImageDisplaySrc(
   attachment: InlineAttachment,
   originalSrc: string,
 ): string {
-  const id = attachment.id ?? attachment.sys_id;
-  const originMatch = originalSrc.match(/^(https?:\/\/[^/]+)/i);
-  if (originMatch && id) {
-    return `${originMatch[1]}/${id}.iix`;
+  if (attachment.previewUrl) {
+    return attachment.previewUrl;
   }
-  return (
-    attachment.previewUrl ??
-    attachment.downloadUrl ??
-    attachment.url ??
-    originalSrc
-  );
+  return attachment.downloadUrl ?? attachment.url ?? originalSrc;
 }
 
 /**
