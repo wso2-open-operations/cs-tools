@@ -191,7 +191,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
               })}
             >
               <Typography variant="caption" color="info.dark" fontWeight="medium">
-                A contact cannot be both a CS Integration User and have roles.
+                This contact is a CS Integration User. CS Integration Users cannot be assigned other roles.
               </Typography>
             </Box>
           )}
