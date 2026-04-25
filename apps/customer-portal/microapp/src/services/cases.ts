@@ -167,7 +167,7 @@ export function toCase(dto: CaseDto): Case {
     issueTypeId: dto.issueType?.id,
     product: dto.product?.label,
     deployment: dto.deployment?.label ?? undefined,
-    reporter: dto.csManager?.label,
+    reporter: dto.createdBy,
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
     conversationId: dto.conversation?.id,
