@@ -15,7 +15,7 @@
 // under the License.
 
 import { Stack, Checkbox, FormControlLabel, Typography, Box, pxToRem } from "@wso2/oxygen-ui";
-import { ShieldUser } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield } from "@wso2/oxygen-ui-icons-react";
 import { MOCK_ROLES } from "@src/mocks/data/users";
 import type { Role } from "@root/src/types";
 
@@ -88,7 +88,16 @@ interface RoleOptionProps {
 }
 
 export function RoleOption({ role, description, selected, disabled = false, onClick }: RoleOptionProps) {
-  const admin = role === "Admin User";
+  const roleIcon =
+    role === "Admin User" ? (
+      <Crown size={pxToRem(18)} />
+    ) : role === "Portal User" ? (
+      <Monitor size={pxToRem(18)} />
+    ) : role === "Security User" ? (
+      <Shield size={pxToRem(18)} />
+    ) : (
+      <Code size={pxToRem(18)} />
+    );
 
   return (
     <Box
@@ -114,7 +123,7 @@ export function RoleOption({ role, description, selected, disabled = false, onCl
             </Stack>
           }
         />
-        {admin && <ShieldUser size={pxToRem(18)} />}
+        <Box color="text.secondary">{roleIcon}</Box>
       </Stack>
     </Box>
   );
