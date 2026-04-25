@@ -21,6 +21,7 @@ import { useLogger } from "@hooks/useLogger";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import type { DownloadDeploymentLicenseVariables } from "@features/project-details/types/projectDetailsApi";
 import type { DeploymentLicense } from "@features/project-details/types/deployments";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to download a license for a deployment (POST /projects/:projectId/deployments/:deploymentId/license).
@@ -49,21 +50,6 @@ export function useDownloadDeploymentLicense(): UseMutationResult<
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
-  };
-
-  const extractBackendError = (
-    response: Response,
-    responseText: string,
-  ): string => {
-    try {
-      const jsonError = JSON.parse(responseText);
-      if (jsonError.message) {
-        return jsonError.message;
-      }
-    } catch {
-      // Response is not JSON, continue
-    }
-    return `Error downloading deployment license: ${response.status} ${response.statusText}`;
   };
 
   return useMutation<void, Error, DownloadDeploymentLicenseVariables>({
@@ -101,8 +87,7 @@ export function useDownloadDeploymentLicense(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          const errorMessage = extractBackendError(response, text);
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const licenseData: DeploymentLicense = await response.json();
