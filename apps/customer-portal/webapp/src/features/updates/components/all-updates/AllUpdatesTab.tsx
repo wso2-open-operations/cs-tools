@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   CardContent,
+  CircularProgress,
   FormControl,
   Grid,
   InputLabel,
@@ -28,7 +29,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText } from "@wso2/oxygen-ui-icons-react";
+import { Download } from "@wso2/oxygen-ui-icons-react";
 import searchingSvg from "@assets/search/searching.svg";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -39,7 +40,6 @@ import { PendingUpdatesList } from "@features/updates/components/pending-updates
 import PendingUpdatesListSkeleton from "@features/updates/components/pending-updates/PendingUpdatesListSkeleton";
 import EmptyState from "@components/empty-state/EmptyState";
 import error500Svg from "@assets/error/error-500.svg";
-import UpdateLevelsReportModal from "@features/updates/components/all-updates/UpdateLevelsReportModal";
 import type {
   AllUpdatesTabFilterState,
   AllUpdatesTabSearchParams,
@@ -59,11 +59,13 @@ import {
   ALL_UPDATES_START_LEVEL_LABEL,
   ALL_UPDATES_TAB_INITIAL_FILTER,
   ALL_UPDATES_VERSION_LABEL,
-  ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL,
   ALL_UPDATES_EMPTY_SEARCH_MESSAGE,
 } from "@features/updates/constants/updatesConstants";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/common";
-import { getUpdateLevelsReportData } from "@features/updates/utils/updateLevelsReportPdf";
+import {
+  generateUpdateLevelsReportPdf,
+  getUpdateLevelsReportData,
+} from "@features/updates/utils/updateLevelsReportPdf";
 import {
   getNextAllUpdatesFilterAfterChange,
   getProductNamesFromProductLevels,
@@ -86,7 +88,7 @@ export default function AllUpdatesTab(): JSX.Element {
   const [filter, setFilter] = useState<AllUpdatesTabFilterState>(
     ALL_UPDATES_TAB_INITIAL_FILTER,
   );
-  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [searchParams, setSearchParams] =
     useState<AllUpdatesTabSearchParams | null>(null);
 
@@ -197,14 +199,18 @@ export default function AllUpdatesTab(): JSX.Element {
     }
   }, [searchData, searchParams]);
 
-  const handleViewReport = useCallback(() => {
+  const handleDownloadReport = useCallback(async () => {
     if (!reportData) return;
-    setReportModalOpen(true);
+    setIsGeneratingPdf(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    try {
+      generateUpdateLevelsReportPdf(reportData);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   }, [reportData]);
 
   const canSearch = validateAllUpdatesFilter(filter).valid;
-
-  const canViewReport = !!reportData;
 
   const hasActiveFilter =
     filter.productName !== "" ||
@@ -426,11 +432,17 @@ export default function AllUpdatesTab(): JSX.Element {
             <Button
               variant="outlined"
               color="warning"
-              startIcon={<FileText size={18} />}
-              onClick={handleViewReport}
-              disabled={!canViewReport}
+              startIcon={
+                isGeneratingPdf ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <Download size={18} />
+                )
+              }
+              onClick={handleDownloadReport}
+              disabled={!reportData || isGeneratingPdf}
             >
-              {ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL}
+              {isGeneratingPdf ? "Generating..." : "Download Report"}
             </Button>
           </Stack>
         </CardContent>
@@ -486,11 +498,6 @@ export default function AllUpdatesTab(): JSX.Element {
         />
       )}
 
-      <UpdateLevelsReportModal
-        open={reportModalOpen}
-        reportData={reportData}
-        onClose={() => setReportModalOpen(false)}
-      />
     </Stack>
   );
 }
