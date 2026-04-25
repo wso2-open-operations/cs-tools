@@ -585,12 +585,12 @@ export function getChatStatusAction(status: string): ChatAction {
   const normalized = status?.toLowerCase() || "";
 
   switch (true) {
-    case normalized.includes("resolved"):
+    case normalized.includes("open"):
+    case normalized.includes("active"):
     case normalized.includes("abandoned"):
-    case normalized.includes("converted"):
-      return ChatAction.VIEW;
-    default:
       return ChatAction.RESUME;
+    default:
+      return ChatAction.VIEW;
   }
 }
 
@@ -745,10 +745,7 @@ export function resolveColorFromTheme(path: string, theme: Theme): string {
 export function formatRelativeTime(date: string | Date | undefined): string {
   if (!date) return "--";
 
-  const d =
-    typeof date === "string"
-      ? parseBackendTimestamp(date)
-      : date;
+  const d = typeof date === "string" ? parseBackendTimestamp(date) : date;
   if (!d) return "--";
   if (isNaN(d.getTime())) return "--";
 
@@ -980,19 +977,19 @@ export function getSeverityColor(label?: string): string {
 export function getStatusColor(label?: string): string {
   switch (label) {
     case CaseStatus.OPEN:
-      return colors.blue[500];
+      return colors.lightBlue[500];
     case CaseStatus.WORK_IN_PROGRESS:
-      return colors.orange[500];
-    case CaseStatus.AWAITING_INFO:
-      return colors.grey[500];
-    case CaseStatus.WAITING_ON_WSO2:
       return colors.green[500];
+    case CaseStatus.AWAITING_INFO:
+      return colors.orange[900];
+    case CaseStatus.WAITING_ON_WSO2:
+      return colors.yellow[800];
     case CaseStatus.SOLUTION_PROPOSED:
-      return colors.yellow[900];
+      return colors.purple[300];
     case CaseStatus.CLOSED:
-      return colors.red[500];
+      return colors.grey[500];
     case CaseStatus.REOPENED:
-      return colors.purple[500];
+      return colors.pink[500];
     default:
       return colors.grey[500];
   }
@@ -1877,4 +1874,20 @@ export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";
 export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {
   const normalized = statusLabel?.trim().toLowerCase() ?? "";
   return normalized === CASE_STATUS.CLOSED.toLowerCase();
+}
+
+/**
+ * Returns the UTC ISO date range covering the last 30 days,
+ * for use with closedStartDate / closedEndDate filter fields.
+ */
+export function getLast30DaysUtcRange(): {
+  closedStartDate: string;
+  closedEndDate: string;
+} {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`;
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  return { closedStartDate: fmt(thirtyDaysAgo), closedEndDate: fmt(now) };
 }

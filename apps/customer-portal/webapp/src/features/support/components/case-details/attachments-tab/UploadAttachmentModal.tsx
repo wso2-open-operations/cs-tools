@@ -62,7 +62,7 @@ function ensureExtension(fileName: string, extension: string): string {
 
 /**
  * Modal for uploading a case attachment or deployment document: drag-and-drop or file picker.
- * Supports caseId (case attachments) or deploymentId (deployment documents). Max file size 15 MB.
+ * Supports caseId (case attachments) or deploymentId (deployment documents). Max file size 10 MB.
  *
  * @param {UploadAttachmentModalProps} props - open, caseId/deploymentId, onClose, optional onSuccess.
  * @returns {JSX.Element} The upload attachment modal.
@@ -258,7 +258,7 @@ export default function UploadAttachmentModal({
             onClose={() => setFileSizeErrorVisible(false)}
             sx={{ mb: 2 }}
           >
-            File size exceeds 15 MB limit.
+            File size exceeds 10 MB limit.
           </Alert>
         )}
         {readErrorVisible && (

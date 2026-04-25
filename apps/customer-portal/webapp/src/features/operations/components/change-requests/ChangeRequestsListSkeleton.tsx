@@ -63,8 +63,14 @@ export default function ChangeRequestsListSkeleton(): JSX.Element {
                 flexWrap: "wrap",
               }}
             >
+              {/* CR number | state dot+label | pipe | case internalId | pipe | case number | pipe | product */}
               <Skeleton variant="text" width={100} height={20} />
-              <Skeleton variant="rounded" width={88} height={22} />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <Skeleton variant="circular" width={8} height={8} />
+                <Skeleton variant="text" width={88} height={20} />
+              </Box>
+              <Skeleton variant="text" width={8} height={20} />
+              <Skeleton variant="text" width={80} height={20} />
               <Skeleton variant="text" width={8} height={20} />
               <Skeleton variant="text" width={90} height={20} />
               <Skeleton variant="text" width={8} height={20} />
@@ -79,9 +85,11 @@ export default function ChangeRequestsListSkeleton(): JSX.Element {
                 flexWrap: "wrap",
               }}
             >
-              <Skeleton variant="text" width={150} height={20} />
+              <Skeleton variant="text" width={130} height={20} />
               <Skeleton variant="text" width={8} height={20} />
-              <Skeleton variant="text" width={150} height={20} />
+              <Skeleton variant="text" width={130} height={20} />
+              <Skeleton variant="text" width={8} height={20} />
+              <Skeleton variant="text" width={130} height={20} />
               <Skeleton variant="rounded" width={56} height={20} />
             </Box>
           </Box>

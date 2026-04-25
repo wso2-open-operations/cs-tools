@@ -23,7 +23,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
-import { Box, Button, CircularProgress, Stack } from "@wso2/oxygen-ui";
+import { Button, CircularProgress, Divider, Stack } from "@wso2/oxygen-ui";
 import { Download } from "@wso2/oxygen-ui-icons-react";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -31,11 +31,7 @@ import useGetChangeRequests, {
   useGetChangeRequestsInfinite,
 } from "@features/operations/api/useGetChangeRequests";
 import { useGetProjectChangeRequestStats } from "@features/operations/api/useGetProjectChangeRequestStats";
-import {
-  CHANGE_REQUEST_FILTER_DEFINITIONS,
-  CHANGE_REQUEST_STAT_CONFIGS,
-} from "@features/operations/constants/operationsConstants";
-import ListStatGrid from "@components/list-view/ListStatGrid";
+import { CHANGE_REQUEST_FILTER_DEFINITIONS } from "@features/operations/constants/operationsConstants";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
@@ -46,13 +42,22 @@ import ChangeRequestsCalendarView from "@features/operations/components/change-r
 import TabBar from "@components/tab-bar/TabBar";
 import { generateChangeRequestsSchedulePdf } from "@features/operations/utils/changeRequestsSchedulePdf";
 import { hasListSearchOrFilters, countListSearchAndFilters } from "@features/support/utils/support";
-import { ChangeRequestsViewMode } from "@features/operations/types/changeRequests";
+import {
+  ChangeRequestFilterDefinitionId,
+  ChangeRequestsViewMode,
+} from "@features/operations/types/changeRequests";
 import {
   CHANGE_REQUESTS_ENTITY_LABEL,
   CHANGE_REQUESTS_EXPORT_EXPORTING_LABEL,
   CHANGE_REQUESTS_EXPORT_SCHEDULE_LABEL,
   CHANGE_REQUESTS_PAGE_DESCRIPTION,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
+  CHANGE_REQUESTS_PAGE_DESCRIPTION_SCHEDULED,
   CHANGE_REQUESTS_PAGE_TITLE,
+  CHANGE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED,
+  CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING,
+  CHANGE_REQUESTS_PAGE_TITLE_SCHEDULED,
   CHANGE_REQUESTS_SEARCH_PLACEHOLDER,
   CHANGE_REQUESTS_VIEW_TABS_CONFIG,
   OPERATIONS_LIST_BACK_LABEL,
@@ -73,7 +78,16 @@ import {
 export default function ChangeRequestsPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+  const locationState = location.state as {
+    returnTo?: string;
+    outstandingOnly?: boolean;
+    actionRequired?: boolean;
+    scheduledOnly?: boolean;
+  } | null;
+  const returnTo = locationState?.returnTo;
+  const outstandingOnly = locationState?.outstandingOnly ?? false;
+  const actionRequired = locationState?.actionRequired ?? false;
+  const scheduledOnly = locationState?.scheduledOnly ?? false;
   const { projectId } = useParams<{ projectId: string }>();
   const navSegment = getOperationsNavSegment(location.pathname);
 
@@ -82,8 +96,10 @@ export default function ChangeRequestsPage(): JSX.Element {
   );
   const sessionPrefix = `${projectId ?? "unknown"}-change-requests`;
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useSessionState<ChangeRequestFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [isFiltersOpen, setIsFiltersOpen] = useState(
+    () => hasListSearchOrFilters(searchTerm, filters),
+  );
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
   const [rowsPerPage, setRowsPerPage] = useSessionState<number>(`${sessionPrefix}-rowsPerPage`, OPERATIONS_LIST_PAGE_SIZE, undefined, { popOnly: true });
   const [isExporting, setIsExporting] = useState(false);
@@ -93,15 +109,13 @@ export default function ChangeRequestsPage(): JSX.Element {
   const {
     data: stats,
     isLoading: isStatsLoading,
-    isError: isStatsError,
-    isFetched: isStatsFetched,
   } = useGetProjectChangeRequestStats(projectId || "", {
     enabled: !!projectId,
   });
 
   const changeRequestSearchRequest = useMemo(
-    () => buildChangeRequestSearchRequest(filters, searchTerm),
-    [searchTerm, filters],
+    () => buildChangeRequestSearchRequest(filters, searchTerm, outstandingOnly, actionRequired, scheduledOnly),
+    [searchTerm, filters, outstandingOnly, actionRequired, scheduledOnly],
   );
 
   const offset = (page - 1) * rowsPerPage;
@@ -238,16 +252,15 @@ export default function ChangeRequestsPage(): JSX.Element {
   };
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
-  const normalizedStats = useMemo(
-    () => ({
-      totalRequests: stats?.totalRequests ?? 0,
-      awaitingYourAction: stats?.awaitingYourAction ?? 0,
-      ongoing: stats?.ongoing ?? 0,
-      completed: stats?.completed ?? 0,
-    }),
-    [stats],
+  const visibleFilterDefinitions = useMemo(
+    () =>
+      outstandingOnly || actionRequired || scheduledOnly
+        ? CHANGE_REQUEST_FILTER_DEFINITIONS.filter(
+            (def) => def.id !== ChangeRequestFilterDefinitionId.State,
+          )
+        : CHANGE_REQUEST_FILTER_DEFINITIONS,
+    [outstandingOnly, actionRequired, scheduledOnly],
   );
-
   const exportButton = (
     <Button
       variant="contained"
@@ -273,43 +286,53 @@ export default function ChangeRequestsPage(): JSX.Element {
   return (
     <Stack spacing={3}>
       <ListPageHeader
-        title={CHANGE_REQUESTS_PAGE_TITLE}
-        description={CHANGE_REQUESTS_PAGE_DESCRIPTION}
-        backLabel={returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+        title={
+          actionRequired
+            ? CHANGE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED
+            : scheduledOnly
+            ? CHANGE_REQUESTS_PAGE_TITLE_SCHEDULED
+            : outstandingOnly
+            ? CHANGE_REQUESTS_PAGE_TITLE_OUTSTANDING
+            : CHANGE_REQUESTS_PAGE_TITLE
+        }
+        description={
+          actionRequired
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED
+            : scheduledOnly
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_SCHEDULED
+            : outstandingOnly
+            ? CHANGE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
+            : CHANGE_REQUESTS_PAGE_DESCRIPTION
+        }
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={exportButton}
       />
 
-      <Box sx={{ mb: 3 }}>
-        <ListStatGrid
-          isLoading={isStatsLoading || (!isStatsFetched && !isStatsError)}
-          isError={isStatsError}
-          entityName="change request"
-          configs={CHANGE_REQUEST_STAT_CONFIGS}
-          stats={normalizedStats}
+      {outstandingOnly || actionRequired || scheduledOnly ? (
+        <Divider />
+      ) : (
+        <ListSearchBar
+          searchPlaceholder={CHANGE_REQUESTS_SEARCH_PLACEHOLDER}
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          isFiltersOpen={isFiltersOpen}
+          onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+          activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
+          onClearFilters={handleClearFilters}
+          filtersContent={
+            <ListFiltersPanel
+              filterDefinitions={visibleFilterDefinitions}
+              filters={filters}
+              resolveOptions={(def) =>
+                resolveChangeRequestFilterListOptions(def, filterMetadata)
+              }
+              onFilterChange={handleFilterChange}
+              gridSize={{ xs: 12, sm: 6, md: 4 }}
+            />
+          }
         />
-      </Box>
-
-      <ListSearchBar
-        searchPlaceholder={CHANGE_REQUESTS_SEARCH_PLACEHOLDER}
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
-        onClearFilters={handleClearFilters}
-        filtersContent={
-          <ListFiltersPanel
-            filterDefinitions={CHANGE_REQUEST_FILTER_DEFINITIONS}
-            filters={filters}
-            resolveOptions={(def) =>
-              resolveChangeRequestFilterListOptions(def, filterMetadata)
-            }
-            onFilterChange={handleFilterChange}
-            gridSize={{ xs: 12, sm: 6, md: 4 }}
-          />
-        }
-      />
+      )}
 
       <ListResultsBar
         shownCount={changeRequests.length}

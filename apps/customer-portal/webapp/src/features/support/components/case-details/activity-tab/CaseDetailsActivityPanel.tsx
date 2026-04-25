@@ -41,6 +41,7 @@ import type {
 } from "@features/support/types/supportComponents";
 import type { CaseComment } from "@features/support/types/cases";
 import ApiErrorState from "@components/error/ApiErrorState";
+import { ApiError } from "@utils/ApiError";
 
 // TODO : DUE TO URGENCY THIS COMPONENT BREAKS THE BEST PRACTICES , NEED FULL REFACTOR
 /**
@@ -59,7 +60,11 @@ export default function CaseDetailsActivityPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  const { data: userDetails } = useGetUserDetails();
+  const {
+    data: userDetails,
+    isError: isUserDetailsError,
+    error: userDetailsError,
+  } = useGetUserDetails();
   const {
     data: commentsData,
     isLoading: isCommentsLoading,
@@ -74,6 +79,10 @@ export default function CaseDetailsActivityPanel({
   } = useGetConversationMessages(conversationId ?? "", { pageSize: 50 });
 
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
+  const hideAvatar =
+    isUserDetailsError &&
+    userDetailsError instanceof ApiError &&
+    (userDetailsError.status === 401 || userDetailsError.status === 403);
 
   const mergedTimeline = useMemo(() => {
     const caseComments = commentsData?.comments ?? [];
@@ -119,7 +128,7 @@ export default function CaseDetailsActivityPanel({
         {[1, 2, 3].map((i) => (
           <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
             <Skeleton variant="circular" width={32} height={32} />
-            <Box sx={{ flex: 1 }}>
+            <Box sx={{ flex: 1, width: "100%" }}>
               <Skeleton variant="text" width="40%" height={20} />
               <Skeleton variant="rectangular" height={60} sx={{ mt: 1 }} />
             </Box>
@@ -143,6 +152,7 @@ export default function CaseDetailsActivityPanel({
         caseCreatedOn={undefined}
         currentUserEmail={currentUserEmail}
         primaryBg={primaryBg}
+        hideAvatar={hideAvatar}
         userDetails={userDetails}
       />
     );
@@ -225,6 +235,7 @@ function ActivityContent({
   commentsToShow,
   currentUserEmail,
   primaryBg,
+  hideAvatar = false,
   userDetails,
   onImageClick,
 }: ActivityContentProps): JSX.Element {
@@ -263,6 +274,7 @@ function ActivityContent({
                 comment={comment}
                 isCurrentUser={isCurrentUser}
                 primaryBg={primaryBg}
+                hideAvatar={hideAvatar}
                 userDetails={userDetails}
                 onImageClick={onImageClick}
               />

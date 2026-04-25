@@ -60,6 +60,12 @@ public type CaseSearchFilters record {|
     entity:CaseType[] caseTypes?;
     # Severity ID
     int severityId?;
+    # Engagement type keys (required for engagement type cases)
+    int[] engagementTypeKeys?;
+    # Closed start date
+    entity:UtcDateTimeString closedStartDate?;
+    # Closed end date
+    entity:UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
     # Case created by the logged in user
@@ -183,6 +189,8 @@ public type ReferenceItem record {|
     string label;
     # Count
     int count?;
+    # WSO2 Internal ID
+    string? internalId?;
     # Number
     string? number?;
     # Abbreviation
@@ -355,6 +363,8 @@ public type Project record {|
     int activeCasesCount;
     # Active chats/conversations count
     int activeChatsCount;
+    # Action Required count
+    int actionRequiredCount;
     # SLA status (e.g., "Needs Attention")
     string slaStatus;
 |};
@@ -445,6 +455,8 @@ public type ProjectCaseStats record {|
     int activeCount;
     # Outstanding case count (cases that are not solution proposed or closed)
     int outstandingCount;
+    # Action required from customer case count
+    int actionRequiredCount;
     # Average response time
     decimal averageResponseTime;
     # Resolved case count breakdown
@@ -503,6 +515,18 @@ public type ProjectStats record {|
     int deployments?;
     # SLA status
     string slaStatus?;
+    # Outstanding case count
+    int outstandingCaseCount?;
+    # Outstanding service request count
+    int outstandingServiceRequestCount?;
+    # Outstanding engagement count
+    int outstandingEngagementCount?;
+    # Outstanding SRA count
+    int outstandingSraCount?;
+    # Outstanding change request count
+    int outstandingChangeRequestCount?;
+    # Outstanding announcement count
+    int outstandingAnnouncementCount?;
 |};
 
 # Recent activity details.
@@ -810,6 +834,10 @@ public type ProductVulnerabilitySearchFilters record {|
     int statusId?;
     # Severity ID
     int severityId?;
+    # Product name filter
+    string productName?;
+    # Product version filter
+    string productVersion?;
 |};
 
 # Base product vulnerability.
@@ -822,12 +850,20 @@ public type ProductVulnerability record {|
     string vulnerabilityId;
     # Severity level
     ReferenceItem severity;
+    # Name of the product
+    string productName?;
+    # Version of the product
+    string productVersion?;
     # Name of the component
     string componentName;
     # Version of the component
     string version;
     # Type
     string 'type;
+    # Type of the component
+    string componentType?;
+    # Update level for the vulnerability
+    string updateLevel?;
     # Use case description
     string? useCase;
     # Justification
@@ -840,10 +876,6 @@ public type ProductVulnerability record {|
 # Product vulnerability information.
 public type ProductVulnerabilityResponse record {|
     *ProductVulnerability;
-    # Type of the component
-    string componentType?;
-    # Update level for the vulnerability
-    string updateLevel?;
 |};
 
 # Product vulnerabilities response with pagination.
@@ -1022,14 +1054,22 @@ public type ContactOnboardPayload record {|
     string contactLastName;
     # Whether the contact is System User or not
     boolean isCsIntegrationUser;
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is Security Contact or not
     boolean isSecurityContact = false;
 |};
 
-# Payload for updating membership security flag.
-public type MembershipSecurityPayload record {|
+# Payload for updating membership roles.
+public type MembershipRolePayload record {|
+    # Whether the contact is a customer admin or not
+    boolean isCsAdmin = false;
+    # Whether the contact is a portal user or not
+    boolean isPortalUser = false;
     # Whether the contact is a security contact or not
-    boolean isSecurityContact;
+    boolean isSecurityContact = false;
 |};
 
 # The request payload to be validated.
@@ -1470,6 +1510,10 @@ public type ChangeRequestSearchPayload record {|
         int[] stateKeys?;
         # Change request impact key
         int impactKey?;
+        # Start date for closed date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+        entity:UtcDateTimeString closedStartDate?;
+        # End date for closed date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+        entity:UtcDateTimeString closedEndDate?;
     |} filters?;
     # Pagination details
     entity:Pagination pagination?;
@@ -1516,8 +1560,19 @@ public type ProjectChangeRequestStatsResponse record {|
     int activeCount;
     # Outstanding change request count
     int outstandingCount;
+    # Action required from customer change request count
+    int actionRequiredCount;
     # Count of change requests by state
     ReferenceItem[] stateCount;
+    # Resolved change request count breakdown
+    record {|
+        # Total resolved count
+        int total;
+        # Current month resolved count
+        int currentMonth;
+        # Past thirty days resolved count
+        int pastThirtyDays;
+    |} resolvedCount;
 |};
 
 # Registry token creation payload.

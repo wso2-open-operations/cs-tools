@@ -208,7 +208,7 @@ const CasesList = ({
                       );
                     })()}
                   </TableCell>
-                  <TableCell align={assignedEngineerName ? "left" : "center"}>
+                  <TableCell align="center">
                     <Typography variant="body2" color="text.primary">
                       {assignedEngineerDisplay}
                     </Typography>

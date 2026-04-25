@@ -15,8 +15,10 @@
 // under the License.
 
 import type { CaseDetailsTabPanelsProps } from "@features/support/types/supportComponents";
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { Box, Paper, Stack, Typography } from "@wso2/oxygen-ui";
+import { ClipboardList } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import { useNavigate, useParams } from "react-router";
 import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
@@ -41,6 +43,10 @@ export default function CaseDetailsTabPanels({
   isEngagement = false,
   isServiceRequest = false,
 }: CaseDetailsTabPanelsProps): JSX.Element | null {
+  const navigate = useNavigate();
+  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
+  const resolvedProjectIdForNav = data?.project?.id ?? routeProjectId ?? projectId;
+
   switch (panelIndex) {
     case 0: {
       const resolvedProjectId = data?.project?.id ?? projectId;
@@ -117,6 +123,77 @@ export default function CaseDetailsTabPanels({
           projectId={resolvedProjectId}
           data={data}
         />
+      );
+    }
+    case 5: {
+      const changeRequests = data?.changeRequests ?? [];
+      if (changeRequests.length === 0) {
+        return (
+          <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+            No related change requests found.
+          </Typography>
+        );
+      }
+      return (
+        <Stack spacing={1.5} sx={{ p: 1 }}>
+          {changeRequests.map((cr) => (
+            <Paper
+              key={cr.id}
+              variant="outlined"
+              sx={{
+                p: 2,
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                cursor: "pointer",
+                "&:hover": { bgcolor: "action.hover" },
+              }}
+              onClick={() =>
+                navigate(
+                  `/projects/${resolvedProjectIdForNav}/operations/change-requests/${cr.id}`,
+                  { state: { returnTo: window.location.pathname } },
+                )
+              }
+            >
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 1,
+                  bgcolor: "primary.main",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  color: "primary.contrastText",
+                  opacity: 0.85,
+                }}
+              >
+                <ClipboardList size={18} aria-hidden />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  {cr.number && (
+                    <Typography variant="caption" fontWeight={600} color="primary.main">
+                      {cr.number}
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    {cr.id}
+                  </Typography>
+                </Box>
+                <Typography
+                  variant="body2"
+                  fontWeight={500}
+                  color="text.primary"
+                  sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
+                  {cr.label}
+                </Typography>
+              </Box>
+            </Paper>
+          ))}
+        </Stack>
       );
     }
     default:

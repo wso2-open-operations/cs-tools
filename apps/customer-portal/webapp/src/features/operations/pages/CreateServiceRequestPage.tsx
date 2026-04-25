@@ -32,7 +32,7 @@ import {
 } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProductCategory, ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import {
   extractDeploymentProducts,
   usePostDeploymentProductsSearchInfinite,
@@ -50,7 +50,11 @@ import {
   getFirstEmptyRequiredField,
   isContextField,
   isDescriptionField,
+  isDateTimeField,
 } from "@features/operations/utils/serviceRequestValidation";
+import { datetimeLocalWallTimeToUtcMs } from "@features/support/utils/support";
+import { resolveDisplayTimeZone } from "@utils/dateTime";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
   getBaseDeploymentOptions,
   getBaseProductOptions,
@@ -65,7 +69,6 @@ import {
 } from "@features/operations/utils/caseRefresh";
 import {
   filterDeploymentsForCaseCreation,
-  getProductCategoriesForServiceRequest,
   getProjectPermissions,
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
@@ -121,6 +124,30 @@ function getCreateServiceRequestValidationError(params: {
   return null;
 }
 
+function getServiceRequestTitleLengthError(
+  variables: Array<{ id: string; questionText?: string }> | undefined,
+  variableValues: Record<string, string>,
+): string | null {
+  if (!variables?.length) {
+    return null;
+  }
+  const titleField = variables.find(
+    (variable) =>
+      (variable.questionText ?? "")
+        .replace(/^\s*\*?\s*/, "")
+        .trim()
+        .toLowerCase() === "title",
+  );
+  if (!titleField) {
+    return null;
+  }
+  const plainTitle = htmlToPlainText(variableValues[titleField.id] ?? "").trim();
+  if (plainTitle.length > 160) {
+    return "Title must be 160 characters or fewer.";
+  }
+  return null;
+}
+
 function getCanSubmitServiceRequest(params: {
   projectId: string | undefined;
   selectedDeploymentId: string;
@@ -172,6 +199,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const { showSuccess } = useSuccessBanner();
   const queryClient = useQueryClient();
   const authFetch = useAuthApiClient();
+  const { data: userDetails } = useGetUserDetails();
+  const userTimeZone = userDetails?.timeZone?.trim() || resolveDisplayTimeZone();
 
   const [deployment, setDeployment] = useState("");
   const [product, setProduct] = useState("");
@@ -252,9 +281,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   );
   const selectedDeploymentId = selectedDeploymentMatch?.id ?? "";
 
-  const srProductCategories = getProductCategoriesForServiceRequest(
-    projectDetails?.type?.label,
-  );
+  const srProductCategories = (projectFeatures?.srProductCategories ?? undefined) as ProductCategory[] | undefined;
   const deploymentProductsQuery = usePostDeploymentProductsSearchInfinite(
     selectedDeploymentId,
     {
@@ -462,6 +489,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
       contextValues,
       variableValues,
     );
+    const titleLengthError = getServiceRequestTitleLengthError(
+      variables,
+      variableValues,
+    );
 
     const validationError = getCreateServiceRequestValidationError({
       projectId,
@@ -475,6 +506,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
       showError(validationError);
       return;
     }
+    if (titleLengthError) {
+      return;
+    }
     if (!projectId || !deploymentMatch) {
       return;
     }
@@ -483,9 +517,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
       .filter((v) => !isContextField(v.questionText ?? ""))
       .map((v) => {
         const raw = variableValues[v.id] ?? "";
-        const value = isDescriptionField(v.questionText ?? "")
-          ? raw.trim()
-          : htmlToPlainText(raw).trim();
+        let value: string;
+        if (isDescriptionField(v.questionText ?? "")) {
+          value = raw.trim();
+        } else if (isDateTimeField(v) && raw.trim()) {
+          const utcMs = datetimeLocalWallTimeToUtcMs(raw.trim(), userTimeZone);
+          value = utcMs != null ? new Date(utcMs).toISOString() : raw.trim();
+        } else {
+          value = htmlToPlainText(raw).trim();
+        }
         return { id: v.id, value };
       })
       .filter((v) => v.value !== "");
@@ -520,11 +560,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
       onSuccess: async (data) => {
         setIsNavigatingAfterCreate(true);
         const srNumber = (data as { number?: string }).number;
-        showSuccess(
-          srNumber
-            ? `Service request ${srNumber} created successfully`
-            : "Service request created successfully",
-        );
 
         if (projectId) {
           await triggerPostCreationApiCalls(
@@ -541,6 +576,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
         navigate(
           `/projects/${projectId}/${basePath}/service-requests/${data.id}`,
+        );
+        showSuccess(
+          srNumber
+            ? `Service request ${srNumber} created successfully`
+            : "Service request created successfully",
         );
       },
       onError: (error) => {
@@ -667,6 +707,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
               attachments={attachments}
               onAttachmentClick={handleAttachmentClick}
               onAttachmentRemove={handleAttachmentRemove}
+              userTimeZone={userTimeZone}
             />
           </div>
         )}
@@ -686,7 +727,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             variant="contained"
             color="primary"
             startIcon={<CircleCheck size={18} />}
-            disabled={!canSubmit}
+            disabled={!canSubmit || isInitialLoading || deploymentProductsLoading}
           >
             {isCreatePending
               ? "Creating..."

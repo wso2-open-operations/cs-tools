@@ -85,4 +85,4 @@ export const SERVICENOW_REDIRECT_NO_CASE_ID =
   "No case ID provided in the URL.";
 
 export const SERVICENOW_REDIRECT_RESOLVE_ERROR =
-  "Unable to resolve the case. Please try again.";
+  "Something went wrong";

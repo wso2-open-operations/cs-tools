@@ -16,11 +16,9 @@
 
 import { useState, useMemo, type JSX } from "react";
 import {
-  Alert,
   Box,
   Button,
   Chip,
-  Grid,
   IconButton,
   InputAdornment,
   ListItemIcon,
@@ -29,7 +27,6 @@ import {
   MenuItem,
   Paper,
   Skeleton,
-  StatCard,
   Table,
   TableBody,
   TableCell,
@@ -37,13 +34,11 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
 import {
-  AlertCircle,
-  CheckCircle,
-  Info,
   KeyRound,
   Monitor,
   MoreVertical,
@@ -62,8 +57,6 @@ import { useSearchRegistryTokens } from "@features/settings/api/useSearchRegistr
 import { type RegistryToken, RegistryTokenType } from "@features/settings/types/registryTokens";
 import {
   NULL_PLACEHOLDER,
-  REGISTRY_ADMIN_ALERT_BODY,
-  REGISTRY_ADMIN_ALERT_PREFIX,
   REGISTRY_GENERATE_SERVICE_TOKEN,
   REGISTRY_GENERATE_USER_TOKEN,
   REGISTRY_MENU_DELETE,
@@ -73,16 +66,11 @@ import {
   REGISTRY_SEARCH_PLACEHOLDER_SERVICE,
   REGISTRY_SEARCH_PLACEHOLDER_USER,
   REGISTRY_SERVICE_TOKENS_EMPTY,
-  REGISTRY_STAT_ACTIVE_LABEL,
-  REGISTRY_STAT_EXPIRING_LABEL,
-  REGISTRY_STAT_TOTAL_LABEL,
   REGISTRY_SUBTAB_SERVICE_BASE,
   REGISTRY_SUBTAB_USER_BASE,
-  REGISTRY_TOKEN_EXPIRY_WARNING_DAYS,
   REGISTRY_USER_TOKENS_EMPTY,
 } from "@features/settings/constants/settingsConstants";
 import {
-  RegistryTokenDisplayStatus,
   RegistryTokenSubTabId,
   type SettingsRegistryTokensProps,
 } from "@features/settings/types/settings";
@@ -93,12 +81,11 @@ import {
   formatRegistryTokenTimestamp,
   getRegistryTokenDisplayStatus,
   getRegistryTokenStatusChipColor,
-  registryTokenExpiresWithinDays,
 } from "@features/settings/utils/registryTokens";
 import { resolveRegistryTokenSubTabId } from "@features/settings/utils/settingsPage";
 
 /**
- * Registry Tokens settings tab: stat cards, sub-tabs (User/Service), search, table.
+ * Registry Tokens settings tab: sub-tabs (User/Service), search, table.
  *
  * @param {SettingsRegistryTokensProps} props - Component props.
  * @returns {JSX.Element} The component.
@@ -137,29 +124,6 @@ export default function SettingsRegistryTokens({
     () => allTokens.filter((t) => t.tokenType === RegistryTokenType.SERVICE),
     [allTokens],
   );
-
-  const stats = useMemo(() => {
-    const active = allTokens.filter(
-      (t) =>
-        getRegistryTokenDisplayStatus(t) === RegistryTokenDisplayStatus.Active,
-    ).length;
-    const revokedOrExpired = allTokens.filter((t) => {
-      const s = getRegistryTokenDisplayStatus(t);
-      return (
-        s === RegistryTokenDisplayStatus.Expired ||
-        s === RegistryTokenDisplayStatus.Revoked
-      );
-    }).length;
-    const expiringSoon = allTokens.filter((t) =>
-      registryTokenExpiresWithinDays(t, REGISTRY_TOKEN_EXPIRY_WARNING_DAYS),
-    ).length;
-    return {
-      total: allTokens.length,
-      active,
-      revokedOrExpired,
-      expiringSoon,
-    };
-  }, [allTokens]);
 
   const subTabs = useMemo(() => {
     const tabs = [
@@ -208,27 +172,6 @@ export default function SettingsRegistryTokens({
     );
   }, [activeTokens, searchQuery]);
 
-  const statCards = [
-    {
-      value: stats.total,
-      label: REGISTRY_STAT_TOTAL_LABEL,
-      icon: KeyRound,
-      iconColor: "warning",
-    },
-    {
-      value: stats.active,
-      label: REGISTRY_STAT_ACTIVE_LABEL,
-      icon: CheckCircle,
-      iconColor: "success",
-    },
-    {
-      value: stats.expiringSoon,
-      label: REGISTRY_STAT_EXPIRING_LABEL,
-      icon: AlertCircle,
-      iconColor: "error",
-    },
-  ];
-
   const skeletonRows = (colCount: number) =>
     Array.from({ length: 3 }).map((_, i) => (
       <TableRow key={i}>
@@ -239,54 +182,10 @@ export default function SettingsRegistryTokens({
         ))}
       </TableRow>
     ));
+  const restrictedTooltip = "You do not have permission to perform this action.";
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {/* Admin alert */}
-      {isAdmin && (
-        <Alert
-          severity="info"
-          icon={<Info size={18} />}
-          sx={{
-            borderRadius: 1,
-            "& .MuiAlert-message": { fontWeight: 500 },
-          }}
-        >
-          <strong>{REGISTRY_ADMIN_ALERT_PREFIX}</strong>&nbsp;{" "}
-          {REGISTRY_ADMIN_ALERT_BODY}
-        </Alert>
-      )}
-
-      {/* Stat cards */}
-      <Grid container spacing={2}>
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Grid key={card.label} size={{ xs: 12, sm: 4 }}>
-              <StatCard
-                label={card.label}
-                value={
-                  isTableLoading
-                    ? ((
-                        <Skeleton
-                          data-testid="Skeleton"
-                          variant="rounded"
-                          width={60}
-                          height={24}
-                        />
-                      ) as any)
-                    : error
-                      ? NULL_PLACEHOLDER
-                      : card.value.toString()
-                }
-                icon={<Icon />}
-                iconColor={card.iconColor as any}
-              />
-            </Grid>
-          );
-        })}
-      </Grid>
-
       {/* Header + description */}
       <Box>
         <Typography variant="h6" sx={{ mb: 0.5 }}>
@@ -332,25 +231,31 @@ export default function SettingsRegistryTokens({
           }}
         />
         {/* Generate button: user token for all, service token for admins only */}
-        {!isRestricted && (
-          <Button
-            variant="contained"
-            color="warning"
-            startIcon={
-              displayTokenTab === RegistryTokenSubTabId.USER ? (
-                <KeyRound size={18} />
-              ) : (
-                <Monitor size={18} />
-              )
-            }
-            sx={{ whiteSpace: "nowrap", pl: 3, pr: 3 }}
-            onClick={() => setGenerateModalOpen(true)}
-          >
-            {displayTokenTab === RegistryTokenSubTabId.USER
-              ? REGISTRY_GENERATE_USER_TOKEN
-              : REGISTRY_GENERATE_SERVICE_TOKEN}
-          </Button>
-        )}
+        <Tooltip
+          title={isRestricted ? restrictedTooltip : ""}
+          disableHoverListener={!isRestricted}
+        >
+          <span>
+            <Button
+              variant="contained"
+              color="warning"
+              startIcon={
+                displayTokenTab === RegistryTokenSubTabId.USER ? (
+                  <KeyRound size={18} />
+                ) : (
+                  <Monitor size={18} />
+                )
+              }
+              sx={{ whiteSpace: "nowrap", pl: 3, pr: 3 }}
+              onClick={() => setGenerateModalOpen(true)}
+              disabled={isRestricted}
+            >
+              {displayTokenTab === RegistryTokenSubTabId.USER
+                ? REGISTRY_GENERATE_USER_TOKEN
+                : REGISTRY_GENERATE_SERVICE_TOKEN}
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
 
       {/* User Tokens Table */}
@@ -434,17 +339,24 @@ export default function SettingsRegistryTokens({
                         <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            setMenuAnchor(e.currentTarget);
-                            setMenuToken(token);
-                          }}
-                          aria-label="Token actions"
-                          disabled={isRestricted}
+                        <Tooltip
+                          title={isRestricted ? restrictedTooltip : ""}
+                          disableHoverListener={!isRestricted}
                         >
-                          <MoreVertical size={18} />
-                        </IconButton>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                setMenuAnchor(e.currentTarget);
+                                setMenuToken(token);
+                              }}
+                              aria-label="Token actions"
+                              disabled={isRestricted}
+                            >
+                              <MoreVertical size={18} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   );
@@ -534,17 +446,24 @@ export default function SettingsRegistryTokens({
                         <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            setMenuAnchor(e.currentTarget);
-                            setMenuToken(token);
-                          }}
-                          aria-label="Token actions"
-                          disabled={isRestricted}
+                        <Tooltip
+                          title={isRestricted ? restrictedTooltip : ""}
+                          disableHoverListener={!isRestricted}
                         >
-                          <MoreVertical size={18} />
-                        </IconButton>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                setMenuAnchor(e.currentTarget);
+                                setMenuToken(token);
+                              }}
+                              aria-label="Token actions"
+                              disabled={isRestricted}
+                            >
+                              <MoreVertical size={18} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   );
@@ -566,35 +485,49 @@ export default function SettingsRegistryTokens({
         anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
         transformOrigin={{ vertical: "top", horizontal: "right" }}
       >
-        <MenuItem
-          disabled={isRestricted}
-          onClick={() => {
-            if (isRestricted) return;
-            setRegenerateToken(menuToken);
-            setMenuAnchor(null);
-            setMenuToken(null);
-          }}
+        <Tooltip
+          title={isRestricted ? restrictedTooltip : ""}
+          disableHoverListener={!isRestricted}
         >
-          <ListItemIcon>
-            <RefreshCw size={16} />
-          </ListItemIcon>
-          <ListItemText>{REGISTRY_MENU_REGENERATE}</ListItemText>
-        </MenuItem>
-        <MenuItem
-          disabled={isRestricted}
-          onClick={() => {
-            if (isRestricted) return;
-            setDeleteToken(menuToken);
-            setMenuAnchor(null);
-            setMenuToken(null);
-          }}
-          sx={{ color: "error.main" }}
+          <span>
+            <MenuItem
+              disabled={isRestricted}
+              onClick={() => {
+                if (isRestricted) return;
+                setRegenerateToken(menuToken);
+                setMenuAnchor(null);
+                setMenuToken(null);
+              }}
+            >
+              <ListItemIcon>
+                <RefreshCw size={16} />
+              </ListItemIcon>
+              <ListItemText>{REGISTRY_MENU_REGENERATE}</ListItemText>
+            </MenuItem>
+          </span>
+        </Tooltip>
+        <Tooltip
+          title={isRestricted ? restrictedTooltip : ""}
+          disableHoverListener={!isRestricted}
         >
-          <ListItemIcon sx={{ color: "error.main" }}>
-            <Trash2 size={16} />
-          </ListItemIcon>
-          <ListItemText>{REGISTRY_MENU_DELETE}</ListItemText>
-        </MenuItem>
+          <span>
+            <MenuItem
+              disabled={isRestricted}
+              onClick={() => {
+                if (isRestricted) return;
+                setDeleteToken(menuToken);
+                setMenuAnchor(null);
+                setMenuToken(null);
+              }}
+              sx={{ color: "error.main" }}
+            >
+              <ListItemIcon sx={{ color: "error.main" }}>
+                <Trash2 size={16} />
+              </ListItemIcon>
+              <ListItemText>{REGISTRY_MENU_DELETE}</ListItemText>
+            </MenuItem>
+          </span>
+        </Tooltip>
       </Menu>
 
       {/* Modals */}

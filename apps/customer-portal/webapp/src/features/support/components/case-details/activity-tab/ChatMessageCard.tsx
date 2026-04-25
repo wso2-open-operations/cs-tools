@@ -135,6 +135,18 @@ export default function ChatMessageCard({
     });
   }, []);
 
+  const setAnchorAttributes = useCallback((root: HTMLDivElement) => {
+    const anchors = root.querySelectorAll("a");
+    anchors.forEach((anchor) => {
+      const href = anchor.getAttribute("href") ?? "";
+      if (!isSafeHref(href)) {
+        return;
+      }
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    });
+  }, []);
+
   const handleClick = useCallback(
     (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -170,6 +182,7 @@ export default function ChatMessageCard({
     const el = contentRef.current;
     if (!el) return;
     setImageA11yAttributes(el);
+    setAnchorAttributes(el);
     el.addEventListener("click", handleClick);
     el.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -180,6 +193,7 @@ export default function ChatMessageCard({
     handleClick,
     handleKeyDown,
     setImageA11yAttributes,
+    setAnchorAttributes,
     htmlContent,
     markdownContent,
     renderAsMarkdown,

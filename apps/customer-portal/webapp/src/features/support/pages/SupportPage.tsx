@@ -15,7 +15,7 @@
 // under the License.
 
 import { useParams, useNavigate } from "react-router";
-import { useEffect, type JSX } from "react";
+import { useEffect, useMemo, type JSX } from "react";
 import { Grid, Stack } from "@wso2/oxygen-ui";
 import { FileText, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
@@ -27,7 +27,8 @@ import ChatHistoryList from "@features/support/components/support-overview-cards
 import { useGetProjectSupportStats } from "@features/support/api/useGetProjectSupportStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
-import useGetProjectCases from "@api/useGetProjectCases";
+import useGetProjectFilters from "@api/useGetProjectFilters";
+import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import { useSearchConversations } from "@features/support/api/useSearchConversations";
 import { useLogger } from "@hooks/useLogger";
 import {
@@ -36,8 +37,9 @@ import {
   CaseType,
 } from "@features/support/constants/supportConstants";
 import { getProjectPermissions } from "@utils/permission";
-import { isClosedLikeCaseStatus, isS0Case } from "@features/support/utils/support";
+import { isS0Case } from "@features/support/utils/support";
 import { SortOrder } from "@/types/common";
+import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
 import type { ChatHistoryItem } from "@features/support/types/conversations";
 
 /**
@@ -69,25 +71,34 @@ export default function SupportPage(): JSX.Element {
     caseTypes: [CaseType.DEFAULT_CASE],
   });
 
+  const { data: filterMetadata, isLoading: isFilterMetadataLoading, isError: isFilterMetadataError } =
+    useGetProjectFilters(projectId || "");
+
+  const nonClosedStatusIds = useMemo(
+    () => resolveCasesTableDefaultStatusIds(filterMetadata?.caseStates),
+    [filterMetadata?.caseStates],
+  );
+
   const {
-    data,
-    isLoading: isCasesLoading,
+    data: casesPageData,
+    isLoading: isCasesDataLoading,
     isError: isCasesError,
-    hasNextPage,
-    fetchNextPage,
-    isFetchingNextPage,
-  } = useGetProjectCases(
+  } = useGetProjectCasesPage(
     projectId || "",
     {
       filters: {
         caseTypes: [CaseType.DEFAULT_CASE],
+        statusIds: nonClosedStatusIds,
       },
       sortBy: { field: "createdOn", order: SortOrder.DESC },
     },
-    {
-      enabled: !!projectId,
-    },
+    0,
+    SUPPORT_OVERVIEW_CASES_LIMIT,
+    { enabled: !!projectId && filterMetadata !== undefined },
   );
+
+  const isCasesLoading = isFilterMetadataLoading || isCasesDataLoading;
+  const combinedIsCasesError = isCasesError || isFilterMetadataError;
 
   const {
     data: conversationsData,
@@ -100,14 +111,11 @@ export default function SupportPage(): JSX.Element {
 
   const { isLoading: isAuthLoading } = useAsgardeo();
 
-  const allFetchedCases = data?.pages.flatMap((p) => p.cases) ?? [];
-  const openCases = allFetchedCases.filter(
-    (c) => !isClosedLikeCaseStatus(c.status?.label),
-  );
-  const openCasesFiltered = includeS0InSupportMetrics === false
-    ? openCases.filter((c) => !isS0Case(c))
-    : openCases;
-  const cases = openCasesFiltered.slice(0, SUPPORT_OVERVIEW_CASES_LIMIT);
+  const allFetchedCases = casesPageData?.cases ?? [];
+  const cases =
+    includeS0InSupportMetrics === false
+      ? allFetchedCases.filter((c) => !isS0Case(c))
+      : allFetchedCases;
 
   const chatItems: ChatHistoryItem[] = (
     conversationsData?.conversations?.slice(0, SUPPORT_OVERVIEW_CHAT_LIMIT) ??
@@ -122,28 +130,25 @@ export default function SupportPage(): JSX.Element {
     status: c.state?.label ?? "Open",
   }));
 
-  useEffect(() => {
-    if (includeS0InSupportMetrics === undefined) {
-      return;
-    }
-    if (
-      !isCasesLoading &&
-      !isFetchingNextPage &&
-      hasNextPage &&
-      openCasesFiltered.length < SUPPORT_OVERVIEW_CASES_LIMIT
-    ) {
-      void fetchNextPage();
-    }
-  }, [
-    includeS0InSupportMetrics,
-    isCasesLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    openCasesFiltered.length,
-    fetchNextPage,
-  ]);
-
   const isActuallyLoading = isAuthLoading || isLoading || (!stats && !isError);
+
+  const handleStatClick = (key: string) => {
+    const path = supportPath;
+    switch (key) {
+      case "ongoingCases":
+        navigate("cases?statusFilter=active", { state: { returnTo: path } });
+        break;
+      case "activeChats":
+        navigate("conversations?statusFilter=active", { state: { returnTo: path } });
+        break;
+      case "resolvedPast30DaysCasesCount":
+        navigate("cases?statusFilter=resolved", { state: { returnTo: path } });
+        break;
+      case "resolvedChats":
+        navigate("conversations?statusFilter=resolvedViaChat", { state: { returnTo: path } });
+        break;
+    }
+  };
 
   useEffect(() => {
     if (isError) {
@@ -163,6 +168,7 @@ export default function SupportPage(): JSX.Element {
         isLoading={isActuallyLoading}
         isError={isError}
         stats={stats}
+        onStatClick={handleStatClick}
       />
       <Grid
         container
@@ -190,11 +196,12 @@ export default function SupportPage(): JSX.Element {
                   navigate("cases", { state: { returnTo: supportPath } }),
               },
             ]}
-            isError={isCasesError}
+            isError={combinedIsCasesError}
           >
             <OutstandingCasesList
               cases={cases}
               isLoading={isCasesLoading}
+              showInternalId
               onCaseClick={
                 projectId
                   ? (c) =>

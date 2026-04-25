@@ -38,10 +38,16 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
 
   if (contact.isCsIntegrationUser) {
     badges.push({ label: "System User", Icon: Code, chipColor: "info" });
-  } else if (contact.isSecurityContact) {
-    badges.push({ label: "Security User", Icon: Shield, chipColor: "error" });
   } else {
-    badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
+    if (contact.isPortalUser) {
+      badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
+    }
+    if (contact.isSecurityContact) {
+      badges.push({ label: "Security User", Icon: Shield, chipColor: "error" });
+    }
+    if (!contact.isPortalUser && !contact.isSecurityContact) {
+      badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
+    }
   }
 
   if (contact.account?.classification === "Partner") {

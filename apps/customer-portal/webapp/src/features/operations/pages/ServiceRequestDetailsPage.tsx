@@ -85,22 +85,6 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
     navigate(`/projects/${projectId}/${basePath}/service-requests`, { state: { fromBack: true } });
   };
 
-  const handleOpenRelatedCase = () => {
-    if (!projectId) return;
-    navigate(`/projects/${projectId}/support/chat/create-related-case`, {
-      state: {
-        relatedCase: {
-          relatedCaseId: data?.id ?? serviceRequestId ?? "",
-          number: data?.number ?? "",
-          title: data?.title ?? "",
-          description: data?.description ?? "",
-          deploymentId: data?.deployment?.id,
-          deploymentLabel: data?.deployment?.label,
-        },
-      },
-    });
-  };
-
   return (
     <CaseDetailsContent
       data={data}
@@ -110,7 +94,6 @@ export default function ServiceRequestDetailsPage(): JSX.Element {
       caseId={serviceRequestId || ""}
       projectId={projectId}
       onBack={handleBack}
-      onOpenRelatedCase={handleOpenRelatedCase}
       isServiceRequest
     />
   );

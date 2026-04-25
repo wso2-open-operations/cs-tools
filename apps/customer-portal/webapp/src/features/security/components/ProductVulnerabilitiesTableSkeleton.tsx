@@ -33,24 +33,18 @@ const ProductVulnerabilitiesTableSkeleton = ({
     <>
       {Array.from({ length: rowsPerPage }).map((_, index) => (
         <TableRow key={`skeleton-${index}`}>
-          <TableCell>
-            <Skeleton variant="text" width={120} height={20} />
-          </TableCell>
-          <TableCell>
-            <Skeleton variant="text" width={100} height={20} />
-          </TableCell>
-          <TableCell>
-            <Skeleton variant="rounded" width={70} height={24} />
-          </TableCell>
-          <TableCell sx={{ maxWidth: 180 }}>
-            <Skeleton variant="text" width={180} height={20} />
-          </TableCell>
-          <TableCell>
-            <Skeleton variant="text" width={80} height={20} />
-          </TableCell>
-          <TableCell>
-            <Skeleton variant="rounded" width={60} height={24} />
-          </TableCell>
+          <TableCell><Skeleton variant="text" width={100} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={110} height={20} /></TableCell>
+          <TableCell><Skeleton variant="rounded" width={70} height={24} /></TableCell>
+          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={60} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={160} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={70} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={90} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={100} height={20} /></TableCell>
+          <TableCell><Skeleton variant="text" width={90} height={20} /></TableCell>
         </TableRow>
       ))}
     </>

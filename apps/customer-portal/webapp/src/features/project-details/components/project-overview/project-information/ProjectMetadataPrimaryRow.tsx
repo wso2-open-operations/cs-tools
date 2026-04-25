@@ -16,38 +16,26 @@
 
 import { Box, Chip, Grid, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import {
-  getProjectTypeColor,
-  getSupportTierColor,
-} from "@features/project-details/utils/projectDetails";
+import { getSupportTierColor } from "@features/project-details/utils/projectDetails";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { PROJECT_METADATA_CHIP_SX } from "@features/project-details/constants/projectInformationConstants";
 import type { ProjectMetadataPrimaryRowProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
- * First metadata row: created date, project type, support tier.
+ * Primary metadata cells: created date and support tier.
  *
  * @param props - Field values and loading state.
  * @returns {JSX.Element} Grid row.
  */
 export default function ProjectMetadataPrimaryRow({
   createdDate,
-  type,
   supportTier,
   isLoading,
   isError,
 }: ProjectMetadataPrimaryRowProps): JSX.Element {
   return (
-    <Grid
-      container
-      spacing={2}
-      sx={{
-        alignItems: "center",
-        justifyContent: "space-between",
-        mb: 2,
-      }}
-    >
-      <Grid size={{ xs: 12, md: 4 }}>
+    <>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Box
           sx={{
             display: "flex",
@@ -71,50 +59,12 @@ export default function ProjectMetadataPrimaryRow({
           )}
         </Box>
       </Grid>
-      <Grid size={{ xs: 12, md: 4 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Box
           sx={{
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
-          }}
-        >
-          <Typography
-            variant="body2"
-            fontWeight="medium"
-            sx={{ display: "block", mb: 0.5 }}
-          >
-            Project Type
-          </Typography>
-          {isLoading || isError ? (
-            <Skeleton variant="rounded" width={80} height={24} />
-          ) : type?.label ? (
-            <Tooltip title={type.label} arrow>
-              <Chip
-                label={type.label}
-                size="small"
-                variant="outlined"
-                color={getProjectTypeColor(type.label)}
-                sx={PROJECT_METADATA_CHIP_SX}
-              />
-            </Tooltip>
-          ) : (
-            <Chip
-              label=""
-              size="small"
-              variant="outlined"
-              color={getProjectTypeColor("")}
-              sx={PROJECT_METADATA_CHIP_SX}
-            />
-          )}
-        </Box>
-      </Grid>
-      <Grid size={{ xs: 12, md: 4 }}>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: { xs: "center", md: "flex-end" },
+            alignItems: { xs: "center", md: "flex-start" },
           }}
         >
           <Typography
@@ -147,6 +97,6 @@ export default function ProjectMetadataPrimaryRow({
           )}
         </Box>
       </Grid>
-    </Grid>
+    </>
   );
 }

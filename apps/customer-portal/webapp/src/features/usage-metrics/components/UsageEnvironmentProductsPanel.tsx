@@ -97,7 +97,11 @@ function ProductExpandedView({
 
   return (
     <>
-      <Grid container spacing={2}>
+      <Grid
+        container
+        spacing={2}
+        sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+      >
         <Grid size={{ xs: 12, lg: 6 }}>
           <Card sx={{ p: 2, borderRadius: 0 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
@@ -299,6 +303,7 @@ function InstanceAccordionRow({
             justifyContent: "space-between",
             gap: 2,
             width: "100%",
+            minWidth: 0,
             pr: 1,
           }}
         >
@@ -323,6 +328,7 @@ function InstanceAccordionRow({
               alignItems: "center",
               justifyContent: { xs: "flex-start", lg: "flex-end" },
               flex: 1,
+              minWidth: 0,
             }}
           >
             <MetricPill
@@ -422,6 +428,7 @@ function ProductAccordionRow({
             alignItems: { xs: "stretch", lg: "flex-start" },
             gap: 2,
             width: "100%",
+            minWidth: 0,
             pr: 1,
           }}
         >
@@ -453,6 +460,7 @@ function ProductAccordionRow({
           <Box
             sx={{
               flex: 1,
+              minWidth: 0,
               display: "grid",
               gridTemplateColumns: { xs: "1fr", sm: "repeat(4, 1fr)" },
               gap: 2,
@@ -664,7 +672,17 @@ export default function UsageEnvironmentProductsPanel({
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        overflowX: "hidden",
+      }}
+    >
       {products.map((product) => (
         <ProductAccordionRow
           key={product.id}

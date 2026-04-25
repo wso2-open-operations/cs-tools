@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, StatCard, Skeleton } from "@wso2/oxygen-ui";
+import { Box, StatCard, Skeleton, Tooltip, useTheme } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
+import { Info } from "@wso2/oxygen-ui-icons-react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { type SupportStatConfig } from "@features/support/constants/supportConstants";
 
@@ -34,6 +35,8 @@ export interface ListStatGridProps<T extends string> {
     xl?: number;
   };
   valueFormatter?: (value: number) => string | number;
+  onStatClick?: (key: T) => void;
+  nonClickableKeys?: T[];
 }
 
 /**
@@ -62,7 +65,10 @@ export default function ListStatGrid<T extends string>({
   spacing = 2,
   itemSize = { xs: 12, sm: 6, md: 3 },
   valueFormatter,
+  onStatClick,
+  nonClickableKeys,
 }: ListStatGridProps<T>): JSX.Element {
+  const theme = useTheme();
   const xs = itemSize.xs ?? 12;
   const sm = itemSize.sm ?? 6;
   const md = itemSize.md ?? 3;
@@ -87,13 +93,39 @@ export default function ListStatGrid<T extends string>({
       {configs.map((stat) => {
         const SecondaryIcon = stat.secondaryIcon;
         const Icon = stat.icon;
+        const isClickable = !!onStatClick && !nonClickableKeys?.includes(stat.key);
 
         return (
           <Box
             key={stat.key}
+            onClick={isClickable ? () => onStatClick(stat.key) : undefined}
+            role={isClickable ? "button" : undefined}
+            tabIndex={isClickable ? 0 : undefined}
+            onKeyDown={
+              isClickable
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onStatClick(stat.key);
+                    }
+                  }
+                : undefined
+            }
             sx={{
               position: "relative",
               minWidth: 0,
+              cursor: isClickable ? "pointer" : undefined,
+              borderRadius: 1,
+              transition: isClickable ? "box-shadow 0.2s ease, transform 0.15s ease" : undefined,
+              "&:hover": isClickable
+                ? {
+                    boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
+                    transform: "translateY(-2px)",
+                  }
+                : undefined,
+              "&:focus-visible": isClickable
+                ? { outline: "2px solid", outlineOffset: 2 }
+                : undefined,
             }}
           >
             {SecondaryIcon && (
@@ -109,18 +141,36 @@ export default function ListStatGrid<T extends string>({
                 <SecondaryIcon />
               </Box>
             )}
+            {stat.tooltipText && (
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: 56,
+                  right: 14,
+                  zIndex: 2,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  color: "text.secondary",
+                  backgroundColor: "background.paper",
+                }}
+              >
+                <Tooltip title={stat.tooltipText}>
+                  <Box component="span" sx={{ display: "inline-flex" }}>
+                    <Info size={14} />
+                  </Box>
+                </Tooltip>
+              </Box>
+            )}
             <StatCard
               label={stat.label}
-              value={
+              value={(
                 isLoading ? (
-                  ((
-                    <Skeleton
-                      data-testid="Skeleton"
-                      variant="rounded"
-                      width={60}
-                      height={24}
-                    />
-                  ) as any)
+                  <Skeleton
+                    data-testid="Skeleton"
+                    variant="rounded"
+                    width={60}
+                    height={24}
+                  />
                 ) : isError ? (
                   <ErrorIndicator entityName={entityName} />
                 ) : stats?.[stat.key] != null ? (
@@ -132,7 +182,7 @@ export default function ListStatGrid<T extends string>({
                 ) : (
                   "--"
                 )
-              }
+              ) as unknown as string | number}
               icon={<Icon />}
               iconColor={stat.iconColor}
             />

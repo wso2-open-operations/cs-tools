@@ -67,23 +67,23 @@ export const DASHBOARD_STATS: StatConfigItem[] = [
   {
     id: "totalCases",
     label: "Action Required",
-    icon: Clock,
+    icon: AlertCircle,
     iconColor: "primary",
-    tooltipText: "Total number of cases reported for this project",
+    tooltipText: "Items awaiting your response",
   },
   {
     id: "openCases",
     label: "Outstanding",
-    icon: AlertCircle,
+    icon: Clock,
     iconColor: "warning",
-    tooltipText: "Currently active and unresolved cases",
+    tooltipText: "Currently active and unresolved items",
   },
   {
     id: "resolvedCases",
-    label: "Closed",
+    label: "Closed (Last 30d)",
     icon: CheckCircle,
     iconColor: "success",
-    tooltipText: "Successfully closed and resolved cases",
+    tooltipText: "Successfully closed and resolved items in Last 30 days",
   },
   {
     id: "avgResponseTime",
@@ -200,11 +200,10 @@ export const SEVERITY_FRIENDLY_LABEL: Record<SeverityLegendKey, string> = {
 
 // Outstanding engagements category chart data.
 export const OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA = [
+  { key: "consultancy", name: "Consultancy", color: colors.green[500] },
   { key: "onboarding", name: "Onboarding", color: colors.blue[500] },
   { key: "migration", name: "Migration", color: colors.orange[500] },
-  { key: "services", name: "Services", color: colors.green[500] },
-  { key: "follow-up", name: "Follow up", color: colors.purple[500] },
-  { key: "improvements", name: "Improvements", color: colors.brown[500] },
+  { key: "follow-up", name: "Follow Up", color: colors.purple[500] },
 ] as const;
 
 // Configuration for Cases Trend Chart (same legend order as Outstanding Engagements).

@@ -164,7 +164,7 @@ export function BasicInformationSection({
             {/* deployment field label container */}
             <Box sx={{ mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
               <Typography variant="caption">
-                Deployment Type{" "}
+                Deploymnet{" "}
                 {!isDeploymentDisabled && (
                   <Box component="span" sx={{ color: "warning.main" }}>
                     *
@@ -202,7 +202,7 @@ export function BasicInformationSection({
                       if (showNoDeploymentsHint) {
                         return EMPTY_DROPDOWN_PLACEHOLDER;
                       }
-                      return "Select Deployment Type...";
+                      return "Select Deploymnet...";
                     }
                     return value;
                   }}
@@ -213,7 +213,7 @@ export function BasicInformationSection({
                   <MenuItem value="" disabled>
                     {showNoDeploymentsHint
                       ? EMPTY_DROPDOWN_PLACEHOLDER
-                      : "Select Deployment Type..."}
+                    : "Select Deploymnet..."}
                   </MenuItem>
                   {deploymentOptions.map((d) => (
                     <MenuItem key={d} value={d}>

@@ -31,6 +31,7 @@ export interface ListItemsProps {
   onCaseClick?: (caseItem: CaseListItem) => void;
   entityName?: string;
   hideSeverity?: boolean;
+  showInternalId?: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export default function ListItems({
   onCaseClick,
   entityName = "items",
   hideSeverity = false,
+  showInternalId = false,
 }: ListItemsProps): JSX.Element {
   if (isLoading) {
     return <ListSkeleton />;
@@ -120,6 +122,7 @@ export default function ListItems({
           caseItem={caseItem}
           onClick={onCaseClick}
           hideSeverity={hideSeverity}
+          showInternalId={showInternalId}
         />
       ))}
     </Box>

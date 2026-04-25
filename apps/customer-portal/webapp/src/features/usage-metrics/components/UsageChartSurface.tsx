@@ -33,12 +33,29 @@ export function UsageChartSurface({
     <Box
       sx={{
         width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        overflow: "hidden",
         position: "relative",
         ...(minHeight != null ? { minHeight, height: minHeight } : {}),
         "& *:focus": { outline: "none" },
         "& .recharts-responsive-container": {
           width: "100% !important",
           maxWidth: "100%",
+          minWidth: "0 !important",
+          overflow: "hidden !important",
+        },
+        "& .recharts-responsive-container > div": {
+          width: "100% !important",
+          maxWidth: "100% !important",
+          minWidth: "0 !important",
+          overflow: "hidden !important",
+        },
+        "& .recharts-wrapper": {
+          width: "100% !important",
+          maxWidth: "100% !important",
+          minWidth: "0 !important",
+          overflow: "hidden !important",
         },
         "& .recharts-surface": { outline: "none" },
       }}

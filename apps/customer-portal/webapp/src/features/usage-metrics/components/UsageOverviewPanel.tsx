@@ -532,44 +532,58 @@ export default function UsageOverviewPanel({
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        overflowX: "hidden",
+      }}
+    >
+      <Grid
+        container
+        spacing={2}
+        sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+      >
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
           <StatCard
             label={USAGE_METRICS_STAT_ENVIRONMENTS}
             value={
               isStatCardsLoading
                 ? ((
                     <Skeleton variant="rounded" width={60} height={24} />
-                  ) as any)
+                  ) as unknown as number)
                 : overviewStats.environments
             }
             icon={<Layers />}
             iconColor="info"
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
           <StatCard
             label={USAGE_METRICS_STAT_PRODUCTS}
             value={
               isStatCardsLoading
                 ? ((
                     <Skeleton variant="rounded" width={60} height={24} />
-                  ) as any)
+                  ) as unknown as number)
                 : overviewStats.products
             }
             icon={<Package />}
             iconColor="primary"
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
           <StatCard
             label={USAGE_METRICS_STAT_INSTANCES}
             value={
               isStatCardsLoading
                 ? ((
                     <Skeleton variant="rounded" width={60} height={24} />
-                  ) as any)
+                  ) as unknown as number)
                 : overviewStats.instances
             }
             icon={<ServerIcon />}
@@ -645,7 +659,11 @@ export default function UsageOverviewPanel({
           {USAGE_METRICS_SECTION_AGGREGATED}
         </Typography>
         {isLoading ? (
-          <Grid container spacing={2}>
+          <Grid
+            container
+            spacing={2}
+            sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+          >
             {[0, 1, 2, 3, 4].map((i) => (
               <Grid key={i} size={{ xs: 12, lg: 6 }}>
                 <Card variant="outlined" sx={{ p: 2 }}>
@@ -673,14 +691,22 @@ export default function UsageOverviewPanel({
           </Grid>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <Grid container spacing={2}>
+            <Grid
+              container
+              spacing={2}
+              sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+            >
               {aggregatedMetrics.slice(0, 2).map((metric) => (
                 <Grid key={metric.id} size={{ xs: 12, lg: 6 }}>
                   <UsageMetricTrendCard metric={metric} />
                 </Grid>
               ))}
             </Grid>
-            <Grid container spacing={2}>
+            <Grid
+              container
+              spacing={2}
+              sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+            >
               {aggregatedMetrics.slice(2, 4).map((metric) => (
                 <Grid key={metric.id} size={{ xs: 12, lg: 6 }}>
                   <UsageMetricTrendCard metric={metric} />
@@ -688,7 +714,11 @@ export default function UsageOverviewPanel({
               ))}
             </Grid>
             {aggregatedMetrics[4] != null && (
-              <Grid container spacing={2}>
+              <Grid
+                container
+                spacing={2}
+                sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
+              >
                 <Grid size={{ xs: 12, lg: 6 }}>
                   <UsageMetricTrendCard metric={aggregatedMetrics[4]} />
                 </Grid>

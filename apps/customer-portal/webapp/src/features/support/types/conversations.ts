@@ -203,6 +203,7 @@ export type Message = {
   id: string;
   text: string;
   sender: ChatSender;
+  isCurrentUser?: boolean;
   timestamp: Date;
   createdBy?: string;
   createdOnRaw?: string;

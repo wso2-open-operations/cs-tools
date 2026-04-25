@@ -34,6 +34,7 @@ export type ProjectListItem = {
   hasKbReferences?: boolean;
   activeCasesCount: number;
   activeChatsCount: number;
+  actionRequiredCount: number;
   slaStatus: string;
 };
 
@@ -128,6 +129,12 @@ export type ProjectStatsSummary = {
   activeChats: number;
   deployments: number;
   slaStatus: string;
+  outstandingCaseCount: number;
+  outstandingServiceRequestCount: number;
+  outstandingEngagementCount: number;
+  outstandingSraCount: number;
+  outstandingChangeRequestCount: number;
+  outstandingAnnouncementCount: number;
 };
 
 // Item type for recent activity inside a project stats response.
@@ -163,6 +170,8 @@ export type ProjectFeatures = {
   hasTimeLogsReadAccess: boolean;
   hasDeploymentWriteAccess: boolean;
   hasDeploymentReadAccess: boolean;
+  defaultCaseProductCategories?: string[] | null;
+  srProductCategories?: string[] | null;
 };
 
 // Request type for patching a project.

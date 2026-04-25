@@ -32,7 +32,6 @@ import {
 import {
   ArrowLeft,
   ExternalLink,
-  RefreshCw,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
@@ -496,18 +495,6 @@ export default function UpdateLevelDetailsPage(): JSX.Element {
           <IconButton onClick={handleBack} size="small" aria-label="Back">
             <ArrowLeft size={20} />
           </IconButton>
-          <Box
-            sx={{
-              p: 1,
-              bgcolor: "warning.lighter",
-              color: "warning.main",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <RefreshCw size={24} />
-          </Box>
           <Box>
             <Typography variant="h5" color="text.primary" fontWeight={600}>
               Update Level {levelKey} Details

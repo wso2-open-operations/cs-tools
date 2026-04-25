@@ -29,9 +29,8 @@ import {
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Divider, Stack, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
-import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -42,17 +41,11 @@ import {
   isS0Case,
 } from "@features/support/utils/support";
 import {
-  CaseType,
-  ALL_CASES_STAT_CONFIGS,
-  getAllCasesFlattenedStats,
-} from "@features/support/constants/supportConstants";
-import {
   getProjectPermissions,
   getProjectSeverityPolicy,
 } from "@utils/permission";
 import { SortOrder } from "@/types/common";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
-import ListStatGrid from "@components/list-view/ListStatGrid";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
@@ -65,19 +58,24 @@ import {
   OPERATIONS_LIST_PAGE_SIZE,
   SERVICE_REQUESTS_ENTITY_LABEL,
   SERVICE_REQUESTS_NEW_BUTTON_LABEL,
+  SERVICE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED,
   SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL,
   SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE,
+  SERVICE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING,
+  SERVICE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED,
   SERVICE_REQUESTS_PAGE_TITLE_ALL,
   SERVICE_REQUESTS_PAGE_TITLE_MINE,
+  SERVICE_REQUESTS_PAGE_TITLE_OUTSTANDING,
   SERVICE_REQUESTS_SEARCH_PLACEHOLDER,
   SERVICE_REQUESTS_SORT_FIELD_OPTIONS,
-  SERVICE_REQUESTS_STAT_ENTITY_NAME,
   SERVICE_REQUESTS_ERROR_ENTITY_NAME,
 } from "@features/operations/constants/operationsConstants";
 import {
   buildServiceRequestsPageCaseSearchRequest,
   getOperationsNavSegment,
 } from "@features/operations/utils/operationsPages";
+import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
+import { CaseStatus } from "@features/support/constants/supportConstants";
 
 /**
  * ServiceRequestsPage lists service requests using the same filters, sort,
@@ -92,13 +90,17 @@ export default function ServiceRequestsPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
   const navSegment = getOperationsNavSegment(location.pathname);
-  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+  const returnTo = (location.state as { returnTo?: string; outstandingOnly?: boolean; actionRequired?: boolean } | null)?.returnTo;
+  const outstandingOnly = (location.state as { outstandingOnly?: boolean } | null)?.outstandingOnly ?? false;
+  const actionRequired = (location.state as { actionRequired?: boolean } | null)?.actionRequired ?? false;
 
   const listMode = createdByMe ? "mine" : "all";
   const sessionPrefix = `${projectId ?? "unknown"}-service-requests-${listMode}`;
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [isFiltersOpen, setIsFiltersOpen] = useState(
+    () => hasListSearchOrFilters(searchTerm, filters),
+  );
   const [sortField, setSortField] = useSessionState<ServiceRequestCaseSortField>(`${sessionPrefix}-sortField`, ServiceRequestCaseSortField.CreatedOn, undefined, { popOnly: true });
   const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
@@ -139,15 +141,23 @@ export default function ServiceRequestsPage(): JSX.Element {
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
-  const {
-    data: stats,
-    isLoading: isStatsQueryLoading,
-    isError: isStatsError,
-  } = useGetProjectCasesStats(projectId || "", {
-    caseTypes: [CaseType.SERVICE_REQUEST],
-    createdByMe: createdByMe || undefined,
-    enabled: !!projectId && permissions.hasSR,
-  });
+  const outstandingStatusIds = useMemo(() => {
+    if (actionRequired) {
+      if (!filterMetadata) return undefined;
+      return (filterMetadata.caseStates ?? [])
+        .filter(
+          (s) =>
+            s.label === CaseStatus.AWAITING_INFO ||
+            s.label === CaseStatus.SOLUTION_PROPOSED,
+        )
+        .map((s) => Number(s.id));
+    }
+    if (outstandingOnly) {
+      if (!filterMetadata) return undefined;
+      return resolveCasesTableDefaultStatusIds(filterMetadata.caseStates);
+    }
+    return [];
+  }, [actionRequired, outstandingOnly, filterMetadata]);
 
   const caseSearchRequest = useMemo(
     () =>
@@ -157,8 +167,9 @@ export default function ServiceRequestsPage(): JSX.Element {
         sortField,
         sortOrder,
         createdByMe,
+        outstandingStatusIds,
       ),
-    [filters, searchTerm, sortField, sortOrder, createdByMe],
+    [filters, searchTerm, sortField, sortOrder, createdByMe, outstandingStatusIds],
   );
 
   const {
@@ -169,21 +180,18 @@ export default function ServiceRequestsPage(): JSX.Element {
     fetchNextPage,
     isFetchingNextPage,
   } = useGetProjectCases(projectId || "", caseSearchRequest, {
-    enabled: !!projectId && permissions.hasSR,
+    enabled:
+      !!projectId &&
+      permissions.hasSR &&
+      (!(actionRequired || outstandingOnly) || filterMetadata !== undefined),
     pageSize: rowsPerPage,
   });
 
   const { showLoader, hideLoader } = useLoader();
 
-  const hasStatsResponse = stats !== undefined;
   const hasCasesResponse = data !== undefined;
   const isProjectContextLoading = isProjectLoading;
   const canLoadServiceRequests = !projectDetailsReady || permissions.hasSR;
-  const isStatsLoading =
-    canLoadServiceRequests &&
-    (isProjectContextLoading ||
-      isStatsQueryLoading ||
-      (!!projectId && !hasStatsResponse && !isStatsError));
 
   const isCasesAreaLoading =
     canLoadServiceRequests &&
@@ -191,7 +199,7 @@ export default function ServiceRequestsPage(): JSX.Element {
       (!!projectId && !hasCasesResponse) ||
       isFetchingNextPage);
 
-  const isInitialPageLoading = isStatsLoading || isCasesAreaLoading;
+  const isInitialPageLoading = isCasesAreaLoading;
 
   useEffect(() => {
     if (isInitialPageLoading) {
@@ -280,7 +288,12 @@ export default function ServiceRequestsPage(): JSX.Element {
     ) {
       setFilters((prev) => ({ ...prev, deploymentId: undefined }));
     }
-  }, [projectDetailsReady, permissions.hasDeployments, filters.deploymentId]);
+  }, [
+    projectDetailsReady,
+    permissions.hasDeployments,
+    filters.deploymentId,
+    setFilters,
+  ]);
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, {
     ...filters,
@@ -301,7 +314,7 @@ export default function ServiceRequestsPage(): JSX.Element {
             sx={{ mb: 2 }}
             variant="text"
           >
-            {returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+            {OPERATIONS_LIST_BACK_LABEL}
           </Button>
           <Typography variant="body2" color="text.secondary">
             Service requests are not available for this project.
@@ -321,7 +334,7 @@ export default function ServiceRequestsPage(): JSX.Element {
             sx={{ mb: 2 }}
             variant="text"
           >
-            {returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+            {OPERATIONS_LIST_BACK_LABEL}
           </Button>
           <ErrorIndicator entityName={SERVICE_REQUESTS_ERROR_ENTITY_NAME} size="medium" />
         </Box>
@@ -344,62 +357,64 @@ export default function ServiceRequestsPage(): JSX.Element {
   return (
     <Stack spacing={3}>
       <ListPageHeader
-        title={
-          createdByMe
+        title={(() => {
+          return actionRequired
+            ? SERVICE_REQUESTS_PAGE_TITLE_ACTION_REQUIRED
+            : outstandingOnly
+            ? SERVICE_REQUESTS_PAGE_TITLE_OUTSTANDING
+            : createdByMe
             ? SERVICE_REQUESTS_PAGE_TITLE_MINE
-            : SERVICE_REQUESTS_PAGE_TITLE_ALL
-        }
+            : SERVICE_REQUESTS_PAGE_TITLE_ALL;
+        })()}
         description={
-          createdByMe
+          actionRequired
+            ? SERVICE_REQUESTS_PAGE_DESCRIPTION_ACTION_REQUIRED
+            : outstandingOnly
+            ? SERVICE_REQUESTS_PAGE_DESCRIPTION_OUTSTANDING
+            : createdByMe
             ? SERVICE_REQUESTS_PAGE_DESCRIPTION_MINE
             : SERVICE_REQUESTS_PAGE_DESCRIPTION_ALL
         }
-        backLabel={returnTo ? "Back to Dashboard" : OPERATIONS_LIST_BACK_LABEL}
+        backLabel={OPERATIONS_LIST_BACK_LABEL}
         onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
         actions={newRequestButton}
       />
 
-      <Box sx={{ mb: 3 }}>
-        <ListStatGrid
-          isLoading={isStatsLoading}
-          isError={isStatsError}
-          entityName={SERVICE_REQUESTS_STAT_ENTITY_NAME}
-          configs={ALL_CASES_STAT_CONFIGS}
-          stats={getAllCasesFlattenedStats(stats)}
-        />
-      </Box>
-
-      <ListSearchPanel
-        searchTerm={searchTerm}
-        searchPlaceholder={SERVICE_REQUESTS_SEARCH_PLACEHOLDER}
-        onSearchChange={handleSearchChange}
-        isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        filters={filters}
-        filterMetadata={filterMetadata}
-        deployments={
-          projectDetailsReady && permissions.hasDeployments
-            ? deploymentsList
-            : []
-        }
-        onLoadMoreDeployments={() => {
-          if (
-            deploymentsQuery.hasNextPage &&
-            !deploymentsQuery.isFetchingNextPage
-          ) {
-            void deploymentsQuery.fetchNextPage();
+      {outstandingOnly || actionRequired ? (
+        <Divider />
+      ) : (
+        <ListSearchPanel
+          searchTerm={searchTerm}
+          searchPlaceholder={SERVICE_REQUESTS_SEARCH_PLACEHOLDER}
+          onSearchChange={handleSearchChange}
+          isFiltersOpen={isFiltersOpen}
+          onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+          filters={filters}
+          filterMetadata={filterMetadata}
+          deployments={
+            projectDetailsReady && permissions.hasDeployments
+              ? deploymentsList
+              : []
           }
-        }}
-        hasMoreDeployments={!!deploymentsQuery.hasNextPage}
-        isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
-        onFilterChange={handleFilterChange}
-        onClearFilters={handleClearFilters}
-        excludeS0={excludeS0}
-        restrictSeverityToLow={restrictSeverityToLow}
-        hideSeverityFilter
-        hideDeploymentFilter={!permissions.hasDeployments}
-        isProjectContextLoading={isProjectContextLoading}
-      />
+          onLoadMoreDeployments={() => {
+            if (
+              deploymentsQuery.hasNextPage &&
+              !deploymentsQuery.isFetchingNextPage
+            ) {
+              void deploymentsQuery.fetchNextPage();
+            }
+          }}
+          hasMoreDeployments={!!deploymentsQuery.hasNextPage}
+          isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
+          onFilterChange={handleFilterChange}
+          onClearFilters={handleClearFilters}
+          excludeS0={excludeS0}
+          restrictSeverityToLow={restrictSeverityToLow}
+          hideSeverityFilter
+          hideDeploymentFilter={!permissions.hasDeployments}
+          isProjectContextLoading={isProjectContextLoading}
+        />
+      )}
 
       <ListResultsBar
         shownCount={paginatedCases.length}
@@ -419,6 +434,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         hasListRefinement={listHasRefinement}
         entityName={SERVICE_REQUESTS_ENTITY_LABEL}
         hideSeverity
+        showInternalId
         onCaseClick={(c) =>
           navigate(
             `/projects/${projectId}/${navSegment}/service-requests/${c.id}`,

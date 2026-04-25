@@ -36,6 +36,7 @@ export type ProjectCardProps = {
   id: string;
   activeCasesCount: number;
   activeChatsCount: number;
+  actionRequiredCount: number;
   closureState?: string | null;
   onViewDashboard?: () => void;
   projectKey: string;
@@ -51,6 +52,7 @@ export type ProjectCardStatsProps = {
   activeChatsCount: number | undefined;
   date: string;
   activeCasesCount: number | undefined;
+  actionRequiredCount: number | undefined;
   isError?: boolean;
   isLoading?: boolean;
 };

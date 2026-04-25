@@ -39,7 +39,7 @@ import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymen
 export default function UsageAndMetricsTabContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [timeRange, setTimeRange] = useState<UsageTimeRange>(
-    UsageTimeRange.THREE_MONTHS,
+    UsageTimeRange.ONE_MONTH,
   );
   const [innerTab, setInnerTab] = useState<string>(
     UsageMetricsInnerTabId.OVERVIEW,
@@ -68,6 +68,18 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const innerTabs = useMemo(
     () => buildUsageInnerTabs(deploymentsData),
     [deploymentsData],
+  );
+
+  const overviewTab = useMemo(
+    () =>
+      innerTabs.find((tab) => tab.id === UsageMetricsInnerTabId.OVERVIEW) ??
+      innerTabs[0],
+    [innerTabs],
+  );
+
+  const deploymentTabs = useMemo(
+    () => innerTabs.filter((tab) => tab.id !== overviewTab?.id),
+    [innerTabs, overviewTab],
   );
 
   const activeDeploymentId = useMemo(
@@ -112,7 +124,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const handleCancelCustom = () => {
     setCustomStart(appliedCustomStart);
     setCustomEnd(appliedCustomEnd);
-    setTimeRange(UsageTimeRange.THREE_MONTHS);
+    setTimeRange(UsageTimeRange.ONE_MONTH);
   };
 
   const timeRangeSelector = (
@@ -133,13 +145,70 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   );
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <TabBar
-        tabs={innerTabs}
-        activeTab={innerTab}
-        onTabChange={setInnerTab}
-        sx={{ mb: 1 }}
-      />
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+        overflowX: "hidden",
+      }}
+    >
+      <Box
+        sx={{
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+          }}
+        >
+          {overviewTab && (
+            <TabBar
+              tabs={[overviewTab]}
+              activeTab={innerTab}
+              onTabChange={setInnerTab}
+              keepButtonWidth={true}
+              compact={true}
+              sx={{ mb: 0, border: "none", boxShadow: "none", flexShrink: 0 }}
+            />
+          )}
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              maxWidth: "100%",
+              overflowX: "auto",
+              overflowY: "hidden",
+              scrollbarWidth: "none",
+              "&::-webkit-scrollbar": { display: "none" },
+            }}
+          >
+            <Box sx={{ width: "max-content", minWidth: "100%" }}>
+              <TabBar
+                tabs={deploymentTabs}
+                activeTab={innerTab}
+                onTabChange={setInnerTab}
+                keepButtonWidth={true}
+                compact={true}
+                sx={{ mb: 0, border: "none", boxShadow: "none" }}
+              />
+            </Box>
+          </Box>
+        </Box>
+      </Box>
 
       {innerTab !== UsageMetricsInnerTabId.OVERVIEW && timeRangeSelector}
 

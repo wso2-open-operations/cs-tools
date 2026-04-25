@@ -185,6 +185,7 @@ export default function ActivityCommentInput({
       );
       if (ok) {
         clearUI();
+        window.location.reload();
       }
       return;
     }
@@ -196,10 +197,13 @@ export default function ActivityCommentInput({
         onSuccess: async () => {
           clearUI();
           if (attachmentsSnapshot.length > 0) {
-            await uploadAttachmentsFromSnapshot(
+            const ok = await uploadAttachmentsFromSnapshot(
               attachmentsSnapshot,
               attachmentNamesSnapshot,
             );
+            if (ok) {
+              window.location.reload();
+            }
           }
         },
         onError: (error: unknown) => {

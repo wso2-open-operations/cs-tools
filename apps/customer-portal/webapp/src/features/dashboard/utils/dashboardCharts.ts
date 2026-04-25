@@ -303,27 +303,21 @@ export function buildEngagementsPieSlices(
         color: isError && !isLoading ? errorGrey : item.color,
       }));
     default:
-      return safeData.categories
-        .filter((category) => {
-          const normalized = category.name.trim().toLowerCase();
-          switch (normalized) {
-            case "services":
-            case "improvements":
-            case "follow up":
-            case "follow-up":
-              return category.value > 0;
-            default:
-              return true;
-          }
-        })
-        .map((category, index) => ({
-        name: category.name,
-        value: category.value,
-        color:
-          colorByLabel.get(category.name.toLowerCase()) ??
-          fallbackColors[index % fallbackColors.length] ??
-          fallbackGrey,
-        }));
+      return chartSource.map((entry, index) => {
+        const category = safeData.categories.find(
+          (c) => c.name === entry.name,
+        );
+        return {
+          name: entry.name,
+          value: category?.value ?? 0,
+          id: category?.id,
+          ids: category?.ids,
+          color:
+            colorByLabel.get(entry.name.toLowerCase()) ??
+            fallbackColors[index % fallbackColors.length] ??
+            fallbackGrey,
+        };
+      });
   }
 }
 

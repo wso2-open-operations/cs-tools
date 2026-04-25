@@ -64,6 +64,8 @@ export function CaseDetailsSection({
   isSeverityDisabled = false,
 }: CaseDetailsSectionProps): JSX.Element {
   const titleReadOnly = isTitleDisabled;
+  const titleLength = title.trim().length;
+  const isTitleTooLong = titleLength > 160;
   const meta = metadata as
     | {
         issueTypes?: unknown[];
@@ -185,7 +187,19 @@ export function CaseDetailsSection({
                   : "Enter issue title"
               }
               disabled={isLoading || titleReadOnly}
+              error={isTitleTooLong}
+              helperText={
+                isTitleTooLong ? "Title must be 160 characters or fewer." : undefined
+              }
             />
+            <Typography
+              variant="caption"
+              color={isTitleTooLong ? "error.main" : "text.secondary"}
+              align="right"
+              sx={{ mt: 0.5, display: "block" }}
+            >
+              {titleLength}/160
+            </Typography>
           </Box>
         </Box>
 
@@ -316,7 +330,7 @@ export function CaseDetailsSection({
                     color="text.secondary"
                     sx={{ mt: 1, display: "block" }}
                   >
-                    PDF, DOCX, TXT, CSV or other formats • Max 15MB per file
+                    PDF, DOCX, TXT, CSV or other formats • Max 10MB per file
                   </Typography>
                 </Box>
               </Box>

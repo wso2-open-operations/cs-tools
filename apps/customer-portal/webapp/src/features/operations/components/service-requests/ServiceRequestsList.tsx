@@ -135,6 +135,20 @@ export default function ServiceRequestsList({
                   alignItems="center"
                   sx={{ mb: 1, flexWrap: "wrap" }}
                 >
+                  {sr.internalId && (
+                    <>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        color="text.secondary"
+                      >
+                        {sr.internalId}
+                      </Typography>
+                      <Typography variant="body2" color="text.disabled">
+                        |
+                      </Typography>
+                    </>
+                  )}
                   <Typography
                     variant="body2"
                     fontWeight={500}

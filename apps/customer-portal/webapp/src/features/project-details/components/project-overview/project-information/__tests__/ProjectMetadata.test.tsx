@@ -28,6 +28,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
       {label}
     </div>
   ),
+  Tooltip: ({ children }: any) => <div>{children}</div>,
   Skeleton: () => <div data-testid="skeleton" />,
 }));
 
@@ -55,14 +56,8 @@ describe("ProjectMetadata", () => {
     expect(screen.getByText("Created Date")).toBeInTheDocument();
     expect(screen.getByText("Jan 1, 2024")).toBeInTheDocument();
 
-    expect(screen.getByText("Project Type")).toBeInTheDocument();
-    expect(screen.getByText("Subscription")).toBeInTheDocument();
-
     expect(screen.getByText("Support Tier")).toBeInTheDocument();
     expect(screen.getByText("Enterprise")).toBeInTheDocument();
-
-    expect(screen.getByText("Overall Status")).toBeInTheDocument();
-    expect(screen.getByText("Good")).toBeInTheDocument();
 
     expect(screen.getByText("Go Live Date")).toBeInTheDocument();
     expect(screen.getByText("Sep 12, 2025")).toBeInTheDocument();
@@ -78,21 +73,15 @@ describe("ProjectMetadata", () => {
     expect(skeletons.length).toBeGreaterThan(0);
 
     expect(screen.queryByText("Jan 1, 2024")).toBeNull();
-    expect(screen.queryByText("Subscription")).toBeNull();
   });
 
   it("should assign correct colors to chips", () => {
     render(<ProjectMetadata {...defaultProps} />);
 
-    expect(screen.getByText("Subscription")).toHaveAttribute(
-      "data-color",
-      "info",
-    );
     expect(screen.getByText("Enterprise")).toHaveAttribute(
       "data-color",
       "warning",
     );
-    expect(screen.getByText("Good")).toHaveAttribute("data-color", "success");
   });
 
   it("should hide onboarding status when hideOnboardingStatus is true", () => {

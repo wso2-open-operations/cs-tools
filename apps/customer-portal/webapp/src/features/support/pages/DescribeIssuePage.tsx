@@ -250,6 +250,7 @@ export default function DescribeIssuePage(): JSX.Element {
                   loading={isLoadingAfterClick}
                   loadingPosition="start"
                   disabled={isSubmitDisabled}
+                  sx={{ py: 0.5 }}
                 >
                   Submit & Get Help
                 </Button>

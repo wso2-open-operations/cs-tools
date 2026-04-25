@@ -28,6 +28,7 @@ export type DateRangeFilter = {
 
 // Enum for usage time ranges.
 export enum UsageTimeRange {
+  ONE_MONTH = "1m",
   THREE_MONTHS = "3m",
   SIX_MONTHS = "6m",
   TWELVE_MONTHS = "12m",

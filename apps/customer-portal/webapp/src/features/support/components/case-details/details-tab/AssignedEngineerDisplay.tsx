@@ -33,9 +33,6 @@ export default function AssignedEngineerDisplay({
 
   return (
     <Stack spacing={0.5}>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-        Support Engineer
-      </Typography>
       <Stack direction="row" alignItems="center" spacing={1}>
         <Avatar
           sx={{

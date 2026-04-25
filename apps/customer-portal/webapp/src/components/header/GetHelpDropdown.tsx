@@ -22,6 +22,7 @@ import {
   Menu,
   MenuItem,
   Skeleton,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -157,6 +158,20 @@ function GetHelpDropdownContent(): JSX.Element {
         ]
       : []),
   ];
+
+  if (isProjectsListBusy) {
+    return (
+      <Stack direction="row" alignItems="center" spacing={0.5}>
+        <Skeleton variant="rounded" width={96} height={36} />
+        <Skeleton variant="rounded" width={36} height={36} />
+        <Divider
+          orientation="vertical"
+          flexItem
+          sx={{ mx: 1, display: { xs: "none", sm: "block" } }}
+        />
+      </Stack>
+    );
+  }
 
   return (
     <Box sx={{ display: "flex", alignItems: "center" }}>

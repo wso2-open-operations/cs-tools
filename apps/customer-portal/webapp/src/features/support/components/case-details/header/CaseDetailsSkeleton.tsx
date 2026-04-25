@@ -18,7 +18,7 @@ import type {
   CaseDetailsHeaderVariant,
   CaseDetailsSkeletonProps,
 } from "@features/support/types/supportComponents";
-import { Box, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
+import { Box, Divider, Paper, Skeleton, Stack } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 export type CaseDetailsHeaderSkeletonProps = {
@@ -26,7 +26,7 @@ export type CaseDetailsHeaderSkeletonProps = {
 };
 
 /**
- * Header-only skeleton: case ID and optional chip placeholders, title.
+ * Header-only skeleton: wso2CaseId | caseNumber | status + optional chips, then title.
  * Used by CaseDetailsHeader when loading and by CaseDetailsSkeleton.
  *
  * @param props - Optional variant matching {@link CaseDetailsHeader}.
@@ -37,36 +37,43 @@ export function CaseDetailsHeaderSkeleton({
 }: CaseDetailsHeaderSkeletonProps = {}): JSX.Element {
   return (
     <Box>
+      {/* Row: wso2CaseId | caseNumber | status [| severity chip] [| assigned engineer] */}
       <Stack
         direction="row"
         spacing={1.5}
         alignItems="center"
-        sx={{ mb: 0.5, flexWrap: "wrap" }}
+        sx={{ mb: 1, flexWrap: "wrap" }}
       >
+        {/* wso2CaseId */}
+        <Skeleton variant="text" width={80} height={18} />
+        <Divider orientation="vertical" flexItem sx={{ height: 14, alignSelf: "center" }} />
+        {/* caseNumber */}
         <Skeleton variant="text" width={100} height={20} />
-        {variant === "default" && (
-          <>
-            <Skeleton
-              variant="rounded"
-              width={56}
-              height={20}
-              sx={{ borderRadius: "10px" }}
-            />
-            <Skeleton variant="rounded" width={72} height={20} />
-          </>
+        {/* status dot + label — shown for all variants except engagement */}
+        {variant !== "engagement" && (
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Skeleton variant="circular" width={8} height={8} />
+            <Skeleton variant="text" width={72} height={16} />
+          </Stack>
         )}
-        {variant === "serviceRequest" && (
-          <Skeleton variant="rounded" width={72} height={20} />
+        {/* severity chip — default only */}
+        {variant === "default" && (
+          <Skeleton
+            variant="rounded"
+            width={56}
+            height={20}
+            sx={{ borderRadius: "10px" }}
+          />
         )}
       </Stack>
-      <Skeleton variant="text" width="70%" height={28} sx={{ maxWidth: 400 }} />
+      {/* Title */}
+      <Skeleton variant="text" width="65%" height={28} sx={{ maxWidth: 420 }} />
     </Box>
   );
 }
 
 /**
- * Skeleton placeholder for case details loading: header and action row only.
- * Sub nav tab items (tabs and tab panel content) are not shown as skeleton.
+ * Skeleton placeholder for case details loading: header, action row, and tab bar.
  *
  * @param {CaseDetailsSkeletonProps} props - Optional configuration.
  * @returns {JSX.Element} The rendered skeleton.
@@ -80,44 +87,36 @@ export default function CaseDetailsSkeleton({
   void hideAssignedEngineer;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <CaseDetailsHeaderSkeleton variant={headerVariant} />
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 2,
+          flexWrap: "wrap",
+        }}
+      >
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <CaseDetailsHeaderSkeleton variant={headerVariant} />
+        </Box>
 
-      {/* Action row: manage status label placeholder */}
-      {!hideActionRow && (
-        <Paper
-          variant="outlined"
-          sx={{
-            mt: 2,
-            mb: 1,
-            py: 0.5,
-            px: 2,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 1,
-            bgcolor: "background.default",
-            minHeight: 0,
-          }}
-        >
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            {!showEngineerOnly && (
-              <Stack direction="row" spacing={1.5} alignItems="center">
-                <Skeleton variant="circular" width={12} height={12} />
-                <Skeleton variant="text" width={100} height={14} />
-              </Stack>
-            )}
+        {/* Action buttons area (right side) */}
+        {!hideActionRow && !showEngineerOnly && (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Skeleton variant="rounded" width={88} height={30} sx={{ borderRadius: "4px" }} />
+            <Skeleton variant="rounded" width={96} height={30} sx={{ borderRadius: "4px" }} />
           </Stack>
-        </Paper>
-      )}
+        )}
+        {showEngineerOnly && (
+          <Skeleton variant="circular" width={32} height={32} sx={{ flexShrink: 0 }} />
+        )}
+      </Box>
 
-      {/* Security Report Analysis Progress Skeleton */}
-      {hideActionRow && (
+      {/* Security Report Analysis progress bar — shown instead of action row */}
+      {hideActionRow && !showEngineerOnly && (
         <Paper
           variant="outlined"
           sx={{
-            mt: 2,
-            mb: 1,
             py: 1.5,
             px: 2,
             bgcolor: "background.default",
@@ -130,6 +129,8 @@ export default function CaseDetailsSkeleton({
           <Skeleton variant="rounded" width="100%" height={8} />
         </Paper>
       )}
+
+      
     </Box>
   );
 }

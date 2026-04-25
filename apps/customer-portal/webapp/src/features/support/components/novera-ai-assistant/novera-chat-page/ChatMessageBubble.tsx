@@ -15,7 +15,15 @@
 // under the License.
 
 import type { ChatMessageBubbleProps } from "@features/support/types/supportComponents";
-import { Avatar, Box, Paper, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import {
+  Avatar,
+  Box,
+  Paper,
+  Stack,
+  Typography,
+  alpha,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import { Bot, User } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
@@ -64,10 +72,7 @@ const primaryWaveTextSx = {
 function MarkdownContent({ text }: { text: string }) {
   const markdownComponents: React.ComponentProps<
     typeof ReactMarkdown
-  >["components"] = useMemo(
-    () => buildBotMarkdownComponents(),
-    [],
-  );
+  >["components"] = useMemo(() => buildBotMarkdownComponents(), []);
 
   return (
     <Box
@@ -76,7 +81,11 @@ function MarkdownContent({ text }: { text: string }) {
           { mt: 0 },
         "& ul, & ol": { mt: 0, mb: 1, pl: 2.5 },
         "& li": { mb: 0.5 },
-        "& p": { margin: "0 0 0.25em 0", whiteSpace: "pre-wrap", wordBreak: "break-word" },
+        "& p": {
+          margin: "0 0 0.25em 0",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        },
         "& p:last-child": { marginBottom: 0 },
         "& pre": {
           overflowX: "auto",
@@ -108,7 +117,10 @@ function MarkdownContent({ text }: { text: string }) {
         },
       }}
     >
-      <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown
+        components={markdownComponents}
+        remarkPlugins={[remarkGfm]}
+      >
         {text}
       </ReactMarkdown>
     </Box>
@@ -128,6 +140,7 @@ export default function ChatMessageBubble({
   message,
 }: ChatMessageBubbleProps): JSX.Element {
   const isUser = message.sender === ChatSender.USER;
+  const isCurrentUserMessage = isUser && (message.isCurrentUser ?? true);
 
   const displayText = message.isError ? "Something went wrong" : message.text;
 
@@ -191,7 +204,14 @@ export default function ChatMessageBubble({
 
   if (isUser) {
     return (
-      <Stack direction="row" alignItems="flex-start" sx={{ flexDirection: "row-reverse", gap: 2 }}>
+      <Stack
+        direction="row"
+        alignItems="flex-start"
+        sx={{
+          flexDirection: isCurrentUserMessage ? "row-reverse" : "row",
+          gap: 2,
+        }}
+      >
         <Avatar
           sx={{
             width: 32,
@@ -204,8 +224,21 @@ export default function ChatMessageBubble({
         >
           <User size={14} />
         </Avatar>
-        <Stack spacing={0.75} sx={{ minWidth: 0, alignItems: "flex-end" }}>
-          <Stack direction="row" alignItems="center" sx={{ flexDirection: "row-reverse", gap: 1 }}>
+        <Stack
+          spacing={0.75}
+          sx={{
+            minWidth: 0,
+            alignItems: isCurrentUserMessage ? "flex-end" : "flex-start",
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            sx={{
+              flexDirection: isCurrentUserMessage ? "row-reverse" : "row",
+              gap: 1,
+            }}
+          >
             <Typography variant="body2" color="text.primary" fontWeight={500}>
               {message.createdBy || "You"}
             </Typography>
@@ -340,14 +373,17 @@ export default function ChatMessageBubble({
                 {message.thinkingSteps && message.thinkingSteps.length > 0 && (
                   <Box sx={{ mt: 1 }}>
                     {message.thinkingSteps.map((step, idx) => (
-                      <Typography
+                      <Box
                         key={`${message.id}-thinking-${idx}`}
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block" }}
+                        sx={{
+                          "& p, & li": {
+                            fontSize: "0.75rem",
+                            color: "text.secondary",
+                          },
+                        }}
                       >
-                        {`• ${step}`}
-                      </Typography>
+                        <MarkdownContent text={`• ${step}`} />
+                      </Box>
                     ))}
                   </Box>
                 )}

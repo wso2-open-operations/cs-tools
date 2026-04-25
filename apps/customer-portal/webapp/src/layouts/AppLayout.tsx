@@ -29,6 +29,7 @@ import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
+import HtmlAnnouncementBanner from "@components/announcement-banner/HtmlAnnouncementBanner";
 import TopBanner from "@components/top-banner/TopBanner";
 import Footer from "@components/footer/Footer";
 import Header from "@components/header/Header";
@@ -73,29 +74,32 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   });
 
   const { isVisible } = useLoader();
-  const [loadingMessage, setLoadingMessage] = useState<
-    "Authenticating…" | "Fetching user info…" | "Please wait…"
-  >("Authenticating…");
+  const isLoginCallback =
+    new URLSearchParams(location.search).has("code") &&
+    new URLSearchParams(location.search).has("state");
 
-  // Animate loading message during authentication
+  // Track when auth + user details have both settled for the first time.
+  // Using state (not a ref) so the component re-renders once ready.
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>(
+    isLoginCallback ? "Authenticating…" : "Loading…",
+  );
+
   useEffect(() => {
-    if (!isAuthLoading) return;
+    if (!isAuthLoading && !isUserDetailsLoading) {
+      setHasInitialized(true);
+    }
+  }, [isAuthLoading, isUserDetailsLoading]);
+
+  // Animate loading message only during the actual login callback flow.
+  useEffect(() => {
+    if (!isAuthLoading || !isLoginCallback) return;
 
     setLoadingMessage("Authenticating…");
-
-    const t1 = setTimeout(() => {
-      setLoadingMessage("Fetching user info…");
-    }, 1500);
-
-    const t2 = setTimeout(() => {
-      setLoadingMessage("Please wait…");
-    }, 3000);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [isAuthLoading]);
+    const t1 = setTimeout(() => setLoadingMessage("Fetching user info…"), 1500);
+    const t2 = setTimeout(() => setLoadingMessage("Please wait…"), 3000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [isAuthLoading, isLoginCallback]);
 
   // Persist sidebar state
   useEffect(() => {
@@ -163,11 +167,13 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
       >
         <TopBanner />
         <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
+        <HtmlAnnouncementBanner />
         <AppShell sx={{ flex: 1, minHeight: 0, height: "auto" }}>
           <AppShell.Navbar>
             <Header
               onToggleSidebar={shellActions.toggleSidebar}
               collapsed={shellState.sidebarCollapsed}
+              hideProjectControls={hasPortalAccessError}
             />
           </AppShell.Navbar>
 
@@ -216,7 +222,8 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                   minWidth: 0,
                   display: "flex",
                   flexDirection: "column",
-                  overflow: "auto",
+                  overflowY: "auto",
+                  overflowX: "hidden",
                   ...(isDetailsStylePage ? { minHeight: "60vh" } : {}),
                   ...(isAuthLoading
                     ? { p: 0 }
@@ -225,7 +232,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                       : { p: 3 }),
                 }}
               >
-                {isAuthLoading || isUserDetailsLoading ? (
+                {!hasInitialized ? (
                   <Box
                     sx={{
                       flex: 1,

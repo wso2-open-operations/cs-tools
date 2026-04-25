@@ -20,6 +20,7 @@ import {
   Button,
   Divider,
   Paper,
+  Skeleton,
   Stack,
   Typography,
   Avatar,
@@ -86,17 +87,6 @@ export interface ServiceRequestDetailContentProps {
   onBack: () => void;
 }
 
-interface RequestDetailSection {
-  label: string;
-  value: string;
-}
-
-const WSO2_PRODUCT_LABEL_REGEX = /^\s*wso2\s*product\s*:?\s*/i;
-
-/** Names of context fields to hide from Request Details (same as create flow). */
-const REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES =
-  /^(project|deployments?|product|wso2\s*product|environment)$/i;
-
 function isPlainTextComment(content: string): boolean {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return true;
@@ -105,54 +95,6 @@ function isPlainTextComment(content: string): boolean {
     trimmed.startsWith("[code]") && trimmed.endsWith("[/code]");
   const hasInlineImageRef = /\[img:\d+\]/.test(trimmed);
   return !hasHtmlTags && !isFullCodeBlock && !hasInlineImageRef;
-}
-
-function stripWso2ProductFromText(text: string): string {
-  if (!text?.trim()) return text ?? "";
-  return text
-    .split(/\r?\n/)
-    .filter((line) => !WSO2_PRODUCT_LABEL_REGEX.test(line.trim()))
-    .join("\n")
-    .trim();
-}
-
-function parseRequestDetails(
-  descriptionHtml: string | null | undefined,
-): RequestDetailSection[] {
-  if (!descriptionHtml) {
-    return [];
-  }
-
-  if (typeof document === "undefined") {
-    return [{ label: "Details", value: descriptionHtml }];
-  }
-
-  const sections: RequestDetailSection[] = [];
-  const strongRegex = /<strong[^>]*>([\s\S]*?)<\/strong>/gi;
-  let match: RegExpExecArray | null;
-
-  while ((match = strongRegex.exec(descriptionHtml)) !== null) {
-    const label = (match[1] ?? "")
-      .replace(/<[^>]+>/g, "")
-      .trim()
-      .replace(/:$/, "");
-    const valueStart = match.index + match[0].length;
-    const nextStrong = descriptionHtml
-      .slice(valueStart)
-      .search(/<strong[^>]*>/i);
-    const valueEnd =
-      nextStrong >= 0 ? valueStart + nextStrong : descriptionHtml.length;
-    const valueHtml = descriptionHtml.slice(valueStart, valueEnd).trim();
-    if (label && valueHtml) {
-      sections.push({ label, value: valueHtml });
-    }
-  }
-
-  if (sections.length === 0 && descriptionHtml.trim()) {
-    sections.push({ label: "Details", value: descriptionHtml.trim() });
-  }
-
-  return sections;
 }
 
 export default function ServiceRequestDetailContent({
@@ -214,11 +156,6 @@ export default function ServiceRequestDetailContent({
     (srMeta.openedBy as string | undefined) ??
     (srMeta.createdBy as string | undefined) ??
     null;
-
-  const requestDetailSections = useMemo(
-    () => parseRequestDetails(data?.description),
-    [data?.description],
-  );
 
   const commentsSorted = useMemo(() => {
     const list = commentsData?.comments ?? [];
@@ -304,27 +241,88 @@ export default function ServiceRequestDetailContent({
 
   if (isLoading) {
     return (
-      <Box>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Button
           startIcon={<ArrowLeft size={16} />}
           onClick={onBack}
-          sx={{ mb: 2 }}
+          sx={{ alignSelf: "flex-start", mb: 0.5 }}
           variant="text"
         >
           Back to Service Requests
         </Button>
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Stack spacing={2}>
-            <Box sx={{ height: 24, width: 120 }} />
-            <Box sx={{ height: 32, width: "60%" }} />
-            <Box sx={{ height: 56, width: "100%" }} />
-            <Stack direction="row" spacing={3} sx={{ pt: 2 }}>
-              {[1, 2, 3, 4].map((i) => (
-                <Box key={i} sx={{ height: 40, width: 140 }} />
-              ))}
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
+          <Stack spacing={1.5}>
+            {/* Header: WSO2 Case ID | Number | Status */}
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap" }}>
+              <Skeleton variant="text" width={80} height={18} />
+              <Skeleton variant="rectangular" width={1} height={14} />
+              <Skeleton variant="text" width={100} height={20} />
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Skeleton variant="circular" width={8} height={8} />
+                <Skeleton variant="text" width={70} height={16} />
+              </Stack>
             </Stack>
+            {/* Title */}
+            <Skeleton variant="text" width="55%" height={28} />
+            {/* Meta grid: Environment / Product / Requested By / Requested On */}
+            <Box
+              sx={{
+                mt: 1,
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, minmax(0, 1fr))" },
+                gap: 3,
+              }}
+            >
+              {[1, 2, 3, 4].map((i) => (
+                <Stack key={i} spacing={0.5}>
+                  <Skeleton variant="text" width={80} height={14} />
+                  <Skeleton variant="text" width="85%" height={20} />
+                </Stack>
+              ))}
+            </Box>
           </Stack>
         </Paper>
+        {/* Content area: Attachments + Communication / Details panel */}
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", md: "1fr 360px" },
+            gap: 3,
+            alignItems: "start",
+          }}
+        >
+          <Stack spacing={3}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
+              <Skeleton variant="text" width={110} height={22} sx={{ mb: 1.5 }} />
+              <Stack spacing={2}>
+                {[1, 2].map((i) => (
+                  <Box key={i} sx={{ display: "flex", gap: 1.5 }}>
+                    <Skeleton variant="circular" width={32} height={32} sx={{ flexShrink: 0 }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Skeleton variant="text" width="40%" height={16} sx={{ mb: 0.5 }} />
+                      <Skeleton variant="rounded" width="100%" height={52} />
+                    </Box>
+                  </Box>
+                ))}
+              </Stack>
+            </Paper>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
+              <Skeleton variant="text" width={130} height={22} sx={{ mb: 1.5 }} />
+              <Skeleton variant="rounded" width="100%" height={80} />
+            </Paper>
+          </Stack>
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
+            <Skeleton variant="text" width={80} height={22} sx={{ mb: 2 }} />
+            <Stack spacing={2}>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Stack key={i} spacing={0.5}>
+                  <Skeleton variant="text" width="55%" height={14} />
+                  <Skeleton variant="text" width="75%" height={20} />
+                </Stack>
+              ))}
+            </Stack>
+          </Paper>
+        </Box>
       </Box>
     );
   }
@@ -364,6 +362,10 @@ export default function ServiceRequestDetailContent({
             alignItems="center"
             sx={{ flexWrap: "wrap" }}
           >
+            <Typography variant="body2" color="text.secondary">
+              WSO2 Case ID: {data?.internalId ?? "--"}
+            </Typography>
+            <Divider orientation="vertical" flexItem />
             <Typography variant="body2" fontWeight={600} color="text.primary">
               {data?.number ?? "--"}
             </Typography>
@@ -472,157 +474,6 @@ export default function ServiceRequestDetailContent({
         }}
       >
         <Stack spacing={3}>
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
-            <Typography
-              variant="subtitle2"
-              color="text.primary"
-              sx={{ mb: 1.5 }}
-            >
-              Request Details
-            </Typography>
-            {(() => {
-              const apiVariables = data?.variables ?? [];
-              const filteredVariables = apiVariables.filter(
-                (v) =>
-                  !REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES.test(
-                    (v.name ?? "").trim(),
-                  ),
-              );
-              if (filteredVariables.length > 0) {
-                return filteredVariables.map((v, index) => {
-                  const rawValue = (v.value ?? "").trim();
-                  const hasHtml =
-                    rawValue.includes("<") || rawValue.includes(">");
-                  const processedValue = hasHtml
-                    ? DOMPurify.sanitize(
-                        convertCodeTagsToHtml(
-                          stripCustomerCommentAddedLabel(rawValue),
-                        ),
-                      )
-                    : "";
-                  return (
-                    <Box key={`${v.name}-${index}`} sx={{ mb: 1.5 }}>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mb: 0.5 }}
-                      >
-                        {v.name}
-                      </Typography>
-                      {hasHtml ? (
-                        // biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify
-                        <Box
-                          component="div"
-                          sx={{
-                            "& p": { mb: 0.5 },
-                            "& p:last-child": { mb: 0 },
-                            "& code": {
-                              display: "block",
-                              p: 1,
-                              bgcolor: "action.hover",
-                              fontSize: "0.875rem",
-                              whiteSpace: "pre-wrap",
-                              overflowWrap: "break-word",
-                            },
-                          }}
-                          dangerouslySetInnerHTML={{
-                            __html: processedValue || "--",
-                          }}
-                        />
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          color="text.primary"
-                          sx={{ whiteSpace: "pre-wrap" }}
-                        >
-                          {rawValue || "--"}
-                        </Typography>
-                      )}
-                      {index < filteredVariables.length - 1 && (
-                        <Divider sx={{ mt: 1.5 }} />
-                      )}
-                    </Box>
-                  );
-                });
-              }
-              const filtered = requestDetailSections.filter(
-                (s) =>
-                  !REQUEST_DETAILS_HIDDEN_VARIABLE_NAMES.test(s.label.trim()),
-              );
-              if (filtered.length > 0) {
-                return filtered.map((section, index) => {
-                  const processedHtml = DOMPurify.sanitize(
-                    convertCodeTagsToHtml(
-                      stripCustomerCommentAddedLabel(section.value),
-                    ),
-                  );
-                  return (
-                    <Box key={`${section.label}-${index}`} sx={{ mb: 1.5 }}>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ display: "block", mb: 0.5 }}
-                      >
-                        {section.label}
-                      </Typography>
-                      {/* biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify */}
-                      <Box
-                        component="div"
-                        sx={{
-                          "& p": { mb: 0.5 },
-                          "& p:last-child": { mb: 0 },
-                          "& code": {
-                            display: "block",
-                            p: 1,
-                            bgcolor: "action.hover",
-                            fontSize: "0.875rem",
-                            whiteSpace: "pre-wrap",
-                            overflowWrap: "break-word",
-                          },
-                        }}
-                        dangerouslySetInnerHTML={{ __html: processedHtml }}
-                      />
-                      {index < filtered.length - 1 && (
-                        <Divider sx={{ mt: 1.5 }} />
-                      )}
-                    </Box>
-                  );
-                });
-              }
-              const fallbackHtml = stripWso2ProductFromText(
-                data?.description ?? "",
-              );
-              const processedFallback = fallbackHtml
-                ? DOMPurify.sanitize(
-                    convertCodeTagsToHtml(
-                      stripCustomerCommentAddedLabel(fallbackHtml),
-                    ),
-                  )
-                : "";
-              return (
-                // biome-ignore security/noDangerouslySetInnerHtml: sanitized with DOMPurify
-                <Box
-                  component="div"
-                  sx={{
-                    "& p": { mb: 0.5 },
-                    "& p:last-child": { mb: 0 },
-                    "& code": {
-                      display: "block",
-                      p: 1,
-                      bgcolor: "action.hover",
-                      fontSize: "0.875rem",
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "break-word",
-                    },
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: processedFallback || "--",
-                  }}
-                />
-              );
-            })()}
-          </Paper>
-
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 0 }}>
             <Typography
               variant="subtitle2"

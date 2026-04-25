@@ -55,16 +55,22 @@ const ProductVulnerabilitiesList = ({
 }: ProductVulnerabilitiesListProps): JSX.Element => {
   return (
     <>
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
         <Table sx={{ minWidth: 650 }}>
           <TableHead>
             <TableRow>
-              <TableCell>CVE ID</TableCell>
+              <TableCell>CVE</TableCell>
               <TableCell>Vulnerability ID</TableCell>
               <TableCell>Severity</TableCell>
+              <TableCell>Product Name</TableCell>
+              <TableCell>Product Version</TableCell>
               <TableCell>Component Name</TableCell>
-              <TableCell>Version</TableCell>
-              <TableCell>Type</TableCell>
+              <TableCell>Component Version</TableCell>
+              <TableCell>Component Type</TableCell>
+              <TableCell>Update Level</TableCell>
+              <TableCell>Use Case</TableCell>
+              <TableCell>Justification</TableCell>
+              <TableCell>Resolution</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -135,6 +141,16 @@ const ProductVulnerabilitiesList = ({
                         }}
                       />
                     </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.productName ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.productVersion ?? "--"}
+                      </Typography>
+                    </TableCell>
                     <TableCell sx={{ maxWidth: 180 }}>
                       <Typography
                         variant="body2"
@@ -150,7 +166,44 @@ const ProductVulnerabilitiesList = ({
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip label={row.type} variant="outlined" size="small" />
+                      <Typography variant="body2" color="text.secondary">
+                        {row.componentType ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.updateLevel ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 160 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        noWrap
+                        title={row.useCase ?? undefined}
+                      >
+                        {row.useCase ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 160 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        noWrap
+                        title={row.justification ?? undefined}
+                      >
+                        {row.justification ?? "--"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 160 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        noWrap
+                        title={row.resolution ?? undefined}
+                      >
+                        {row.resolution ?? "--"}
+                      </Typography>
                     </TableCell>
                   </TableRow>
                 );

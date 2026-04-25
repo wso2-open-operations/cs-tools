@@ -103,7 +103,7 @@ export type EditUserModalProps = {
   contact: ProjectContact | null;
   isSubmitting?: boolean;
   onClose: () => void;
-  onSubmit: (next: { isSecurityContact: boolean }) => void;
+  onSubmit: (next: { isCsAdmin: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => void;
 };
 
 export type RemoveUserModalProps = {

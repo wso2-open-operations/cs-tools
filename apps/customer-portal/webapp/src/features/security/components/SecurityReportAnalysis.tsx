@@ -65,12 +65,17 @@ import {
 } from "@features/security/utils/securityPage";
 import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 
+type SecurityReportAnalysisProps = {
+  fixedStatusIds?: number[];
+  fixedClosedDateRange?: { closedStartDate: string; closedEndDate: string };
+};
+
 /**
  * SecurityReportAnalysis displays security vulnerability reports uploaded for analysis.
  *
  * @returns {JSX.Element}
  */
-const SecurityReportAnalysis = (): JSX.Element => {
+const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: SecurityReportAnalysisProps): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { data: projectDetails, isLoading: isProjectLoading } =
@@ -115,18 +120,21 @@ const SecurityReportAnalysis = (): JSX.Element => {
         caseTypes: [CaseType.SECURITY_REPORT_ANALYSIS],
         createdByMe:
           viewMode === SecurityReportViewMode.MY ? true : undefined,
-        statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+        statusIds: fixedStatusIds !== undefined
+          ? (fixedStatusIds.length > 0 ? fixedStatusIds : undefined)
+          : (filters.statusId ? [Number(filters.statusId)] : undefined),
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
+        ...(fixedClosedDateRange ?? {}),
       },
       sortBy: {
         field: sortField,
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortField, sortOrder, viewMode],
+    [filters, searchTerm, sortField, sortOrder, viewMode, fixedStatusIds, fixedClosedDateRange],
   );
 
   const { data, isLoading, hasNextPage, fetchNextPage } = useGetProjectCases(
@@ -283,32 +291,34 @@ const SecurityReportAnalysis = (): JSX.Element => {
         </Box>
       </Box>
 
-      <ListSearchBar
-        searchPlaceholder={SECURITY_REPORT_SEARCH_PLACEHOLDER}
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
-        onClearFilters={handleClearFilters}
-        filtersContent={
-          <ListFiltersPanel
-            filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}
-            filters={filters}
-            resolveOptions={(def) => {
-              const raw = (
-                filterMetadata as CaseMetadataResponse | undefined
-              )?.[def.metadataKey as keyof CaseMetadataResponse];
-              if (!Array.isArray(raw)) return [];
-              return raw.map((item: { label: string; id: string }) => ({
-                label: item.label,
-                value: item.id,
-              }));
-            }}
-            onFilterChange={handleFilterChange}
-          />
-        }
-      />
+      {fixedStatusIds === undefined && (
+        <ListSearchBar
+          searchPlaceholder={SECURITY_REPORT_SEARCH_PLACEHOLDER}
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          isFiltersOpen={isFiltersOpen}
+          onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+          activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
+          onClearFilters={handleClearFilters}
+          filtersContent={
+            <ListFiltersPanel
+              filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}
+              filters={filters}
+              resolveOptions={(def) => {
+                const raw = (
+                  filterMetadata as CaseMetadataResponse | undefined
+                )?.[def.metadataKey as keyof CaseMetadataResponse];
+                if (!Array.isArray(raw)) return [];
+                return raw.map((item: { label: string; id: string }) => ({
+                  label: item.label,
+                  value: item.id,
+                }));
+              }}
+              onFilterChange={handleFilterChange}
+            />
+          }
+        />
+      )}
 
       <ListResultsBar
         shownCount={paginatedCases.length}
@@ -337,6 +347,7 @@ const SecurityReportAnalysis = (): JSX.Element => {
                 key={caseItem.id}
                 caseItem={caseItem}
                 onClick={handleCaseClick}
+                showInternalId
               />
             ))}
           </Box>

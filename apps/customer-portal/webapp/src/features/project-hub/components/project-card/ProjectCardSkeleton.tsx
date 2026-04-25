@@ -74,6 +74,23 @@ const ProjectCardSkeleton = (): JSX.Element => {
             gap: 1.5,
           }}
         >
+          {/* Action Required */}
+          <Box
+            display="flex"
+            justifyContent="space-between"
+            alignItems="center"
+          >
+            <Box display="flex" alignItems="center" gap={1}>
+              <Skeleton variant="circular" width={16} height={16} />
+              <Typography variant="body2">
+                <Skeleton variant="text" width={100} />
+              </Typography>
+            </Box>
+            <Typography variant="body2">
+              <Skeleton variant="text" width={20} />
+            </Typography>
+          </Box>
+
           {/* Open Cases */}
           <Box
             display="flex"

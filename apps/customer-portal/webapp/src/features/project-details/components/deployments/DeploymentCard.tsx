@@ -124,9 +124,19 @@ export default function DeploymentCard({
                   sx={{ height: 20, fontSize: "0.75rem", fontFamily: "monospace", flexShrink: 0 }}
                 />
               </Box>
-              {/* Row 2: type + bullet + description inline */}
+              {/* Row 2: type + bullet + description, capped at 3 lines */}
               {(typeLabel || description) && (
-                <Typography variant="caption" color="text.secondary">
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    display: "-webkit-box",
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                    wordBreak: "break-word",
+                  }}
+                >
                   {typeLabel && (
                     <Box component="span" sx={{ textTransform: "capitalize" }}>
                       {typeLabel}

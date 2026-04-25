@@ -19,7 +19,10 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { CaseCommentsResponse } from "@features/support/types/cases";
+import type {
+  CaseActivitiesResponse,
+  CaseCommentsResponse,
+} from "@features/support/types/cases";
 import type { UseGetCaseCommentsOptions } from "@features/support/types/supportApi";
 
 export type { UseGetCaseCommentsOptions };
@@ -42,6 +45,29 @@ export default function useGetCaseComments(
   const authFetch = useAuthApiClient();
   const { offset = 0, limit = 20 } = options ?? {};
 
+  const mapActivitiesToCommentsResponse = (
+    data: CaseActivitiesResponse,
+  ): CaseCommentsResponse => ({
+    comments: (data.activities ?? []).map((activity) => ({
+      id: activity.id,
+      content: activity.content,
+      createdOn: activity.createdOn,
+      createdBy: activity.createdBy,
+      createdByFirstName: activity.createdByFirstName,
+      createdByLastName: activity.createdByLastName,
+      createdByFullName: activity.createdByFullName,
+      type: activity.type,
+      fileName: activity.fileName,
+      contentType: activity.contentType,
+      sizeBytes: activity.sizeBytes,
+      downloadUrl: activity.downloadUrl,
+      isEscalated: false,
+    })),
+    totalRecords: data.totalRecords,
+    offset: data.offset,
+    limit: data.limit,
+  });
+
   return useQuery<CaseCommentsResponse, Error>({
     queryKey: [ApiQueryKeys.CASE_COMMENTS, projectId, caseId, offset, limit],
     queryFn: async (): Promise<CaseCommentsResponse> => {
@@ -55,13 +81,18 @@ export default function useGetCaseComments(
           throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
         }
 
-        const params = new URLSearchParams();
-        if (offset !== undefined) params.set("offset", String(offset));
-        if (limit !== undefined) params.set("limit", String(limit));
-        const query = params.toString();
-        const requestUrl = `${baseUrl}/cases/${caseId}/comments${query ? `?${query}` : ""}`;
+        const requestUrl = `${baseUrl}/cases/${caseId}/activities/search`;
         const response = await authFetch(requestUrl, {
-          method: "GET",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pagination: {
+              offset,
+              limit,
+            },
+          }),
         });
 
         if (!response.ok) {
@@ -70,9 +101,9 @@ export default function useGetCaseComments(
           );
         }
 
-        const data: CaseCommentsResponse = await response.json();
+        const data: CaseActivitiesResponse = await response.json();
         logger.debug("[useGetCaseComments] Data received:", data);
-        return data;
+        return mapActivitiesToCommentsResponse(data);
       } catch (error) {
         logger.error("[useGetCaseComments] Error:", error);
         throw error;

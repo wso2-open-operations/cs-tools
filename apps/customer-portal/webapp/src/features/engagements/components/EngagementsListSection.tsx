@@ -15,10 +15,21 @@
 // under the License.
 
 import type { JSX } from "react";
+import {
+  Divider,
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  Typography,
+} from "@wso2/oxygen-ui";
+import type { SelectChangeEvent } from "@wso2/oxygen-ui";
+import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListItems from "@components/list-view/ListItems";
-import ListSearchPanel from "@components/list-view/ListSearchPanel";
+import { countListSearchAndFilters } from "@features/support/utils/support";
 import {
   ENGAGEMENTS_LIST_ENTITY_LABEL,
   ENGAGEMENTS_SEARCH_PLACEHOLDER,
@@ -41,8 +52,9 @@ export default function EngagementsListSection({
   filterMetadata,
   onFilterChange,
   onClearFilters,
-  excludeS0,
-  restrictSeverityToLow,
+  hideFiltersButton = false,
+  isStatFiltered = false,
+  engagementTypeOptions = [],
   isProjectContextLoading,
   sortField,
   onSortFieldChange,
@@ -59,25 +71,80 @@ export default function EngagementsListSection({
   onPageChange,
   onRowsPerPageChange,
 }: EngagementsListSectionProps): JSX.Element {
+  const activeFiltersCount = countListSearchAndFilters(searchTerm, {
+    statusId: filters.statusId,
+    engagementTypeKey: filters.engagementTypeKey,
+  });
+
   return (
     <>
-      <ListSearchPanel
-        searchTerm={searchTerm}
-        searchPlaceholder={ENGAGEMENTS_SEARCH_PLACEHOLDER}
-        onSearchChange={onSearchChange}
-        isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={onFiltersToggle}
-        filters={filters}
-        filterMetadata={filterMetadata}
-        deployments={undefined}
-        onFilterChange={onFilterChange}
-        onClearFilters={onClearFilters}
-        excludeS0={excludeS0}
-        restrictSeverityToLow={restrictSeverityToLow}
-        hideSeverityFilter
-        hideDeploymentFilter
-        isProjectContextLoading={isProjectContextLoading}
-      />
+      {isStatFiltered ? (
+        <Divider />
+      ) : (
+        <ListSearchBar
+          searchPlaceholder={ENGAGEMENTS_SEARCH_PLACEHOLDER}
+          searchTerm={searchTerm}
+          onSearchChange={onSearchChange}
+          isFiltersOpen={isFiltersOpen}
+          onFiltersToggle={onFiltersToggle}
+          activeFiltersCount={activeFiltersCount}
+          onClearFilters={onClearFilters}
+          hideFiltersButton={hideFiltersButton}
+          isLoading={isProjectContextLoading}
+          filtersContent={
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              {filterMetadata?.caseStates && (
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="eng-status-label">Status</InputLabel>
+                    <Select
+                      labelId="eng-status-label"
+                      value={filters.statusId ?? ""}
+                      label="Status"
+                      onChange={(e: SelectChangeEvent<string>) =>
+                        onFilterChange("statusId", e.target.value)
+                      }
+                    >
+                      <MenuItem value="">
+                        <Typography variant="body2">All Statuses</Typography>
+                      </MenuItem>
+                      {filterMetadata.caseStates.map((s) => (
+                        <MenuItem key={s.id} value={s.id}>
+                          <Typography variant="body2">{s.label}</Typography>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+              {engagementTypeOptions.length > 0 && (
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="eng-type-label">Engagement Type</InputLabel>
+                    <Select
+                      labelId="eng-type-label"
+                      value={filters.engagementTypeKey ?? ""}
+                      label="Engagement Type"
+                      onChange={(e: SelectChangeEvent<string>) =>
+                        onFilterChange("engagementTypeKey", e.target.value)
+                      }
+                    >
+                      <MenuItem value="">
+                        <Typography variant="body2">All Types</Typography>
+                      </MenuItem>
+                      {engagementTypeOptions.map((opt) => (
+                        <MenuItem key={opt.value} value={opt.value}>
+                          <Typography variant="body2">{opt.label}</Typography>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+            </Grid>
+          }
+        />
+      )}
 
       <ListResultsBar
         shownCount={paginatedCases.length}
@@ -98,6 +165,7 @@ export default function EngagementsListSection({
         entityName={ENGAGEMENTS_LIST_ENTITY_LABEL}
         onCaseClick={onCaseClick}
         hideSeverity
+        showInternalId
       />
 
       <ListPagination

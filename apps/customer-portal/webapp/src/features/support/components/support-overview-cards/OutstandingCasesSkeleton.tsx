@@ -15,7 +15,7 @@
 // under the License.
 
 import { SUPPORT_OVERVIEW_CASES_LIMIT } from "@features/support/constants/supportConstants";
-import { Box, Form, Skeleton } from "@wso2/oxygen-ui";
+import { Box, Form, Skeleton, Stack } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 
 /**
@@ -37,42 +37,31 @@ export default function OutstandingCasesSkeleton(): JSX.Element {
             flexDirection: "column",
             alignItems: "stretch",
             gap: 1,
-            minHeight: "180px",
           }}
         >
-          <Form.CardHeader
-            sx={{ p: 0 }}
-            title={
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1,
-                  flexWrap: "wrap",
-                }}
-              >
-                <Skeleton variant="text" width={60} height={20} />
-                <Skeleton
-                  variant="rounded"
-                  width={72}
-                  height={20}
-                  sx={{ borderRadius: "10px" }}
-                />
-              </Box>
-            }
-          />
-          <Skeleton variant="text" width="90%" height={24} />
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "flex-end",
-              alignItems: "center",
-              gap: 1.5,
-            }}
-          >
-            <Skeleton variant="text" width={120} height={16} />
-            <Skeleton variant="text" width={100} height={16} />
+          {/* Header: internalId | number | status dot + label */}
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Skeleton variant="text" width={72} height={18} />
+            <Skeleton variant="text" width={8} height={18} />
+            <Skeleton variant="text" width={90} height={18} />
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <Skeleton variant="circular" width={8} height={8} />
+              <Skeleton variant="text" width={64} height={16} />
+            </Stack>
+          </Stack>
+
+          {/* Content: title + description */}
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+            <Skeleton variant="text" width="85%" height={20} />
+            <Skeleton variant="text" width="95%" height={16} />
+            <Skeleton variant="text" width="70%" height={16} />
           </Box>
+
+          {/* Footer: assigned engineer + relative time */}
+          <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={1.5}>
+            <Skeleton variant="text" width={110} height={14} />
+            <Skeleton variant="text" width={70} height={14} />
+          </Stack>
         </Form.CardButton>
       ))}
     </Box>

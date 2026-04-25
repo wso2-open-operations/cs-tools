@@ -84,13 +84,13 @@ export default function ProjectDetails(): JSX.Element {
   const isDetailsLoading =
     isProjectFeaturesLoading ||
     getProjectDetailsLoadingState({
-    isAuthLoading,
-    isProjectLoading,
-    isStatsLoading,
-    project,
-    projectError,
-    stats,
-    statsError,
+      isAuthLoading,
+      isProjectLoading,
+      isStatsLoading,
+      project,
+      projectError,
+      stats,
+      statsError,
     });
 
   useEffect(() => {
@@ -116,17 +116,17 @@ export default function ProjectDetails(): JSX.Element {
       getProjectPermissions(projectTypeLabel, {
         projectFeatures,
       }),
-    [
-      projectTypeLabel,
-      projectFeatures,
-    ],
+    [projectTypeLabel, projectFeatures],
   );
 
   const visibleTabs = useMemo(
     () =>
       isProjectFeaturesLoading
         ? PROJECT_DETAILS_TABS
-        : filterProjectDetailsTabsByPermissions(PROJECT_DETAILS_TABS, permissions),
+        : filterProjectDetailsTabsByPermissions(
+            PROJECT_DETAILS_TABS,
+            permissions,
+          ),
     [isProjectFeaturesLoading, permissions],
   );
   const effectiveTab = useMemo(() => {
@@ -161,7 +161,7 @@ export default function ProjectDetails(): JSX.Element {
         return (
           <Box>
             <Grid container spacing={3}>
-              <Grid size={{ xs: 12, md: 6 }}>
+              <Grid size={{ xs: 12, md: 5 }}>
                 <ProjectInformationCard
                   project={project}
                   slaStatus={stats?.projectStats?.slaStatus || "--"}
@@ -169,7 +169,7 @@ export default function ProjectDetails(): JSX.Element {
                   isError={!!projectError}
                 />
               </Grid>
-              <Grid size={{ xs: 12, md: 6 }}>
+              <Grid size={{ xs: 12, md: 7 }}>
                 <ProjectStatisticsCard
                   stats={stats?.projectStats}
                   isLoading={(isDetailsLoading || !stats) && !statsError}
@@ -177,7 +177,7 @@ export default function ProjectDetails(): JSX.Element {
                   showDeploymentsStat={permissions.hasDeployments}
                 />
               </Grid>
-              <Grid size={{ xs: 12, md: 6 }}>
+              <Grid size={{ xs: 12, md: 5 }}>
                 <ContactInfoCard
                   project={project}
                   isLoading={(isDetailsLoading || !project) && !projectError}
@@ -185,7 +185,7 @@ export default function ProjectDetails(): JSX.Element {
                 />
               </Grid>
               {permissions.showServiceHoursAllocationsCard && (
-                <Grid size={{ xs: 12, md: 6 }}>
+                <Grid size={{ xs: 12, md: 7 }}>
                   <ServiceHoursAllocationsCard
                     project={project}
                     isLoading={(isDetailsLoading || !project) && !projectError}

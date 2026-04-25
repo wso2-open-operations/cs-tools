@@ -15,8 +15,16 @@
 // under the License.
 
 import type { CaseDetailsHeaderProps } from "@features/support/types/supportComponents";
-import { Box, Chip, Stack, Typography, alpha } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import {
+  Box,
+  Chip,
+  Divider,
+  Stack,
+  Tooltip,
+  Typography,
+  alpha,
+} from "@wso2/oxygen-ui";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
   formatValue,
@@ -32,16 +40,30 @@ import { CaseDetailsHeaderSkeleton } from "@case-details/CaseDetailsSkeleton";
  * @returns {JSX.Element} The header block.
  */
 export default function CaseDetailsHeader({
+  wso2CaseId,
   caseNumber,
   title,
   severityLabel,
   statusLabel,
+  assignedEngineerLabel,
   statusChipSx,
   isLoading = false,
   showSeverityChip = true,
   showStatusChip = true,
   variant = "default",
 }: CaseDetailsHeaderProps): JSX.Element {
+  const titleRef = useRef<HTMLDivElement | null>(null);
+  const [showTitleTooltip, setShowTitleTooltip] = useState(false);
+
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) {
+      setShowTitleTooltip(false);
+      return;
+    }
+    setShowTitleTooltip(el.scrollHeight > el.clientHeight + 1);
+  }, [title]);
+
   if (isLoading) {
     return <CaseDetailsHeaderSkeleton variant={variant} />;
   }
@@ -63,9 +85,33 @@ export default function CaseDetailsHeader({
         alignItems="center"
         sx={{ mb: 0.5, flexWrap: "wrap" }}
       >
+        {wso2CaseId ? (
+          <>
+            <Typography variant="body2" color="text.secondary">
+              {formatValue(wso2CaseId)}
+            </Typography>
+            <Divider orientation="vertical" flexItem />
+          </>
+        ) : null}
         <Typography variant="body2" fontWeight={500} color="text.primary">
           {formatValue(caseNumber)}
         </Typography>
+        {showStatusChip && (
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                bgcolor: statusColor ?? "text.secondary",
+                flexShrink: 0,
+              }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {formatValue(statusLabel)}
+            </Typography>
+          </Stack>
+        )}
         {displaySeverity && (
           <Chip
             label={mapSeverityToDisplay(severityLabel ?? undefined)}
@@ -92,26 +138,36 @@ export default function CaseDetailsHeader({
             }}
           />
         )}
-        {showStatusChip && (
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            <Box
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                bgcolor: statusColor ?? "text.secondary",
-                flexShrink: 0,
-              }}
-            />
+        {assignedEngineerLabel ? (
+          <>
+            <Divider orientation="vertical" flexItem />
             <Typography variant="caption" color="text.secondary">
-              {formatValue(statusLabel)}
+              Assigned to: {assignedEngineerLabel}
             </Typography>
-          </Stack>
-        )}
+          </>
+        ) : null}
       </Stack>
-      <Typography variant="h6" color="text.primary" sx={{ fontWeight: 500 }}>
-        {formatValue(title)}
-      </Typography>
+      <Tooltip
+        title={showTitleTooltip ? formatValue(title) : ""}
+        disableHoverListener={!showTitleTooltip}
+      >
+        <Typography
+          ref={titleRef}
+          variant="h6"
+          color="text.primary"
+          sx={{
+            fontWeight: 500,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            wordBreak: "break-word",
+          }}
+        >
+          {formatValue(title)}
+        </Typography>
+      </Tooltip>
     </Box>
   );
 }

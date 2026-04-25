@@ -19,25 +19,19 @@ import {
   ListFilter,
   ChevronDown,
   ChevronUp,
-  Plus,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, useCallback } from "react";
-import { useNavigate, useParams } from "react-router";
+import { type JSX } from "react";
 import {
-  CASES_TABLE_BUTTON_CREATE,
   CASES_TABLE_BUTTON_FILTERS,
   CASES_TABLE_HEADER_SUBTITLE,
   CASES_TABLE_HEADER_TITLE,
 } from "@/features/dashboard/constants/casesTable";
-import type {
-  CasesTableHeaderProps,
-  CasesTableRouteParams,
-} from "@/features/dashboard/types/casesTable";
-import { formatCasesTableClearFiltersLabel, navigateToCreateCase } from "@features/dashboard/utils/dashboard";
+import type { CasesTableHeaderProps } from "@/features/dashboard/types/casesTable";
+import { formatCasesTableClearFiltersLabel } from "@features/dashboard/utils/dashboard";
 
 /**
- * Header row for the dashboard cases table (title, filter toggle, create case).
+ * Header row for the dashboard cases table (title, filter toggle).
  *
  * @returns {JSX.Element} Header UI
  */
@@ -45,19 +39,8 @@ const CasesTableHeader = ({
   activeFiltersCount,
   isFiltersOpen,
   onFilterToggle,
-  hasAgent = false,
 }: CasesTableHeaderProps): JSX.Element => {
-  // navigate function
-  const navigate = useNavigate();
-  // project id
-  const { projectId: rawProjectId } = useParams<CasesTableRouteParams>();
-  const projectId = rawProjectId ?? "";
-  // has active filters
   const hasActiveFilters = activeFiltersCount > 0;
-  // handle create case
-  const handleCreateCase = useCallback(() => {
-    navigateToCreateCase(navigate, projectId, hasAgent);
-  }, [navigate, projectId, hasAgent]);
 
   return (
     <Box>
@@ -77,38 +60,27 @@ const CasesTableHeader = ({
             {CASES_TABLE_HEADER_SUBTITLE}
           </Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button
-            variant="outlined"
-            color="warning"
-            size="small"
-            onClick={onFilterToggle}
-            startIcon={
-              hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
-            }
-            endIcon={
-              !hasActiveFilters &&
-              (isFiltersOpen ? (
-                <ChevronUp size={16} />
-              ) : (
-                <ChevronDown size={16} />
-              ))
-            }
-          >
-            {hasActiveFilters
-              ? formatCasesTableClearFiltersLabel(activeFiltersCount)
-              : CASES_TABLE_BUTTON_FILTERS}
-          </Button>
-          <Button
-            variant="contained"
-            color="warning"
-            startIcon={<Plus size={16} />}
-            size="small"
-            onClick={handleCreateCase}
-          >
-            {CASES_TABLE_BUTTON_CREATE}
-          </Button>
-        </Box>
+        <Button
+          variant="outlined"
+          color="warning"
+          size="small"
+          onClick={onFilterToggle}
+          startIcon={
+            hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
+          }
+          endIcon={
+            !hasActiveFilters &&
+            (isFiltersOpen ? (
+              <ChevronUp size={16} />
+            ) : (
+              <ChevronDown size={16} />
+            ))
+          }
+        >
+          {hasActiveFilters
+            ? formatCasesTableClearFiltersLabel(activeFiltersCount)
+            : CASES_TABLE_BUTTON_FILTERS}
+        </Button>
       </Box>
     </Box>
   );

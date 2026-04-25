@@ -15,6 +15,7 @@ window.config = {
   // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL: "Learn more",
   // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://example.com",
   CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED: true,
+  CUSTOMER_PORTAL_TOP_BANNER_ENABLED: false,
   // Optional top banner rendered above the header (raw HTML string):
   // CUSTOMER_PORTAL_TOP_BANNER_HTML: '<div style="background-color:#000;height:6.8rem"><a href="https://wso2.com/wso2con/" target="_blank"><img style="object-fit:cover;height:100%;width:100%" src="banner.png" role="presentation"></a></div>',
 };

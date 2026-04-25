@@ -27,6 +27,7 @@ import type { CaseAttachment } from "@features/support/types/cases";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { useGetAttachment } from "@api/useGetAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
@@ -52,6 +53,8 @@ export default function CaseDetailsAttachmentsPanel({
   isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { data: userDetails } = useGetUserDetails();
+  const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
   const { downloadAttachment, isDownloading, downloadingId } =
     useGetAttachment();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -229,14 +232,24 @@ export default function CaseDetailsAttachmentsPanel({
               <AttachmentsListSkeleton />
             ) : (
               paginatedAttachments.map((att) => {
+                const isOwner =
+                  currentUserEmail &&
+                  att.createdBy?.trim().toLowerCase() === currentUserEmail;
+                const deleteDisabled = isCaseClosed || !isOwner;
+                const deleteTooltip = isCaseClosed
+                  ? undefined
+                  : !isOwner
+                    ? "Only the uploader can delete this attachment"
+                    : undefined;
                 return (
                   <AttachmentListItem
                     key={att.id}
                     attachment={att}
                     onDownload={handleDownload}
                     onDelete={handleDeleteClick}
-                    deleteDisabled={isCaseClosed}
-                    onEdit={isCaseClosed ? undefined : handleEditClick}
+                    deleteDisabled={deleteDisabled}
+                    deleteTooltip={deleteTooltip}
+                    onEdit={isCaseClosed || !isOwner ? undefined : handleEditClick}
                     hideDescription
                     isDownloadLoading={isDownloading && downloadingId === att.id}
                   />
@@ -258,6 +271,9 @@ export default function CaseDetailsAttachmentsPanel({
       <UploadAttachmentModal
         open={uploadOpen}
         caseId={caseId}
+        onSuccess={() => {
+          window.location.reload();
+        }}
         onClose={() => setUploadOpen(false)}
       />
 

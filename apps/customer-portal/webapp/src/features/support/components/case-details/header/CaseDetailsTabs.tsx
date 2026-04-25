@@ -37,12 +37,16 @@ export default function CaseDetailsTabs({
   hideKnowledgeBaseTab = false,
   knowledgeBaseCount,
   knowledgeBaseCountLoading = false,
+  hideRelatedChangeRequestsTab = true,
 }: CaseDetailsTabsProps): JSX.Element {
   const tabs = CASE_DETAILS_TABS.filter((t) => {
     if (hideCallsTab && t.label.startsWith("Calls")) {
       return false;
     }
     if (hideKnowledgeBaseTab && t.label.startsWith("Knowledge Base")) {
+      return false;
+    }
+    if (hideRelatedChangeRequestsTab && t.label === "Related Change Requests") {
       return false;
     }
     return true;

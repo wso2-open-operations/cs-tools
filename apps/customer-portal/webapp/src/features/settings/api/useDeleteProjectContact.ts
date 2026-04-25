@@ -82,8 +82,8 @@ export function useDeleteProjectContact(
         throw error;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.PROJECT_CONTACTS, projectId],
       });
     },

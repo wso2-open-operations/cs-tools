@@ -43,6 +43,9 @@ export function resolveUsagePresetDateRange(
   const start = new Date(end);
 
   switch (preset) {
+    case UsageTimeRange.ONE_MONTH:
+      start.setMonth(start.getMonth() - 1);
+      break;
     case UsageTimeRange.THREE_MONTHS:
       start.setMonth(start.getMonth() - 3);
       break;
@@ -111,6 +114,8 @@ export function getActiveUsageDeploymentId(innerTab: string): string | null {
  */
 export function getUsagePresetShortLabel(preset: UsageTimeRange): string {
   switch (preset) {
+    case UsageTimeRange.ONE_MONTH:
+      return "1M";
     case UsageTimeRange.THREE_MONTHS:
       return "3M";
     case UsageTimeRange.SIX_MONTHS:

@@ -32,6 +32,7 @@ import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 interface HeaderProps {
   onToggleSidebar: () => void;
   collapsed?: boolean;
+  hideProjectControls?: boolean;
 }
 
 /**
@@ -40,7 +41,7 @@ interface HeaderProps {
  * @param {HeaderProps} props - The props for the component.
  * @returns {JSX.Element} The Header component.
  */
-export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
+export default function Header({ onToggleSidebar, hideProjectControls = false }: HeaderProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const logger = useLogger();
@@ -110,13 +111,13 @@ export default function Header({ onToggleSidebar }: HeaderProps): JSX.Element {
 
   return (
     <HeaderUI>
-      {!isProjectHub && (
+      {!isProjectHub && !hideProjectControls && (
         /* header sidebar toggle */
         <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
       )}
       {/* header brand logo and title */}
       <Brand isNavigationDisabled={projects.length <= 1} />
-      {!isProjectHub && (
+      {!isProjectHub && !hideProjectControls && (
         <>
           {/* header project switcher */}
           <ProjectSwitcher

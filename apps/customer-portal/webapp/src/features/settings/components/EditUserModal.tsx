@@ -29,50 +29,43 @@ import {
   IconButton,
   Typography,
   alpha,
+  colors,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Lock, Settings, Shield, User, X } from "@wso2/oxygen-ui-icons-react";
+import { Crown, Monitor, Settings, Shield, X } from "@wso2/oxygen-ui-icons-react";
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
 import type { EditUserModalProps } from "@features/settings/types/settings";
 
-const USER_ROLES = [
+const EDITABLE_ROLES = [
   {
-    id: "portal",
+    id: "admin" as const,
+    label: "Admin",
+    description: "Full administrative privileges and user management",
+    Icon: Crown,
+    color: "secondary" as const,
+  },
+  {
+    id: "portal" as const,
     label: "Portal User",
-    description: "Can access and manage general support cases",
-    Icon: User,
+    description: "Can log in to and access the Support Portal",
+    Icon: Monitor,
     color: "primary" as const,
   },
   {
-    id: "system",
-    label: "System User",
-    description: "API access only, does not have support portal access",
-    Icon: Settings,
-    color: "warning" as const,
-  },
-  {
-    id: "admin",
-    label: "Admin User",
-    description: "Full administrative privileges and user management",
-    Icon: Lock,
-    color: "error" as const,
-  },
-  {
-    id: "security",
-    label: "Security User",
+    id: "security" as const,
+    label: "Security Contact",
     description: "Receives security bulletins and critical security announcements",
     Icon: Shield,
     color: "error" as const,
   },
 ] as const;
 
-type RoleId = (typeof USER_ROLES)[number]["id"];
+type EditableRoleId = (typeof EDITABLE_ROLES)[number]["id"];
 
 /**
- * Admin-only modal for editing a user's roles.
- * System User selection makes other roles readonly.
- * Only the Security User role is wired to the API (isSecurityContact); others are UI-only.
+ * Admin-only modal for editing a user's membership roles.
+ * Supports isCsAdmin, isPortalUser (web user), and isSecurityContact flags.
  *
  * @param {EditUserModalProps} props - Modal props.
  * @returns {JSX.Element} The modal.
@@ -85,62 +78,63 @@ export default function EditUserModal({
   onSubmit,
 }: EditUserModalProps): JSX.Element {
   const theme = useTheme();
-  const [selectedRoles, setSelectedRoles] = useState<Set<RoleId>>(new Set());
+  const [selectedRoles, setSelectedRoles] = useState<Set<EditableRoleId>>(new Set());
+
+  const getInitialRoles = useCallback(() => {
+    if (!contact) return new Set<EditableRoleId>();
+    const initial = new Set<EditableRoleId>();
+    if (contact.isCsAdmin) initial.add("admin");
+    // isPortalUser is the explicit flag; fall back to !isCsIntegrationUser if absent
+    const portalUser = contact.isPortalUser ?? !contact.isCsIntegrationUser;
+    if (portalUser) initial.add("portal");
+    if (contact.isSecurityContact) initial.add("security");
+    return initial;
+  }, [contact]);
 
   useEffect(() => {
     if (open && contact) {
-      const initial = new Set<RoleId>();
-      if (contact.isCsIntegrationUser) {
-        initial.add("system");
-      } else {
-        initial.add("portal");
-        if (contact.isSecurityContact) initial.add("security");
-      }
-      setSelectedRoles(initial);
+      setSelectedRoles(getInitialRoles());
     }
-  }, [open, contact]);
+  }, [open, contact, getInitialRoles]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
     onClose();
   }, [isSubmitting, onClose]);
 
-  const isSystemSelected = selectedRoles.has("system");
-
-  const handleRoleToggle = (roleId: RoleId) => {
+  const handleRoleToggle = (roleId: EditableRoleId) => {
     setSelectedRoles((prev) => {
       const next = new Set(prev);
-      if (roleId === "system") {
-        if (next.has("system")) {
-          next.delete("system");
-          next.add("portal");
-        } else {
-          next.clear();
-          next.add("system");
-        }
+      if (next.has(roleId)) {
+        next.delete(roleId);
       } else {
-        if (next.has(roleId)) {
-          next.delete(roleId);
-        } else {
-          next.add(roleId);
-        }
+        next.add(roleId);
       }
       return next;
     });
   };
 
   const handleSave = useCallback(() => {
-    onSubmit({ isSecurityContact: selectedRoles.has("security") });
+    onSubmit({
+      isCsAdmin: selectedRoles.has("admin"),
+      isPortalUser: selectedRoles.has("portal"),
+      isSecurityContact: selectedRoles.has("security"),
+    });
   }, [selectedRoles, onSubmit]);
 
-  const initialIsSecurity = !!contact?.isSecurityContact;
-  const isDirty = selectedRoles.has("security") !== initialIsSecurity;
+  const initialRoles = getInitialRoles();
+  const isDirty =
+    selectedRoles.has("admin") !== initialRoles.has("admin") ||
+    selectedRoles.has("portal") !== initialRoles.has("portal") ||
+    selectedRoles.has("security") !== initialRoles.has("security");
 
   const displayName = contact
     ? contact.firstName && contact.lastName
       ? `${contact.firstName} ${contact.lastName}`
       : contact.firstName || contact.lastName || contact.email || NULL_PLACEHOLDER
     : NULL_PLACEHOLDER;
+
+  const isSystemUser = !!contact?.isCsIntegrationUser;
 
   return (
     <Dialog
@@ -160,7 +154,7 @@ export default function EditUserModal({
       >
         <X size={18} />
       </IconButton>
-      <DialogTitle id="edit-user-modal-title">Edit User</DialogTitle>
+      <DialogTitle id="edit-user-modal-title">Edit User Roles</DialogTitle>
       <DialogContent>
         {/* User info header */}
         {contact && (
@@ -194,7 +188,7 @@ export default function EditUserModal({
             >
               {getInitials(contact.firstName, contact.lastName, contact.email)}
             </Box>
-            <Box sx={{ minWidth: 0 }}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
                 {displayName}
               </Typography>
@@ -205,22 +199,45 @@ export default function EditUserModal({
           </Box>
         )}
 
-        <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-          User Roles
-        </Typography>
-        {isSystemSelected && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-            System User is selected — other roles are not available for system users.
-          </Typography>
+        {/* System user indicator */}
+        {isSystemUser && (
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              p: 1.5,
+              mb: 2,
+              borderRadius: 1,
+              border: "1px solid",
+              borderColor: alpha(theme.palette.warning.main, 0.3),
+              bgcolor: alpha(theme.palette.warning.main, 0.05),
+            }}
+          >
+            <Settings size={16} color={theme.palette.warning.main} />
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: "warning.dark" }}>
+                System User
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Used for API / machine-to-machine integrations.
+              </Typography>
+            </Box>
+          </Box>
         )}
 
+        <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+          Membership Roles
+        </Typography>
+
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-          {USER_ROLES.map((role, index) => {
+          {EDITABLE_ROLES.map((role, index) => {
             const RoleIcon = role.Icon;
-            const isSystem = role.id === "system";
             const isChecked = selectedRoles.has(role.id);
-            const isReadonly = !isSystem && isSystemSelected;
-            const paletteColor = theme.palette[role.color];
+            const resolvedColor =
+              role.color === "secondary"
+                ? (colors.purple?.[600] ?? "#7c3aed")
+                : theme.palette[role.color]?.main ?? theme.palette.text.primary;
 
             return (
               <Box key={role.id}>
@@ -229,12 +246,12 @@ export default function EditUserModal({
                   control={
                     <Checkbox
                       checked={isChecked}
-                      onChange={() => !isReadonly && !isSubmitting && handleRoleToggle(role.id)}
-                      disabled={isReadonly || isSubmitting}
+                      onChange={() => !isSubmitting && handleRoleToggle(role.id)}
+                      disabled={isSubmitting}
                       size="small"
                       sx={{
-                        color: isReadonly ? "action.disabled" : paletteColor?.main,
-                        "&.Mui-checked": { color: paletteColor?.main },
+                        color: resolvedColor,
+                        "&.Mui-checked": { color: resolvedColor },
                       }}
                     />
                   }
@@ -248,12 +265,8 @@ export default function EditUserModal({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          bgcolor: isReadonly
-                            ? alpha(theme.palette.action.disabled, 0.08)
-                            : alpha(paletteColor?.main ?? "#000", 0.1),
-                          color: isReadonly
-                            ? "action.disabled"
-                            : paletteColor?.main,
+                          bgcolor: alpha(resolvedColor, 0.1),
+                          color: resolvedColor,
                           flexShrink: 0,
                           mt: 0.25,
                         }}
@@ -261,19 +274,10 @@ export default function EditUserModal({
                         <RoleIcon size={14} />
                       </Box>
                       <Box>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: 500,
-                            color: isReadonly ? "text.disabled" : "text.primary",
-                          }}
-                        >
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
                           {role.label}
                         </Typography>
-                        <Typography
-                          variant="caption"
-                          color={isReadonly ? "text.disabled" : "text.secondary"}
-                        >
+                        <Typography variant="caption" color="text.secondary">
                           {role.description}
                         </Typography>
                       </Box>
@@ -285,23 +289,6 @@ export default function EditUserModal({
             );
           })}
         </Box>
-
-        {isSystemSelected && (
-          <Box
-            sx={{
-              mt: 2,
-              p: 1.5,
-              borderRadius: 1,
-              border: "1px solid",
-              borderColor: alpha(theme.palette.warning.main, 0.3),
-              bgcolor: alpha(theme.palette.warning.main, 0.05),
-            }}
-          >
-            <Typography variant="caption" color="text.secondary">
-              System Users are used for machine-to-machine integrations and cannot hold additional roles.
-            </Typography>
-          </Box>
-        )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button variant="outlined" onClick={handleClose} disabled={isSubmitting}>
@@ -311,7 +298,7 @@ export default function EditUserModal({
           variant="contained"
           color="warning"
           onClick={handleSave}
-          disabled={isSubmitting || isSystemSelected || !isDirty}
+          disabled={isSubmitting || !isDirty || selectedRoles.size === 0}
           startIcon={
             isSubmitting ? <CircularProgress size={16} color="inherit" /> : undefined
           }

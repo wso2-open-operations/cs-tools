@@ -16,19 +16,17 @@
 
 import { Box, Chip, Grid, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { getSLAStatusColor } from "@features/project-details/utils/projectDetails";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { PROJECT_METADATA_CHIP_SX } from "@features/project-details/constants/projectInformationConstants";
 import type { ProjectMetadataSecondaryRowProps } from "@features/project-details/types/projectDetailsComponents";
 
 /**
- * Second metadata row: SLA, go-live date, onboarding status.
+ * Secondary metadata cells: go-live date and onboarding status.
  *
  * @param props - Field values and loading state.
  * @returns {JSX.Element} Grid row.
  */
 export default function ProjectMetadataSecondaryRow({
-  slaStatus,
   goLivePlanDate,
   onboardingStatus,
   hideOnboardingStatus = false,
@@ -36,58 +34,13 @@ export default function ProjectMetadataSecondaryRow({
   isError,
 }: ProjectMetadataSecondaryRowProps): JSX.Element {
   return (
-    <Grid
-      container
-      spacing={2}
-      sx={{
-        alignItems: "center",
-        justifyContent: "space-between",
-      }}
-    >
-      <Grid size={{ xs: 12, md: 4 }}>
+    <>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
         <Box
           sx={{
             display: "flex",
             flexDirection: "column",
             alignItems: { xs: "center", md: "flex-start" },
-          }}
-        >
-          <Typography
-            variant="body2"
-            fontWeight="medium"
-            sx={{ display: "block", mb: 0.5 }}
-          >
-            Overall Status
-          </Typography>
-          {isLoading || isError ? (
-            <Skeleton variant="rounded" width={60} height={24} />
-          ) : slaStatus ? (
-            <Tooltip title={slaStatus} arrow>
-              <Chip
-                label={slaStatus}
-                size="small"
-                color={getSLAStatusColor(slaStatus)}
-                variant="outlined"
-                sx={PROJECT_METADATA_CHIP_SX}
-              />
-            </Tooltip>
-          ) : (
-            <Chip
-              label={slaStatus}
-              size="small"
-              color={getSLAStatusColor(slaStatus)}
-              variant="outlined"
-              sx={PROJECT_METADATA_CHIP_SX}
-            />
-          )}
-        </Box>
-      </Grid>
-      <Grid size={{ xs: 12, md: 4 }}>
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
           }}
         >
           <Typography
@@ -108,17 +61,17 @@ export default function ProjectMetadataSecondaryRow({
       </Grid>
       {hideOnboardingStatus && (
         <Grid
-          size={{ xs: 12, md: 4 }}
+          size={{ xs: 12, sm: 6, md: 3 }}
           sx={{ display: { xs: "none", md: "block" } }}
         />
       )}
       {!hideOnboardingStatus && (
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Box
             sx={{
               display: "flex",
               flexDirection: "column",
-              alignItems: { xs: "center", md: "flex-end" },
+              alignItems: { xs: "center", md: "flex-start" },
             }}
           >
             <Typography
@@ -154,6 +107,6 @@ export default function ProjectMetadataSecondaryRow({
           </Box>
         </Grid>
       )}
-    </Grid>
+    </>
   );
 }

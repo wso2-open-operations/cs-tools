@@ -24,6 +24,7 @@ import { SupportOverviewIconVariant } from "@features/support/types/supportOverv
 import OutstandingCasesList from "@features/support/components/support-overview-cards/OutstandingCasesList";
 import type { CaseListItem } from "@features/support/types/cases";
 import {
+  CaseStatus,
   OPERATIONS_STAT_CONFIGS,
   OPERATIONS_OVERVIEW_LIST_LIMIT,
   CaseType,
@@ -31,14 +32,17 @@ import {
 } from "@features/support/constants/supportConstants";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
-import useGetProjectCases from "@api/useGetProjectCases";
+import useGetProjectFilters from "@api/useGetProjectFilters";
+import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
 import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { useGetProjectChangeRequestsStats } from "@features/dashboard/api/useGetProjectChangeRequestsStats";
 import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 import { SortOrder } from "@/types/common";
+import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import {
+  ChangeRequestStates,
   OPERATIONS_HUB_CARD_TITLE_CR,
   OPERATIONS_HUB_CARD_TITLE_SR,
   OPERATIONS_HUB_FOOTER_VIEW_ALL_CR,
@@ -47,7 +51,7 @@ import {
   OPERATIONS_HUB_HEADER_ACTION_CREATE_SR,
   OPERATIONS_HUB_PROJECT_ERROR_MESSAGE,
   OPERATIONS_HUB_STAT_ENTITY_NAME,
-  ALLOWED_CHANGE_REQUEST_STATE_IDS,
+  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
 } from "@features/operations/constants/operationsConstants";
 import {
   formatOperationsOverviewChangeRequestsSubtitle,
@@ -93,20 +97,40 @@ export default function OperationsPage(): JSX.Element {
   const isRestricted = isProjectRestricted(project?.closureState);
   const operationsPath = `/projects/${projectId}/operations`;
 
+  const { data: filterMetadata, isLoading: isFilterMetadataLoading, isError: isFilterMetadataError } =
+    useGetProjectFilters(projectId || "");
+
+  const nonClosedStatusIds = useMemo(
+    () => resolveCasesTableDefaultStatusIds(filterMetadata?.caseStates),
+    [filterMetadata?.caseStates],
+  );
+
   const {
     data: srData,
-    isLoading: isSrLoading,
+    isLoading: isSrDataLoading,
     isError: isSrError,
-  } = useGetProjectCases(
+  } = useGetProjectCasesPage(
     projectId || "",
     {
-      filters: { caseTypes: [CaseType.SERVICE_REQUEST] },
+      filters: {
+        caseTypes: [CaseType.SERVICE_REQUEST],
+        statusIds: nonClosedStatusIds,
+      },
       sortBy: { field: "createdOn", order: SortOrder.DESC },
     },
-    { enabled: !!projectId && permissionsReady && isServiceRequestEnabled },
+    0,
+    OPERATIONS_OVERVIEW_LIST_LIMIT,
+    {
+      enabled:
+        !!projectId &&
+        permissionsReady &&
+        isServiceRequestEnabled &&
+        filterMetadata !== undefined,
+    },
   );
-  const serviceRequests =
-    srData?.pages?.[0]?.cases?.slice(0, OPERATIONS_OVERVIEW_LIST_LIMIT) ?? [];
+  const isSrLoading = isSrDataLoading || isFilterMetadataLoading;
+  const combinedIsSrError = isSrError || isFilterMetadataError;
+  const serviceRequests = srData?.cases ?? [];
 
   const {
     data: crData,
@@ -116,7 +140,7 @@ export default function OperationsPage(): JSX.Element {
     projectId || "",
     {
       filters: {
-        stateKeys: [...ALLOWED_CHANGE_REQUEST_STATE_IDS],
+        stateKeys: [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS],
       },
     },
     0,
@@ -129,7 +153,7 @@ export default function OperationsPage(): JSX.Element {
     () =>
       changeRequests.map((cr) => ({
         id: cr.id,
-        internalId: cr.id,
+        internalId: cr.case?.internalId ?? cr.internalId ?? undefined,
         number: cr.number,
         title: cr.title,
         description: cr.description ?? "",
@@ -167,20 +191,29 @@ export default function OperationsPage(): JSX.Element {
     enabled: !!projectId && permissionsReady && isChangeRequestEnabled,
   });
 
-  const activeServiceRequests = srStats?.activeCount;
-  const activeChangeRequests = crStats?.activeCount;
+  // Action Required SRs = Awaiting Info + Solution Proposed
+  const awaitingInfoSrCount =
+    srStats?.stateCount?.find((s) => s.label === CaseStatus.AWAITING_INFO)?.count ?? 0;
+  const solutionProposedSrCount =
+    srStats?.stateCount?.find((s) => s.label === CaseStatus.SOLUTION_PROPOSED)?.count ?? 0;
+  const actionRequiredSrCount = awaitingInfoSrCount + solutionProposedSrCount;
+
+  // Outstanding SRs = all SR states except Closed
+  const closedSrCount =
+    srStats?.stateCount?.find((s) => s.label === CaseStatus.CLOSED)?.count ?? 0;
+  const totalSrCount =
+    srStats?.stateCount?.reduce((sum, s) => sum + (s.count ?? 0), 0) ?? 0;
+  const outstandingSrCount = totalSrCount - closedSrCount;
+
+  // Action Required CRs = Customer Approval + Customer Review
+  const customerApprovalCrCount =
+    crStats?.stateCount?.find((s) => s.label === ChangeRequestStates.CUSTOMER_APPROVAL)?.count ?? 0;
+  const customerReviewCrCount =
+    crStats?.stateCount?.find((s) => s.label === ChangeRequestStates.CUSTOMER_REVIEW)?.count ?? 0;
+  const actionRequiredCrCount = customerApprovalCrCount + customerReviewCrCount;
 
   const scheduledCrCount =
-    crStats?.stateCount?.find((s) => s.label === "Scheduled")?.count ?? 0;
-
-  const closedSrCount =
-    srStats?.stateCount?.find((s) => s.label === "Closed")?.count ?? 0;
-  const closedCrCount =
-    crStats?.stateCount?.find((s) => s.label === "Closed")?.count ?? 0;
-
-  const completedThisMonth =
-    (isServiceRequestEnabled ? closedSrCount : 0) +
-    (isChangeRequestEnabled ? closedCrCount : 0);
+    crStats?.stateCount?.find((s) => s.label === ChangeRequestStates.SCHEDULED)?.count ?? 0;
 
   const srReady = !isServiceRequestEnabled || srStats !== undefined;
   const crReady = !isChangeRequestEnabled || crStats !== undefined;
@@ -191,13 +224,11 @@ export default function OperationsPage(): JSX.Element {
       : srReady && crReady
         ? {
             ...(isServiceRequestEnabled && {
-              activeServiceRequests: activeServiceRequests ?? 0,
+              actionRequiredServiceRequests: actionRequiredSrCount,
+              outstandingServiceRequests: outstandingSrCount,
             }),
             ...(isChangeRequestEnabled && {
-              activeChangeRequests: activeChangeRequests ?? 0,
-            }),
-            ...((isServiceRequestEnabled || isChangeRequestEnabled) && {
-              completedThisMonth,
+              actionRequiredChangeRequests: actionRequiredCrCount,
             }),
             ...(isChangeRequestEnabled &&
               scheduledCrCount > 0 && {
@@ -220,11 +251,37 @@ export default function OperationsPage(): JSX.Element {
 
     return OPERATIONS_STAT_CONFIGS.filter(
       (c) =>
-        (isServiceRequestEnabled || c.key !== "activeServiceRequests") &&
+        (isServiceRequestEnabled ||
+          (c.key !== "actionRequiredServiceRequests" && c.key !== "outstandingServiceRequests")) &&
         (isChangeRequestEnabled ||
-          (c.key !== "activeChangeRequests" && c.key !== "upcomingChanges")),
+          (c.key !== "actionRequiredChangeRequests" && c.key !== "upcomingChanges")),
     );
   }, [permissionsReady, isServiceRequestEnabled, isChangeRequestEnabled]);
+
+  const handleStatClick = (key: OperationsStatKey) => {
+    switch (key) {
+      case "actionRequiredServiceRequests":
+        navigate(`/projects/${projectId}/operations/service-requests`, {
+          state: { returnTo: operationsPath, actionRequired: true },
+        });
+        break;
+      case "outstandingServiceRequests":
+        navigate(`/projects/${projectId}/operations/service-requests`, {
+          state: { returnTo: operationsPath, outstandingOnly: true },
+        });
+        break;
+      case "actionRequiredChangeRequests":
+        navigate(`/projects/${projectId}/operations/change-requests`, {
+          state: { returnTo: operationsPath, actionRequired: true },
+        });
+        break;
+      case "upcomingChanges":
+        navigate(`/projects/${projectId}/operations/change-requests`, {
+          state: { returnTo: operationsPath, scheduledOnly: true },
+        });
+        break;
+    }
+  };
 
   const overviewGridSize =
     isServiceRequestEnabled && isChangeRequestEnabled
@@ -265,6 +322,7 @@ export default function OperationsPage(): JSX.Element {
           entityName={OPERATIONS_HUB_STAT_ENTITY_NAME}
           stats={stats}
           configs={operationsStatConfigs}
+          onStatClick={handleStatClick}
         />
       </Box>
       {!permissionsReady ? (
@@ -334,11 +392,12 @@ export default function OperationsPage(): JSX.Element {
                         ),
                     },
                   ]}
-                  isError={isSrError}
+                  isError={combinedIsSrError}
                 >
                   <OutstandingCasesList
                     cases={serviceRequests}
                     isLoading={isSrLoading}
+                    showInternalId
                     onCaseClick={
                       projectId
                         ? (c) =>
@@ -363,21 +422,33 @@ export default function OperationsPage(): JSX.Element {
                   footerButtons={[]}
                   isError={isCrError}
                 >
-                  <Box sx={{ display: "flex", flexDirection: "column", width: "100%" }}>
-                    <OutstandingCasesList
-                      cases={changeRequestsAsCases}
-                      isLoading={isCrLoading}
-                      isError={isCrError}
-                      onCaseClick={
-                        projectId
-                          ? (c) =>
-                              navigate(
-                                `/projects/${projectId}/operations/change-requests/${c.id}`,
-                                { state: { returnTo: operationsPath } },
-                              )
-                          : undefined
-                      }
-                    />
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      width: "100%",
+                      flex: 1,
+                      minHeight: 0,
+                    }}
+                  >
+                    <Box sx={{ flex: 1, minHeight: 0 }}>
+                      <OutstandingCasesList
+                        cases={changeRequestsAsCases}
+                        isLoading={isCrLoading}
+                        isError={isCrError}
+                        useChangeRequestColors
+                        showInternalId
+                        onCaseClick={
+                          projectId
+                            ? (c) =>
+                                navigate(
+                                  `/projects/${projectId}/operations/change-requests/${c.id}`,
+                                  { state: { returnTo: operationsPath } },
+                                )
+                            : undefined
+                        }
+                      />
+                    </Box>
                     {projectId && !isCrLoading && !isCrError && (
                       <>
                         <Box sx={{ borderTop: 1, borderColor: "divider", mt: 1.5 }} />

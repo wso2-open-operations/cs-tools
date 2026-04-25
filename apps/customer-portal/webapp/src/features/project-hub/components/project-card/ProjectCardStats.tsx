@@ -22,7 +22,7 @@ import {
   Typography,
   colors,
 } from "@wso2/oxygen-ui";
-import { CircleAlert, MessageSquare } from "@wso2/oxygen-ui-icons-react";
+import { AlertTriangle, CircleAlert, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import {
@@ -43,6 +43,7 @@ import type { ProjectCardStatsProps } from "@features/project-hub/types/projectH
 export default function ProjectCardStats({
   activeCasesCount,
   activeChatsCount,
+  actionRequiredCount,
   isError,
   isLoading,
 }: ProjectCardStatsProps): JSX.Element {
@@ -55,6 +56,30 @@ export default function ProjectCardStats({
           gap: 1.5,
         }}
       >
+        {/* Action Required cases */}
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box
+            display="flex"
+            alignItems="center"
+            gap={1}
+            color="text.secondary"
+          >
+            <AlertTriangle size={16} />
+            <Typography variant="body2" color="inherit">
+              Action Required
+            </Typography>
+          </Box>
+          {isLoading ? (
+            <Skeleton variant="text" width={20} />
+          ) : isError ? (
+            <ErrorIndicator entityName="action required" />
+          ) : (
+            <Typography variant="body2" color="warning.main">
+              {actionRequiredCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
+            </Typography>
+          )}
+        </Box>
+
         {/* Outstanding support cases */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box

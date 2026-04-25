@@ -117,6 +117,12 @@ export default function CaseDetailsPage(): JSX.Element {
 
   const handleOpenRelatedCase = () => {
     if (!projectId) return;
+    const deployedProductLabel = [
+      data?.deployedProduct?.label ?? "",
+      data?.deployedProduct?.version ?? "",
+    ]
+      .join(" ")
+      .trim();
     navigate(`/projects/${projectId}/support/chat/create-related-case`, {
       state: {
         relatedCase: {
@@ -126,6 +132,9 @@ export default function CaseDetailsPage(): JSX.Element {
           description: data?.description ?? "",
           deploymentId: data?.deployment?.id,
           deploymentLabel: data?.deployment?.label,
+          deployedProductId: data?.deployedProduct?.id,
+          deployedProductLabel:
+            deployedProductLabel || data?.deployedProduct?.label,
         },
       },
     });

@@ -33,7 +33,10 @@ import {
   OperationsNavSegment,
   ServiceRequestCaseSortField,
 } from "@features/operations/types/serviceRequests";
-import { ALLOWED_CHANGE_REQUEST_STATE_IDS } from "@features/operations/constants/operationsConstants";
+import {
+  ALLOWED_CHANGE_REQUEST_STATE_IDS,
+  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
+} from "@features/operations/constants/operationsConstants";
 import type { SortOrder } from "@/types/common";
 
 /**
@@ -72,19 +75,37 @@ export function formatOperationsOverviewChangeRequestsSubtitle(
   return `Latest ${limit} change requests`;
 }
 
+/** CR state IDs for "Action Required" (Customer Approval + Customer Review). */
+const ACTION_REQUIRED_CR_STATE_IDS = [5, 1] as const;
+
+/** CR state IDs for "Scheduled Only" (Upcoming). */
+const SCHEDULED_ONLY_CR_STATE_IDS = [-2] as const;
+
 /**
  * Builds the change-request search payload for the list/calendar/export flows.
  *
  * @param filters - UI filter state.
  * @param searchTerm - Raw search string.
+ * @param outstandingOnly - Restrict to outstanding states via {@link OUTSTANDING_CHANGE_REQUEST_STATE_IDS}.
+ * @param actionRequired - Restrict to action-required states via {@link ACTION_REQUIRED_CR_STATE_IDS}.
+ * @param scheduledOnly - Restrict to scheduled state via {@link SCHEDULED_ONLY_CR_STATE_IDS}.
  * @returns Request body without pagination.
  */
 export function buildChangeRequestSearchRequest(
   filters: ChangeRequestFilterValues,
   searchTerm: string,
+  outstandingOnly: boolean = false,
+  actionRequired: boolean = false,
+  scheduledOnly: boolean = false,
 ): Omit<ChangeRequestSearchRequest, "pagination"> {
   const selectedStateId = filters.stateId ? Number(filters.stateId) : undefined;
-  const allowedStateIds: number[] = [...ALLOWED_CHANGE_REQUEST_STATE_IDS];
+  const allowedStateIds: number[] = actionRequired
+    ? [...ACTION_REQUIRED_CR_STATE_IDS]
+    : scheduledOnly
+      ? [...SCHEDULED_ONLY_CR_STATE_IDS]
+      : outstandingOnly
+        ? [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS]
+        : [...ALLOWED_CHANGE_REQUEST_STATE_IDS];
   const stateKeys =
     selectedStateId === undefined
       ? allowedStateIds
@@ -156,16 +177,23 @@ export function buildServiceRequestsPageCaseSearchRequest(
   sortField: ServiceRequestCaseSortField,
   sortOrder: SortOrder,
   createdByMe: boolean,
+  outstandingStatusIds?: number[],
 ): Omit<CaseSearchRequest, "pagination"> {
   const normalizedSortField =
     sortField === ServiceRequestCaseSortField.Severity
       ? ServiceRequestCaseSortField.CreatedOn
       : sortField;
 
+  const resolvedStatusIds: number[] | undefined = filters.statusId
+    ? [Number(filters.statusId)]
+    : outstandingStatusIds?.length
+      ? outstandingStatusIds
+      : undefined;
+
   return {
     filters: {
       caseTypes: [CaseType.SERVICE_REQUEST],
-      statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+      statusIds: resolvedStatusIds,
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
       deploymentId: filters.deploymentId || undefined,
       searchQuery: searchTerm.trim() || undefined,

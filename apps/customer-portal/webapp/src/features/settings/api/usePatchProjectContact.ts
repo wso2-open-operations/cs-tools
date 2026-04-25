@@ -26,11 +26,13 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 
 export interface PatchProjectContactVariables {
   email: string;
+  isCsAdmin: boolean;
+  isPortalUser: boolean;
   isSecurityContact: boolean;
 }
 
 /**
- * Hook to update a project contact's security flag
+ * Hook to update a project contact's membership roles
  * (PATCH /projects/:projectId/contacts/:email).
  *
  * @param {string} projectId - The ID of the project.
@@ -45,9 +47,9 @@ export function usePatchProjectContact(
   const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, PatchProjectContactVariables>({
-    mutationFn: async ({ email, isSecurityContact }): Promise<void> => {
+    mutationFn: async ({ email, isCsAdmin, isPortalUser, isSecurityContact }): Promise<void> => {
       logger.debug(
-        `[usePatchProjectContact] Patching ${email} isSecurityContact=${isSecurityContact}`,
+        `[usePatchProjectContact] Patching ${email} isCsAdmin=${isCsAdmin} isPortalUser=${isPortalUser} isSecurityContact=${isSecurityContact}`,
       );
 
       try {
@@ -63,7 +65,7 @@ export function usePatchProjectContact(
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts/${encodeURIComponent(email)}`;
         const response = await authFetch(requestUrl, {
           method: "PATCH",
-          body: JSON.stringify({ isSecurityContact }),
+          body: JSON.stringify({ isCsAdmin, isPortalUser, isSecurityContact }),
         });
 
         if (!response.ok) {
@@ -86,8 +88,8 @@ export function usePatchProjectContact(
         throw error;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.PROJECT_CONTACTS, projectId],
       });
     },

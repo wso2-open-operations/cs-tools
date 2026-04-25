@@ -28,6 +28,7 @@ const mockProjects = [
     hasAgent: true,
     activeCasesCount: 3,
     activeChatsCount: 4,
+    actionRequiredCount: 0,
     slaStatus: "Needs Attention",
   },
   {
@@ -39,6 +40,7 @@ const mockProjects = [
     hasAgent: true,
     activeCasesCount: 15,
     activeChatsCount: 5,
+    actionRequiredCount: 0,
     slaStatus: "Needs Attention",
   },
 ];

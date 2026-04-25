@@ -345,6 +345,7 @@ export default function ProjectHub(): JSX.Element {
                   date={project.createdOn}
                   activeCasesCount={project.activeCasesCount}
                   activeChatsCount={project.activeChatsCount}
+                  actionRequiredCount={project.actionRequiredCount ?? 0}
                   closureState={project.closureState}
                 />
               </Box>

@@ -22,7 +22,7 @@ import {
   Cell,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
-import { useMemo, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
@@ -64,6 +64,7 @@ export const ActiveCasesChart = ({
   onSliceClick,
 }: ActiveCasesChartProps): JSX.Element => {
   const isDarkMode = useDarkMode();
+  const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
   // safe data
   const safeData = data ?? EMPTY_ACTIVE_CASES_DATA;
   // series config
@@ -132,11 +133,11 @@ export const ActiveCasesChart = ({
           </Box>
         </>
       ) : isEmpty ? (
-        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", py: 5, gap: 1.5 }}>
+        <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX + 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
           <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.08), display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Inbox size={24} color={colors.grey?.[400] ?? "#9CA3AF"} />
           </Box>
-          <Typography variant="body2" color="text.disabled">No data found</Typography>
+          <Typography variant="body2" color="text.disabled">No {DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS} found</Typography>
         </Box>
       ) : (
         <>
@@ -147,7 +148,9 @@ export const ActiveCasesChart = ({
               opacity: isError ? 0.3 : 1,
               filter: isError ? "grayscale(1)" : "none",
               "& *:focus": { outline: "none" },
-              ...(onSliceClick && !isError && { "& .recharts-pie-sector": { cursor: "pointer" } }),
+              ...(onSliceClick && !isError && {
+                "& .recharts-pie-sector": { cursor: "pointer" },
+              }),
             }}
           >
             <ResponsiveContainer width="100%" height="100%">
@@ -166,6 +169,12 @@ export const ActiveCasesChart = ({
                   endAngle={-270}
                   label={false}
                   labelLine={false}
+                  onMouseEnter={
+                    onSliceClick && !isError
+                      ? (_data: unknown, index: number) => setActivePieIndex(index)
+                      : undefined
+                  }
+                  onMouseLeave={onSliceClick && !isError ? () => setActivePieIndex(undefined) : undefined}
                   onClick={
                     onSliceClick && !isError
                       ? (_data, index) => {
@@ -176,7 +185,13 @@ export const ActiveCasesChart = ({
                   }
                 >
                   {displayChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} stroke="none" opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1} />
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color}
+                      stroke={activePieIndex === index ? entry.color : "none"}
+                      strokeWidth={activePieIndex === index ? 3 : 0}
+                      opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1}
+                    />
                   ))}
                 </Pie>
               </PieChart>

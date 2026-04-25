@@ -97,6 +97,7 @@ describe("ProjectCard", () => {
     date: "2026-01-17",
     activeCasesCount: 10,
     activeChatsCount: 5,
+    actionRequiredCount: 0,
   };
 
   it("should render all sub-components with correct props", () => {

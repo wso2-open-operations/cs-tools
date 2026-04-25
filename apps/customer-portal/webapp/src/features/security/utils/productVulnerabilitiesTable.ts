@@ -19,7 +19,7 @@ import {
 } from "@features/security/constants/securityConstants";
 
 /**
- * Counts search + severity filters for the product vulnerabilities table header.
+ * Counts search, severity, product name, and product version filters for the product vulnerabilities table header.
  *
  * @param searchInput - Current search text.
  * @param filters - Raw filter state.
@@ -31,7 +31,9 @@ export function countProductVulnerabilityTableActiveFilters(
 ): number {
   const searchCount = searchInput.trim() ? 1 : 0;
   const severityCount = filters.severityId ? 1 : 0;
-  return searchCount + severityCount;
+  const productCount = filters.productName ? 1 : 0;
+  const productVersionCount = filters.productVersion ? 1 : 0;
+  return searchCount + severityCount + productCount + productVersionCount;
 }
 
 /**

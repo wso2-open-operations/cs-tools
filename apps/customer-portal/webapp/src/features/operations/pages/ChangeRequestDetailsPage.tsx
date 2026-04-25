@@ -62,6 +62,8 @@ import {
   formatImpactLabel,
   getChangeRequestImpactColorShades,
 } from "@features/operations/utils/changeRequestUi";
+import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
+import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequests";
 
 /**
  * ChangeRequestDetailsPage component to display detailed information about a change request.
@@ -96,58 +98,108 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
     () => buildChangeRequestWorkflowStages(changeRequest),
     [changeRequest],
   );
-  const hasCustomerApproved = changeRequest?.hasCustomerApproved === true;
-  const hasCustomerReviewed = changeRequest?.hasCustomerReviewed === true;
-  const canShowProposeNewTime = hasCustomerApproved;
-  const canShowApprovalActions = hasCustomerApproved || hasCustomerReviewed;
+  const currentStateLabel = changeRequest?.state?.label;
+
+  const decisionMode = ((): ChangeRequestDecisionMode => {
+    switch (currentStateLabel) {
+      case ChangeRequestStates.CUSTOMER_APPROVAL:
+        return changeRequest?.hasCustomerApproved === true
+          ? ChangeRequestDecisionMode.CUSTOMER_APPROVAL
+          : ChangeRequestDecisionMode.NONE;
+      case ChangeRequestStates.CUSTOMER_REVIEW:
+        return ChangeRequestDecisionMode.CUSTOMER_REVIEW;
+      default:
+        return ChangeRequestDecisionMode.NONE;
+    }
+  })();
+
+  const canShowApprovalActions = decisionMode !== ChangeRequestDecisionMode.NONE;
+  const canShowProposeNewTime = decisionMode === ChangeRequestDecisionMode.CUSTOMER_APPROVAL;
+
+  const approveLabel = (() => {
+    switch (decisionMode) {
+      case ChangeRequestDecisionMode.CUSTOMER_REVIEW:
+        return "Successful";
+      default:
+        return "Approve";
+    }
+  })();
+
+  const rejectLabel = (() => {
+    switch (decisionMode) {
+      case ChangeRequestDecisionMode.CUSTOMER_REVIEW:
+        return "Unsuccessful";
+      default:
+        return "Reject";
+    }
+  })();
 
   const impactColor = getChangeRequestImpactColorShades(
     changeRequest?.impact?.label,
   );
+
   const handleApproveChange = () => {
     if (!changeRequest) return;
-
-    const payload = !hasCustomerApproved
-      ? { isCustomerApproved: true }
-      : !hasCustomerReviewed
-        ? { isCustomerReviewed: true }
-        : null;
-    if (!payload) return;
-
-    patchChangeRequest.mutate(
-      payload,
-      {
-        onSuccess: () => {
-          showSuccess("Change request approved successfully.");
-        },
-        onError: (err) => {
-          showError(err?.message ?? "Failed to approve change request.");
-        },
-      },
-    );
+    switch (decisionMode) {
+      case ChangeRequestDecisionMode.CUSTOMER_APPROVAL:
+        patchChangeRequest.mutate(
+          { isCustomerApproved: true },
+          {
+            onSuccess: () => {
+              showSuccess("Change request approved successfully.");
+              window.location.reload();
+            },
+            onError: (err) => showError(err?.message ?? "Failed to approve change request."),
+          },
+        );
+        break;
+      case ChangeRequestDecisionMode.CUSTOMER_REVIEW:
+        patchChangeRequest.mutate(
+          { isCustomerReviewed: true },
+          {
+            onSuccess: () => {
+              showSuccess("Change request marked as successful.");
+              window.location.reload();
+            },
+            onError: (err) => showError(err?.message ?? "Failed to update change request."),
+          },
+        );
+        break;
+      default:
+        break;
+    }
   };
 
   const handleRejectChange = () => {
     if (!changeRequest) return;
-
-    const payload = !hasCustomerApproved
-      ? { isCustomerApproved: false }
-      : !hasCustomerReviewed
-        ? { isCustomerReviewed: false }
-        : null;
-    if (!payload) return;
-
-    patchChangeRequest.mutate(
-      payload,
-      {
-        onSuccess: () => {
-          showSuccess("Change request rejected successfully.");
-        },
-        onError: (err) => {
-          showError(err?.message ?? "Failed to reject change request.");
-        },
-      },
-    );
+    switch (decisionMode) {
+      case ChangeRequestDecisionMode.CUSTOMER_APPROVAL:
+        patchChangeRequest.mutate(
+          { isCustomerApproved: false },
+          {
+            onSuccess: () => {
+              showSuccess("Change request rejected successfully.");
+              window.location.reload();
+            },
+            onError: (err) => showError(err?.message ?? "Failed to reject change request."),
+          },
+        );
+        break;
+      case ChangeRequestDecisionMode.CUSTOMER_REVIEW:
+        patchChangeRequest.mutate(
+          { isCustomerReviewed: false },
+          {
+            onSuccess: () => {
+              showSuccess("Change request marked as unsuccessful.");
+              window.location.reload();
+            },
+            onError: (err) => showError(err?.message ?? "Failed to update change request."),
+          },
+        );
+        break;
+      default:
+        break;
+    }
   };
 
   // Loading state with skeleton (or if fetching/no data yet)
@@ -258,7 +310,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           Back to Change Requests
         </Button>
         <Button
-          variant="contained"
+          variant="outlined"
           size="small"
           startIcon={<Download size={18} />}
           color="warning"
@@ -396,7 +448,9 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                     sx={{ minHeight: "unset", p: 0 }}
                   >
                     Service Request:{" "}
-                    {changeRequest.case?.number || "Not Available"}
+                    {changeRequest.case?.internalId
+                      ? `${changeRequest.case.internalId} | ${changeRequest.case?.number || "Not Available"}`
+                      : (changeRequest.case?.number || "Not Available")}
                   </Button>
                 </Box>
                 {canShowApprovalActions && (
@@ -437,7 +491,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                         },
                       }}
                     >
-                      Approve
+                      {approveLabel}
                     </Button>
                     <Button
                       size="small"
@@ -455,7 +509,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                         },
                       }}
                     >
-                      Reject
+                      {rejectLabel}
                     </Button>
                   </Stack>
                 )}

@@ -29,6 +29,9 @@ dependencies = [
 	{org = "ballerina", name = "task"},
 	{org = "ballerina", name = "time"}
 ]
+modules = [
+	{org = "ballerina", packageName = "cache", moduleName = "cache"}
+]
 
 [[package]]
 org = "ballerina"
@@ -345,8 +348,9 @@ modules = [
 [[package]]
 org = "wso2"
 name = "customer_portal"
-version = "1.0.0-rc.3"
+version = "1.0.0"
 dependencies = [
+	{org = "ballerina", name = "cache"},
 	{org = "ballerina", name = "constraint"},
 	{org = "ballerina", name = "http"},
 	{org = "ballerina", name = "jwt"},

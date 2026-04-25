@@ -32,30 +32,16 @@ import { useState, type JSX } from "react";
 import { usePatchChangeRequest } from "@features/operations/api/usePatchChangeRequest";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import { resolveDisplayTimeZone, formatBackendTimestampForDisplay } from "@utils/dateTime";
 import {
-  changeRequestToApiDatetime,
-  changeRequestToDatetimeLocal,
-  formatChangeRequestDisplayDate,
-} from "@features/operations/utils/changeRequests";
+  callRequestApiPreferredTimeToDatetimeLocal,
+  computeMinScheduleDatetimeLocalForTimeZone,
+  datetimeLocalWallTimeToUtcMs,
+} from "@features/support/utils/support";
 import type {
   ChangeRequestDetails,
   ProposeNewImplementationTimeModalProps,
 } from "@features/operations/types/changeRequests";
-
-/**
- * Produces browser-local datetime-local value for "now".
- *
- * @returns {string} YYYY-MM-DDTHH:mm local timestamp.
- */
-function getCurrentLocalDatetimeInputValue(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hour = String(now.getHours()).padStart(2, "0");
-  const minute = String(now.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hour}:${minute}`;
-}
 
 type ProposeNewImplementationTimeModalBodyProps = {
   changeRequest: ChangeRequestDetails;
@@ -73,11 +59,13 @@ function ProposeNewImplementationTimeModalBody({
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const patchMutation = usePatchChangeRequest(changeRequest.id);
+  const userTimeZone = resolveDisplayTimeZone();
   const [proposedStart, setProposedStart] = useState(() =>
-    changeRequestToDatetimeLocal(changeRequest.startDate),
+    callRequestApiPreferredTimeToDatetimeLocal(changeRequest.startDate, userTimeZone),
   );
 
   const isModalBusy = patchMutation.isPending;
+  const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, userTimeZone);
 
   const handleClose = () => {
     if (isModalBusy) return;
@@ -85,18 +73,25 @@ function ProposeNewImplementationTimeModalBody({
   };
 
   const handleSubmit = () => {
-    const startApi = changeRequestToApiDatetime(proposedStart);
-    if (!startApi) {
+    if (!proposedStart) {
       showError("Please select proposed start date and time.");
       return;
     }
+    const utcMs = datetimeLocalWallTimeToUtcMs(proposedStart, userTimeZone);
+    if (utcMs == null) {
+      showError("Invalid date and time. Please select a valid value.");
+      return;
+    }
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const d = new Date(utcMs);
+    const plannedStartOn = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 
     patchMutation.mutate(
-      { plannedStartOn: startApi },
+      { plannedStartOn },
       {
         onSuccess: () => {
           showSuccess("Implementation schedule updated successfully");
-          handleClose();
+          window.location.reload();
         },
         onError: (err) => {
           showError(err?.message ?? "Failed to submit proposal");
@@ -173,7 +168,11 @@ function ProposeNewImplementationTimeModalBody({
                 Start Date & Time
               </Typography>
               <Typography variant="body2" color="text.primary">
-                {formatChangeRequestDisplayDate(changeRequest.startDate)}
+                {formatBackendTimestampForDisplay(
+                  changeRequest.startDate,
+                  { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" },
+                  userTimeZone,
+                ) ?? "Not available"}
               </Typography>
             </Box>
             <Box>
@@ -185,7 +184,11 @@ function ProposeNewImplementationTimeModalBody({
                 End Date & Time
               </Typography>
               <Typography variant="body2" color="text.primary">
-                {formatChangeRequestDisplayDate(changeRequest.endDate)}
+                {formatBackendTimestampForDisplay(
+                  changeRequest.endDate,
+                  { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" },
+                  userTimeZone,
+                ) ?? "Not available"}
               </Typography>
             </Box>
           </Box>
@@ -207,9 +210,8 @@ function ProposeNewImplementationTimeModalBody({
             fullWidth
             value={proposedStart}
             onChange={(e) => setProposedStart(e.target.value)}
-            inputProps={{
-              min: getCurrentLocalDatetimeInputValue(),
-            }}
+            inputProps={{ min: minDatetime }}
+            helperText={`Timezone: ${userTimeZone}`}
           />
         </Box>
       </DialogContent>

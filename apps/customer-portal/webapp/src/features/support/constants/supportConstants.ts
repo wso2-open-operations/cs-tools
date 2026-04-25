@@ -19,7 +19,6 @@ import {
   BookOpen,
   Bot,
   Calendar,
-  CalendarDays,
   CircleAlert,
   CircleCheck,
   CirclePause,
@@ -27,17 +26,17 @@ import {
   CircleX,
   Clock,
   FileText,
+  GitBranch,
   Info,
   MessageCircle,
   MessageSquare,
   Paperclip,
   Phone,
-  Server,
   TriangleAlert,
-  TrendingUp,
   RotateCcw,
   XCircle,
   FileCheck,
+  AlertCircle,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ProjectCasesStats } from "@features/support/types/cases";
 import type {
@@ -69,6 +68,9 @@ export const KB_ARTICLE_VIEW_BASE_URL =
 export const ChatAction = {
   VIEW: "view",
   RESUME: "resume",
+  ACTIVE: "active",
+  OPEN: "open",
+  ABANDONED: "abandoned",
 } as const;
 
 export type ChatAction = (typeof ChatAction)[keyof typeof ChatAction];
@@ -178,10 +180,10 @@ export const CaseType = {
 export type CaseType = (typeof CaseType)[keyof typeof CaseType];
 
 // Maximum allowed attachment file size in bytes.
-export const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
+export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
-// Maximum allowed embedded image size in bytes (15MB for base64 images in rich text).
-export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
+// Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
+export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 
 // Initial limit for case attachments list.
 export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
@@ -277,7 +279,6 @@ export const SUPPORT_STAT_CONFIGS: SupportStatConfig[] = [
     iconColor: "error",
     key: "ongoingCases",
     label: "Outstanding Cases",
-    secondaryIcon: TrendingUp,
   },
   {
     icon: Clock,
@@ -308,6 +309,7 @@ export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
   { label: "Attachments (0)", Icon: Paperclip },
   { label: "Calls (0)", Icon: Phone },
   { label: "Knowledge Base (0)", Icon: BookOpen },
+  { label: "Related Change Requests", Icon: GitBranch },
 ];
 
 // Case status actions shown in the case details action row. Close button last.
@@ -556,9 +558,9 @@ export const SERVICE_REQUEST_STAT_CONFIGS: SupportStatConfig<ServiceRequestStatK
  * Valid keys for operations statistics.
  */
 export type OperationsStatKey =
-  | "activeServiceRequests"
-  | "activeChangeRequests"
-  | "completedThisMonth"
+  | "actionRequiredServiceRequests"
+  | "outstandingServiceRequests"
+  | "actionRequiredChangeRequests"
   | "upcomingChanges";
 
 /**
@@ -566,22 +568,22 @@ export type OperationsStatKey =
  */
 export const OPERATIONS_STAT_CONFIGS: SupportStatConfig<OperationsStatKey>[] = [
   {
-    icon: Server,
+    icon: AlertCircle,
     iconColor: "info",
-    key: "activeServiceRequests",
+    key: "actionRequiredServiceRequests",
+    label: "Action Required Service Requests",
+  },
+  {
+    icon: Clock,
+    iconColor: "primary",
+    key: "outstandingServiceRequests",
     label: "Outstanding Service Requests",
   },
   {
-    icon: CalendarDays,
-    iconColor: "primary",
-    key: "activeChangeRequests",
-    label: "Outstanding Change Requests",
-  },
-  {
-    icon: CircleCheck,
-    iconColor: "success",
-    key: "completedThisMonth",
-    label: "Completed This Month",
+    icon: TriangleAlert,
+    iconColor: "warning",
+    key: "actionRequiredChangeRequests",
+    label: "Action Required Changes",
   },
   {
     icon: Calendar,

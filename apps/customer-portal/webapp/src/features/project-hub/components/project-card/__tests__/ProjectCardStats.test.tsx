@@ -56,6 +56,7 @@ describe("ProjectCardStats", () => {
     const props = {
       activeCasesCount: 10,
       activeChatsCount: 5,
+      actionRequiredCount: 0,
       date: "2025-07-17",
     };
 
@@ -70,6 +71,7 @@ describe("ProjectCardStats", () => {
     const props = {
       activeCasesCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
     };
 
@@ -84,6 +86,7 @@ describe("ProjectCardStats", () => {
     const props = {
       activeCasesCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
       isError: true,
     };
@@ -101,6 +104,7 @@ describe("ProjectCardStats", () => {
     const props = {
       activeCasesCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
       isLoading: true,
     };

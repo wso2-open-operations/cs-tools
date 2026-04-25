@@ -66,23 +66,31 @@ export default function UsageMetricsTimeRangeSelector({
     <Box
       sx={{
         display: "flex",
-        alignItems: "center",
+        alignItems: { xs: "flex-start", md: "center" },
         justifyContent: "space-between",
         gap: 2,
         mb: 1,
         mt: innerTab !== UsageMetricsInnerTabId.OVERVIEW ? 1 : 0,
-        overflowX: "auto",
-        pb: 0.5,
+        width: "100%",
+        minWidth: 0,
+        flexWrap: { xs: "wrap", md: "nowrap" },
       }}
     >
       <Box
-        sx={{ display: "flex", alignItems: "center", gap: 1.5, flexShrink: 0 }}
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1.5,
+          flexShrink: 1,
+          minWidth: 0,
+          flexWrap: "wrap",
+        }}
       >
         <Calendar size={18} />
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           {USAGE_METRICS_TIME_RANGE_HEADING}
         </Typography>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           {USAGE_METRICS_PRESET_TIME_RANGES.map((preset) => {
             const selected = timeRange === preset;
             return (
@@ -115,13 +123,13 @@ export default function UsageMetricsTimeRangeSelector({
 
           {timeRange === UsageTimeRange.CUSTOM && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, ml: 1 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                 <TextField
                   type="date"
                   size="small"
                   value={customStart}
                   onChange={(e) => onCustomStartChange(e.target.value)}
-                  sx={{ minWidth: 160 }}
+                  sx={{ minWidth: 160, maxWidth: "100%" }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -142,7 +150,7 @@ export default function UsageMetricsTimeRangeSelector({
                   size="small"
                   value={customEnd}
                   onChange={(e) => onCustomEndChange(e.target.value)}
-                  sx={{ minWidth: 160 }}
+                  sx={{ minWidth: 160, maxWidth: "100%" }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -179,7 +187,11 @@ export default function UsageMetricsTimeRangeSelector({
       <Typography
         variant="body2"
         color="text.secondary"
-        sx={{ minWidth: 100, textAlign: "right", flexShrink: 0 }}
+        sx={{
+          minWidth: { xs: "100%", md: 100 },
+          textAlign: { xs: "left", md: "right" },
+          flexShrink: 0,
+        }}
       >
         {timeRange === UsageTimeRange.CUSTOM
           ? appliedCustomStart && appliedCustomEnd

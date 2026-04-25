@@ -45,6 +45,8 @@ export interface ListSearchBarProps {
   filtersContent: ReactNode;
   /** Show a skeleton placeholder while context is loading */
   isLoading?: boolean;
+  /** Hide the filters/clear-filters button entirely */
+  hideFiltersButton?: boolean;
 }
 
 /**
@@ -64,6 +66,7 @@ export default function ListSearchBar({
   onClearFilters,
   filtersContent,
   isLoading = false,
+  hideFiltersButton = false,
 }: ListSearchBarProps): JSX.Element {
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(event.target.value);
@@ -103,26 +106,28 @@ export default function ListSearchBar({
             }}
           />
         </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={hasActiveFilters ? onClearFilters : onFiltersToggle}
-          startIcon={
-            hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
-          }
-          endIcon={
-            !hasActiveFilters &&
-            (isFiltersOpen ? (
-              <ChevronUp size={16} />
-            ) : (
-              <ChevronDown size={16} />
-            ))
-          }
-        >
-          {hasActiveFilters
-            ? `Clear Filters (${activeFiltersCount})`
-            : "Filters"}
-        </Button>
+        {!hideFiltersButton && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={hasActiveFilters ? onClearFilters : onFiltersToggle}
+            startIcon={
+              hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
+            }
+            endIcon={
+              !hasActiveFilters &&
+              (isFiltersOpen ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              ))
+            }
+          >
+            {hasActiveFilters
+              ? `Clear Filters (${activeFiltersCount})`
+              : "Filters"}
+          </Button>
+        )}
       </Box>
 
       {isFiltersOpen && (

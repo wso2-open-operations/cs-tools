@@ -25,6 +25,7 @@ import type {
 // Item type for a change request.
 export type ChangeRequestItem = AuditMetadata & {
   id: string;
+  internalId?: string | null;
   number: string;
   title: string;
   description?: string | null;
@@ -82,6 +83,11 @@ export type ChangeRequestStatsResponse = {
   activeCount?: number;
   outstandingCount?: number;
   stateCount: ChangeRequestStateCount[];
+  resolvedCount: {
+    total: number;
+    currentMonth: number;
+    pastThirtyDays: number;
+  };
 };
 
 // Response type for patching a change request.
@@ -100,6 +106,8 @@ export type ChangeRequestSearchFilters = {
   impactKey?: number;
   searchQuery?: string;
   stateKeys?: number[];
+  closedStartDate?: string;
+  closedEndDate?: string;
 };
 
 // Request type for searching change requests.

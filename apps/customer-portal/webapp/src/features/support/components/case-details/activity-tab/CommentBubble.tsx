@@ -15,11 +15,32 @@
 // under the License.
 
 import type { CommentBubbleProps } from "@features/support/types/supportComponents";
-import { Avatar, Box, Skeleton, Stack, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
+import {
+  Avatar,
+  Box,
+  IconButton,
+  Paper,
+  CircularProgress,
+  Skeleton,
+  Stack,
+  Tooltip,
+  Typography,
+  alpha,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
 import { useMemo } from "react";
+import {
+  Download,
+  File,
+  FileArchive,
+  FileText,
+  Image,
+} from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
+  formatFileSize,
+  getAttachmentFileCategory,
   getInitials,
   hasSingleCodeWrapper,
   stripCodeWrapper,
@@ -35,14 +56,11 @@ import {
 import DOMPurify from "dompurify";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
+import { useGetAttachment } from "@api/useGetAttachment";
 
 function commentAuthorDisplayName(comment: CaseComment): string {
-  const fromNames = [comment.createdByFirstName, comment.createdByLastName]
-    .filter((p) => p != null && String(p).trim() !== "")
-    .join(" ")
-    .trim();
-  if (fromNames.length > 0) {
-    return fromNames;
+  if (comment.createdByFullName?.trim()) {
+    return comment.createdByFullName.trim();
   }
   return comment.createdBy?.trim() || "Unknown";
 }
@@ -58,9 +76,11 @@ export default function CommentBubble({
   isCurrentUser,
   primaryBg,
   onImageClick,
+  hideAvatar = false,
   userDetails,
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
+  const { downloadAttachment, isDownloading, downloadingId } = useGetAttachment();
   const rawContent = comment.content ?? "";
   const isFullCodeWrap = hasSingleCodeWrapper(rawContent);
   const codeBlockCount = rawContent.match(/\[code\]/gi)?.length ?? 0;
@@ -111,15 +131,41 @@ export default function CommentBubble({
     return "?";
   }, [isCurrentUser, comment, userDetails]);
 
-  const isRight = isCurrentUser;
   const isNovera = isNoveraOrBotSender(comment.createdBy, comment.type);
+  const isAttachmentEntry = comment.type?.toLowerCase() === "attachment";
+  const attachmentCategory = getAttachmentFileCategory(
+    comment.fileName ?? "",
+    comment.contentType ?? "",
+  );
+
+  const renderAttachmentIcon = () => {
+    switch (attachmentCategory) {
+      case "image":
+        return <Image size={18} aria-hidden />;
+      case "pdf":
+      case "text":
+        return <FileText size={18} aria-hidden />;
+      case "archive":
+        return <FileArchive size={18} aria-hidden />;
+      default:
+        return <File size={18} aria-hidden />;
+    }
+  };
+
+  const handleAttachmentDownload = async () => {
+    await downloadAttachment({
+      id: comment.id,
+      name: comment.fileName ?? "attachment",
+      type: comment.contentType,
+      downloadUrl: comment.downloadUrl,
+    });
+  };
 
   return (
     <Stack
       direction="row"
       alignItems="flex-start"
       sx={{
-        flexDirection: isRight ? "row-reverse" : "row",
         gap: 2,
       }}
     >
@@ -138,7 +184,7 @@ export default function CommentBubble({
         >
           <Bot size={16} color="white" />
         </Box>
-      ) : (
+      ) : !hideAvatar ? (
         <Avatar
           sx={{
             width: 32,
@@ -155,14 +201,15 @@ export default function CommentBubble({
         >
           {initials}
         </Avatar>
+      ) : (
+        <Box sx={{ width: 32, flexShrink: 0 }} />
       )}
       <Stack
         spacing={0.75}
         sx={{
           width: "100%",
-          maxWidth: 1000,
           minWidth: 0,
-          alignItems: isRight ? "flex-end" : "flex-start",
+          alignItems: "flex-start",
         }}
       >
         <Stack
@@ -170,7 +217,6 @@ export default function CommentBubble({
           alignItems="center"
           flexWrap="wrap"
           sx={{
-            flexDirection: isRight ? "row-reverse" : "row",
             gap: 1,
             minHeight: 32,
           }}
@@ -184,7 +230,86 @@ export default function CommentBubble({
             {formatCommentDate(comment.createdOn)}
           </Typography>
         </Stack>
-        {isImagesLoading ? (
+        {isAttachmentEntry ? (
+          <Paper
+            variant="outlined"
+            sx={{
+              width: "100%",
+              p: 1.5,
+              display: "flex",
+              flexDirection: "column",
+              gap: 1,
+              bgcolor: "background.paper",
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                minWidth: 0,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  bgcolor: "action.hover",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "text.secondary",
+                  flexShrink: 0,
+                }}
+              >
+                {renderAttachmentIcon()}
+              </Box>
+              <Typography
+                variant="body2"
+                color="text.primary"
+                sx={{ flex: 1, minWidth: 0 }}
+                noWrap
+              >
+                {comment.fileName ?? "Attachment"}
+              </Typography>
+              <Tooltip title="Download attachment">
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="Download attachment"
+                    onClick={() => {
+                      void handleAttachmentDownload();
+                    }}
+                    disabled={isDownloading && downloadingId === comment.id}
+                  >
+                    {isDownloading && downloadingId === comment.id ? (
+                      <CircularProgress size={16} />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Box>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="caption" color="text.secondary" component="span">
+                {formatFileSize(comment.sizeBytes)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="span">
+                •
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="span">
+                Uploaded by {comment.createdBy}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="span">
+                •
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="span">
+                {comment.createdOn}
+              </Typography>
+            </Stack>
+          </Paper>
+        ) : isImagesLoading ? (
           <Box sx={{ width: "100%", display: "flex", flexDirection: "column", gap: 0.75 }}>
             <Skeleton variant="rectangular" width="100%" height={160} sx={{ borderRadius: 1 }} />
           </Box>

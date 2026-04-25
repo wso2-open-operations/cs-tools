@@ -17,6 +17,8 @@
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 const LAST_SELECTED_PROJECT_ID_KEY = "last_selected_project_id";
 const NOVERA_CHAT_ENABLED_KEY = "novera_chat_enabled";
+const PENDING_SUCCESS_MESSAGE_KEY = "pending_success_message";
+const PENDING_SETTINGS_TAB_KEY = "pending_settings_tab";
 
 
 /**
@@ -63,10 +65,12 @@ export function getLastSelectedProjectId(): string | null {
 
 /**
  * Persists the last selected project id to localStorage.
+ * Only stores the id when it is exactly 32 characters (valid project id format).
  *
  * @param {string} projectId - The selected project id.
  */
 export function setLastSelectedProjectId(projectId: string): void {
+  if (projectId.length !== 32) return;
   try {
     localStorage.setItem(LAST_SELECTED_PROJECT_ID_KEY, projectId);
   } catch {
@@ -97,5 +101,61 @@ export function setNoveraChatEnabled(enabled: boolean): void {
     localStorage.setItem(NOVERA_CHAT_ENABLED_KEY, String(enabled));
   } catch {
     return;
+  }
+}
+
+/**
+ * Stores the settings tab to restore after the next page reload.
+ *
+ * @param {string} tabId - The tab id to restore.
+ */
+export function setPendingSettingsTab(tabId: string): void {
+  try {
+    sessionStorage.setItem(PENDING_SETTINGS_TAB_KEY, tabId);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Reads and clears the pending post-reload settings tab.
+ *
+ * @returns {string | null} The tab id, or null if none is pending.
+ */
+export function consumePendingSettingsTab(): string | null {
+  try {
+    const tab = sessionStorage.getItem(PENDING_SETTINGS_TAB_KEY);
+    if (tab !== null) sessionStorage.removeItem(PENDING_SETTINGS_TAB_KEY);
+    return tab;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stores a success message to be shown after the next page reload.
+ *
+ * @param {string} message - The success message.
+ */
+export function setPendingSuccessMessage(message: string): void {
+  try {
+    sessionStorage.setItem(PENDING_SUCCESS_MESSAGE_KEY, message);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Reads and clears the pending post-reload success message.
+ *
+ * @returns {string | null} The message, or null if none is pending.
+ */
+export function consumePendingSuccessMessage(): string | null {
+  try {
+    const msg = sessionStorage.getItem(PENDING_SUCCESS_MESSAGE_KEY);
+    if (msg !== null) sessionStorage.removeItem(PENDING_SUCCESS_MESSAGE_KEY);
+    return msg;
+  } catch {
+    return null;
   }
 }

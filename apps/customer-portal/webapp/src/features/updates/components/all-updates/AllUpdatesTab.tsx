@@ -23,12 +23,13 @@ import {
   Grid,
   InputLabel,
   MenuItem,
-  Paper,
   Select,
+  Skeleton,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
+import searchingSvg from "@assets/search/searching.svg";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
@@ -199,6 +200,32 @@ export default function AllUpdatesTab(): JSX.Element {
 
   const canViewReport = !!reportData;
 
+  if (isProductLevelsLoading) {
+    return (
+      <Stack spacing={3} sx={{ width: "100%" }}>
+        <Card variant="outlined" sx={{ borderRadius: 0 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+              {ALL_UPDATES_SECTION_TITLE}
+            </Typography>
+            <Grid container spacing={2}>
+              {[1, 2, 3, 4].map((i) => (
+                <Grid key={i} size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Skeleton variant="rounded" height={40} />
+                </Grid>
+              ))}
+            </Grid>
+            <Box sx={{ mt: 3, display: "flex", gap: 2 }}>
+              <Skeleton variant="rounded" width={120} height={36} />
+              <Skeleton variant="rounded" width={160} height={36} />
+            </Box>
+          </CardContent>
+        </Card>
+        <Skeleton variant="rounded" height={240} />
+      </Stack>
+    );
+  }
+
   if (isProductLevelsError) {
     return (
       <Box
@@ -210,7 +237,12 @@ export default function AllUpdatesTab(): JSX.Element {
           py: 5,
         }}
       >
-        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
+        <img
+          src={error500Svg}
+          alt=""
+          aria-hidden="true"
+          style={{ width: 200, height: "auto" }}
+        />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE}
         </Typography>
@@ -222,7 +254,7 @@ export default function AllUpdatesTab(): JSX.Element {
     <Stack spacing={3} sx={{ width: "100%" }}>
       <Card variant="outlined" sx={{ borderRadius: 0 }}>
         <CardContent sx={{ p: 3 }}>
-          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 2 }}>
             {ALL_UPDATES_SECTION_TITLE}
           </Typography>
           <Grid container spacing={2}>
@@ -385,11 +417,27 @@ export default function AllUpdatesTab(): JSX.Element {
       </Card>
 
       {!searchParams ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
-          <Typography variant="body2" color="text.secondary">
+        <Box sx={{ textAlign: "center", py: 8 }}>
+          <img
+            src={searchingSvg}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 180, height: "auto", opacity: 0.85 }}
+          />
+          <Typography
+            variant="body1"
+            sx={{ mt: 2.5, fontWeight: 500, color: "text.secondary" }}
+          >
+            Search for updates
+          </Typography>
+          <Typography
+            variant="body2"
+            
+            sx={{ mt: 0.5, whiteSpace: "nowrap" }}
+          >
             {ALL_UPDATES_IDLE_HINT}
           </Typography>
-        </Paper>
+        </Box>
       ) : isSearchLoading ? (
         <PendingUpdatesListSkeleton />
       ) : isSearchError ? (
@@ -402,7 +450,12 @@ export default function AllUpdatesTab(): JSX.Element {
             py: 5,
           }}
         >
-          <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
+          <img
+            src={error500Svg}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 200, height: "auto" }}
+          />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {ALL_UPDATES_SEARCH_ERROR_MESSAGE}
           </Typography>

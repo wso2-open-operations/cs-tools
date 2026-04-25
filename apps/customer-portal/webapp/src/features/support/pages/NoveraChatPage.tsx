@@ -27,6 +27,7 @@ import { flushSync } from "react-dom";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePostCaseClassifications } from "@features/support/api/usePostCaseClassifications";
 import { useChatWebSocket } from "@features/support/api/useChatWebSocket";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -94,6 +95,8 @@ export default function NoveraChatPage(): JSX.Element {
   const preloadedMessages = navState?.messages;
   const navAccountId = navState?.accountId;
   const chatNumber = navState?.chatNumber;
+  const { data: userDetails } = useGetUserDetails();
+  const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
 
   const handleBack = () => {
     if (projectId) {
@@ -161,6 +164,10 @@ export default function NoveraChatPage(): JSX.Element {
         id: message.id || `restored-${index}`,
         sender:
           message.sender === ChatSender.BOT ? ChatSender.BOT : ChatSender.USER,
+          isCurrentUser:
+            message.sender === ChatSender.USER
+              ? (message.isCurrentUser ?? true)
+              : false,
         timestamp:
           message.timestamp instanceof Date
             ? message.timestamp
@@ -186,6 +193,7 @@ export default function NoveraChatPage(): JSX.Element {
           id: "2",
           text: userMsg,
           sender: ChatSender.USER,
+          isCurrentUser: true,
           timestamp: new Date(),
         });
       }
@@ -226,12 +234,28 @@ export default function NoveraChatPage(): JSX.Element {
         const isBot =
           msg.type?.toLowerCase() === "bot" ||
           msg.createdBy?.toLowerCase() === "novera";
+        const messageCreatorEmail = msg.createdBy?.toLowerCase() ?? "";
+        const isCurrentUserMessage =
+          !isBot &&
+          (currentUserEmail.length > 0
+            ? messageCreatorEmail.length > 0 &&
+              messageCreatorEmail === currentUserEmail
+            : true);
+        const createdByDisplayName = [
+          msg.createdByFirstName,
+          msg.createdByLastName,
+        ]
+          .filter((name) => Boolean(name && name.trim()))
+          .join(" ")
+          .trim();
 
         return {
           id: msg.id || `msg-${index}`,
           text: displayTextFromConversationContent(msg.content || "", isBot),
           sender: isBot ? ChatSender.BOT : ChatSender.USER,
+          isCurrentUser: isBot ? false : isCurrentUserMessage,
           timestamp: dateFromApiCreatedOn(msg.createdOn),
+          createdBy: createdByDisplayName || msg.createdBy || undefined,
           showCreateCaseAction: false,
         };
       });
@@ -246,7 +270,7 @@ export default function NoveraChatPage(): JSX.Element {
     queryClient.invalidateQueries({
       queryKey: [ApiQueryKeys.CONVERSATION_MESSAGES, urlConversationId, 10],
     });
-  }, [urlConversationId, conversationHistory, queryClient]);
+  }, [urlConversationId, conversationHistory, queryClient, currentUserEmail]);
 
 
   // Update URL with conversationId from describe-issue flow
@@ -592,6 +616,7 @@ export default function NoveraChatPage(): JSX.Element {
           id: `user-${Date.now()}`,
           text,
           sender: ChatSender.USER,
+          isCurrentUser: true,
           timestamp: new Date(),
         },
         {

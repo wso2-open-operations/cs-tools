@@ -74,7 +74,6 @@ import {
 import { SecurityTabId } from "@features/security/types/security";
 import {
   filterDeploymentsForCaseCreation,
-  getProductCategoriesForCaseCreation,
   getProjectSeverityPolicy,
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
@@ -84,7 +83,7 @@ import {
 } from "@features/support/utils/richTextEditor";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProductCategory, ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import type {
   RelatedCaseState,
 } from "@features/support/types/createCasePage";
@@ -198,7 +197,7 @@ export default function CreateCasePage(): JSX.Element {
     {
       pageSize: 10,
       enabled: !!selectedDeploymentId,
-      request: { filters: { productCategories: getProductCategoriesForCaseCreation(projectDetails?.type?.label) } },
+      request: { filters: { productCategories: (projectFeatures?.defaultCaseProductCategories ?? undefined) as ProductCategory[] | undefined } },
     },
   );
   const deploymentProductsLoading = deploymentProductsQuery.isLoading;
@@ -557,19 +556,28 @@ export default function CreateCasePage(): JSX.Element {
     if (!projectDeployments?.length) return;
     if (hasRelatedCaseDeploymentInitializedRef.current) return;
 
-    const dep = relatedCase.deploymentId
-      ? projectDeployments.find(
-          (d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId,
+    const deploymentOptionFromId = relatedCase.deploymentId
+      ? projectDeployments
+          .find((d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId)
+          ?.name?.trim() ||
+        projectDeployments
+          .find((d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId)
+          ?.type?.label?.trim()
+      : undefined;
+    const deploymentOptionFromLabel = relatedCase.deploymentLabel
+      ? findMatchingDeploymentLabel(
+          relatedCase.deploymentLabel,
+          baseDeploymentOptions,
         )
-      : null;
-    const displayLabel = dep
-      ? (dep.name ?? dep.type?.label ?? relatedCase.deploymentLabel)
-      : relatedCase.deploymentLabel;
-    if (displayLabel) {
-      setDeployment(displayLabel);
+      : undefined;
+    const resolvedDeploymentOption =
+      deploymentOptionFromId || deploymentOptionFromLabel;
+
+    if (resolvedDeploymentOption) {
+      setDeployment(resolvedDeploymentOption);
       hasRelatedCaseDeploymentInitializedRef.current = true;
     }
-  }, [relatedCase, projectDeployments]);
+  }, [relatedCase, projectDeployments, baseDeploymentOptions]);
 
   useEffect(() => {
     if (noAiMode) return;
@@ -651,8 +659,27 @@ export default function CreateCasePage(): JSX.Element {
 
   useEffect(() => {
     if (!selectedDeploymentId || !sortedBaseProductOptions.length) return;
-    // In related-case / no-AI mode, keep Product Version unselected by default.
-    if (noAiMode && relatedCase) return;
+    if (noAiMode && relatedCase) {
+      // Pre-select the deployed product from the related case, but only once.
+      setProduct((current) => {
+        if (current?.trim()) return current;
+        if (relatedCase.deployedProductId) {
+          const found = sortedBaseProductOptions.some(
+            (o) => o.id === relatedCase.deployedProductId,
+          );
+          if (found) return relatedCase.deployedProductId;
+        }
+        if (relatedCase.deployedProductLabel) {
+          const fromLabel = findMatchingProductId(
+            relatedCase.deployedProductLabel,
+            sortedBaseProductOptions,
+          );
+          if (fromLabel) return fromLabel;
+        }
+        return current;
+      });
+      return;
+    }
     setProduct((current) => {
       if (!current?.trim()) {
         const fromClassification = findMatchingProductId(
@@ -750,6 +777,9 @@ export default function CreateCasePage(): JSX.Element {
     const descriptionPlain = htmlToPlainText(description).trim();
     if (!titlePlain) {
       showError("Please enter a case title.");
+      return;
+    }
+    if (titlePlain.length > 160) {
       return;
     }
     if (!descriptionPlain) {
@@ -857,8 +887,6 @@ export default function CreateCasePage(): JSX.Element {
           isSecurityReport,
         );
 
-        showSuccess("Case created successfully");
-
         if (projectId) {
           await triggerPostCreationApiCalls(
             authFetch,
@@ -886,12 +914,13 @@ export default function CreateCasePage(): JSX.Element {
 
         // Refetch security vulnerabilities if this was a security report
         if (isCreatedSecurityReport) {
-          navigate(
+          window.location.assign(
             `/projects/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTabId.VULNERABILITIES}`,
           );
         } else {
-          navigate(`/projects/${projectId}/support/cases/${caseId}`);
+          window.location.assign(`/projects/${projectId}/support/cases/${caseId}`);
         }
+        showSuccess("Case created successfully");
       },
       onError: (error) => {
         setIsNavigatingAfterCreate(false);
@@ -960,7 +989,7 @@ export default function CreateCasePage(): JSX.Element {
             }
             isRelatedCaseMode={noAiMode}
             extraProductOptions={extraProductOptions}
-            isDeploymentDisabled={!!relatedCase}
+            isDeploymentDisabled={false}
             hideDeploymentField={isPrimaryProductionOnly}
             onLoadMoreDeployments={() => {
               if (
@@ -1006,7 +1035,7 @@ export default function CreateCasePage(): JSX.Element {
                 : undefined
             }
             isRelatedCaseMode={noAiMode}
-            isTitleDisabled={!!relatedCase}
+            isTitleDisabled={false}
             relatedCaseNumber={relatedCase?.number ?? ""}
             isSecurityReport={isSecurityReport}
             excludeS0={excludeS0}
