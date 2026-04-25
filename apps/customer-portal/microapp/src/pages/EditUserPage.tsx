@@ -182,6 +182,11 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         </SectionCard>
 
         <SectionCard title="User Role">
+          {isSystemUserReadOnly && (
+            <Typography variant="caption" color="warning.dark" fontWeight="medium">
+              A contact cannot be both a CS Integration User and have roles.
+            </Typography>
+          )}
           <RoleSelector value={roles} onChange={setRoles} readOnly={isSystemUserReadOnly} />
         </SectionCard>
 
