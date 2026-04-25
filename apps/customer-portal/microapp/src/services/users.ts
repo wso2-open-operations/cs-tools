@@ -23,13 +23,20 @@ import type {
   Role,
   User,
   UserDto,
+  ValidateContactRequestDto,
+  ValidateContactResponseDto,
   UsersDto,
 } from "@src/types";
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import apiClient from "@src/services/apiClient";
 import { toApiError } from "@utils/ApiError";
 
-import { PROJECT_USERS_ENDPOINT, USER_ACTIONS_ENDPOINT, USERS_ME_ENDPOINT } from "@config/endpoints";
+import {
+  PROJECT_USERS_ENDPOINT,
+  PROJECT_USERS_VALIDATION_ENDPOINT,
+  USER_ACTIONS_ENDPOINT,
+  USERS_ME_ENDPOINT,
+} from "@config/endpoints";
 
 const getMe = async (): Promise<Me> => {
   const response = (await apiClient.get<MeDto>(USERS_ME_ENDPOINT)).data;
@@ -46,6 +53,14 @@ const createContact = async (id: string, body: CreateContactRequestDto): Promise
     await apiClient.post(PROJECT_USERS_ENDPOINT(id), body);
   } catch (error) {
     throw toApiError(error, "Failed to invite user. Please try again.");
+  }
+};
+
+const validateContact = async (id: string, body: ValidateContactRequestDto): Promise<ValidateContactResponseDto> => {
+  try {
+    return (await apiClient.post<ValidateContactResponseDto>(PROJECT_USERS_VALIDATION_ENDPOINT(id), body)).data;
+  } catch (error) {
+    throw toApiError(error, "Email validation failed. Please try again.");
   }
 };
 
@@ -119,6 +134,11 @@ export const users = {
   create: (projectId: string) =>
     mutationOptions({
       mutationFn: (body: CreateContactRequestDto) => createContact(projectId, body),
+    }),
+
+  validate: (projectId: string) =>
+    mutationOptions({
+      mutationFn: (body: ValidateContactRequestDto) => validateContact(projectId, body),
     }),
 
   edit: (projectId: string, email: string) =>

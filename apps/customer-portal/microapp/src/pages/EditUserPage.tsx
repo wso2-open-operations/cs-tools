@@ -99,6 +99,45 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
     onError: (error) => notify.error(getApiErrorMessage(error) ?? deleteFallbackMessage),
   });
 
+  const validateUserMutation = useMutation({
+    ...users.validate(projectId!),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? "Email validation failed. Please try again."),
+  });
+
+  const handleSubmit = async () => {
+    try {
+      if (mode === "invite") {
+        const validationResponse = await validateUserMutation.mutateAsync({
+          contactEmail: email,
+        });
+
+        if (!validationResponse.isContactValid) {
+          notify.error(validationResponse.message || "This email cannot be added.");
+          return;
+        }
+
+        await createUserMutation.mutateAsync({
+          contactEmail: email,
+          contactFirstName: firstName,
+          contactLastName: lastName,
+          isCsIntegrationUser: roles.includes("System User"),
+          isCsAdmin: roles.includes("Admin User"),
+          isPortalUser: roles.includes("Portal User"),
+          isSecurityContact: roles.includes("Security User"),
+        });
+        return;
+      }
+
+      await editUserMutation.mutateAsync({
+        isCsAdmin: roles.includes("Admin User"),
+        isPortalUser: roles.includes("Portal User"),
+        isSecurityContact: roles.includes("Security User"),
+      });
+    } catch {
+      // Mutation onError handlers surface user-facing messages.
+    }
+  };
+
   return (
     <>
       <Stack gap={2}>
@@ -170,37 +209,18 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
           disabled={
             mode === "edit"
               ? JSON.stringify(roles) === JSON.stringify(initialRoles) || editUserMutation.isPending
-              : createUserMutation.isPending
+              : createUserMutation.isPending || validateUserMutation.isPending
           }
           variant="contained"
           startIcon={
-            createUserMutation.isPending || editUserMutation.isPending ? (
+            createUserMutation.isPending || editUserMutation.isPending || validateUserMutation.isPending ? (
               <CircularProgress size={16} color="inherit" />
             ) : undefined
           }
-          onClick={() => {
-            if (mode === "invite")
-              createUserMutation.mutate({
-                contactEmail: email,
-                contactFirstName: firstName,
-                contactLastName: lastName,
-                isCsIntegrationUser: roles.includes("System User"),
-                isCsAdmin: roles.includes("Admin User"),
-                isPortalUser: roles.includes("Portal User"),
-                isSecurityContact: roles.includes("Security User"),
-              });
-
-            if (mode === "edit") {
-              editUserMutation.mutate({
-                isCsAdmin: roles.includes("Admin User"),
-                isPortalUser: roles.includes("Portal User"),
-                isSecurityContact: roles.includes("Security User"),
-              });
-            }
-          }}
+          onClick={() => void handleSubmit()}
         >
           {mode === "invite"
-            ? createUserMutation.isPending
+            ? createUserMutation.isPending || validateUserMutation.isPending
               ? "Sending..."
               : "Send Invitation"
             : editUserMutation.isPending
