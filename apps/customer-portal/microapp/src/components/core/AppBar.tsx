@@ -36,7 +36,7 @@ import { useProject } from "@context/project";
 import { APP_BAR_CONFIG } from "@components/layout/config";
 import { PROJECT_STATUS_META } from "@config/constants";
 import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
 import { goToMyAppsScreen } from "../microapp-bridge";
 import { useThemeMode } from "@root/src/context/theme";
@@ -49,9 +49,9 @@ export function AppBar() {
     useLayout();
   const config = APP_BAR_CONFIG[appBarVariant];
   const { projectId } = useProject();
-  const projectsData = useQuery(projects.all()).data;
+  const { data: projectsData } = useSuspenseQuery(projects.all());
   const project = projectsData?.find((project) => project.id === projectId);
-  const hasMultipleProjects = (projectsData?.length ?? 0) > 1;
+  const hasMultipleProjects = projectsData.length > 1;
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
