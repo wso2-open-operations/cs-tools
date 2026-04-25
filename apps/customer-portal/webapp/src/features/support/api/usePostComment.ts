@@ -24,10 +24,10 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys, ApiMutationKeys } from "@constants/apiConstants";
 import type {
-import { parseApiResponseMessage } from "@utils/ApiError";
   PostCommentRequest,
   PostCommentVariables,
 } from "@features/support/types/supportApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export type { PostCommentRequest, PostCommentVariables };
 
