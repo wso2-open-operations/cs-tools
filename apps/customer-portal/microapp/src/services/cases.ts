@@ -36,9 +36,13 @@ import type {
   GetCasesStatsRequestDto,
   EditCaseResponseDto,
   EditCaseRequestDto,
+  Attachment,
+  AttachmentsDto,
+  AttachmentDto,
 } from "@src/types";
 
 import {
+  CASE_ATTACHMENTS_ENDPOINT,
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
@@ -116,6 +120,11 @@ const createComment = async (id: string, body: CreateCommentRequestDto): Promise
   return toComment(response);
 };
 
+const getAttachments = async (id: string): Promise<Attachment[]> => {
+  const response = (await apiClient.post<AttachmentsDto>(CASE_ATTACHMENTS_ENDPOINT(id))).data;
+  return response.attachments.map(toAttachment);
+};
+
 /* Mappers */
 export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
   return {
@@ -167,11 +176,23 @@ export function toComment(dto: CommentDto): Comment {
     createdBy: dto.createdBy,
     attachments: dto.inlineAttachments.map((attachment) => ({
       id: attachment.id,
+      type: "others",
       fileName: attachment.fileName,
       downloadUrl: attachment.downloadUrl,
       createdOn: new Date(attachment.createdOn.replace(" ", "T")),
       createdBy: attachment.createdBy,
     })),
+  };
+}
+
+export function toAttachment(dto: AttachmentDto): Attachment {
+  return {
+    id: dto.id,
+    type: /^image\//.test(dto.type) ? "image" : "others",
+    fileName: dto.name,
+    downloadUrl: dto.downloadUrl,
+    createdOn: new Date(dto.createdOn.replace(" ", "T")),
+    createdBy: dto.createdBy,
   };
 }
 
@@ -228,4 +249,7 @@ export const cases = {
     mutationOptions({
       mutationFn: (body: CreateCommentRequestDto) => createComment(id, body),
     }),
+
+  attachments: (id: string) =>
+    queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id) }),
 };

@@ -214,3 +214,19 @@ export interface CreateCommentRequestDto {
 export interface GetCasesStatsRequestDto {
   caseTypes: string[];
 }
+
+export interface AttachmentsDto extends Pagination {
+  attachments: AttachmentDto[];
+}
+
+export interface AttachmentDto {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  createdBy: string;
+  createdOn: string;
+  downloadUrl: string;
+  previewUrl: string;
+  description: string | null;
+}

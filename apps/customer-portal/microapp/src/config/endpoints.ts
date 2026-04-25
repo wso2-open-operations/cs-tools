@@ -39,6 +39,7 @@ export const CASE_CLASSIFICATION_ENDPOINT = "/cases/classify";
 export const CASE_STATS_ENDPOINT = (id: string) => `/projects/${id}/stats/cases`;
 export const CASE_DETAILS_ENDPOINT = (id: string) => `/cases/${id}`;
 export const CASE_COMMENTS_ENDPOINT = (id: string) => `/cases/${id}/comments`;
+export const CASE_ATTACHMENTS_ENDPOINT = (id: string) => `/cases/${id}/attachments`;
 export const CASE_CALL_REQUESTS_ENDPOINT = (id: string) => `/cases/${id}/call-requests/search`;
 export const USERS_ME_ENDPOINT = "/users/me";
 export const CHAT_INITIATE_ENDPOINT = (id: string) => `/projects/${id}/conversations`;

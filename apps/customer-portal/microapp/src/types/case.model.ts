@@ -51,6 +51,7 @@ export interface Comment {
 
 export interface Attachment {
   id: string;
+  type: "image" | "others";
   fileName: string;
   downloadUrl: string;
   createdOn: Date;
