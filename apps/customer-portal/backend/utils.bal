@@ -912,6 +912,7 @@ public isolated function mapProjectsResponse(entity:ProjectsResponse response) r
             'type: {id: project.'type.id, label: project.'type.name},
             hasPdpSubscription: project.hasPdpSubscription,
             actionRequiredCount: project.actionRequiredCount,
+            outstandingCount: project.outstandingCount,
             hasAgent: project.hasAgent,
             hasKbReferences: project.hasKbReferences,
             activeCasesCount: project.activeCasesCount,

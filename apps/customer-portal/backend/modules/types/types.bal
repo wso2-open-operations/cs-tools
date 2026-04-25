@@ -365,6 +365,8 @@ public type Project record {|
     int activeChatsCount;
     # Action Required count
     int actionRequiredCount;
+    # Outstanding count (default case, SR, SRA, engagement, and CR count that are not in closed state)
+    int outstandingCount;
     # SLA status (e.g., "Needs Attention")
     string slaStatus;
 |};

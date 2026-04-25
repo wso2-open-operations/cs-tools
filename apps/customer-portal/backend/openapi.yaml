@@ -2795,10 +2795,12 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
