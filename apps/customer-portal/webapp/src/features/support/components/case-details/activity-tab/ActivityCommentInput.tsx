@@ -240,6 +240,7 @@ export default function ActivityCommentInput({
             onAttachmentRemove={handleAttachmentRemove}
             showKeyboardHint={!isCaseClosed}
             maxHeight="310px"
+            onPasteError={() => showError("Image exceeds the maximum allowed size of 10 MB.")}
             overlayElement={
               <Tooltip
                 title={
