@@ -150,26 +150,23 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
   doc.setFontSize(12);
   doc.text("Update Levels Summary", 14, 95);
   doc.setFontSize(10);
-  doc.text(`Security Updates: ${reportData.securityCount}`, 14, 102);
-  doc.text(`Regular Updates: ${reportData.regularCount}`, 14, 109);
-  doc.text(`Mixed Updates: ${reportData.mixedCount}`, 14, 116);
-  doc.text("Applied Updates: N/A", 14, 123);
-  doc.text(`Pending Updates: ${reportData.levelCount}`, 14, 130);
+  doc.text(`Security Updates Levels: ${reportData.securityCount}`, 14, 102);
+  doc.text(`Regular Updates Levels: ${reportData.regularCount}`, 14, 109);
+  doc.text(`Mixed Updates Levels: ${reportData.mixedCount}`, 14, 116);
 
   doc.setFontSize(12);
-  doc.text("Update Levels Details", 14, 142);
+  doc.text("Update Levels Details", 14, 128);
 
   const tableData = reportData.tableRows.map((row) => [
     row.levelKey,
     row.typeLabel,
     String(row.updatesCount),
     row.releaseDate,
-    row.applied,
   ]);
 
   autoTable(doc, {
     startY: 148,
-    head: [["Level", "Type", "Updates", "Release Date", "Applied"]],
+    head: [["Level", "Type", "Updates", "Release Date"]],
     body: tableData,
     theme: "grid",
     headStyles: { fillColor: [100, 100, 100], fontSize: 9 },
@@ -179,7 +176,6 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
       1: { cellWidth: 35 },
       2: { cellWidth: 25 },
       3: { cellWidth: 45 },
-      4: { cellWidth: 25 },
     },
     margin: { left: 14 },
   });
