@@ -33,6 +33,7 @@ import { useLayout } from "../context/layout";
 import { RichText, SectionCard } from "../components/shared";
 import { InfoField } from "../components/features/detail";
 import DOMPurify from "dompurify";
+import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "../config/constants";
 
 type CreateCaseFormValues = {
   project: string;
@@ -52,7 +53,7 @@ export default function CreateCasePage() {
   const classifications: CaseClassificationResponseDto = location.state?.classifications;
   const relatedCase: Case | undefined = location.state?.case;
   const queryClient = useQueryClient();
-  const { projectId } = useProject();
+  const { projectId, type } = useProject();
   const notify = useNotify();
 
   const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
@@ -107,10 +108,20 @@ export default function CreateCasePage() {
     label: project.name,
   }));
 
-  const deploymentOptions = useMemo(
-    () => deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.name })) ?? [],
-    [deploymentQuery.data],
-  );
+  const deploymentsFieldDisabled = type ? DEPLOYMENT_DISABLED_PROJECT_TYPES.includes(type) : false;
+
+  const deploymentOptions = useMemo(() => {
+    const data = deploymentQuery.data ?? [];
+
+    const filteredData = deploymentsFieldDisabled
+      ? data.filter((deployment) => deployment.type === "Primary Production").slice(0, 1)
+      : data;
+
+    return filteredData.map((deployment) => ({
+      value: deployment.id,
+      label: deployment.name,
+    }));
+  }, [deploymentQuery.data, deploymentsFieldDisabled]);
 
   const productOptions = useMemo(
     () =>
@@ -140,7 +151,7 @@ export default function CreateCasePage() {
     const autoFilledFields = new Set<keyof CreateCaseFormValues>();
 
     const matchedDeployment = deploymentOptions.find((option) => option.label === classifications.caseInfo.environment);
-    if (matchedDeployment) {
+    if (matchedDeployment && !deploymentsFieldDisabled) {
       formik.setFieldValue("deployment", matchedDeployment.value);
       autoFilledFields.add("deployment");
     }
@@ -200,6 +211,12 @@ export default function CreateCasePage() {
     return () => layout.setTitleOverride(undefined);
   }, [relatedCase, deploymentOptions]);
 
+  useEffect(() => {
+    if (!deploymentsFieldDisabled) return;
+
+    formik.setFieldValue("deployment", deploymentOptions[0].value);
+  }, [deploymentsFieldDisabled]);
+
   return (
     <>
       {relatedCase && <RelatedCaseSection relatedCase={relatedCase} />}
@@ -248,7 +265,9 @@ export default function CreateCasePage() {
                   return next;
                 });
               }}
-              disabled={!!relatedCase || !formik.values.project || deploymentQuery.isLoading}
+              disabled={
+                !!relatedCase || !formik.values.project || deploymentQuery.isLoading || deploymentsFieldDisabled
+              }
               error={formik.touched.deployment && Boolean(formik.errors.deployment)}
               helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
             />
