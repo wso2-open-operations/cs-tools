@@ -69,7 +69,7 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
   { path: "/support", tabIndex: 1 },
   { path: "/users", tabIndex: 2 },
   { path: "/users/invite", title: "Invite User", appBarVariant: "minimal", hasBackAction: true, tabIndex: 2 },
-  { path: "/users/edit", title: "Edit User", appBarVariant: "minimal", hasBackAction: true, tabIndex: 2 },
+  { path: "/users/edit", title: "View User", appBarVariant: "minimal", hasBackAction: true, tabIndex: 2 },
   { path: "/profile", appBarVariant: "minimal", tabIndex: 3 },
   {
     path: "/profile/update",
