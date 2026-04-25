@@ -200,7 +200,6 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
 
         {mode === "edit" && (
           <>
-            <PermissionDetails />
             <DangerZone onDelete={deleteUserMutation.mutate} isPending={deleteUserMutation.isPending} />
           </>
         )}
@@ -298,38 +297,6 @@ function ExpirationNotice() {
           need to send a new invitation.
         </Typography>
       </Typography>
-    </Card>
-  );
-}
-
-function PermissionDetails() {
-  return (
-    <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5 })}>
-      <Typography variant="body2" fontWeight="medium" color="info">
-        Permission Details
-      </Typography>
-      <ul style={{ margin: 0, marginTop: 3, paddingLeft: 20 }}>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Create and manage own cases
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Participate in chats
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Submit service requests
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            View project analytics
-          </Typography>
-        </li>
-      </ul>
     </Card>
   );
 }
