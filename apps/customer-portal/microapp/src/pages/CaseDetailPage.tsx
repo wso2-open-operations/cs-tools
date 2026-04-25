@@ -17,8 +17,17 @@
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeftRightIcon, CheckIcon, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import {
+  ArrowLeftRightIcon,
+  CheckIcon,
+  Download,
+  Image,
+  Paperclip,
+  PlusIcon,
+  User,
+  Users,
+} from "@wso2/oxygen-ui-icons-react";
+import { Box, Card, CircularProgress, Grid, IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
   InfoField,
@@ -37,6 +46,7 @@ import { Comment } from "@components/features/detail";
 import { useFilters } from "../context/filters";
 import DOMPurify from "dompurify";
 import { useNotify } from "../context/snackbar";
+import type { Attachment } from "@src/types";
 
 dayjs.extend(relativeTime);
 
@@ -49,6 +59,10 @@ export default function CaseDetailPage() {
 
   const { id } = useParams();
   const { data, isLoading } = useQuery(cases.get(id!));
+  const { data: attachments, isLoading: isAttachmentsLoading } = useQuery({
+    ...cases.attachments(id!),
+    enabled: Boolean(id),
+  });
   const { data: filters, isLoading: isFiltersLoading } = useFilters();
   const { data: comments, isFetching: isCommentsRefetching } = useQuery({
     ...cases.comments(id!),
@@ -213,7 +227,38 @@ export default function CaseDetailPage() {
             </Grid>
           </Grid>
         </SectionCard>
-        {/* <SectionCard title="Attachments"></SectionCard> */}
+        <SectionCard title="Attachments">
+          {isAttachmentsLoading ? (
+            <Grid spacing={1.5} container>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
+                  <Card variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack direction="row" gap={1} alignItems="center">
+                      <Skeleton variant="rounded" width={40} height={40} />
+                      <Stack gap={0.5} flex={1} minWidth={0}>
+                        <Skeleton variant="text" width="80%" />
+                        <Skeleton variant="text" width="50%" />
+                      </Stack>
+                      <Skeleton variant="circular" width={32} height={32} />
+                    </Stack>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          ) : attachments?.length ? (
+            <Grid spacing={1.5} container>
+              {attachments.map((attachment) => (
+                <Grid key={attachment.id} size={{ xs: 12 }}>
+                  <AttachmentCard attachment={attachment} />
+                </Grid>
+              ))}
+            </Grid>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No attachments for this case.
+            </Typography>
+          )}
+        </SectionCard>
         <SectionCard title="Activity Timeline">
           <Stack gap={2} pt={1}>
             {comments ? (
@@ -244,6 +289,71 @@ export default function CaseDetailPage() {
 
       <div ref={bottomRef} />
     </>
+  );
+}
+
+function AttachmentCard({ attachment }: { attachment: Attachment }) {
+  const queryClient = useQueryClient();
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      const data = await queryClient.fetchQuery(cases.attachment(attachment.id));
+
+      const [prefix, base64] = data.content.split(",");
+      const mimeType = prefix.split(":")[1].split(";")[0];
+
+      const byteCharacters = atob(base64);
+      const byteArray = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteArray[i] = byteCharacters.charCodeAt(i);
+      }
+
+      const blob = new Blob([byteArray], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachment.fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <Card sx={{ p: 1.5 }}>
+      <Stack direction="row" alignItems="flex-start" gap={1}>
+        <Box
+          sx={{
+            flexShrink: 0,
+            width: 40,
+            height: 40,
+            borderRadius: 0.5,
+            overflow: "hidden",
+            bgcolor: "action.hover",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "text.secondary",
+          }}
+        >
+          {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
+        </Box>
+        <Stack gap={0.25} minWidth={0} flex={1}>
+          <Typography variant="subtitle2" fontWeight="medium" noWrap>
+            {attachment.fileName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {attachment.createdBy} · {dayjs(attachment.createdOn).fromNow()}
+          </Typography>
+        </Stack>
+        <IconButton onClick={handleDownload} disabled={isDownloading}>
+          {isDownloading ? <CircularProgress size={pxToRem(18)} /> : <Download size={pxToRem(18)} />}
+        </IconButton>
+      </Stack>
+    </Card>
   );
 }
 
