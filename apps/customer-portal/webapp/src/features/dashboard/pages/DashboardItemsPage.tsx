@@ -724,7 +724,7 @@ export default function DashboardItemsPage({
           mode === "action-required"
             ? "Action Required Items"
             : mode === "closed-last-30d"
-              ? "Closed items last (30d)"
+              ? "Closed items (last 30d)"
               : "Outstanding Items"
         }
         description={

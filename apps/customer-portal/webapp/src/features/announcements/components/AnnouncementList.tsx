@@ -111,6 +111,20 @@ export default function AnnouncementList({
                     flexWrap: "wrap",
                   }}
                 >
+                  {caseItem.internalId && (
+                    <>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        color="text.secondary"
+                      >
+                        {caseItem.internalId}
+                      </Typography>
+                      <Typography variant="body2" color="text.disabled">
+                        |
+                      </Typography>
+                    </>
+                  )}
                   <Typography
                     variant="body2"
                     fontWeight={500}
