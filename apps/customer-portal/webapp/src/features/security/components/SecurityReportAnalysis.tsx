@@ -67,6 +67,7 @@ import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 
 type SecurityReportAnalysisProps = {
   fixedStatusIds?: number[];
+  fixedClosedDateRange?: { closedStartDate: string; closedEndDate: string };
 };
 
 /**
@@ -74,7 +75,7 @@ type SecurityReportAnalysisProps = {
  *
  * @returns {JSX.Element}
  */
-const SecurityReportAnalysis = ({ fixedStatusIds }: SecurityReportAnalysisProps): JSX.Element => {
+const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: SecurityReportAnalysisProps): JSX.Element => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { data: projectDetails, isLoading: isProjectLoading } =
@@ -126,13 +127,14 @@ const SecurityReportAnalysis = ({ fixedStatusIds }: SecurityReportAnalysisProps)
         issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
         deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
+        ...(fixedClosedDateRange ?? {}),
       },
       sortBy: {
         field: sortField,
         order: sortOrder,
       },
     }),
-    [filters, searchTerm, sortField, sortOrder, viewMode, fixedStatusIds],
+    [filters, searchTerm, sortField, sortOrder, viewMode, fixedStatusIds, fixedClosedDateRange],
   );
 
   const { data, isLoading, hasNextPage, fetchNextPage } = useGetProjectCases(
