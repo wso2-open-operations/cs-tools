@@ -54,6 +54,15 @@ export interface EditContactRequestDto {
   isSecurityContact: boolean;
 }
 
+export interface ValidateContactRequestDto {
+  contactEmail: string;
+}
+
+export interface ValidateContactResponseDto {
+  isContactValid: boolean;
+  message: string;
+}
+
 export interface EditMeDto {
   phoneNumber: string;
   timeZone: string;
