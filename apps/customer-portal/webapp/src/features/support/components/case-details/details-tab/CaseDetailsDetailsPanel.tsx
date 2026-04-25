@@ -429,6 +429,14 @@ export default function CaseDetailsDetailsPanel({
                 {formatValue(productDisplayName)}
               </Typography>
             </Box>
+            {data?.deployedProduct?.version ? (
+              <Box>
+                <Typography {...labelSx}>Production Version</Typography>
+                <Typography {...valueSx}>
+                  {data.deployedProduct.version}
+                </Typography>
+              </Box>
+            ) : null}
             <Box>
               <Typography {...labelSx}>Environment Type</Typography>
               <Typography {...valueSx}>
