@@ -778,7 +778,7 @@ public isolated function mapChangeRequestSearchResponse(entity:ChangeRequestSear
             createdOn: changeRequest.createdOn,
             updatedOn: changeRequest.updatedOn,
             project: project != () ? {id: project.id, label: project.name, number: project?.number} : (),
-            case: case != () ? {id: case.id, label: case.name, number: case?.number} : (),
+            case: case != () ? {id: case.id, label: case.name, number: case?.number, internalId: case?.internalId} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name, number: deployment?.number} : (),
             deployedProduct: deployedProduct != () ?
                 {id: deployedProduct.id, label: deployedProduct.name, number: deployedProduct?.number} : (),
