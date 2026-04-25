@@ -75,5 +75,6 @@ public enum ProductClass {
 public enum ProductCategory {
     PRIVATE_DATA_PLANE = "pdp",
     CLOUD = "cl",
-    MS = "ms"
+    MS = "ms",
+    PC = "pc"
 }

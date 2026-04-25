@@ -4578,6 +4578,7 @@ components:
       - ms
       - cl
       - pdp
+      - pc
     ProductClass:
       type: string
       description: Valid product class values.
