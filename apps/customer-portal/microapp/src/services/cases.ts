@@ -39,9 +39,11 @@ import type {
   Attachment,
   AttachmentsDto,
   AttachmentDto,
+  Pagination,
 } from "@src/types";
 
 import {
+  ATTACHMENT_DETAIL_ENDPOINT,
   CASE_ATTACHMENTS_ENDPOINT,
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
@@ -120,9 +122,14 @@ const createComment = async (id: string, body: CreateCommentRequestDto): Promise
   return toComment(response);
 };
 
-const getAttachments = async (id: string): Promise<Attachment[]> => {
-  const response = (await apiClient.post<AttachmentsDto>(CASE_ATTACHMENTS_ENDPOINT(id))).data;
+const getAttachments = async (id: string, body: Partial<Omit<Pagination, "totalRecords">>): Promise<Attachment[]> => {
+  const response = (await apiClient.get<AttachmentsDto>(CASE_ATTACHMENTS_ENDPOINT(id), { params: body })).data;
   return response.attachments.map(toAttachment);
+};
+
+const getAttachment = async (id: string): Promise<{ content: string }> => {
+  const response = (await apiClient.get<{ content: string }>(ATTACHMENT_DETAIL_ENDPOINT(id))).data;
+  return response;
 };
 
 /* Mappers */
@@ -250,6 +257,8 @@ export const cases = {
       mutationFn: (body: CreateCommentRequestDto) => createComment(id, body),
     }),
 
-  attachments: (id: string) =>
-    queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id) }),
+  attachments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
+    queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id, body) }),
+
+  attachment: (id: string) => queryOptions({ queryKey: ["attachment", id], queryFn: () => getAttachment(id) }),
 };
