@@ -84,12 +84,14 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
     useGetProjectFeatures(projectId || "");
   const areFeaturePermissionsReady =
     !isProjectLoading && !isProjectFeaturesLoading && !!projectFeatures;
+  const permissions = areFeaturePermissionsReady
+    ? getProjectPermissions(projectDetails?.type?.label, { projectFeatures })
+    : null;
   const isSecurityReportAvailable =
-    areFeaturePermissionsReady &&
-    getProjectPermissions(projectDetails?.type?.label, { projectFeatures })
-      .hasSecurityReportAnalysis;
+    areFeaturePermissionsReady && (permissions?.hasSecurityReportAnalysis ?? false);
   const canCreateSecurityReport =
-    isSecurityReportAvailable &&
+    areFeaturePermissionsReady &&
+    (permissions?.hasSraWriteAccess ?? false) &&
     !isProjectRestricted(projectDetails?.closureState);
 
   const [viewMode, setViewMode] = useState<SecurityReportViewMode>(

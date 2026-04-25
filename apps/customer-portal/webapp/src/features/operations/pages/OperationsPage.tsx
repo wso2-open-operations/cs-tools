@@ -348,7 +348,43 @@ export default function OperationsPage(): JSX.Element {
               iconVariant={SupportOverviewIconVariant.Blue}
               footerButtons={[]}
             >
-              <OutstandingCasesList cases={[]} isLoading />
+              <Box
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  width: "100%",
+                  flex: 1,
+                  minHeight: 0,
+                }}
+              >
+                <Box sx={{ flex: 1, minHeight: 0 }}>
+                  <OutstandingCasesList cases={[]} isLoading />
+                </Box>
+                {projectId && (
+                  <>
+                    <Box sx={{ borderTop: 1, borderColor: "divider", mt: 1.5 }} />
+                    <Button
+                      fullWidth
+                      variant="text"
+                      color="primary"
+                      onClick={() =>
+                        navigate(
+                          `/projects/${projectId}/operations/change-requests`,
+                          { state: { returnTo: operationsPath } },
+                        )
+                      }
+                      endIcon={<ArrowRight size={16} />}
+                      sx={{
+                        justifyContent: "flex-start",
+                        textTransform: "none",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {OPERATIONS_HUB_FOOTER_VIEW_ALL_CR}
+                    </Button>
+                  </>
+                )}
+              </Box>
             </SupportOverviewCard>
           </Grid>
         </Grid>
@@ -449,7 +485,7 @@ export default function OperationsPage(): JSX.Element {
                         }
                       />
                     </Box>
-                    {projectId && !isCrLoading && !isCrError && (
+                    {projectId && !isCrError && (
                       <>
                         <Box sx={{ borderTop: 1, borderColor: "divider", mt: 1.5 }} />
                         <Button
