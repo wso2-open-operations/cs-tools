@@ -60,6 +60,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
       : state?.role && state.role !== "Admin User"
         ? [state.role]
         : defaultUserRole;
+  const isSystemUserReadOnly = mode === "edit" && initialRoles.includes("System User");
   const [roles, setRoles] = useState<Role[]>(initialRoles);
   const [email, setEmail] = useState(state?.email ?? "");
   const [firstName, setFirstName] = useState(state?.firstName ?? "");
@@ -181,7 +182,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         </SectionCard>
 
         <SectionCard title="User Role">
-          <RoleSelector value={roles} onChange={setRoles} />
+          <RoleSelector value={roles} onChange={setRoles} readOnly={isSystemUserReadOnly} />
         </SectionCard>
 
         {mode === "invite" && (
@@ -207,7 +208,9 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         <Button
           disabled={
             mode === "edit"
-              ? JSON.stringify(roles) === JSON.stringify(initialRoles) || editUserMutation.isPending
+              ? isSystemUserReadOnly ||
+                JSON.stringify(roles) === JSON.stringify(initialRoles) ||
+                editUserMutation.isPending
               : createUserMutation.isPending || validateUserMutation.isPending
           }
           variant="contained"

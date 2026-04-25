@@ -24,12 +24,15 @@ export type RoleName = Role;
 interface RoleSelectorProps {
   value: Role[];
   onChange: (value: Role[]) => void;
+  readOnly?: boolean;
 }
 
-export function RoleSelector({ value, onChange }: RoleSelectorProps) {
+export function RoleSelector({ value, onChange, readOnly = false }: RoleSelectorProps) {
   const hasSystemUser = value.includes("System User");
 
   const toggleRole = (role: Role) => {
+    if (readOnly) return;
+
     if (role === "System User") {
       onChange(hasSystemUser ? ["Portal User"] : ["System User"]);
       return;
@@ -54,7 +57,7 @@ export function RoleSelector({ value, onChange }: RoleSelectorProps) {
           role={role.name as RoleName}
           description={role.description}
           selected={value.includes(role.name as Role)}
-          disabled={hasSystemUser && role.name !== "System User"}
+          disabled={readOnly || (hasSystemUser && role.name !== "System User")}
           onClick={toggleRole}
         />
       ))}
