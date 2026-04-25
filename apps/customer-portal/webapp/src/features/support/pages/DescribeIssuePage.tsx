@@ -243,6 +243,17 @@ export default function DescribeIssuePage(): JSX.Element {
                 }}
               >
                 <Button
+                  variant="outlined"
+                  onClick={() =>
+                    navigate(
+                      `/projects/${projectId}/support/chat/create-case`,
+                    )
+                  }
+                  sx={{ py: 0.5 }}
+                >
+                  Create Case
+                </Button>
+                <Button
                   variant="contained"
                   color="warning"
                   startIcon={<Send size={18} />}

@@ -163,6 +163,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
           maxWidth: "100%",
           minWidth: 0,
           overflow: "hidden",
+          contain: "inline-size",
         }}
       >
         <Box
@@ -170,9 +171,9 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
             display: "flex",
             alignItems: "center",
             gap: 1,
-            width: "100%",
             maxWidth: "100%",
             minWidth: 0,
+            overflow: "hidden",
           }}
         >
           {overviewTab && (
@@ -182,12 +183,12 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
               onTabChange={setInnerTab}
               keepButtonWidth={true}
               compact={true}
-              sx={{ mb: 0, border: "none", boxShadow: "none", flexShrink: 0 }}
+              sx={{ mb: 0, border: "none", boxShadow: "none", flexShrink: 0, flexGrow: 0 }}
             />
           )}
           <Box
             sx={{
-              flex: 1,
+              flex: "1 1 0",
               minWidth: 0,
               maxWidth: "100%",
               overflowX: "auto",
@@ -196,7 +197,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
               "&::-webkit-scrollbar": { display: "none" },
             }}
           >
-            <Box sx={{ width: "max-content", minWidth: "100%" }}>
+            <Box sx={{ width: "max-content" }}>
               <TabBar
                 tabs={deploymentTabs}
                 activeTab={innerTab}

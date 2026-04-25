@@ -45,6 +45,7 @@ import type {
   AllUpdatesTabSearchParams,
 } from "@features/updates/types/updates";
 import {
+  ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL,
   ALL_UPDATES_END_LEVEL_LABEL,
   ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE,
   ALL_UPDATES_IDLE_HINT,
@@ -125,7 +126,7 @@ export default function AllUpdatesTab(): JSX.Element {
     if (!filter.startLevel || startLevelOptions.length === 0) return [];
     const start = Number(filter.startLevel);
     if (!Number.isFinite(start)) return [];
-    return startLevelOptions.filter((level) => level >= start);
+    return startLevelOptions.filter((level) => level > start);
   }, [startLevelOptions, filter.startLevel]);
 
   useEffect(() => {
@@ -158,6 +159,11 @@ export default function AllUpdatesTab(): JSX.Element {
       endingUpdateLevel: result.end,
     });
   }, [filter]);
+
+  const handleClearFilters = useCallback(() => {
+    setFilter(ALL_UPDATES_TAB_INITIAL_FILTER);
+    setSearchParams(null);
+  }, []);
 
   const handleView = useCallback(
     (levelKey: string) => {
@@ -200,12 +206,19 @@ export default function AllUpdatesTab(): JSX.Element {
 
   const canViewReport = !!reportData;
 
+  const hasActiveFilter =
+    filter.productName !== "" ||
+    filter.productVersion !== "" ||
+    filter.startLevel !== "" ||
+    filter.endLevel !== "";
+  const canClear = hasActiveFilter || searchParams !== null;
+
   if (isProductLevelsLoading) {
     return (
       <Stack spacing={3} sx={{ width: "100%" }}>
-        <Card variant="outlined" sx={{ borderRadius: 0 }}>
+        <Card variant="outlined">
           <CardContent sx={{ p: 3 }}>
-            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+            <Typography variant="subtitle1" sx={{ mb: 2 }}>
               {ALL_UPDATES_SECTION_TITLE}
             </Typography>
             <Grid container spacing={2}>
@@ -252,7 +265,7 @@ export default function AllUpdatesTab(): JSX.Element {
 
   return (
     <Stack spacing={3} sx={{ width: "100%" }}>
-      <Card variant="outlined" sx={{ borderRadius: 0 }}>
+      <Card variant="outlined">
         <CardContent sx={{ p: 3 }}>
           <Typography variant="subtitle1" sx={{ mb: 2 }}>
             {ALL_UPDATES_SECTION_TITLE}
@@ -394,7 +407,7 @@ export default function AllUpdatesTab(): JSX.Element {
               </FormControl>
             </Grid>
           </Grid>
-          <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+          <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
             <Button
               variant="contained"
               color="warning"
@@ -402,6 +415,13 @@ export default function AllUpdatesTab(): JSX.Element {
               disabled={!canSearch || isSearchLoading}
             >
               {ALL_UPDATES_SEARCH_BUTTON_LABEL}
+            </Button>
+            <Button
+              variant="text"
+              onClick={handleClearFilters}
+              disabled={!canClear}
+            >
+              {ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL}
             </Button>
             <Button
               variant="outlined"
@@ -430,11 +450,7 @@ export default function AllUpdatesTab(): JSX.Element {
           >
             Search for updates
           </Typography>
-          <Typography
-            variant="body2"
-            
-            sx={{ mt: 0.5, whiteSpace: "nowrap" }}
-          >
+          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "nowrap" }}>
             {ALL_UPDATES_IDLE_HINT}
           </Typography>
         </Box>

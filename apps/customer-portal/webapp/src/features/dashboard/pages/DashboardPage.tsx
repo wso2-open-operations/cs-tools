@@ -485,21 +485,6 @@ export default function DashboardPage(): JSX.Element {
         )?.count ?? 0))
       : 0;
 
-    const casesOutstandingCount =
-      combinedCasesStats?.stateCount
-        ?.filter((s) => s.label !== CaseStatus.CLOSED)
-        .reduce((sum, s) => sum + s.count, 0) ?? 0;
-    const crOutstandingCount = includeCrStats
-      ? (changeRequestStats?.stateCount
-          ?.filter(
-            (s) =>
-              s.label !== ChangeRequestStates.ROLLBACK &&
-              s.label !== ChangeRequestStates.CLOSED &&
-              s.label !== ChangeRequestStates.CANCELED,
-          )
-          .reduce((sum, s) => sum + s.count, 0) ?? 0)
-      : 0;
-
     const closedTotal =
       defaultCaseStats?.stateCount?.find((s) => s.label === CaseStatus.CLOSED)
         ?.count ?? 0;
@@ -529,7 +514,7 @@ export default function DashboardPage(): JSX.Element {
 
     return {
       totalCases: casesActionCount + crActionCount,
-      openCases: casesOutstandingCount + crOutstandingCount,
+      openCases: resolvedProject?.outstandingCount ?? undefined,
       resolvedCases: Math.max(0, closedTotal - s0ClosedCount),
       avgResponseTime,
     };
@@ -539,6 +524,7 @@ export default function DashboardPage(): JSX.Element {
     defaultCaseStats,
     includeCrStats,
     permissions.includeS0InSupportMetrics,
+    resolvedProject?.outstandingCount,
   ]);
 
   const isDashboardStatsLoading =

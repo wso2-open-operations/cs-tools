@@ -30,7 +30,7 @@ import {
   PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES,
   PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL,
   PROJECT_CARD_STATS_NULL_PLACEHOLDER,
-  PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL,
+  PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL,
 } from "@features/project-hub/constants/projectHubConstants";
 import type { ProjectCardStatsProps } from "@features/project-hub/types/projectHub";
 
@@ -80,7 +80,7 @@ export default function ProjectCardStats({
           )}
         </Box>
 
-        {/* Outstanding support cases */}
+        {/* Outstanding items */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box
             display="flex"
@@ -90,7 +90,7 @@ export default function ProjectCardStats({
           >
             <CircleAlert size={16} />
             <Typography variant="body2" color="inherit">
-              {PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL}
+              {PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL}
             </Typography>
           </Box>
           {isLoading ? (

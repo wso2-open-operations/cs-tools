@@ -168,15 +168,41 @@ export function formatAnnouncementsClearFiltersButtonLabel(
 }
 
 /**
+ * Strips pure-white inline background declarations from style attributes so
+ * dark-mode containers no longer render white boxes on a dark background.
+ * Everything else (code-block backgrounds, borders, shadows, text colors) is
+ * intentionally left untouched so light-mode and structural styling stay intact.
+ *
+ * @param html - Raw HTML string.
+ * @returns HTML with pure-white background declarations removed.
+ */
+function stripLightModeInlineStyles(html: string): string {
+  return html.replace(/style\s*=\s*"([^"]*)"/gi, (_match, styleContent: string) => {
+    const declarations = styleContent.split(";");
+    const filtered = declarations.filter((decl) => {
+      const normalized = decl.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!normalized) return false;
+      if (/^background(-color)?\s*:\s*(#fff(fff)?|white|#f4f4f4|#f5f5f5|#f0f0f0|#f9f9f9|#f8f8f8|#fafafa|#e9e9e9)\s*$/.test(normalized)) return false;
+      return true;
+    });
+    const cleaned = filtered.join(";").replace(/;+$/, "").trim();
+    if (!cleaned) return "";
+    return `style="${cleaned}"`;
+  });
+}
+
+/**
  * Normalizes announcement HTML:
+ * - Strips pure-white inline backgrounds in dark mode so containers don't clash.
  * - Converts empty `<code>` blocks to a newline (`<br />`) so we do not render useless whitespace.
  * - Converts `<code><n/><code/>`-style placeholders (and bare `<n/>`) into newlines.
  *
  * @param html - Raw HTML from backend.
+ * @param isDarkMode - When true, strips pure-white inline backgrounds.
  * @returns Normalized HTML.
  */
-export function normalizeAnnouncementDescriptionHtml(html: string): string {
-  let normalized = html;
+export function normalizeAnnouncementDescriptionHtml(html: string, isDarkMode = false): string {
+  let normalized = isDarkMode ? stripLightModeInlineStyles(html) : html;
 
   normalized = normalized.replace(
     /<p>\s*<code>\s*(?:&nbsp;|\s|<br\s*\/?>)*<\/code>\s*<\/p>/gi,
