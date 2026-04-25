@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchProjectRequest } from "@features/project-hub/types/projects";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export interface PatchProjectResponse {
   id: string;
@@ -65,15 +66,7 @@ export function usePatchProject(
 
       if (!response.ok) {
         const text = await response.text();
-        let msg = `Error updating project: ${response.status} ${response.statusText}`;
-        try {
-          const json = JSON.parse(text) as { message?: string };
-          if (typeof json.message === "string") msg = json.message;
-          else if (text) msg += ` - ${text}`;
-        } catch {
-          if (text) msg += ` - ${text}`;
-        }
-        throw new Error(msg);
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
 
       const data: PatchProjectResponse = await response.json();

@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CreateProjectContactRequest } from "@features/settings/types/users";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to create a project contact (POST /projects/:projectId/contacts).
@@ -66,18 +67,7 @@ export function usePostProjectContact(
 
         if (!response.ok) {
           const text = await response.text();
-          let errorMessage = `Error adding project contact: ${response.status} ${response.statusText}`;
-          try {
-            const json = JSON.parse(text) as { message?: string };
-            if (typeof json.message === "string") {
-              errorMessage = json.message;
-            } else if (text) {
-              errorMessage += ` - ${text}`;
-            }
-          } catch {
-            if (text) errorMessage += ` - ${text}`;
-          }
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
       } catch (error) {
         logger.error("[usePostProjectContact] Error:", error);
