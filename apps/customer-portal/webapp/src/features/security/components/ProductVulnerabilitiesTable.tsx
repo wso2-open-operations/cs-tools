@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ListingTable, Divider, Box, Skeleton } from "@wso2/oxygen-ui";
+import { ListingTable, Divider, Box } from "@wso2/oxygen-ui";
 import { type JSX, useState, useMemo, useEffect } from "react";
 import { usePostProductVulnerabilitiesSearch } from "@features/security/api/usePostProductVulnerabilitiesSearch";
 import { useGetVulnerabilitiesMetaData } from "@features/security/api/useGetVulnerabilitiesMetaData";
@@ -207,53 +207,22 @@ const ProductVulnerabilitiesTable = ({
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
-      {isLoading ? (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            mb: 3,
-            flexWrap: "wrap",
-            rowGap: 2,
-            columnGap: { xs: 3, sm: 4, md: 6, lg: 8 },
-          }}
-        >
-          <Box sx={{ minWidth: 0, flex: { xs: "1 1 100%", lg: "0 1 auto" } }}>
-            <Skeleton variant="text" width={220} height={28} sx={{ mb: 0.5 }} />
-            <Skeleton variant="text" width={340} height={20} />
-          </Box>
-          <Box
-            sx={{
-              display: "flex",
-              gap: 1,
-              alignItems: "center",
-              width: { xs: "100%", lg: "auto" },
-              flex: { xs: "1 1 100%", lg: "1 1 auto" },
-            }}
-          >
-            <Skeleton variant="rounded" height={36} sx={{ flex: 1 }} />
-            <Skeleton variant="rounded" width={100} height={36} />
-          </Box>
-        </Box>
-      ) : (
-        <ProductVulnerabilitiesTableHeader
-          searchValue={searchInput}
-          onSearchChange={(v) => {
-            setSearchInput(v);
-            setPage(0);
-          }}
-          onFilterToggle={() => {
-            if (activeFilterCount > 0) {
-              handleClearFilters();
-            } else {
-              setIsFilterOpen(!isFilterOpen);
-            }
-          }}
-          isFiltersOpen={isFilterOpen}
-          activeFiltersCount={activeFilterCount}
-        />
-      )}
+      <ProductVulnerabilitiesTableHeader
+        searchValue={searchInput}
+        onSearchChange={(v) => {
+          setSearchInput(v);
+          setPage(0);
+        }}
+        onFilterToggle={() => {
+          if (activeFilterCount > 0) {
+            handleClearFilters();
+          } else {
+            setIsFilterOpen(!isFilterOpen);
+          }
+        }}
+        isFiltersOpen={isFilterOpen}
+        activeFiltersCount={activeFilterCount}
+      />
 
       {!isLoading && isFilterOpen && (
         <>
