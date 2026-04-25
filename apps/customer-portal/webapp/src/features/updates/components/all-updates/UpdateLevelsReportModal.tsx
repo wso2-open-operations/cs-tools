@@ -112,19 +112,13 @@ export default function UpdateLevelsReportModal({
           </Typography>
           <Box sx={{ mb: 2, "& p": { m: 0, fontSize: "0.875rem" } }}>
             <Typography variant="body2" component="p">
-              Security Updates: {reportData.securityCount}
+              Security Updates Levels: {reportData.securityCount}
             </Typography>
             <Typography variant="body2" component="p">
-              Regular Updates: {reportData.regularCount}
+              Regular Updates Levels: {reportData.regularCount}
             </Typography>
             <Typography variant="body2" component="p">
-              Mixed Updates: {reportData.mixedCount}
-            </Typography>
-            <Typography variant="body2" component="p">
-              Applied Updates: N/A
-            </Typography>
-            <Typography variant="body2" component="p">
-              Pending Updates: {reportData.levelCount}
+              Mixed Updates Levels: {reportData.mixedCount}
             </Typography>
           </Box>
 
@@ -139,7 +133,6 @@ export default function UpdateLevelsReportModal({
                   <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Updates</TableCell>
                   <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Release Date</TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: "0.75rem" }}>Applied</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -149,7 +142,6 @@ export default function UpdateLevelsReportModal({
                     <TableCell>{row.typeLabel}</TableCell>
                     <TableCell>{row.updatesCount}</TableCell>
                     <TableCell>{row.releaseDate}</TableCell>
-                    <TableCell>{row.applied}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -31,7 +31,11 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
-import { getFileIcon, scrollElement } from "@features/support/utils/richTextEditor";
+import {
+  getFileIcon,
+  scrollElement,
+  INSERT_IMAGE_COMMAND,
+} from "@features/support/utils/richTextEditor";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {
@@ -205,6 +209,55 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
       });
     }
   }, [editor, resetTrigger]);
+
+  return null;
+};
+
+/**
+ * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
+ * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
+ */
+const ClipboardImagePlugin = (): null => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          event.preventDefault();
+
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const src = e.target?.result;
+            if (typeof src === "string") {
+              editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
+                src,
+                altText: "Pasted Image",
+              });
+            }
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    };
+
+    return editor.registerRootListener(
+      (
+        rootElement: HTMLElement | null,
+        prevRootElement: HTMLElement | null,
+      ) => {
+        prevRootElement?.removeEventListener("paste", handlePaste);
+        rootElement?.addEventListener("paste", handlePaste);
+      },
+    );
+  }, [editor]);
 
   return null;
 };
@@ -456,6 +509,7 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
+          <ClipboardImagePlugin />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
