@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AppBar as MuiAppBar,
   Button,
@@ -25,19 +25,22 @@ import {
   Typography,
   pxToRem,
   useTheme,
-  Box,
   alpha,
+  Skeleton,
 } from "@wso2/oxygen-ui";
 
-import { NotificationBadge } from "@components/ui";
 import { ProjectSelector } from "@components/features/projects";
 import { useLayout } from "@src/context/layout";
 import { useProject } from "@context/project";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
-import { MOCK_PROJECTS } from "@src/mocks/data/projects";
 import { PROJECT_STATUS_META } from "@config/constants";
-import { ArrowLeft, Bell, ChevronDown, Folder } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { projects } from "@src/services/projects";
+import { goToMyAppsScreen } from "../microapp-bridge";
+import { useThemeMode } from "@root/src/context/theme";
+import { ConfirmDialog } from "../shared/ConfirmDialog";
 
 export function AppBar() {
   const theme = useTheme();
@@ -46,10 +49,23 @@ export function AppBar() {
     useLayout();
   const config = APP_BAR_CONFIG[appBarVariant];
   const { projectId } = useProject();
-  const project = MOCK_PROJECTS.find((project) => project.id === projectId);
+  const project = useQuery(projects.all()).data?.find((project) => project.id === projectId);
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
+
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      document.documentElement.style.setProperty("--app-bar-height", `${entry.contentRect.height}px`);
+    });
+
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
 
   const navigateBack = () => navigate(-1);
 
@@ -62,29 +78,38 @@ export function AppBar() {
     setProjectSelectorAnchor(null);
   };
 
+  const mode = useThemeMode();
+
   if (!project) return null;
 
-  const statusChipColorVariant = PROJECT_STATUS_META[project.status].color;
+  const statusChipColorVariant = project.status ? PROJECT_STATUS_META[project.status].color : "default";
 
   return (
     <>
       <MuiAppBar
-        position="relative"
-        color="transparent"
+        ref={ref}
+        position="sticky"
         elevation={0}
-        sx={{ backgroundColor: "background.paper", display: "flex", flexDirection: "column", gap: 1, p: 1.5, pt: 3 }}
+        sx={{
+          backgroundColor: `${mode === "light" ? "white" : "black"} !important`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1,
+          p: 1.5,
+          pt: 7,
+        }}
       >
         {config.showNotifications && (
-          <Box mb={1}>
-            <NotificationButton to="/notifications" />
-          </Box>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+            <ExitButton />
+          </Stack>
         )}
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-          <Stack direction="row" alignItems="center" gap={1.5}>
+          <Stack direction="row" alignItems="center" gap={1.5} flex={1}>
             {hasBackAction && <BackButton onClick={navigateBack} />}
             {startSlot}
-            <Stack>
+            <Stack flex={1}>
               <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
                 {overlineSlot}
               </Typography>
@@ -103,26 +128,31 @@ export function AppBar() {
         </Stack>
 
         {config.showProjectSelector && (
-          <Button sx={{ justifyContent: "space-between", p: 0 }} onClick={openProjectSelector} disableRipple>
-            <Stack direction="row" sx={{ alignItems: "center" }} gap={1}>
+          <Button sx={{ justifyContent: "space-between", p: 0, mt: 2 }} onClick={openProjectSelector} disableRipple>
+            <Stack direction="row" sx={{ alignItems: "center", flexGrow: 1, minWidth: 0, gap: 1 }}>
               <Folder color={theme.palette.text.secondary} size={pxToRem(18)} />
-              <Typography variant="body1" color="text.secondary" sx={{ textTransform: "initial" }}>
+              <Typography variant="body1" color="text.secondary" sx={{ textTransform: "initial" }} noWrap>
                 {project.name}
               </Typography>
             </Stack>
             <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />
           </Button>
         )}
+
         {config.showChips && (
           <Stack direction="row" gap={2} mt={1.5}>
-            <Chip
-              label={project.status}
-              size="small"
-              sx={(theme) => ({
-                bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-                color: theme.palette[statusChipColorVariant].light,
-              })}
-            />
+            {project.status ? (
+              <Chip
+                label={project.status}
+                size="small"
+                sx={(theme) => ({
+                  bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+                  color: theme.palette[statusChipColorVariant].light,
+                })}
+              />
+            ) : (
+              <Skeleton variant="rounded" width={80} height={24} />
+            )}
             <Chip label={project.type} size="small" sx={{ alignSelf: "start" }} />
           </Stack>
         )}
@@ -137,31 +167,44 @@ export function AppBar() {
   );
 }
 
-function NotificationButton({ to }: { to: string }) {
-  const theme = useTheme();
-
-  return (
-    <IconButton
-      aria-label="Open notifications"
-      component={Link}
-      to={to}
-      sx={{
-        position: "absolute",
-        right: 10,
-        top: 10,
-        p: 0,
-      }}
-    >
-      <Bell size={pxToRem(20)} color={theme.palette.text.secondary} />
-      <NotificationBadge badgeContent={1} color="primary" overlap="circular" />
-    </IconButton>
-  );
-}
-
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <IconButton aria-label="Go back" onClick={onClick} sx={{ p: 0 }} disableRipple>
       <ArrowLeft size={pxToRem(20)} />
     </IconButton>
+  );
+}
+
+export function ExitButton() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <IconButton
+        disableRipple
+        color="error"
+        sx={{
+          gap: 1,
+          position: "absolute",
+          top: "var(--safe-top)",
+          left: 10,
+          p: 0,
+        }}
+        onClick={() => setOpen(true)}
+      >
+        <Grip size={pxToRem(20)} />
+        <Typography>Go to Apps</Typography>
+      </IconButton>
+
+      <ConfirmDialog
+        open={open}
+        title="Return to Apps"
+        description="Are you sure you want to leave this application?"
+        confirmColor="error"
+        confirmLabel="Leave"
+        onClose={() => setOpen(false)}
+        onConfirm={goToMyAppsScreen}
+      />
+    </>
   );
 }

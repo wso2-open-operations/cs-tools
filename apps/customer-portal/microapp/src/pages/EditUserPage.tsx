@@ -16,111 +16,193 @@
 
 import { useState, type ReactNode } from "react";
 import {
+  alpha,
   Avatar,
   Box,
   Button,
   Card,
-  Chip,
-  colors,
-  FormControlLabel,
+  CircularProgress,
   pxToRem,
-  Radio,
-  RadioGroup,
   Stack,
   TextField,
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Link, useLocation } from "react-router-dom";
-import { InvitationSummaryContent, RoleSelector, type RoleName } from "@components/features/users";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { InvitationSummaryContent, RoleSelector } from "@components/features/users";
 import { useProject } from "@context/project";
-
-import { MOCK_PROJECTS } from "@src/mocks/data/projects";
 import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { stringAvatar } from "@utils/others";
+import type { Role } from "@src/types";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { users } from "../services/users";
+import { projects } from "../services/projects";
+import { useNotify } from "../context/snackbar";
+import { ConfirmDialog } from "../components/shared/ConfirmDialog";
 
 export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "edit" }) {
   const location = useLocation();
-  const state = location.state as { email?: string; role?: RoleName; name?: string };
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const state = location.state as { email?: string; role?: Role; firstName?: string; lastName?: string };
 
-  const [role, setRole] = useState<RoleName>(state?.role ?? "Admin");
+  const defaultUserRole = "Portal User";
+  const [role, setRole] = useState<Role>(
+    state?.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole,
+  );
   const [email, setEmail] = useState(state?.email ?? "");
-  const [name, setName] = useState(state?.name ?? "");
-  const [userStatus, setUserStatus] = useState("active");
+  const [firstName, setFirstName] = useState(state?.firstName ?? "");
+  const [lastName, setLastName] = useState(state?.lastName ?? "");
 
   const { projectId } = useProject();
-  const project = MOCK_PROJECTS.find((project) => project.id === projectId);
+  const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
+  const notify = useNotify();
+
+  const createUserMutation = useMutation({
+    ...users.create(projectId!),
+    onSuccess: () => {
+      queryClient.resetQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+    onError: () => notify.error("Failed to invite user. Please try again."),
+  });
+
+  const editUserMutation = useMutation({
+    ...users.edit(projectId!, email),
+    onSuccess: () => {
+      queryClient.resetQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+    onError: () => notify.error("Failed to edit user. Please try again."),
+  });
+
+  const deleteUserMutation = useMutation({
+    ...users.delete(projectId!, email),
+    onSuccess: () => {
+      queryClient.resetQueries({ queryKey: ["users", projectId] });
+      navigate(-1);
+    },
+    onError: () => notify.error("Failed to delete user. Please try again."),
+  });
 
   return (
-    <Stack gap={2}>
-      {/* TODO: Replace hardcoded `lastActive` value with backend-provided data once user activity tracking is integrated. */}
-      {mode === "edit" && <UserSummaryCard name={name} email={email} lastActive="2 hours ago" />}
-      {mode === "invite" && <InvitationNotice />}
-      <SectionCard title="User Details">
-        <Stack gap={2}>
-          <TextField
-            size="small"
-            label="Email Address"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            helperText={mode === "edit" ? "Email cannot be edited" : undefined}
-            slotProps={{
-              htmlInput: { readOnly: mode === "edit" },
-            }}
-          />
-          <TextField
-            size="small"
-            label="Full Name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            helperText={mode === "edit" ? "Name cannot be edited" : undefined}
-            slotProps={{
-              htmlInput: { readOnly: mode === "edit" },
-            }}
-          />
-        </Stack>
-      </SectionCard>
+    <>
+      <Stack gap={2}>
+        {mode === "edit" && <UserSummaryCard firstName={firstName} lastName={lastName} email={email} />}
+        {mode === "invite" && <InvitationNotice />}
+        <SectionCard title="User Details">
+          <Stack gap={2}>
+            <TextField
+              size="small"
+              label="Email Address"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              helperText={mode === "edit" ? "Email cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
 
-      <SectionCard title="User Role">
-        <RoleSelector value={role} onChange={setRole} />
-      </SectionCard>
+            <TextField
+              size="small"
+              label="First Name"
+              value={firstName}
+              onChange={(event) => setFirstName(event.target.value)}
+              helperText={mode === "edit" ? "First Name cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
 
-      {mode === "edit" && (
-        <SectionCard title="User Status">
-          <UserStatusSelector value={userStatus} onChange={setUserStatus} />
+            <TextField
+              size="small"
+              label="Last Name"
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+              helperText={mode === "edit" ? "Last Name cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
+          </Stack>
         </SectionCard>
-      )}
 
-      {mode === "invite" && (
-        <>
-          <SectionCard title="Invitation Summary">
-            <InvitationSummaryContent projectName={project?.name} email={email} name={name} role={role} />
-          </SectionCard>
-          <ExpirationNotice />
-        </>
-      )}
+        <SectionCard title="User Role">
+          <RoleSelector value={role} onChange={setRole} />
+        </SectionCard>
 
-      {mode === "edit" && (
-        <>
-          <PermissionDetails />
-          <DangerZone />
-        </>
-      )}
+        {mode === "invite" && (
+          <>
+            <SectionCard title="Invitation Summary">
+              <InvitationSummaryContent
+                projectName={project?.name}
+                email={email}
+                name={firstName + " " + lastName}
+                role={role}
+              />
+            </SectionCard>
+            <ExpirationNotice />
+          </>
+        )}
 
-      {/* TODO: Implement proper submission handling */}
-      <Button variant="contained" component={Link} to="/users" sx={{ textTransform: "initial" }}>
-        {mode === "invite" ? "Send Invitation" : "Save Changes"}
-      </Button>
+        {mode === "edit" && (
+          <>
+            <PermissionDetails />
+            <DangerZone onDelete={deleteUserMutation.mutate} isPending={deleteUserMutation.isPending} />
+          </>
+        )}
 
-      <Button
-        variant="outlined"
-        component={Link}
-        sx={{ textTransform: "initial", bgcolor: "background.paper" }}
-        to="/users"
-      >
-        Cancel
-      </Button>
-    </Stack>
+        <Button
+          disabled={
+            mode === "edit"
+              ? role === (state.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole) ||
+                editUserMutation.isPending
+              : createUserMutation.isPending
+          }
+          variant="contained"
+          startIcon={
+            createUserMutation.isPending || editUserMutation.isPending ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : undefined
+          }
+          onClick={() => {
+            if (mode === "invite")
+              createUserMutation.mutate({
+                contactEmail: email,
+                contactFirstName: firstName,
+                contactLastName: lastName,
+                isCsIntegrationUser: false,
+                isSecurityContact: role == "System User",
+              });
+
+            if (mode === "edit") {
+              const isSecurityContact = role === "System User";
+
+              editUserMutation.mutate({
+                isSecurityContact,
+              });
+            }
+          }}
+        >
+          {mode === "invite"
+            ? createUserMutation.isPending
+              ? "Sending..."
+              : "Send Invitation"
+            : editUserMutation.isPending
+              ? "Saving..."
+              : "Save Changes"}
+        </Button>
+
+        <Button
+          variant="outlined"
+          component={Link}
+          sx={{ textTransform: "initial", bgcolor: "background.paper" }}
+          to="/users"
+        >
+          Cancel
+        </Button>
+      </Stack>
+    </>
   );
 }
 
@@ -136,13 +218,19 @@ function SectionCard({ title, children }: { title: string; children: ReactNode }
 }
 
 function InvitationNotice() {
+  const theme = useTheme();
+
   return (
-    <Card component={Stack} direction="row" gap={2} sx={{ bgcolor: colors.blue[50], p: 1.5 }}>
-      <Box color={colors.indigo[500]}>
+    <Card
+      component={Stack}
+      direction="row"
+      sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5, gap: 2 })}
+    >
+      <Box color={theme.palette.info.main}>
         <Info size={pxToRem(18)} />
       </Box>
       <Stack>
-        <Typography variant="body2" fontWeight="medium" color={colors.indigo[500]}>
+        <Typography variant="body2" fontWeight="medium" color="info">
           Direct User Invitation
         </Typography>
         <Typography variant="subtitle2" color="text.secondary">
@@ -181,8 +269,8 @@ function ExpirationNotice() {
 
 function PermissionDetails() {
   return (
-    <Card component={Stack} sx={{ bgcolor: colors.blue[50], p: 1.5 }}>
-      <Typography variant="body2" fontWeight="medium" color={colors.indigo[500]}>
+    <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5 })}>
+      <Typography variant="body2" fontWeight="medium" color="info">
         Permission Details
       </Typography>
       <ul style={{ margin: 0, marginTop: 3, paddingLeft: 20 }}>
@@ -211,7 +299,7 @@ function PermissionDetails() {
   );
 }
 
-function UserSummaryCard({ name, email, lastActive }: { name: string; email: string; lastActive: string }) {
+function UserSummaryCard({ firstName, lastName, email }: { firstName: string; lastName: string; email: string }) {
   const theme = useTheme();
 
   return (
@@ -225,11 +313,11 @@ function UserSummaryCard({ name, email, lastActive }: { name: string; email: str
           fontWeight: "medium",
         })}
       >
-        {stringAvatar(name)}
+        {stringAvatar(firstName)}
       </Avatar>
       <Stack textAlign="center" gap={0.5}>
         <Typography variant="h5" fontWeight="medium">
-          {name}
+          {firstName + " " + lastName}
         </Typography>
         <Stack direction="row" justifyContent="center" alignItems="center" gap={1}>
           <Mail size={pxToRem(16)} color={theme.palette.text.secondary} />
@@ -237,61 +325,48 @@ function UserSummaryCard({ name, email, lastActive }: { name: string; email: str
             {email}
           </Typography>
         </Stack>
-        <Typography variant="caption" fontWeight="regular" color="text.secondary">
-          Last Active: {lastActive}
-        </Typography>
       </Stack>
     </Card>
   );
 }
 
-function DangerZone() {
-  return (
-    <Card component={Stack} sx={{ bgcolor: colors.red[50], p: 1.5 }}>
-      <Typography variant="body2" fontWeight="medium" color="error">
-        Danger Zone
-      </Typography>
-      <Typography variant="subtitle2" color="text.secondary">
-        Send an email invitation directly to a user to join this project. The invitation link will be valid for 7 days.
-      </Typography>
-      <Button variant="contained" color="error" startIcon={<Trash2 />} sx={{ mt: 3 }}>
-        Remove User from Project
-      </Button>
-    </Card>
-  );
-}
+function DangerZone({ isPending, onDelete }: { isPending: boolean; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
 
-function UserStatusSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <RadioGroup value={value} onChange={(event) => onChange(event.target.value)}>
-      <FormControlLabel
-        value="active"
-        control={<Radio />}
-        labelPlacement="start"
-        sx={{
-          m: 0,
-          justifyContent: "space-between",
+    <>
+      <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.error.main, 0.2), p: 1.5 })}>
+        <Typography variant="body2" fontWeight="medium" color="error">
+          Danger Zone
+        </Typography>
+        <Typography variant="subtitle2" color="text.secondary">
+          Send an email invitation directly to a user to join this project. The invitation link will be valid for 7
+          days.
+        </Typography>
+        <Button
+          variant="contained"
+          color="error"
+          disabled={isPending}
+          startIcon={isPending ? <CircularProgress size={16} color="inherit" /> : <Trash2 />}
+          sx={{ mt: 3 }}
+          onClick={() => setOpen(true)}
+        >
+          {isPending ? "Removing..." : "Remove User from Project"}
+        </Button>
+      </Card>
+
+      <ConfirmDialog
+        open={open}
+        title="Remove User"
+        description="Are you sure you want to remove this user?"
+        confirmColor="error"
+        confirmLabel="Remove"
+        onClose={() => setOpen(false)}
+        onConfirm={() => {
+          setOpen(false);
+          onDelete();
         }}
-        label={
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Chip size="small" label="Active" color={value === "active" ? "primary" : "default"} />
-          </Stack>
-        }
-      ></FormControlLabel>
-      <FormControlLabel
-        value="inactive"
-        control={<Radio />}
-        labelPlacement="start"
-        sx={{
-          m: 0,
-          justifyContent: "space-between",
-        }}
-        label={
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Chip size="small" label="Inactive" color={value === "inactive" ? "primary" : "default"} />
-          </Stack>
-        }
-      ></FormControlLabel>
-    </RadioGroup>
+      />
+    </>
   );
 }

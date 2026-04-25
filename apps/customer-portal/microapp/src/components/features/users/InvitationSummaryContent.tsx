@@ -36,11 +36,11 @@ export function InvitationSummaryContent({ projectName, email, name, role }: Inv
   return (
     <Stack gap={1}>
       {summary.map((item) => (
-        <Stack direction="row" justifyContent="space-between">
+        <Stack direction="row" justifyContent="space-between" gap={5}>
           <Typography variant="body2" color="text.secondary">
             {item.label}
           </Typography>
-          <Typography component="span" variant="body2">
+          <Typography component="span" variant="body2" textAlign="right">
             {item.value}
           </Typography>
         </Stack>

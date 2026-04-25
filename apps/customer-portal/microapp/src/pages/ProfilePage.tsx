@@ -14,33 +14,61 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// TODO: This page currently contains placeholder values and static content.
-//       All displayed data (names, avatars, dates, etc.) will be replaced
-//       with dynamic values in the future.
-
-import { useLayoutEffect, type ReactNode } from "react";
-import { Card, Divider, Stack, Switch, Typography, colors } from "@wso2/oxygen-ui";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { Card, Divider, Skeleton, Stack, Switch, Typography, colors } from "@wso2/oxygen-ui";
 import { Bell, BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-icons-react";
 import { useLayout } from "@context/layout";
 import { SettingListItem } from "@components/features/settings";
 import { Avatar } from "@components/features/users";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { users } from "@src/services/users";
+import { useProject } from "../context/project";
+import { projects } from "../services/projects";
+import { useNotify } from "../context/snackbar";
+import { metadata } from "../services/metadata";
+import { getVersion, openUrl } from "../components/microapp-bridge";
+import { CHANGE_PASSWORD_URL } from "../config/endpoints";
+import { useMe } from "../context/me";
 
 export default function ProfilePage() {
   const layout = useLayout();
+  const notify = useNotify();
+  const queryClient = useQueryClient();
+  const { projectId, noveraEnabled, kbReferencesEnabled } = useProject();
+  const { isAdmin } = useMe();
+  const { data } = useQuery(users.me());
+  const name = data ? data?.firstName + " " + data?.lastName : undefined;
+
+  const projectEditMutation = useMutation({
+    ...projects.edit(projectId!),
+    onError: (_, variables) => {
+      notify.error("Failed to update project. Please try again.");
+      if (variables.hasAgent) setIsNoveraEnabled(!variables.hasAgent);
+      if (variables.hasKbReferences) setIsKbReferencesEnabled(!variables.hasKbReferences);
+    },
+    onSuccess: () => queryClient.refetchQueries({ queryKey: projects.get(projectId!).queryKey }),
+  });
 
   const AppBarSlot = () => (
-    <Stack direction="row" alignItems="center" gap={1.5} mt={1}>
-      <Avatar>John Smith</Avatar>
-      <Stack>
-        <Typography variant="h6" fontWeight="medium">
-          John Smith
-        </Typography>
-        <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-          Customer since 2024
-        </Typography>
-      </Stack>
+    <Stack direction="row" alignItems="center" gap={1.5} mt={-2}>
+      {name ? <Avatar>{name}</Avatar> : <Skeleton variant="circular" width={40} height={40} sx={{ flexShrink: 0 }} />}
+      <Typography variant="h6" fontWeight="medium" sx={{ flex: 1 }}>
+        {name ?? <Skeleton variant="text" width="100%" height={30} />}
+      </Typography>
     </Stack>
   );
+
+  const prefetch = () => {
+    queryClient.prefetchQuery(metadata.get());
+  };
+
+  const [isNoveraEnabled, setIsNoveraEnabled] = useState(noveraEnabled);
+  const [isKbReferencesEnabled, setIsKbReferencesEnabled] = useState(kbReferencesEnabled);
+  const [version, setVersion] = useState<string | undefined>(undefined);
+
+  useEffect(() => getVersion((version) => setVersion(version)));
+
+  useEffect(prefetch, []);
 
   useLayoutEffect(() => {
     layout.setAppBarSlotsOverride(<AppBarSlot />);
@@ -48,44 +76,98 @@ export default function ProfilePage() {
     return () => {
       layout.setAppBarSlotsOverride(undefined);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   return (
     <Stack gap={2.5}>
       <SectionCard title="Account Information">
-        <SettingListItem name="Email" value="user@example.com" icon={Mail} />
-        <SettingListItem name="Phone" value="+1 (555) 123-4567" icon={Phone} />
-        <SettingListItem name="Timezone" value="Eastern Time (ET) - UTC-5" icon={Clock4} />
+        <SettingListItem
+          name="Email"
+          value={data?.email ?? <Skeleton variant="text" width="100%" height={25} />}
+          icon={Mail}
+        />
+        <SettingListItem
+          name="Phone"
+          value={data?.phoneNumber ?? (data ? "Not Configured" : <Skeleton variant="text" width="100%" height={25} />)}
+          icon={Phone}
+        />
+        <SettingListItem
+          name="Timezone"
+          value={
+            data ? (
+              data.timezone === "--None--" ? (
+                "Not Configured"
+              ) : (
+                data.timezone
+              )
+            ) : (
+              <Skeleton variant="text" width="100%" height={25} />
+            )
+          }
+          icon={Clock4}
+        />
       </SectionCard>
 
       <SectionCard title="Settings">
-        <SettingListItem name="Change Password" suffix="chevron" icon={Lock} />
-        <SettingListItem name="Update Profile" suffix="chevron" icon={User} />
+        <SettingListItem
+          name="Change Password"
+          suffix="chevron"
+          icon={Lock}
+          onClick={() =>
+            openUrl({
+              url: CHANGE_PASSWORD_URL,
+              presentationStyle: "FormSheet",
+              dismissButtonStyle: "close",
+            })
+          }
+        />
+        <SettingListItem name="Update Profile" suffix="chevron" icon={User} to="/profile/update" />
       </SectionCard>
 
       <SectionCard title="Notifications">
         <SettingListItem name="Push Notifications" icon={Bell} suffix={<Switch defaultChecked />} />
       </SectionCard>
 
-      <SectionCard title="AI Features">
-        <SettingListItem
-          name="AI Chat Assistant"
-          description="Enable AI-powered chat support"
-          iconColor={colors.purple[500]}
-          icon={Bot}
-          suffix={<Switch defaultChecked />}
-        />
-        <SettingListItem
-          name="Smart Knowledge Base"
-          description="Get intelligent article suggestions"
-          iconColor={colors.blue[500]}
-          icon={BookOpen}
-          suffix={<Switch defaultChecked />}
-        />
-      </SectionCard>
-      <Typography variant="caption" color="text.secondary" textAlign="center" sx={{ py: 1 }}>
-        Version 1.0.0
-      </Typography>
+      {isAdmin && (
+        <SectionCard title="AI Features">
+          <SettingListItem
+            name="AI Chat Assistant"
+            description="Enable AI-powered chat support"
+            iconColor={colors.purple[500]}
+            icon={Bot}
+            suffix={
+              <Switch
+                checked={isNoveraEnabled}
+                onChange={(event) => {
+                  projectEditMutation.mutate({ hasAgent: event.target.checked });
+                  setIsNoveraEnabled(!isNoveraEnabled);
+                }}
+              />
+            }
+          />
+          <SettingListItem
+            name="Smart Knowledge Base"
+            description="Get intelligent article suggestions"
+            iconColor={colors.blue[500]}
+            icon={BookOpen}
+            suffix={
+              <Switch
+                checked={isKbReferencesEnabled}
+                onChange={(event) => {
+                  projectEditMutation.mutate({ hasKbReferences: event.target.checked });
+                  setIsKbReferencesEnabled(!isKbReferencesEnabled);
+                }}
+              />
+            }
+          />
+        </SectionCard>
+      )}
+      {version && (
+        <Typography variant="caption" color="text.secondary" textAlign="center" sx={{ py: 1 }}>
+          Version {version}
+        </Typography>
+      )}
     </Stack>
   );
 }

@@ -16,9 +16,40 @@
 
 import { useState } from "react";
 import { ProjectContext } from "./ProjectContext";
+import { useQuery } from "@tanstack/react-query";
+import { projects } from "src/services/projects";
+import { setLastVisitedProjectId } from "@root/src/utils/others";
 
 export default function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(null);
 
-  return <ProjectContext.Provider value={{ projectId, setProjectId }}>{children}</ProjectContext.Provider>;
+  const { data } = useQuery({
+    ...projects.get(projectId!),
+    enabled: !!projectId,
+  });
+
+  const { data: features } = useQuery({
+    ...projects.features(projectId!),
+    enabled: !!projectId,
+  });
+
+  const setAndStoreProjectId = (id: string | null) => {
+    setProjectId(id);
+    setLastVisitedProjectId(id); // local storage
+  };
+
+  return (
+    <ProjectContext.Provider
+      value={{
+        projectId,
+        noveraEnabled: data?.agentEnabled ?? false,
+        kbReferencesEnabled: data?.kbReferencesEnabled ?? false,
+        setProjectId: setAndStoreProjectId,
+        features,
+        projectTypeId: data?.typeId,
+      }}
+    >
+      {children}
+    </ProjectContext.Provider>
+  );
 }

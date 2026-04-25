@@ -14,26 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { alpha, Chip, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
-import type { ProjectCardProps } from "@components/features/projects";
+import { alpha, Chip, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
 import { Circle } from "@mui/icons-material";
+import type { Project } from "@src/types";
 
 import { PROJECT_STATUS_META } from "@config/constants";
 
-export function ProjectPopoverItem({
-  name,
-  type,
-  status,
-  numberOfOpenCases,
-  active = false,
-  onClick,
-}: Pick<ProjectCardProps, "name" | "type" | "status" | "numberOfOpenCases"> & {
+type ProjectPopoverItemProps = Pick<Project, "name" | "type" | "status" | "metrics"> & {
   active?: boolean;
   onClick: () => void;
-}) {
+};
+
+export function ProjectPopoverItem({ name, type, status, metrics, active = false, onClick }: ProjectPopoverItemProps) {
   const theme = useTheme();
-  const statusChipColorVariant = PROJECT_STATUS_META[status].color;
+  const statusChipColorVariant = status ? PROJECT_STATUS_META[status].color : "default";
 
   return (
     <Stack
@@ -45,21 +40,25 @@ export function ProjectPopoverItem({
       py={0.5}
       onClick={onClick}
     >
-      <Stack direction="row" gap={1}>
-        <Typography variant="subtitle1" fontWeight="medium" color="text.primary">
+      <Stack direction="row" justifyContent="space-between" alignItems="center" width="100%" gap={1}>
+        <Typography variant="subtitle1" fontWeight="medium" color="text.primary" textAlign="left">
           {name}
         </Typography>
-        {active && <Check color={theme.palette.primary.main} />}
+        {active && <Check style={{ flexShrink: 0 }} color={theme.palette.primary.main} />}
       </Stack>
       <Stack direction="row" alignItems="center" gap={1.5}>
-        <Chip
-          label={status}
-          size="small"
-          sx={(theme) => ({
-            bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-            color: theme.palette[statusChipColorVariant].light,
-          })}
-        />
+        {status ? (
+          <Chip
+            label={status}
+            size="small"
+            sx={(theme) => ({
+              bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
+              color: theme.palette[statusChipColorVariant].light,
+            })}
+          />
+        ) : (
+          <Skeleton variant="rounded" width={80} height={24} />
+        )}
         <Typography color="text.secondary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}>
           {type}
         </Typography>
@@ -67,7 +66,7 @@ export function ProjectPopoverItem({
       <Stack direction="row" alignItems="center" gap={1}>
         <Circle sx={(theme) => ({ fontSize: theme.typography.pxToRem(6), color: "primary.main" })} />
         <Typography color="text.secondary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}>
-          {numberOfOpenCases} Open Cases
+          {metrics.cases ?? 0} Open Cases
         </Typography>
       </Stack>
     </Stack>

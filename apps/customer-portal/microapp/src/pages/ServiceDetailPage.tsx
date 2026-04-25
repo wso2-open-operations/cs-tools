@@ -14,126 +14,198 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useLayoutEffect, useState } from "react";
-import { Chip, Grid, Stack } from "@wso2/oxygen-ui";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Timeline } from "@mui/lab";
-import { Comment, InfoField, OverlineSlot, StickyCommentBar, TimelineEntry } from "@components/features/detail";
+import { Comment, CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { ChecklistItem } from "@components/features/chat";
 import { useLayout } from "@context/layout";
+import { RichText, SectionCard } from "@components/shared";
+import { useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { serviceRequests } from "../services/services";
+import { cases } from "@src/services/cases";
+import { stripHtmlTags } from "@utils/others";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import DOMPurify from "dompurify";
 
-import { MOCK_REQUIREMENTS, MOCK_TIMELINE_DATA, MOCK_UPDATES } from "@src/mocks/data/service";
-import { SectionCard } from "@components/shared";
+dayjs.extend(relativeTime);
 
 export default function ServiceDetailPage() {
   const layout = useLayout();
+  const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
-  const [updates, setUpdates] = useState(MOCK_UPDATES);
+
+  const { id } = useParams();
+  const { data, isLoading } = useQuery(serviceRequests.get(id!));
+  const { data: comments, isFetching: isCommentsRefetching } = useQuery({
+    ...cases.comments(id!),
+    select: (data) => [...data].sort((a, b) => a.createdOn.getTime() - b.createdOn.getTime()),
+  });
+
+  const mutation = useMutation({
+    ...cases.createComment(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: cases.comments(id!).queryKey });
+      setComment("");
+    },
+  });
+
+  const isSendingComment = mutation.status !== "idle" && mutation.isPending && isCommentsRefetching;
 
   const handleSend = () => {
     if (!comment.trim()) return;
-    setUpdates((prev) => [...prev, { author: "You", timestamp: "Just Now", content: comment }]);
+
+    mutation.mutate({
+      content: comment,
+      type: "comments",
+    });
   };
 
-  const AppBarSlot = () => (
-    <Stack direction="row" gap={1.5} mt={1}>
-      <StatusChip status="in progress" size="small" />
-      <PriorityChip priority="high" size="small" />
-      <Chip label="Environment Setup" size="small" />
-    </Stack>
-  );
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const next = entry.isIntersecting ? "normal" : "shrunk";
+        setOverlineSlotVariant(next);
+      },
+      {
+        root: null,
+        rootMargin: "-80px 0px 0px 0px",
+        threshold: 1.0,
+      },
+    );
+
+    observer.observe(element);
+
+    return () => observer.unobserve(element);
+  }, []);
 
   useLayoutEffect(() => {
-    layout.setTitleOverride("Enable additional API Manager environment");
-    layout.setOverlineSlotOverride(<OverlineSlot type="service" id="SR-1234" />);
-    layout.setAppBarSlotsOverride(<AppBarSlot />);
+    layout.setTitleOverride(
+      <OverlineSlot variant={overlineSlotVariant} type="service" id={data?.number} title={data?.title} />,
+    );
 
     return () => {
       layout.setTitleOverride(undefined);
-      layout.setOverlineSlotOverride(undefined);
-      layout.setAppBarSlotsOverride(undefined);
     };
-  }, []);
+  }, [data, overlineSlotVariant]);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [comments]);
 
   return (
     <>
       <Stack gap={2} mb={10}>
+        <Typography ref={ref} variant="h5" fontWeight="medium">
+          {data?.title}
+        </Typography>
         <SectionCard title="Request Information">
           <Grid spacing={1.5} container>
             <Grid size={12}>
+              <InfoField label="Description" value={data?.description ? stripHtmlTags(data.description) : undefined} />
+            </Grid>
+            <Grid size={6}>
               <InfoField
-                label="Description"
-                value="We need to enable an additional staging environment for API Manager to support our development team's testing requirements. This environment should mirror our production setup with the same configuration and policies."
+                label="Status"
+                value={
+                  data?.statusId ? (
+                    <StatusChip type="service" id={data.statusId} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
               />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Requested By" value="John Smith" icon={User} />
+              <InfoField
+                label="Priority"
+                value={
+                  data?.statusId ? (
+                    <PriorityChip id={data.severityId} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
+              />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Assigned To" value="DevOps Team" icon={Users} />
+              <InfoField label="Requested By" value={isLoading ? undefined : (data?.createdBy ?? "N/A")} icon={User} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Created" value="Nov 18, 2025 10:30 AM" />
+              <InfoField label="Assigned To" value={isLoading ? undefined : (data?.assignee ?? "N/A")} icon={Users} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Target Completion" value="Nov 20, 2025" />
+              <InfoField
+                label="Created"
+                value={data?.createdOn
+                  ?.toLocaleString("en-US", {
+                    month: "short",
+                    day: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                  })
+                  .replace("at", " ")}
+              />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Estimated Effort" value="4-6 hours" />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Approval Status" value={<StatusChip size="small" status="approved" />} />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Approved By" value="Manager - Jane Doe" />
+              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
             </Grid>
           </Grid>
         </SectionCard>
-        <SectionCard title="Requirements">
-          <Stack gap={0.5}>
-            {MOCK_REQUIREMENTS.map((text, index) => (
-              <ChecklistItem key={index} variant="checkbox">
-                {text}
-              </ChecklistItem>
-            ))}
-          </Stack>
-        </SectionCard>
-        <SectionCard title="Progress Timeline">
-          <Timeline
-            position="right"
-            sx={{
-              p: 0,
-              [`& .MuiTimelineItem-root:before`]: {
-                flex: 0,
-                padding: 0,
-              },
-            }}
-          >
-            {MOCK_TIMELINE_DATA.map((step, index) => (
-              <TimelineEntry
-                key={index}
-                variant="progress"
-                status={step.status}
-                title={step.title}
-                description={step.description}
-                timestamp={step.timestamp}
-                last={index === MOCK_TIMELINE_DATA.length - 1}
-              />
-            ))}
-          </Timeline>
+        <SectionCard title="Product & Environment">
+          <Grid spacing={1.5} container>
+            <Grid size={12}>
+              <InfoField label="Product Name" value={isLoading ? undefined : data?.product || "N/A"} />
+            </Grid>
+            <Grid size={12}>
+              <InfoField label="Version" value={isLoading ? undefined : data?.productVersion || "N/A"} />
+            </Grid>
+            <Grid size={12}>
+              <InfoField label="Deployment" value={isLoading ? undefined : data?.deployment || "N/A"} />
+            </Grid>
+          </Grid>
         </SectionCard>
         <SectionCard title="Updates">
           <Stack gap={2} pt={1}>
-            {updates.map(({ author, timestamp, content }, index) => (
-              <Comment author={author} timestamp={timestamp} key={index}>
-                {content}
-              </Comment>
-            ))}
+            {comments ? (
+              <>
+                {comments.map(({ id, content, createdOn, createdBy }) => (
+                  <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
+                    <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
+                  </Comment>
+                ))}
+              </>
+            ) : (
+              <>
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <CommentSkeleton key={index} />
+                ))}
+              </>
+            )}
           </Stack>
         </SectionCard>
       </Stack>
-      <StickyCommentBar placeholder="Add Comment" value={comment} onChange={setComment} onSend={handleSend} />
+      <StickyCommentBar
+        placeholder="Add Comment"
+        value={comment}
+        onChange={setComment}
+        onSend={handleSend}
+        loading={isSendingComment}
+      />
+
+      <div ref={bottomRef} />
     </>
   );
 }

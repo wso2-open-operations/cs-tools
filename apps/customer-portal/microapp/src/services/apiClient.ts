@@ -60,8 +60,14 @@ apiClient.interceptors.request.use(
       const token = await refreshTokenPromise;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        config.headers["x-user-id-token"] = token;
         config.headers["Content-Type"] = "application/json";
-        Logger.info("Added authorization token to request");
+
+        // NOTE: This header is intended for local development testing only.
+        // This manually injects the JWT assertion header and must remain disabled in production.
+        // if (import.meta.env.DEV) {
+        //   config.headers["x-jwt-assertion"] = token;
+        // }
       } else {
         Logger.warn("No token available for request");
       }

@@ -25,6 +25,7 @@ import {
   alpha,
   pxToRem,
   Typography,
+  FormHelperText,
 } from "@wso2/oxygen-ui";
 import { Sparkle } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
@@ -32,12 +33,16 @@ import type { ReactNode } from "react";
 interface SelectFieldProps {
   name: string;
   label: string | ReactNode;
-  options: { value: number; label: string | ReactNode }[];
-  value?: number;
+  options: { value: number | string; label: string | ReactNode }[];
+  value?: number | string;
   required?: boolean;
   aiLabel?: string;
+  placeholder?: string;
   startAdornment?: React.ReactNode;
-  onChange?: (event: SelectChangeEvent<number>) => void;
+  disabled?: boolean;
+  error?: boolean;
+  helperText?: string;
+  onChange?: (event: SelectChangeEvent<number | string>) => void;
 }
 
 export function SelectField({
@@ -45,8 +50,12 @@ export function SelectField({
   label,
   options,
   value = 0,
+  disabled = false,
   required = false,
+  error = false,
+  helperText,
   aiLabel,
+  placeholder,
   startAdornment,
   onChange,
 }: SelectFieldProps) {
@@ -73,11 +82,23 @@ export function SelectField({
         {aiLabel && <AILabel label={aiLabel} />}
       </Stack>
       <Select
+        error={error}
+        displayEmpty={placeholder !== undefined}
         name={name}
         value={value}
         sx={{ bgcolor: "background.paper" }}
         startAdornment={startAdornment}
         onChange={onChange}
+        disabled={disabled}
+        renderValue={(selected) => {
+          if (typeof selected === "string" && selected.length === 0)
+            return (
+              <Typography variant="body2" color="text.secondary">
+                {placeholder}
+              </Typography>
+            );
+          return options.find((option) => option.value === selected)?.label ?? selected;
+        }}
       >
         {options.map((option) => (
           <MenuItem key={option.value} value={option.value}>
@@ -85,6 +106,11 @@ export function SelectField({
           </MenuItem>
         ))}
       </Select>
+      {helperText && (
+        <FormHelperText error={error} sx={{ m: 0, mt: -0.5 }}>
+          {helperText}
+        </FormHelperText>
+      )}
     </FormControl>
   );
 }
@@ -96,9 +122,12 @@ export function TextField({
   multiline = false,
   rows = 10,
   required = false,
+  error = false,
   placeholder,
+  helperText,
   aiLabel,
   startAdornment,
+  disabled = false,
   onChange,
 }: {
   name: string;
@@ -110,8 +139,12 @@ export function TextField({
   required?: boolean;
   aiLabel?: string;
   startAdornment?: React.ReactNode;
+  error?: boolean;
+  helperText?: string;
+  disabled?: boolean;
 
   onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onBlur?: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
     <FormControl component={Stack} gap={1} fullWidth>
@@ -127,6 +160,8 @@ export function TextField({
         {aiLabel && <AILabel label={aiLabel} />}
       </Stack>
       <MuiTextField
+        disabled={disabled}
+        error={error}
         name={name}
         value={value}
         placeholder={placeholder}
@@ -136,7 +171,7 @@ export function TextField({
           lineHeight: multiline ? 1.65 : undefined,
 
           "& .MuiOutlinedInput-root": {
-            bgcolor: "background.default",
+            bgcolor: "background.paper",
           },
         }}
         slotProps={{
@@ -146,6 +181,11 @@ export function TextField({
         }}
         onChange={onChange}
       />
+      {helperText && (
+        <FormHelperText error={error} sx={{ m: 0, mt: -0.5 }}>
+          {helperText}
+        </FormHelperText>
+      )}
     </FormControl>
   );
 }

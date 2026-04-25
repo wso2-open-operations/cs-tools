@@ -17,23 +17,21 @@
 import { Stack, Chip, Radio, RadioGroup, FormControlLabel, Box, pxToRem, useRadioGroup } from "@wso2/oxygen-ui";
 import { ShieldUser } from "@wso2/oxygen-ui-icons-react";
 import { MOCK_ROLES } from "@src/mocks/data/users";
+import type { Role } from "@root/src/types";
 
 export type RoleName = (typeof MOCK_ROLES)[number]["name"];
 
-const ROLE_NAMES = MOCK_ROLES.map((role) => role.name);
-
 interface RoleSelectorProps {
-  value: RoleName;
-  onChange: (value: RoleName) => void;
+  value: Role;
+  onChange: (value: Role) => void;
 }
 
 export function RoleSelector({ value, onChange }: RoleSelectorProps) {
   return (
-    <RadioGroup value={value} onChange={(event) => onChange(event.target.value as RoleName)}>
+    <RadioGroup value={value} onChange={(event) => onChange(event.target.value as Role)}>
       <Stack gap={0.5}>
-        {ROLE_NAMES.map((role) => (
-          <RoleOption key={role} role={role} />
-        ))}
+        <RoleOption role="Portal User" />
+        <RoleOption role="System User" />
       </Stack>
     </RadioGroup>
   );

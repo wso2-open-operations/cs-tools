@@ -15,7 +15,7 @@
 // under the License.
 
 import { jwtDecode } from "jwt-decode";
-import { getToken } from "@components/microapp-bridge";
+import { getAccessTokenFromBridge, getToken } from "@components/microapp-bridge";
 import { LocalStorageKeys } from "@utils/constants";
 import { Logger } from "@utils/logger";
 import { useUserStore, type User } from "../store/user";
@@ -41,27 +41,32 @@ export const setIdToken = (token: string): void => localStorage.setItem(LocalSto
  * It fetches a new token and updates it in storage.
  */
 export const refreshToken = (): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    getToken((newIdToken: string | undefined) => {
-      if (newIdToken) {
-        setIdToken(newIdToken);
-        setAccessToken(newIdToken);
-
-        // Automatically decode and store user information when token is refreshed
-        try {
-          initializeUserFromToken();
-          Logger.info("User information updated after token refresh");
-        } catch (error) {
-          Logger.warn("Failed to update user information after token refresh", error);
-        }
-
-        resolve(newIdToken);
-      } else {
-        Logger.error("Failed to refresh token");
-        reject("Failed to refresh token");
-      }
-    });
+  const idTokenPromise = new Promise<string>((resolve, reject) => {
+    getToken((token) => (token ? resolve(token) : reject("ID Token failed")));
   });
+
+  const accessTokenPromise = new Promise<string>((resolve, reject) => {
+    getAccessTokenFromBridge((token) => (token ? resolve(token) : reject("Access Token failed")));
+  });
+
+  return Promise.all([idTokenPromise, accessTokenPromise])
+    .then(([newIdToken, newAccessToken]) => {
+      setIdToken(newIdToken);
+      setAccessToken(newAccessToken);
+
+      try {
+        initializeUserFromToken();
+        Logger.info("User information updated after full token refresh");
+      } catch (error) {
+        Logger.warn("Failed to update user information", error);
+      }
+
+      return newIdToken;
+    })
+    .catch((error) => {
+      Logger.error("Failed to refresh tokens", error);
+      throw error;
+    });
 };
 
 /**

@@ -15,13 +15,13 @@
 // under the License.
 
 import type { ReactNode } from "react";
-import { colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { colors, pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { TrendingDown, TrendingUp } from "@wso2/oxygen-ui-icons-react";
 import { WidgetBox } from "@components/ui";
 
 export interface MetricWidgetProps {
   label: string;
-  value: number | string;
+  value?: number | string;
   icon?: ReactNode;
   size?: "small" | "large";
   base?: boolean;
@@ -42,16 +42,22 @@ export function MetricWidget({ label, value, icon, size, base, trend }: MetricWi
 
         {trend && !base && (
           <Stack direction="row" gap={0.5} alignItems="center">
-            <TrendIcon size={pxToRem(20)} color={colors.green[500]} />
-            <Typography variant="body2" fontWeight="medium" sx={{ color: "components.portal.accent.green" }}>
-              {trend.value}
-            </Typography>
+            {value !== undefined ? (
+              <>
+                <TrendIcon size={pxToRem(20)} color={colors.green[500]} />
+                <Typography variant="body2" fontWeight="medium" sx={{ color: "components.portal.accent.green" }}>
+                  {trend.value}
+                </Typography>
+              </>
+            ) : (
+              <Skeleton variant="rounded" width={60} height={20} animation="wave" />
+            )}
           </Stack>
         )}
       </Stack>
 
       <Typography variant={small ? "h4" : "h4"} fontWeight="medium" sx={{ mt: 1 }}>
-        {value}
+        {value ?? <Skeleton width="60%" animation="wave" />}
       </Typography>
 
       <Typography variant={small ? "subtitle2" : "subtitle2"} fontWeight="medium" color="text.secondary">

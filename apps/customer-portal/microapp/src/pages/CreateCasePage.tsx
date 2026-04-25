@@ -15,18 +15,31 @@
 // under the License.
 
 import { useLocation, useNavigate } from "react-router-dom";
-import { Circle, Folder } from "@wso2/oxygen-ui-icons-react";
-import { Button, Stack, Typography, InputAdornment, pxToRem, colors } from "@wso2/oxygen-ui";
+import { Folder } from "@wso2/oxygen-ui-icons-react";
+import { Button, Stack, Typography, InputAdornment, pxToRem, CircularProgress, Grid, Box } from "@wso2/oxygen-ui";
 import { SelectField, TextField, ConversationSummary } from "@components/features/create";
 import { useFormik } from "formik";
-import { useEffect } from "react";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useProject } from "@context/project";
+import { projects } from "@src/services/projects";
+import { cases } from "@src/services/cases";
+import type { CaseClassificationResponseDto, Case } from "@src/types";
+import { useEffect, useMemo, useState } from "react";
+import * as Yup from "yup";
+import { overrideOrDefault } from "../utils/others";
+import { useNotify } from "../context/snackbar";
+import { useFilters } from "../context/filters";
+import { useLayout } from "../context/layout";
+import { RichText, SectionCard } from "../components/shared";
+import { InfoField } from "../components/features/detail";
+import DOMPurify from "dompurify";
 
 type CreateCaseFormValues = {
-  project: number;
-  product: number;
-  deployment: number;
-  type: number;
-  severity: number;
+  project: string;
+  product: string;
+  deployment: string;
+  type: string;
+  severity: string;
   title: string;
   description: string;
 };
@@ -34,168 +47,385 @@ type CreateCaseFormValues = {
 export default function CreateCasePage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const layout = useLayout();
   const messages = location.state?.messages || [];
+  const classifications: CaseClassificationResponseDto = location.state?.classifications;
+  const relatedCase: Case | undefined = location.state?.case;
+  const queryClient = useQueryClient();
+  const { projectId } = useProject();
+  const notify = useNotify();
 
-  const projects = [
-    { value: 0, label: "Dreamworks Inc" },
-    { value: 1, label: "Newsline Enterprise" },
-    { value: 2, label: "Goods Store Mart" },
-  ];
-
-  const products = [
-    { value: 0, label: "WSO2 API Manager v4.2.0" },
-    { value: 1, label: "WSO2 Identity Access Manager v4.2.0" },
-  ];
-
-  const deploymentTypes = [
-    { value: 0, label: "Production" },
-    { value: 1, label: "Staging" },
-    { value: 2, label: "Development" },
-  ];
-
-  const issueTypes = [
-    { value: 0, label: "Configuration Issue" },
-    { value: 1, label: "Query" },
-    { value: 2, label: "Security Vulnerability" },
-  ];
-
-  const severityLevels = [
-    {
-      value: 0,
-      label: (
-        <Stack direction="row" alignItems="center" gap={1}>
-          <Circle fill={colors.red[500]} color={colors.red[500]} size={pxToRem(12)} />
-          S1 Critical
-        </Stack>
-      ),
-    },
-    {
-      value: 1,
-      label: (
-        <Stack direction="row" alignItems="center" gap={1}>
-          <Circle fill={colors.orange[500]} color={colors.orange[500]} size={pxToRem(12)} />
-          S2 Medium
-        </Stack>
-      ),
-    },
-    {
-      value: 2,
-      label: (
-        <Stack direction="row" alignItems="center" gap={1}>
-          <Circle fill={colors.blue[500]} color={colors.blue[500]} size={pxToRem(12)} />
-          S3 Low
-        </Stack>
-      ),
-    },
-  ];
+  const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
 
   const formik = useFormik<CreateCaseFormValues>({
     initialValues: {
-      project: 0,
-      product: 0,
-      deployment: 0,
+      project: projectId!,
+      product: "",
+      deployment: "",
       title: "",
       description: "",
-      type: 0,
-      severity: 0,
+      type: "",
+      severity: "",
     },
-    onSubmit: () => {
-      navigate("/support");
+    validationSchema: createCaseValidationSchema,
+    validateOnBlur: true,
+    validateOnChange: true,
+    onSubmit: async (values) => {
+      mutation.mutateAsync({
+        type: "default_case",
+        projectId: values.project,
+        deploymentId: values.deployment,
+        deployedProductId: values.product,
+        title: values.title,
+        description: values.description,
+        issueTypeKey: Number(values.type),
+        severityKey: Number(values.severity),
+        relatedCaseId: relatedCase?.id,
+      });
     },
   });
 
-  // TODO: Remove this temporary auto-fill once backend integration is completed.
+  const { data: filters } = useFilters();
+  const issueTypeOptions = filters?.issueTypes.map((type) => ({ value: Number(type.id), label: type.label }));
+  const severityLevelOptions = filters?.severities.map((type) => ({
+    value: Number(type.id),
+    label: overrideOrDefault(type.label),
+  }));
+
+  const deploymentQuery = useQuery({
+    ...projects.deployments(formik.values.project),
+    enabled: !!formik.values.project,
+  });
+
+  const productQuery = useQuery({
+    ...projects.products(formik.values.deployment),
+    enabled: !!formik.values.deployment,
+  });
+
+  const projectsOptions = useSuspenseQuery(projects.all()).data.map((project) => ({
+    value: project.id,
+    label: project.name,
+  }));
+
+  const deploymentOptions = useMemo(
+    () => deploymentQuery.data?.map((deployment) => ({ value: deployment.id, label: deployment.name })) ?? [],
+    [deploymentQuery.data],
+  );
+
+  const productOptions = useMemo(
+    () =>
+      productQuery.data?.map((product) => ({
+        value: product.id,
+        label: product.name,
+      })) ?? [],
+    [productQuery.data],
+  );
+
+  const mutation = useMutation({
+    ...cases.create,
+    onSuccess: ({ id }) => {
+      queryClient.invalidateQueries({ queryKey: ["cases"] });
+      setTimeout(() => {
+        navigate(`/cases/${id}`);
+      }, 500);
+    },
+    onError: () => {
+      notify.error("Failed to create case. Please try again.");
+    },
+  });
+
   useEffect(() => {
-    formik.setFieldValue("title", "API Gateway timeout issues in production");
-    formik.setFieldValue(
-      "description",
-      "Novera: Hi! I'm Novera, your AI-powered support assistant. How can I help you today? Please describe the issue you're experiencing. Customer: fadfad Novera: Thanks for those details. Based on what you've shared, here are a few things to check:",
+    if (!classifications) return;
+
+    const autoFilledFields = new Set<keyof CreateCaseFormValues>();
+
+    const matchedDeployment = deploymentOptions.find((option) => option.label === classifications.caseInfo.environment);
+    if (matchedDeployment) {
+      formik.setFieldValue("deployment", matchedDeployment.value);
+      autoFilledFields.add("deployment");
+    }
+
+    const matchedProduct = productOptions.find((option) => option.label === classifications.caseInfo.productName);
+    if (matchedProduct) {
+      formik.setFieldValue("product", matchedProduct.value);
+      autoFilledFields.add("product");
+    }
+
+    const matchedType = issueTypeOptions?.find((option) => option.label === classifications.issueType);
+
+    if (matchedType) {
+      formik.setFieldValue("type", matchedType.value);
+      autoFilledFields.add("type");
+    }
+
+    const matchedSeverity = severityLevelOptions?.find((option) =>
+      option.label.includes(classifications.severityLevel),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    if (matchedSeverity) {
+      formik.setFieldValue("severity", matchedSeverity.value);
+      autoFilledFields.add("severity");
+    }
+
+    if (classifications.caseInfo.shortDescription) {
+      formik.setFieldValue("title", classifications.caseInfo.shortDescription);
+      autoFilledFields.add("title");
+    }
+
+    if (classifications.caseInfo.description) {
+      formik.setFieldValue("description", classifications.caseInfo.description);
+      autoFilledFields.add("description");
+    }
+
+    setClassified(autoFilledFields);
+  }, [classifications, deploymentOptions]);
+
+  useEffect(() => {
+    if (!relatedCase) return;
+
+    layout.setTitleOverride("Create Related Case");
+
+    formik.setFieldValue("title", relatedCase.title);
+
+    const matchedDeployment = deploymentOptions.find((option) => option.label === relatedCase.deployment);
+    if (matchedDeployment) {
+      formik.setFieldValue("deployment", matchedDeployment.value);
+    }
+
+    const matchedProduct = productOptions.find((option) => option.label === relatedCase.product);
+    if (matchedProduct) {
+      formik.setFieldValue("product", matchedProduct.value);
+    }
+
+    return () => layout.setTitleOverride(undefined);
+  }, [relatedCase, deploymentOptions]);
 
   return (
-    <form onSubmit={formik.handleSubmit}>
-      <Stack pb={5} gap={5}>
-        <Stack gap={2}>
-          <SelectField
-            name="project"
-            label="Project"
-            aiLabel="Auto Detected"
-            options={projects}
-            value={formik.values.project}
-            onChange={formik.handleChange}
-            startAdornment={
-              <InputAdornment position="start">
-                <Folder size={pxToRem(20)} />
-              </InputAdornment>
+    <>
+      {relatedCase && <RelatedCaseSection relatedCase={relatedCase} />}
+      <form onSubmit={formik.handleSubmit}>
+        <Stack pb={5} gap={5}>
+          <Stack gap={2}>
+            <SelectField
+              required
+              disabled
+              name="project"
+              label="Project"
+              options={projectsOptions}
+              value={formik.values.project}
+              onChange={(e) => {
+                formik.handleChange(e);
+                formik.setFieldValue("deployment", "");
+                formik.setFieldValue("product", "");
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete("deployment");
+                  next.delete("product");
+                  return next;
+                });
+              }}
+              startAdornment={
+                <InputAdornment position="start">
+                  <Folder size={pxToRem(20)} />
+                </InputAdornment>
+              }
+            />
+            <SelectField
+              required
+              name="deployment"
+              label="Deployment Type"
+              aiLabel={classified.has("deployment") ? "Auto Detected" : undefined}
+              placeholder="Select Deployment Type"
+              options={deploymentOptions}
+              value={formik.values.deployment}
+              onChange={(e) => {
+                formik.handleChange(e);
+                formik.setFieldValue("product", "");
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete("product");
+                  return next;
+                });
+              }}
+              disabled={!!relatedCase || !formik.values.project || deploymentQuery.isLoading}
+              error={formik.touched.deployment && Boolean(formik.errors.deployment)}
+              helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
+            />
+            <SelectField
+              required
+              name="product"
+              label="Product & Version"
+              aiLabel={classified.has("product") ? "Auto Detected" : undefined}
+              placeholder="Select Product & Version"
+              options={productOptions}
+              value={formik.values.product}
+              onChange={(e) => {
+                formik.handleChange(e);
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  return next;
+                });
+              }}
+              disabled={!!relatedCase || !formik.values.deployment || productQuery.isLoading}
+              error={formik.values.deployment ? formik.touched.product && Boolean(formik.errors.product) : false}
+              helperText={
+                formik.values.deployment
+                  ? formik.touched.product && formik.errors.product
+                    ? formik.errors.product
+                    : undefined
+                  : undefined
+              }
+            />
+          </Stack>
+          <Stack gap={2}>
+            <Typography variant="body1" fontWeight="medium">
+              Case Details
+            </Typography>
+
+            {relatedCase && (
+              <TextField required disabled name="relatedCaseId" label="Related Case ID" value={relatedCase.id} />
+            )}
+
+            <TextField
+              required
+              disabled={!!relatedCase}
+              name="title"
+              label="Issue Title"
+              placeholder="Briefly describe the issue"
+              aiLabel={classified.has("title") ? "Generated from Chat" : undefined}
+              value={formik.values.title}
+              onChange={(e) => {
+                formik.handleChange(e);
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  return next;
+                });
+              }}
+              error={formik.touched.title && Boolean(formik.errors.title)}
+              helperText={formik.touched.title && formik.errors.title ? formik.errors.title : undefined}
+            />
+
+            <TextField
+              required
+              multiline
+              name="description"
+              label="Case Description"
+              placeholder="Explain the issue, including any relevant details"
+              aiLabel={classified.has("description") ? "From Conversation" : undefined}
+              value={formik.values.description}
+              onChange={(e) => {
+                formik.handleChange(e);
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  return next;
+                });
+              }}
+              error={formik.touched.description && Boolean(formik.errors.description)}
+              helperText={
+                formik.touched.description && formik.errors.description ? formik.errors.description : undefined
+              }
+            />
+
+            <SelectField
+              required
+              name="type"
+              label="Issue Type"
+              placeholder="Select Issue Type"
+              aiLabel={classified.has("type") ? "AI Classified" : undefined}
+              options={issueTypeOptions ?? []}
+              value={formik.values.type}
+              onChange={(e) => {
+                formik.handleChange(e);
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  return next;
+                });
+              }}
+              error={formik.touched.type && Boolean(formik.errors.type)}
+              helperText={formik.touched.type && formik.errors.type ? formik.errors.type : undefined}
+            />
+
+            <SelectField
+              required
+              name="severity"
+              label="Severity Levels"
+              placeholder="Select Severity"
+              aiLabel={classified.has("severity") ? "AI Classified" : undefined}
+              options={severityLevelOptions ?? []}
+              value={formik.values.severity}
+              onChange={(e) => {
+                formik.handleChange(e);
+                setClassified((prev) => {
+                  const next = new Set(prev);
+                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  return next;
+                });
+              }}
+              error={formik.touched.severity && Boolean(formik.errors.severity)}
+              helperText={formik.touched.severity && formik.errors.severity ? formik.errors.severity : undefined}
+            />
+          </Stack>
+
+          {messages.length > 0 && <ConversationSummary messages={messages} />}
+
+          <Button
+            type="submit"
+            variant="contained"
+            startIcon={
+              formik.isSubmitting || mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
             }
-            required
-          />
-          <SelectField
-            name="product"
-            label="Product & Version"
-            aiLabel="Auto Detected"
-            options={products}
-            value={formik.values.product}
-            onChange={formik.handleChange}
-            required
-          />
-          <SelectField
-            name="deployment"
-            label="Deployment Type"
-            aiLabel="Auto Detected"
-            options={deploymentTypes}
-            value={formik.values.deployment}
-            onChange={formik.handleChange}
-            required
-          />
+            sx={{ textTransform: "initial" }}
+          >
+            {formik.isSubmitting ? "Saving..." : "Create Case"}
+          </Button>
         </Stack>
-        <Stack gap={2}>
-          <Typography variant="body1" fontWeight="medium">
-            Case Details
-          </Typography>
-          <TextField
-            name="title"
-            label="Issue Title"
-            aiLabel="Generated from Chat"
-            value={formik.values.title}
-            onChange={formik.handleChange}
-            required
-          />
-          <TextField
-            multiline
-            name="description"
-            label="Case Description"
-            aiLabel="From Coversation"
-            value={formik.values.description}
-            onChange={formik.handleChange}
-            required
-          />
-          <SelectField
-            name="type"
-            label="Issue Type"
-            aiLabel="AI Classified"
-            options={issueTypes}
-            value={formik.values.type}
-            onChange={formik.handleChange}
-            required
-          />
-          <SelectField
-            name="severity"
-            label="Severity Levels"
-            aiLabel="AI Accessed"
-            options={severityLevels}
-            value={formik.values.severity}
-            onChange={formik.handleChange}
-            required
-          />
-        </Stack>
-        <ConversationSummary messages={messages} />
-        <Button type="submit" variant="contained" sx={{ textTransform: "initial" }}>
-          Create Case
-        </Button>
-      </Stack>
-    </form>
+      </form>
+    </>
+  );
+}
+
+const createCaseValidationSchema = Yup.object({
+  project: Yup.string().required("Project is required"),
+  deployment: Yup.string().required("Deployment type is required"),
+  product: Yup.string().required("Product & version is required"),
+  title: Yup.string()
+    .trim()
+    .min(5, "Title must be at least 5 characters")
+    .max(200, "Title must be 200 characters or less")
+    .required("Issue title is required"),
+  description: Yup.string()
+    .trim()
+    .min(20, "Description must be at least 20 characters")
+    .max(5000, "Description must be 5000 characters or less")
+    .required("Case description is required"),
+  type: Yup.number().typeError("Issue type is required").required("Issue type is required"),
+  severity: Yup.number().typeError("Severity level is required").required("Severity level is required"),
+});
+
+function RelatedCaseSection({ relatedCase }: { relatedCase: Case }) {
+  return (
+    <Box mb={2}>
+      <SectionCard>
+        <Grid spacing={1.5} container>
+          <Grid size={12}>
+            <InfoField label="Related Case ID" value={relatedCase.id} />
+          </Grid>
+          <Grid size={12}>
+            <InfoField label="Title" value={relatedCase.title} />
+          </Grid>
+          <Grid size={12}>
+            <InfoField
+              label="Description"
+              value={<RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(relatedCase.description) }} />}
+            />
+          </Grid>
+        </Grid>
+      </SectionCard>
+    </Box>
   );
 }
