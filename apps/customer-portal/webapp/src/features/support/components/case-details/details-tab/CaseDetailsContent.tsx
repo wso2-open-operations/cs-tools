@@ -293,7 +293,7 @@ export default function CaseDetailsContent({
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <CaseDetailsHeader
-                    wso2CaseId={isServiceRequest ? data?.internalId : undefined}
+                    wso2CaseId={data?.internalId}
                     caseNumber={data?.number}
                     title={data?.title}
                     severityLabel={severityLabel ?? undefined}
