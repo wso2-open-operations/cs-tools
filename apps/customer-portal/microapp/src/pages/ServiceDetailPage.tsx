@@ -161,9 +161,6 @@ export default function ServiceDetailPage() {
               <InfoField label="Product Name" value={isLoading ? undefined : data?.product || "N/A"} />
             </Grid>
             <Grid size={12}>
-              <InfoField label="Version" value={isLoading ? undefined : data?.productVersion || "N/A"} />
-            </Grid>
-            <Grid size={12}>
               <InfoField label="Deployment" value={isLoading ? undefined : data?.deployment || "N/A"} />
             </Grid>
           </Grid>

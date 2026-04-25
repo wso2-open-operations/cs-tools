@@ -149,6 +149,7 @@ function toProduct(product: DeploymentProductDto): Product {
     name: product.product.label,
     deploymentId: product.deployment.id,
     versionId: product.version?.id ?? undefined,
+    version: product.version?.label,
   };
 }
 
