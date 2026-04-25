@@ -411,7 +411,7 @@ function UpdateDetailCard({
  */
 export default function UpdateLevelDetailsPage(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId, levelKey } = useParams<{
+  const { levelKey } = useParams<{
     projectId: string;
     levelKey: string;
   }>();
@@ -462,17 +462,7 @@ export default function UpdateLevelDetailsPage(): JSX.Element {
   }, [entry, filter]);
 
   const handleBack = () => {
-    if (projectId) {
-      const params = new URLSearchParams({
-        productName,
-        productBaseVersion,
-        startingUpdateLevel: String(startingUpdateLevel),
-        endingUpdateLevel: String(endingUpdateLevel),
-      });
-      navigate(`/projects/${projectId}/updates/pending?${params}`);
-    } else {
-      navigate(ROUTE_PREVIOUS_PAGE);
-    }
+    navigate(ROUTE_PREVIOUS_PAGE);
   };
 
   return (

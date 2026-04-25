@@ -462,22 +462,18 @@ const Editor = ({
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} shiftEnterToSubmit={shiftEnterToSubmit} />
-          {overlayElement && (
-            <Box
-              sx={{
-                position: "absolute",
-                bottom: 8,
-                right: 8,
-                zIndex: 10,
-                display: "flex",
-                gap: 1,
-                pointerEvents: "auto",
-              }}
-            >
-              {overlayElement}
-            </Box>
-          )}
         </Box>
+        {overlayElement && (
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              mt: 1,
+            }}
+          >
+            {overlayElement}
+          </Box>
+        )}
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />
