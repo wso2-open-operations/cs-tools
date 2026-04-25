@@ -122,31 +122,13 @@ export default function DashboardItemsPage({
         ? CR_CLOSED_STATE_KEYS
         : CR_OUTSTANDING_STATE_KEYS;
 
-  const isOutstandingMode = mode === "outstanding-interactions";
-
   // filterMetadataLoaded tracks whether the metadata response has arrived (distinct from having IDs).
   // An error counts as "loaded" so the page does not stay on skeletons forever.
   const filterMetadataLoaded = !!filterMetadata || isFilterMetadataError;
 
-  // For outstanding mode: resolved = closed items shown in the "Resolved Items" sub-section.
-  const resolvedCaseStatusIds = useMemo((): number[] | undefined => {
-    if (!isOutstandingMode) return undefined;
-    if (!filterMetadata?.caseStates) return undefined;
-    return filterMetadata.caseStates
-      .filter((s) => s.label === CaseStatus.CLOSED)
-      .map((s) => Number(s.id));
-  }, [isOutstandingMode, filterMetadata]);
-
   // Queries are enabled once metadata is loaded AND there are status IDs to filter by.
   // An empty caseStatusIds array (no matching statuses) means no items exist — skip the query.
   const hasStatusIds = filterMetadataLoaded && (caseStatusIds?.length ?? 0) > 0;
-  const hasResolvedStatusIds =
-    isOutstandingMode &&
-    filterMetadataLoaded &&
-    (resolvedCaseStatusIds?.length ?? 0) > 0;
-  const apiResolvedStatusIds = hasResolvedStatusIds
-    ? resolvedCaseStatusIds
-    : undefined;
 
   // statusIds sent to the API: use the resolved IDs, or undefined if empty (never send []).
   const apiStatusIds = hasStatusIds ? caseStatusIds : undefined;
@@ -261,111 +243,6 @@ export default function DashboardItemsPage({
     { enabled: crEnabled },
   );
 
-  // --- Resolved item queries (outstanding mode only) ---
-  const {
-    data: resolvedCasesData,
-    isLoading: isResolvedCasesQuerying,
-    isError: isResolvedCasesError,
-  } = useGetProjectCasesPage(
-    projectId || "",
-    {
-      filters: {
-        caseTypes: [CaseType.DEFAULT_CASE],
-        statusIds: apiResolvedStatusIds,
-      },
-    },
-    0,
-    10,
-    { enabled: !!projectId && !isProjectLoading && hasResolvedStatusIds },
-  );
-
-  const {
-    data: resolvedSrData,
-    isLoading: isResolvedSrQuerying,
-    isError: isResolvedSrError,
-  } = useGetProjectCasesPage(
-    projectId || "",
-    {
-      filters: {
-        caseTypes: [CaseType.SERVICE_REQUEST],
-        statusIds: apiResolvedStatusIds,
-      },
-    },
-    0,
-    10,
-    {
-      enabled:
-        !!projectId &&
-        !isProjectLoading &&
-        hasResolvedStatusIds &&
-        permissions.hasSR,
-    },
-  );
-
-  const {
-    data: resolvedSraData,
-    isLoading: isResolvedSraQuerying,
-    isError: isResolvedSraError,
-  } = useGetProjectCasesPage(
-    projectId || "",
-    {
-      filters: {
-        caseTypes: [CaseType.SECURITY_REPORT_ANALYSIS],
-        statusIds: apiResolvedStatusIds,
-      },
-    },
-    0,
-    10,
-    {
-      enabled:
-        !!projectId &&
-        !isProjectLoading &&
-        hasResolvedStatusIds &&
-        permissions.hasSecurityReportAnalysis,
-    },
-  );
-
-  const {
-    data: resolvedEngData,
-    isLoading: isResolvedEngQuerying,
-    isError: isResolvedEngError,
-  } = useGetProjectCasesPage(
-    projectId || "",
-    {
-      filters: {
-        caseTypes: [CaseType.ENGAGEMENT],
-        statusIds: apiResolvedStatusIds,
-      },
-    },
-    0,
-    10,
-    {
-      enabled:
-        !!projectId &&
-        !isProjectLoading &&
-        hasResolvedStatusIds &&
-        permissions.hasEngagements,
-    },
-  );
-
-  const {
-    data: resolvedCrData,
-    isLoading: isResolvedCrQuerying,
-    isError: isResolvedCrError,
-  } = useGetChangeRequests(
-    projectId || "",
-    { filters: { stateKeys: CR_CLOSED_STATE_KEYS } },
-    0,
-    10,
-    {
-      enabled:
-        !!projectId &&
-        permissions.hasCR &&
-        !isProjectLoading &&
-        isOutstandingMode,
-    },
-  );
-
   // --- Derived values ---
   // useGetProjectCasesPage returns CaseSearchResponse directly (not InfiniteData).
   const cases = casesQueryData?.cases ?? [];
@@ -399,65 +276,10 @@ export default function DashboardItemsPage({
     permissions.hasCR &&
     (isProjectLoading || (crEnabled && isCrQuerying && !crQueryData));
 
-  // --- Resolved derived values (outstanding mode only) ---
-  const resolvedCases = resolvedCasesData?.cases ?? [];
-  const resolvedCasesTotal = resolvedCasesData?.totalRecords ?? 0;
-  const isResolvedCasesLoading =
-    isOutstandingMode &&
-    (!filterMetadataLoaded ||
-      (hasResolvedStatusIds && isResolvedCasesQuerying && !resolvedCasesData));
-
-  const resolvedServiceRequests = resolvedSrData?.cases ?? [];
-  const resolvedSrTotal = resolvedSrData?.totalRecords ?? 0;
-  const isResolvedSrLoading =
-    isOutstandingMode &&
-    permissions.hasSR &&
-    (!filterMetadataLoaded ||
-      (hasResolvedStatusIds && isResolvedSrQuerying && !resolvedSrData));
-
-  const resolvedSraItems = resolvedSraData?.cases ?? [];
-  const resolvedSraTotal = resolvedSraData?.totalRecords ?? 0;
-  const isResolvedSraLoading =
-    isOutstandingMode &&
-    permissions.hasSecurityReportAnalysis &&
-    (!filterMetadataLoaded ||
-      (hasResolvedStatusIds && isResolvedSraQuerying && !resolvedSraData));
-
-  const resolvedEngagements = resolvedEngData?.cases ?? [];
-  const resolvedEngTotal = resolvedEngData?.totalRecords ?? 0;
-  const isResolvedEngLoading =
-    isOutstandingMode &&
-    permissions.hasEngagements &&
-    (!filterMetadataLoaded ||
-      (hasResolvedStatusIds && isResolvedEngQuerying && !resolvedEngData));
-
-  const resolvedChangeRequests = resolvedCrData?.changeRequests ?? [];
-  const resolvedCrTotal = resolvedCrData?.totalRecords ?? 0;
-  const isResolvedCrLoading =
-    isOutstandingMode &&
-    permissions.hasCR &&
-    (isProjectLoading ||
-      (!!projectId &&
-        permissions.hasCR &&
-        !isProjectLoading &&
-        isResolvedCrQuerying &&
-        !resolvedCrData));
-
   // --- Accordion state ---
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     () =>
-      new Set([
-        "cases",
-        "sr",
-        "sra",
-        "eng",
-        "cr",
-        "resolved-cases",
-        "resolved-sr",
-        "resolved-sra",
-        "resolved-eng",
-        "resolved-cr",
-      ]),
+      new Set(["cases", "sr", "sra", "eng", "cr"]),
   );
   const toggleSection = useCallback((id: string) => {
     setExpandedSections((prev) => {
@@ -622,84 +444,7 @@ export default function DashboardItemsPage({
     },
   ];
 
-  const resolvedSections: Section[] = isOutstandingMode
-    ? [
-        {
-          id: "resolved-cases",
-          label: "Cases",
-          isLoading: isResolvedCasesLoading,
-          isError: isResolvedCasesError,
-          total: resolvedCasesTotal,
-          hasPermission: true,
-          isCr: false,
-          items: resolvedCases,
-          hideSeverity: false,
-          entityName: "cases",
-          viewAllPath: "../../support/cases",
-          viewAllLabel: "View all cases",
-          onItemClick: handleCaseClick,
-        },
-        {
-          id: "resolved-sr",
-          label: "Service Requests",
-          isLoading: isResolvedSrLoading,
-          isError: isResolvedSrError,
-          total: resolvedSrTotal,
-          hasPermission: permissions.hasSR,
-          isCr: false,
-          items: resolvedServiceRequests,
-          hideSeverity: true,
-          entityName: "service requests",
-          viewAllPath: "../../operations/service-requests",
-          viewAllLabel: "View all service requests",
-          onItemClick: handleSrClick,
-        },
-        {
-          id: "resolved-sra",
-          label: "Security Report Analysis",
-          isLoading: isResolvedSraLoading,
-          isError: isResolvedSraError,
-          total: resolvedSraTotal,
-          hasPermission: permissions.hasSecurityReportAnalysis,
-          isCr: false,
-          items: resolvedSraItems,
-          hideSeverity: false,
-          entityName: "security reports",
-          viewAllPath: "../../security-center",
-          viewAllLabel: "View all security reports",
-          onItemClick: handleSraClick,
-        },
-        {
-          id: "resolved-eng",
-          label: "Engagements",
-          isLoading: isResolvedEngLoading,
-          isError: isResolvedEngError,
-          total: resolvedEngTotal,
-          hasPermission: permissions.hasEngagements,
-          isCr: false,
-          items: resolvedEngagements,
-          hideSeverity: true,
-          entityName: "engagements",
-          viewAllPath: "../../engagements",
-          viewAllLabel: "View all engagements",
-          onItemClick: handleEngClick,
-        },
-        {
-          id: "resolved-cr",
-          label: "Change Requests",
-          isLoading: isResolvedCrLoading,
-          isError: isResolvedCrError,
-          total: resolvedCrTotal,
-          hasPermission: permissions.hasCR,
-          isCr: true,
-          items: resolvedChangeRequests,
-          viewAllPath: "../../operations/change-requests",
-          viewAllLabel: "View all change requests",
-          onItemClick: handleCrClick,
-        },
-      ]
-    : [];
-
+  const isOutstandingMode = mode === "outstanding-interactions";
   const isPageLoading = isProjectLoading || !filterMetadataLoaded;
   const isPageError = !isProjectLoading && isFilterMetadataError;
 
@@ -709,8 +454,6 @@ export default function DashboardItemsPage({
       : sections.filter(
           (s) => s.hasPermission && (s.isLoading || s.total > 0 || s.isError),
         );
-
-  void resolvedSections;
 
   return (
     <Stack spacing={3} sx={{ minWidth: 0 }}>

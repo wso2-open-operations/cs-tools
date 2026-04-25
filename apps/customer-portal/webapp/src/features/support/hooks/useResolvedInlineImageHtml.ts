@@ -51,7 +51,7 @@ export function useResolvedInlineImageHtml(
 ): { resolvedHtml: string; isLoading: boolean } {
   const idsFromHtml = useMemo(() => extractIixAttachmentIds(html), [html]);
 
-  const { dataUrls, isLoading } = useAttachmentPreviews([]);
+  const { dataUrls, isLoading } = useAttachmentPreviews(idsFromHtml);
 
   const resolvedHtml = useMemo(() => {
     if (!dataUrls.size) return html;

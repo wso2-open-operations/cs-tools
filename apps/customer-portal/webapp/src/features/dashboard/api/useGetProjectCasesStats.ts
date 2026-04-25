@@ -117,6 +117,7 @@ export function useGetProjectCasesStats(
           totalCount: raw?.totalCount,
           activeCount: raw?.activeCount,
           outstandingCount: raw?.outstandingCount,
+          actionRequiredCount: raw?.actionRequiredCount,
           averageResponseTime: raw?.averageResponseTime ?? 0,
           resolvedCases: {
             total: raw?.resolvedCases?.total ?? 0,

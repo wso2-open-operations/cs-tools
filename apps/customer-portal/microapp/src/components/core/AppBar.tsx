@@ -36,7 +36,7 @@ import { useProject } from "@context/project";
 import { APP_BAR_CONFIG } from "@components/layout/config";
 import { PROJECT_STATUS_META } from "@config/constants";
 import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
 import { goToMyAppsScreen } from "../microapp-bridge";
 import { useThemeMode } from "@root/src/context/theme";
@@ -49,7 +49,9 @@ export function AppBar() {
     useLayout();
   const config = APP_BAR_CONFIG[appBarVariant];
   const { projectId } = useProject();
-  const project = useQuery(projects.all()).data?.find((project) => project.id === projectId);
+  const { data: projectsData } = useSuspenseQuery(projects.all());
+  const project = projectsData?.find((project) => project.id === projectId);
+  const hasMultipleProjects = projectsData.length > 1;
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
@@ -70,6 +72,7 @@ export function AppBar() {
   const navigateBack = () => navigate(-1);
 
   const openProjectSelector = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!hasMultipleProjects) return;
     event.preventDefault();
     setProjectSelectorAnchor(event.currentTarget);
   };
@@ -135,7 +138,7 @@ export function AppBar() {
                 {project.name}
               </Typography>
             </Stack>
-            <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />
+            {hasMultipleProjects && <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />}
           </Button>
         )}
 
@@ -162,7 +165,9 @@ export function AppBar() {
       </MuiAppBar>
 
       {/* Popovers */}
-      <ProjectSelector anchorEl={projectSelectorAnchor} open={isProjectSelectorOpen} onClose={closeProjectSelector} />
+      {hasMultipleProjects && (
+        <ProjectSelector anchorEl={projectSelectorAnchor} open={isProjectSelectorOpen} onClose={closeProjectSelector} />
+      )}
     </>
   );
 }

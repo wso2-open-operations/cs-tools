@@ -33,6 +33,7 @@ import { InvitationSummaryContent, RoleSelector } from "@components/features/use
 import { useProject } from "@context/project";
 import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { stringAvatar } from "@utils/others";
+import { getApiErrorMessage } from "@utils/ApiError";
 import type { Role } from "@src/types";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { users } from "../services/users";
@@ -40,50 +41,137 @@ import { projects } from "../services/projects";
 import { useNotify } from "../context/snackbar";
 import { ConfirmDialog } from "../components/shared/ConfirmDialog";
 
+type UserActionFeedbackState = {
+  action: "invite" | "edit" | "delete";
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  roles?: Role[];
+};
+
 export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "edit" }) {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const state = location.state as { email?: string; role?: Role; firstName?: string; lastName?: string };
+  const state = location.state as {
+    email?: string;
+    role?: Role;
+    roles?: Role[];
+    firstName?: string;
+    lastName?: string;
+  };
 
-  const defaultUserRole = "Portal User";
-  const [role, setRole] = useState<Role>(
-    state?.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole,
-  );
+  const defaultUserRole: Role[] = ["Portal User"];
+  const initialRoles: Role[] =
+    state?.roles && state.roles.length > 0
+      ? state.roles
+      : state?.role && state.role !== "Admin User"
+        ? [state.role]
+        : defaultUserRole;
+  const isSystemUserReadOnly = mode === "edit" && initialRoles.includes("System User");
+  const [roles, setRoles] = useState<Role[]>(initialRoles);
   const [email, setEmail] = useState(state?.email ?? "");
   const [firstName, setFirstName] = useState(state?.firstName ?? "");
   const [lastName, setLastName] = useState(state?.lastName ?? "");
+  const rolesUnchanged =
+    roles.length === initialRoles.length && roles.every((selectedRole) => initialRoles.includes(selectedRole));
+  const hasAnyRole = roles.length > 0;
 
   const { projectId } = useProject();
   const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
   const notify = useNotify();
+  const inviteFallbackMessage = "Failed to invite user. Please try again.";
+  const editFallbackMessage = "Failed to edit user. Please try again.";
+  const deleteFallbackMessage = "Failed to delete user. Please try again.";
 
   const createUserMutation = useMutation({
     ...users.create(projectId!),
     onSuccess: () => {
       queryClient.resetQueries({ queryKey: ["users", projectId] });
-      navigate(-1);
+      navigate("/users", {
+        state: {
+          action: "invite",
+          email,
+          firstName,
+          lastName,
+          roles,
+        } satisfies UserActionFeedbackState,
+      });
     },
-    onError: () => notify.error("Failed to invite user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? inviteFallbackMessage),
   });
 
   const editUserMutation = useMutation({
     ...users.edit(projectId!, email),
     onSuccess: () => {
       queryClient.resetQueries({ queryKey: ["users", projectId] });
-      navigate(-1);
+      navigate("/users", {
+        state: {
+          action: "edit",
+          email,
+          firstName,
+          lastName,
+          roles,
+        } satisfies UserActionFeedbackState,
+      });
     },
-    onError: () => notify.error("Failed to edit user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? editFallbackMessage),
   });
 
   const deleteUserMutation = useMutation({
     ...users.delete(projectId!, email),
     onSuccess: () => {
       queryClient.resetQueries({ queryKey: ["users", projectId] });
-      navigate(-1);
+      navigate("/users", {
+        state: {
+          action: "delete",
+          email,
+          firstName,
+          lastName,
+        } satisfies UserActionFeedbackState,
+      });
     },
-    onError: () => notify.error("Failed to delete user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? deleteFallbackMessage),
   });
+
+  const validateUserMutation = useMutation({
+    ...users.validate(projectId!),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? "Email validation failed. Please try again."),
+  });
+
+  const handleSubmit = async () => {
+    try {
+      if (mode === "invite") {
+        const validationResponse = await validateUserMutation.mutateAsync({
+          contactEmail: email,
+        });
+
+        if (!validationResponse.isContactValid) {
+          notify.error(validationResponse.message || "This email cannot be added.");
+          return;
+        }
+
+        await createUserMutation.mutateAsync({
+          contactEmail: email,
+          contactFirstName: firstName,
+          contactLastName: lastName,
+          isCsIntegrationUser: roles.includes("System User"),
+          isCsAdmin: roles.includes("Admin User"),
+          isPortalUser: roles.includes("Portal User"),
+          isSecurityContact: roles.includes("Security User"),
+        });
+        return;
+      }
+
+      await editUserMutation.mutateAsync({
+        isCsAdmin: roles.includes("Admin User"),
+        isPortalUser: roles.includes("Portal User"),
+        isSecurityContact: roles.includes("Security User"),
+      });
+    } catch {
+      // Mutation onError handlers surface user-facing messages.
+    }
+  };
 
   return (
     <>
@@ -128,7 +216,20 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         </SectionCard>
 
         <SectionCard title="User Role">
-          <RoleSelector value={role} onChange={setRole} />
+          {isSystemUserReadOnly && (
+            <Box
+              sx={(theme) => ({
+                px: 1.5,
+                py: 1,
+                bgcolor: alpha(theme.palette.info.main, 0.15),
+              })}
+            >
+              <Typography variant="caption" color="info.dark" fontWeight="medium">
+                This contact is a CS Integration User. CS Integration Users cannot be assigned other roles.
+              </Typography>
+            </Box>
+          )}
+          <RoleSelector value={roles} onChange={setRoles} readOnly={isSystemUserReadOnly} />
         </SectionCard>
 
         {mode === "invite" && (
@@ -138,7 +239,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 projectName={project?.name}
                 email={email}
                 name={firstName + " " + lastName}
-                role={role}
+                roles={roles}
               />
             </SectionCard>
             <ExpirationNotice />
@@ -147,7 +248,6 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
 
         {mode === "edit" && (
           <>
-            <PermissionDetails />
             <DangerZone onDelete={deleteUserMutation.mutate} isPending={deleteUserMutation.isPending} />
           </>
         )}
@@ -155,37 +255,23 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
         <Button
           disabled={
             mode === "edit"
-              ? role === (state.role ? (state.role === "Admin" ? defaultUserRole : state.role) : defaultUserRole) ||
-                editUserMutation.isPending
-              : createUserMutation.isPending
+              ? isSystemUserReadOnly || rolesUnchanged || !hasAnyRole || editUserMutation.isPending
+              : !hasAnyRole ||
+                !email.trim() ||
+                !firstName.trim() ||
+                createUserMutation.isPending ||
+                validateUserMutation.isPending
           }
           variant="contained"
           startIcon={
-            createUserMutation.isPending || editUserMutation.isPending ? (
+            createUserMutation.isPending || editUserMutation.isPending || validateUserMutation.isPending ? (
               <CircularProgress size={16} color="inherit" />
             ) : undefined
           }
-          onClick={() => {
-            if (mode === "invite")
-              createUserMutation.mutate({
-                contactEmail: email,
-                contactFirstName: firstName,
-                contactLastName: lastName,
-                isCsIntegrationUser: false,
-                isSecurityContact: role == "System User",
-              });
-
-            if (mode === "edit") {
-              const isSecurityContact = role === "System User";
-
-              editUserMutation.mutate({
-                isSecurityContact,
-              });
-            }
-          }}
+          onClick={() => void handleSubmit()}
         >
           {mode === "invite"
-            ? createUserMutation.isPending
+            ? createUserMutation.isPending || validateUserMutation.isPending
               ? "Sending..."
               : "Send Invitation"
             : editUserMutation.isPending
@@ -263,38 +349,6 @@ function ExpirationNotice() {
           need to send a new invitation.
         </Typography>
       </Typography>
-    </Card>
-  );
-}
-
-function PermissionDetails() {
-  return (
-    <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5 })}>
-      <Typography variant="body2" fontWeight="medium" color="info">
-        Permission Details
-      </Typography>
-      <ul style={{ margin: 0, marginTop: 3, paddingLeft: 20 }}>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Create and manage own cases
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Participate in chats
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            Submit service requests
-          </Typography>
-        </li>
-        <li>
-          <Typography variant="subtitle2" color="text.secondary">
-            View project analytics
-          </Typography>
-        </li>
-      </ul>
     </Card>
   );
 }

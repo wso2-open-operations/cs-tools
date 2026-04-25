@@ -14,11 +14,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { CreateContactRequestDto, EditMeDto, Me, MeDto, Role, User, UserDto, UsersDto } from "@src/types";
+import type {
+  CreateContactRequestDto,
+  EditContactRequestDto,
+  EditMeDto,
+  Me,
+  MeDto,
+  Role,
+  User,
+  UserDto,
+  ValidateContactRequestDto,
+  ValidateContactResponseDto,
+  UsersDto,
+} from "@src/types";
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import apiClient from "@src/services/apiClient";
+import { toApiError } from "@utils/ApiError";
 
-import { PROJECT_USERS_ENDPOINT, USER_ACTIONS_ENDPOINT, USERS_ME_ENDPOINT } from "@config/endpoints";
+import {
+  PROJECT_USERS_ENDPOINT,
+  PROJECT_USERS_VALIDATION_ENDPOINT,
+  USER_ACTIONS_ENDPOINT,
+  USERS_ME_ENDPOINT,
+} from "@config/endpoints";
 
 const getMe = async (): Promise<Me> => {
   const response = (await apiClient.get<MeDto>(USERS_ME_ENDPOINT)).data;
@@ -31,19 +49,39 @@ const getUsers = async (id: string): Promise<User[]> => {
 };
 
 const createContact = async (id: string, body: CreateContactRequestDto): Promise<void> => {
-  await apiClient.post(PROJECT_USERS_ENDPOINT(id), body);
+  try {
+    await apiClient.post(PROJECT_USERS_ENDPOINT(id), body);
+  } catch (error) {
+    throw toApiError(error, "Failed to invite user. Please try again.");
+  }
+};
+
+const validateContact = async (id: string, body: ValidateContactRequestDto): Promise<ValidateContactResponseDto> => {
+  try {
+    return (await apiClient.post<ValidateContactResponseDto>(PROJECT_USERS_VALIDATION_ENDPOINT(id), body)).data;
+  } catch (error) {
+    throw toApiError(error, "Email validation failed. Please try again.");
+  }
 };
 
 const deleteContact = async (id: string, email: string): Promise<void> => {
-  await apiClient.delete(USER_ACTIONS_ENDPOINT(id, email));
+  try {
+    await apiClient.delete(USER_ACTIONS_ENDPOINT(id, email));
+  } catch (error) {
+    throw toApiError(error, "Failed to delete user. Please try again.");
+  }
 };
 
 const editContact = async (
   id: string,
   email: string,
-  body: Partial<Omit<CreateContactRequestDto, "contactEmail" | "contactFirstName" | "contactLastName">>,
+  body: EditContactRequestDto,
 ): Promise<void> => {
-  await apiClient.patch(USER_ACTIONS_ENDPOINT(id, email), body);
+  try {
+    await apiClient.patch(USER_ACTIONS_ENDPOINT(id, email), body);
+  } catch (error) {
+    throw toApiError(error, "Failed to edit user. Please try again.");
+  }
 };
 
 const editMe = async (body: Partial<EditMeDto>): Promise<Partial<EditMeDto>> => {
@@ -66,9 +104,10 @@ function toMe(dto: MeDto): Me {
 
 function toUser(dto: UserDto): User {
   const roles: Role[] = [];
-  if (dto.isCsAdmin) roles.push("Admin");
-  if (dto.isSecurityContact) roles.push("System User");
-  else roles.push("Portal User");
+  if (dto.isCsAdmin) roles.push("Admin User");
+  if (dto.isCsIntegrationUser) roles.push("System User");
+  if (dto.isSecurityContact) roles.push("Security User");
+  if (dto.isPortalUser ?? !dto.isCsIntegrationUser) roles.push("Portal User");
 
   return {
     id: dto.id,
@@ -97,11 +136,14 @@ export const users = {
       mutationFn: (body: CreateContactRequestDto) => createContact(projectId, body),
     }),
 
+  validate: (projectId: string) =>
+    mutationOptions({
+      mutationFn: (body: ValidateContactRequestDto) => validateContact(projectId, body),
+    }),
+
   edit: (projectId: string, email: string) =>
     mutationOptions({
-      mutationFn: (
-        body: Partial<Omit<CreateContactRequestDto, "contactEmail" | "contactFirstName" | "contactLastName">>,
-      ) => editContact(projectId, email, body),
+      mutationFn: (body: EditContactRequestDto) => editContact(projectId, email, body),
     }),
 
   delete: (projectId: string, email: string) =>

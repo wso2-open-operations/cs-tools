@@ -82,6 +82,7 @@ export type ChangeRequestStatsResponse = {
   totalCount: number;
   activeCount?: number;
   outstandingCount?: number;
+  actionRequiredCount?: number;
   stateCount: ChangeRequestStateCount[];
   resolvedCount: {
     total: number;

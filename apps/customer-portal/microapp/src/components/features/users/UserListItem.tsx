@@ -17,7 +17,7 @@
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { Link } from "react-router-dom";
-import { Card, Stack, Avatar as MuiAvatar, Typography, Chip, useTheme, pxToRem, Skeleton } from "@wso2/oxygen-ui";
+import { alpha, Card, Stack, Avatar as MuiAvatar, Typography, Chip, useTheme, pxToRem, Skeleton } from "@wso2/oxygen-ui";
 import { ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
 import { capitalize, stringAvatar } from "@utils/others";
 import type { Role, User } from "@src/types";
@@ -31,7 +31,7 @@ export interface UserListItemProps {
   lastActive: string;
 }
 
-export function UserListItem({ firstName, lastName, email, roles }: User) {
+export function UserListItem({ firstName, lastName, email, roles, isHighlighted = false }: User & { isHighlighted?: boolean }) {
   const theme = useTheme();
 
   return (
@@ -39,8 +39,12 @@ export function UserListItem({ firstName, lastName, email, roles }: User) {
       component={Link}
       elevation={0}
       to="/users/edit"
-      state={{ email, firstName, lastName, role: roles[0] }}
-      sx={{ textDecoration: "none", p: 1 }}
+      state={{ email, firstName, lastName, roles }}
+      sx={{
+        textDecoration: "none",
+        p: 1,
+        bgcolor: isHighlighted ? alpha(theme.palette.info.main, 0.12) : undefined,
+      }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>

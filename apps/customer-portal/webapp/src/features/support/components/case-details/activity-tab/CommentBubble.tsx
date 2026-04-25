@@ -57,6 +57,7 @@ import DOMPurify from "dompurify";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
 import { useGetAttachment } from "@api/useGetAttachment";
+import { useAttachmentPreview } from "@api/useAttachmentPreview";
 
 function commentAuthorDisplayName(comment: CaseComment): string {
   if (comment.createdByFullName?.trim()) {
@@ -137,6 +138,8 @@ export default function CommentBubble({
     comment.fileName ?? "",
     comment.contentType ?? "",
   );
+  const { data: imageDataUrl, isLoading: isImagePreviewLoading } =
+    useAttachmentPreview(isAttachmentEntry && attachmentCategory === "image" ? comment.id : null);
 
   const renderAttachmentIcon = () => {
     switch (attachmentCategory) {
@@ -308,6 +311,19 @@ export default function CommentBubble({
                 {comment.createdOn}
               </Typography>
             </Stack>
+            {attachmentCategory === "image" && (
+              isImagePreviewLoading ? (
+                <Skeleton variant="rectangular" width="100%" height={160} sx={{ borderRadius: 1 }} />
+              ) : imageDataUrl ? (
+                <Box
+                  component="img"
+                  src={imageDataUrl}
+                  alt={comment.fileName ?? "Image attachment"}
+                  sx={{ maxWidth: "100%", borderRadius: 1, display: "block", cursor: "pointer" }}
+                  onClick={() => onImageClick?.(imageDataUrl)}
+                />
+              ) : null
+            )}
           </Paper>
         ) : isImagesLoading ? (
           <Box sx={{ width: "100%", display: "flex", flexDirection: "column", gap: 0.75 }}>

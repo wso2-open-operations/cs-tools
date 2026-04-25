@@ -33,6 +33,7 @@ export interface UserDto {
   lastName: string;
   isCsAdmin: boolean;
   isCsIntegrationUser: boolean;
+  isPortalUser?: boolean;
   isSecurityContact: boolean;
   membershipStatus: string;
 }
@@ -42,7 +43,24 @@ export interface CreateContactRequestDto {
   contactFirstName: string;
   contactLastName: string;
   isCsIntegrationUser: boolean;
+  isCsAdmin: boolean;
+  isPortalUser: boolean;
   isSecurityContact: boolean;
+}
+
+export interface EditContactRequestDto {
+  isCsAdmin: boolean;
+  isPortalUser: boolean;
+  isSecurityContact: boolean;
+}
+
+export interface ValidateContactRequestDto {
+  contactEmail: string;
+}
+
+export interface ValidateContactResponseDto {
+  isContactValid: boolean;
+  message: string;
 }
 
 export interface EditMeDto {

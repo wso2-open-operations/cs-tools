@@ -32,7 +32,7 @@ import {
 import { Download } from "@wso2/oxygen-ui-icons-react";
 import searchingSvg from "@assets/search/searching.svg";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { useGetProductUpdateLevels } from "@features/updates/api/useGetProductUpdateLevels";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
@@ -84,6 +84,7 @@ import {
 export default function AllUpdatesTab(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const [urlParams, setUrlParams] = useSearchParams();
 
   const [filter, setFilter] = useState<AllUpdatesTabFilterState>(
     ALL_UPDATES_TAB_INITIAL_FILTER,
@@ -160,12 +161,17 @@ export default function AllUpdatesTab(): JSX.Element {
       startingUpdateLevel: result.start,
       endingUpdateLevel: result.end,
     });
-  }, [filter]);
+    setUrlParams(
+      { pn: filter.productName, pv: filter.productVersion, sl: String(result.start), el: String(result.end) },
+      { replace: true },
+    );
+  }, [filter, setUrlParams]);
 
   const handleClearFilters = useCallback(() => {
     setFilter(ALL_UPDATES_TAB_INITIAL_FILTER);
     setSearchParams(null);
-  }, []);
+    setUrlParams({}, { replace: true });
+  }, [setUrlParams]);
 
   const handleView = useCallback(
     (levelKey: string) => {

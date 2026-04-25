@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Card, Grid, Stack, Typography, Button, Divider, useTheme, SearchBar } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
@@ -23,23 +23,58 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { users } from "@src/services/users";
 import { useProject } from "@context/project";
 import { ErrorBoundary } from "@components/core";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { MOCK_ROLES } from "@src/mocks/data/users";
+import type { Role } from "@src/types";
 import EmptyState from "../components/shared/EmptyState";
 import { useNotify } from "../context/snackbar";
 
+type UserActionFeedbackState = {
+  action?: "invite" | "edit" | "delete";
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  roles?: Role[];
+};
+
 export default function UsersPage() {
   const notify = useNotify();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { projectId } = useProject();
   const { data } = useQuery(users.all(projectId!));
+  const [highlightedUserEmail, setHighlightedUserEmail] = useState<string>();
 
   const total = data?.length;
   const registered = data?.filter((user) => user.status === "registered").length;
   const invited = data?.filter((user) => user.status === "invited").length;
-  const admins = data?.filter((user) => user.roles.includes("Admin")).length;
+  const admins = data?.filter((user) => user.roles.includes("Admin User")).length;
 
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const feedback = (location.state ?? {}) as UserActionFeedbackState;
+    if (!feedback.action || !feedback.email) return;
+
+    const userDisplayName =
+      feedback.firstName && feedback.lastName ? `${feedback.firstName} ${feedback.lastName}` : feedback.email;
+
+    if (feedback.action === "invite") {
+      notify.success(`Invitation sent to ${feedback.email}.`);
+    } else if (feedback.action === "edit") {
+      const rolesMessage = feedback.roles?.length ? ` Roles: ${feedback.roles.join(", ")}.` : "";
+      notify.success(`Updated ${userDisplayName}.${rolesMessage}`);
+    } else if (feedback.action === "delete") {
+      notify.success(`Removed ${userDisplayName} from project.`);
+    }
+
+    setHighlightedUserEmail(feedback.email);
+    const timeoutId = window.setTimeout(() => setHighlightedUserEmail(undefined), 4000);
+
+    navigate(location.pathname, { replace: true, state: null });
+    return () => window.clearTimeout(timeoutId);
+  }, [location.pathname, location.state, navigate, notify]);
 
   return (
     <>
@@ -79,7 +114,7 @@ export default function UsersPage() {
             onError={() => notify.error("Failed to load users. Try again later.")}
           >
             <Suspense fallback={<UsersListContentSkeleton />}>
-              <UsersListContent search={search} />
+              <UsersListContent search={search} highlightedUserEmail={highlightedUserEmail} />
             </Suspense>
           </ErrorBoundary>
         </Stack>
@@ -89,7 +124,7 @@ export default function UsersPage() {
   );
 }
 
-function UsersListContent({ search }: { search: string }) {
+function UsersListContent({ search, highlightedUserEmail }: { search: string; highlightedUserEmail?: string }) {
   const { projectId } = useProject();
   const { data: usersData } = useSuspenseQuery(users.all(projectId!));
 
@@ -110,7 +145,7 @@ function UsersListContent({ search }: { search: string }) {
   return (
     <>
       {data.map((props) => (
-        <UserListItem key={props.id} {...props} />
+        <UserListItem key={props.id} isHighlighted={props.email === highlightedUserEmail} {...props} />
       ))}
     </>
   );
