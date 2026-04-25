@@ -82,7 +82,7 @@ export function toServiceRequest(dto: ServiceRequestDto): ServiceRequest {
     statusId: dto.status?.id,
     severityId: dto.severity?.id,
     deployment: dto.deployment?.label,
-    product: dto.product?.label,
+    product: dto.deployedProduct ? `${dto.deployedProduct?.label} ${dto.deployedProduct?.version}` : undefined,
   };
 }
 

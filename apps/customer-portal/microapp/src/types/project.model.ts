@@ -62,4 +62,5 @@ export interface Product {
   name: string;
   deploymentId: string;
   versionId?: string;
+  version?: string;
 }

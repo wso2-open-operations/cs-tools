@@ -127,7 +127,7 @@ export default function CreateCasePage() {
     () =>
       productQuery.data?.map((product) => ({
         value: product.id,
-        label: product.name,
+        label: `${product.name} ${product.version}`,
       })) ?? [],
     [productQuery.data],
   );
