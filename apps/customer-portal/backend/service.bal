@@ -85,7 +85,6 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         log:printInfo("Customer Portal backend started.");
     }
 
-    # Fetch metadata information for the customer portal.
     #
     # + return - Metadata information or error response
     resource function get metadata(http:RequestContext ctx)
@@ -1629,8 +1628,39 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        types:ConversationSearchResponse baseResponse = mapConversationSearchResponse(conversationResponse);
+
+        // Fan-out: fire all summary calls in parallel to avoid N serial round-trips.
+        future<ai_chat_agent:ConversationSummaryResponse|error>[] summaryFutures = [];
+        foreach types:Conversation conv in baseResponse.conversations {
+            future<ai_chat_agent:ConversationSummaryResponse|error> f = start ai_chat_agent:getSummary(id, conv.id);
+            summaryFutures.push(f);
+        }
+
+        // Fan-in: collect results and enrich each conversation.
+        types:Conversation[] enrichedConversations = [];
+        foreach int i in 0 ..< baseResponse.conversations.length() {
+            types:Conversation enriched = baseResponse.conversations[i].clone();
+            ai_chat_agent:ConversationSummaryResponse|error summary = wait summaryFutures[i];
+            if summary is ai_chat_agent:ConversationSummaryResponse {
+                enriched.messagesExchanged = summary.messagesExchanged;
+                enriched.troubleshootingAttempts = summary.troubleshootingAttempts;
+                enriched.kbArticlesReviewed = summary.kbArticlesReviewed;
+            } else {
+                enriched.messagesExchanged = 0;
+                enriched.troubleshootingAttempts = 0;
+                enriched.kbArticlesReviewed = 0;
+            }
+            enrichedConversations.push(enriched);
+        }
+
         return <http:Ok>{
-            body: mapConversationSearchResponse(conversationResponse)
+            body: {
+                conversations: enrichedConversations,
+                totalRecords: baseResponse.totalRecords,
+                'limit: baseResponse.'limit,
+                offset: baseResponse.offset
+            }
         };
     }
 
