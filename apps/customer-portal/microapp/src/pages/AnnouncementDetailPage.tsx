@@ -62,7 +62,12 @@ export default function AnnouncementDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="announcement" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="announcement"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {

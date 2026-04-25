@@ -24,7 +24,7 @@ interface ChangeRequestSummaryDto {
   id: string;
   number: string;
   title: string;
-  case: (EntityReference & { number: string }) | null;
+  case: (EntityReference & { number: string; internalId: string }) | null;
   endDate: string | null;
   impact: EntityReference | null;
   state: EntityReference | null;
@@ -39,7 +39,7 @@ export interface ChangeRequestDto {
   number: string;
   title: string;
   createdBy: string;
-  case: (EntityReference & { number: string }) | null;
+  case: (EntityReference & { number: string; internalId: string }) | null;
   deployment: (EntityReference & { number: string }) | null;
   endDate: string | null;
   approvedBy: EntityReference | null;

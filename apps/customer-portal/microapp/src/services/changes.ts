@@ -60,6 +60,7 @@ const getChangeRequestsStats = async (id: string): Promise<ChangeRequestsStatsDt
 function toChangeRequestSummary(dto: ChangeRequestsDto["changeRequests"][number]): ChangeRequestSummary {
   return {
     id: dto.id,
+    internalId: dto.case?.internalId,
     number: dto.number,
     title: dto.title,
     description: dto.case?.label ?? "",
@@ -76,6 +77,7 @@ function toChangeRequestSummary(dto: ChangeRequestsDto["changeRequests"][number]
 function toChangeRequest(dto: ChangeRequestDto): ChangeRequest {
   return {
     id: dto.id,
+    internalId: dto.case?.internalId,
     number: dto.number,
     title: dto.title,
     description: dto.case?.label ?? "",
