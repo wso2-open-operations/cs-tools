@@ -33,6 +33,7 @@ import { InvitationSummaryContent, RoleSelector } from "@components/features/use
 import { useProject } from "@context/project";
 import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { stringAvatar } from "@utils/others";
+import { getApiErrorMessage } from "@utils/ApiError";
 import type { Role } from "@src/types";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { users } from "../services/users";
@@ -67,6 +68,9 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
   const { projectId } = useProject();
   const project = useSuspenseQuery(projects.all()).data.find((project) => project.id === projectId);
   const notify = useNotify();
+  const inviteFallbackMessage = "Failed to invite user. Please try again.";
+  const editFallbackMessage = "Failed to edit user. Please try again.";
+  const deleteFallbackMessage = "Failed to delete user. Please try again.";
 
   const createUserMutation = useMutation({
     ...users.create(projectId!),
@@ -74,7 +78,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
       queryClient.resetQueries({ queryKey: ["users", projectId] });
       navigate(-1);
     },
-    onError: () => notify.error("Failed to invite user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? inviteFallbackMessage),
   });
 
   const editUserMutation = useMutation({
@@ -83,7 +87,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
       queryClient.resetQueries({ queryKey: ["users", projectId] });
       navigate(-1);
     },
-    onError: () => notify.error("Failed to edit user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? editFallbackMessage),
   });
 
   const deleteUserMutation = useMutation({
@@ -92,7 +96,7 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
       queryClient.resetQueries({ queryKey: ["users", projectId] });
       navigate(-1);
     },
-    onError: () => notify.error("Failed to delete user. Please try again."),
+    onError: (error) => notify.error(getApiErrorMessage(error) ?? deleteFallbackMessage),
   });
 
   return (
@@ -181,12 +185,15 @@ export default function EditUserPage({ mode = "invite" }: { mode?: "invite" | "e
                 contactFirstName: firstName,
                 contactLastName: lastName,
                 isCsIntegrationUser: roles.includes("System User"),
+                isCsAdmin: roles.includes("Admin User"),
+                isPortalUser: roles.includes("Portal User"),
                 isSecurityContact: roles.includes("Security User"),
               });
 
             if (mode === "edit") {
               editUserMutation.mutate({
-                isCsIntegrationUser: roles.includes("System User"),
+                isCsAdmin: roles.includes("Admin User"),
+                isPortalUser: roles.includes("Portal User"),
                 isSecurityContact: roles.includes("Security User"),
               });
             }
