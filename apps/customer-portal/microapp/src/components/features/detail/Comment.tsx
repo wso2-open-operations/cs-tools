@@ -26,7 +26,7 @@ interface CommentProps {
 export function Comment({ children, author, timestamp }: CommentProps) {
   return (
     <Card component={Stack} sx={{ bgcolor: "background.default" }}>
-      <Stack direction="row" justifyContent="space-between" p={1}>
+      <Stack p={1}>
         <Typography variant="body2" fontWeight="medium">
           {author}
         </Typography>

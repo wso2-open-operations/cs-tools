@@ -255,7 +255,7 @@ export default function CaseDetailPage() {
             {comments ? (
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={fromNow(createdOn)}>
+                  <Comment key={id} author={createdBy} timestamp={format(createdOn)}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
