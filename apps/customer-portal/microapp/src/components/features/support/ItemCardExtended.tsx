@@ -14,64 +14,60 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Chip, Divider, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import { Box, Card, Chip, Divider, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
-import type { Priority, ServiceCategory, Status } from "./ItemCard";
 import { PriorityChip, StatusChip } from "./Chip";
+import type { CaseSummary, ChangeRequestSummary } from "@src/types";
+import type { Chat } from "@root/src/types/chat.model";
+import { stripHtmlTags } from "@root/src/utils/others";
+import type { ServiceRequestSummary } from "@root/src/types/service.model";
+
 import { TYPE_CONFIG } from "./config";
 
+dayjs.extend(relativeTime);
+
 interface BaseItemCardExtendedProps {
-  id: string;
-  title: string;
-  description: string;
-  updated: string;
   to: string;
 }
 
-interface CaseItemCardExtendedProps extends BaseItemCardExtendedProps {
+interface CaseItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
   type: "case";
-  priority: Priority;
-  status: Status;
-  assignee: string;
-  created: string;
 }
 
-interface ChatItemCardExtendedProps extends BaseItemCardExtendedProps {
+interface ChatItemCardExtendedProps extends BaseItemCardExtendedProps, Chat {
   type: "chat";
-  category: string;
-  status: Status;
-  count: number;
-  started: string;
 }
 
-interface ServiceItemCardExtendedProps extends BaseItemCardExtendedProps {
+interface ServiceItemCardExtendedProps extends BaseItemCardExtendedProps, ServiceRequestSummary {
   type: "service";
-  priority: Priority;
-  status: Status;
-  category: ServiceCategory;
-  requestedBy: string;
-  assignee: string;
 }
 
-interface ChangeItemCardExtendedProps extends BaseItemCardExtendedProps {
+interface ChangeItemCardExtendedProps extends BaseItemCardExtendedProps, ChangeRequestSummary {
   type: "change";
-  impact: Priority;
-  priority: Priority;
-  status: Status;
-  category: ServiceCategory;
-  scheduled: string;
-  owner: string;
+}
+
+interface SraItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
+  type: "sra";
+}
+
+interface EngagementItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
+  type: "engagement";
 }
 
 export type ItemCardExtendedProps =
   | CaseItemCardExtendedProps
   | ChatItemCardExtendedProps
   | ServiceItemCardExtendedProps
-  | ChangeItemCardExtendedProps;
+  | ChangeItemCardExtendedProps
+  | SraItemCardExtendedProps
+  | EngagementItemCardExtendedProps;
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
-  const { id, title, description, type, status, updated, to } = props;
+  const theme = useTheme();
+  const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
   return (
@@ -82,17 +78,22 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
             <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
               <Icon size={pxToRem(19)} color={color} />
               <Typography variant="subtitle2" color="text.secondary">
-                {id}
+                {props.number}
               </Typography>
-              {(type === "case" || type === "service") && <PriorityChip size="small" priority={props.priority} />}
-              {type === "chat" && <Chip label={props.category} size="small" color="default" />}
-              {type === "change" && <PriorityChip size="small" prefix="Impact" priority={props.impact} />}
-              {(type === "service" || type === "change") && (
-                <Chip label={props.category} size="small" color="default" />
+              {(type === "case" || type === "service" || type === "sra") && (
+                <PriorityChip size="small" id={props.severityId} />
+              )}
+              {type === "service" && <Chip size="small" label={props.issueType ?? "N/A"} />}
+              {type === "engagement" && <Chip size="small" label={props.engagementType ?? "Unspecified"} />}
+              {type === "change" && (
+                <>
+                  <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />
+                  <Chip size="small" label={props.requestType ?? "N/A"} />
+                </>
               )}
             </Stack>
             <Stack direction="row" gap={2}>
-              <StatusChip size="small" status={status} />
+              <StatusChip type={type} size="small" id={props.statusId} />
               <Box color="text.secondary">
                 <ChevronRight size={pxToRem(18)} />
               </Box>
@@ -100,20 +101,45 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
           </Stack>
 
           <Stack gap={0.2}>
-            <Typography variant="body2" color="text.primary">
-              {title}
+            <Typography variant="body1" color="text.primary" noWrap>
+              {(type === "case" ||
+                type === "service" ||
+                type === "change" ||
+                type === "sra" ||
+                type === "engagement") &&
+                props.title}
+              {type === "chat" && props.description}
             </Typography>
-            <Typography sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })} color="text.secondary">
-              {description}
-            </Typography>
+            {(type === "case" ||
+              type === "service" ||
+              type === "change" ||
+              type === "sra" ||
+              type === "engagement") && (
+              <Typography
+                variant="subtitle2"
+                color="text.secondary"
+                sx={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {stripHtmlTags(props.description)}
+              </Typography>
+            )}
           </Stack>
+
           {type === "change" && (
             <Stack direction="row" alignItems="center" gap={1}>
-              <Box color="text.secondary">
-                <Calendar size={pxToRem(16)} />
-              </Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Scheduled: {props.scheduled}
+              <Calendar size={pxToRem(16)} color={theme.palette.text.secondary} />
+              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+                Scheduled:{" "}
+                {props.endDate?.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                }) ?? "N/A"}
               </Typography>
             </Stack>
           )}
@@ -135,6 +161,9 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                       return "Requested By";
                     case "change":
                       return "Owner";
+                    case "sra":
+                    case "engagement":
+                      return "Created By";
                   }
                 })()}
               </Typography>
@@ -142,13 +171,15 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
                 {(() => {
                   switch (type) {
                     case "case":
-                      return props.assignee;
+                      return props.assigned ?? "N/A";
                     case "chat":
                       return props.count;
+                    case "sra":
                     case "service":
-                      return props.requestedBy;
+                    case "engagement":
+                      return props.createdBy;
                     case "change":
-                      return props.owner;
+                      return props.assignedTeam ?? "N/A";
                   }
                 })()}
               </Typography>
@@ -157,10 +188,6 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
               <Typography variant="caption" color="text.secondary">
                 {(() => {
                   switch (type) {
-                    case "case":
-                      return "Created";
-                    case "chat":
-                      return "Started";
                     case "service":
                       return "Assignee";
                     case "change":
@@ -171,22 +198,75 @@ export function ItemCardExtended(props: ItemCardExtendedProps) {
               <Typography variant="caption">
                 {(() => {
                   switch (type) {
-                    case "case":
-                      return props.created;
-                    case "chat":
-                      return props.started;
                     case "service":
-                      return props.assignee;
+                      return props.assignee ?? "N/A";
                     case "change":
-                      return <PriorityChip size="small" priority={props.priority} />;
+                      return <PriorityChip size="small" id={props.impactId} />;
                   }
                 })()}
               </Typography>
             </Stack>
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            Updated {updated}
+            {(() => {
+              switch (type) {
+                case "case":
+                case "chat":
+                case "service":
+                case "sra":
+                case "engagement":
+                  return `Created ${dayjs(props.createdOn).fromNow()}`;
+                case "change":
+                  return `Updated ${dayjs(props.updatedOn).fromNow()}`;
+              }
+            })()}
           </Typography>
+        </Stack>
+      </Stack>
+    </Card>
+  );
+}
+
+export function ItemCardExtendedSkeleton() {
+  return (
+    <Card sx={{ textDecoration: "none" }}>
+      <Stack bgcolor="background.paper" p={2} gap={2}>
+        <Stack gap={0.8}>
+          <Stack direction="row" justifyContent="space-between" gap={5}>
+            <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
+              <Skeleton variant="circular" width={pxToRem(19)} height={pxToRem(19)} />
+              <Skeleton variant="text" width={80} height={20} />
+              <Skeleton variant="rounded" width={60} height={24} sx={{ borderRadius: 1 }} />
+            </Stack>
+
+            <Stack direction="row" gap={2} alignItems="center">
+              <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: 1 }} />
+              <Skeleton variant="circular" width={pxToRem(18)} height={pxToRem(18)} />
+            </Stack>
+          </Stack>
+
+          <Stack gap={0.2}>
+            <Skeleton variant="text" width="60%" height={28} />
+            <Skeleton variant="text" width="85%" height={20} />
+            <Skeleton variant="text" width="40%" height={20} />
+          </Stack>
+        </Stack>
+
+        <Divider />
+
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={5}>
+          <Stack direction="row" gap={3}>
+            <Stack>
+              <Skeleton variant="text" width={50} height={16} />
+              <Skeleton variant="text" width={90} height={22} />
+            </Stack>
+            <Stack>
+              <Skeleton variant="text" width={50} height={16} />
+              <Skeleton variant="text" width={90} height={22} />
+            </Stack>
+          </Stack>
+
+          <Skeleton variant="text" width={120} height={20} />
         </Stack>
       </Stack>
     </Card>

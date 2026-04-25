@@ -21,6 +21,7 @@ import { useLogger } from "@hooks/useLogger";
 import type { CreateCaseRequest } from "@features/support/types/cases";
 import type { CreateServiceRequestPayload } from "@features/operations/types/serviceRequests";
 import type { CreateCaseResponse } from "@features/support/types/cases";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Posts a new support case or service request to the backend.
@@ -79,9 +80,7 @@ export function usePostCase(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error creating case: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: CreateCaseResponse = await response.json();

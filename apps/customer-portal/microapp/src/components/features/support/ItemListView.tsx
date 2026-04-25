@@ -21,18 +21,26 @@ import type { ReactNode } from "react";
 
 interface ItemListViewProps {
   title: string;
+  subtitle?: string;
   viewAllPath: string;
   children: ReactNode;
 }
 
-export function ItemListView({ title, viewAllPath, children }: ItemListViewProps) {
+export function ItemListView({ title, subtitle, viewAllPath, children }: ItemListViewProps) {
   const theme = useTheme();
 
   return (
     <>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1}>
-        <Typography variant="h6">{title}</Typography>
-        <Button variant="text" component={Link} to={viewAllPath} sx={{ textTransform: "initial" }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1} width="100%">
+        <Stack mr={2} minWidth={0}>
+          <Typography variant="h6">{title}</Typography>
+          {subtitle && (
+            <Typography variant="subtitle2" color="text.secondary" noWrap>
+              {subtitle}
+            </Typography>
+          )}
+        </Stack>
+        <Button variant="text" component={Link} to={viewAllPath} sx={{ textTransform: "initial", flexShrink: 0 }}>
           <Stack direction="row" gap={1}>
             <Typography variant="body1" color="primary">
               View All

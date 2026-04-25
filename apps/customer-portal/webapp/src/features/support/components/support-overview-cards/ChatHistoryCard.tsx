@@ -64,10 +64,6 @@ export default function ChatHistoryCard({
         flexDirection: "column",
         alignItems: "stretch",
         gap: 1,
-        cursor: "pointer",
-        "&:hover": {
-          bgcolor: "action.hover",
-        },
       }}
     >
       <CardContent
@@ -152,6 +148,7 @@ export default function ChatHistoryCard({
           </Typography>
         </Box>
         <Button
+          component="span"
           size="small"
           variant="text"
           color={getChatActionColor(action)}

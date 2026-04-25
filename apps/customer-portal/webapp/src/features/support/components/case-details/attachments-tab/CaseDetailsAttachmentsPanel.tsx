@@ -18,7 +18,8 @@ import type { CaseDetailsAttachmentsPanelProps } from "@features/support/types/s
 import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import ListPagination from "@components/list-view/ListPagination";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { setPendingCaseDetailsTab } from "@features/settings/utils/settingsStorage";
 import {
   useGetCaseAttachments,
   flattenCaseAttachments,
@@ -39,6 +40,8 @@ import ApiErrorState from "@components/error/ApiErrorState";
 
 
 const ITEMS_PER_PAGE = 10;
+const SKELETON_MIN_DISPLAY_MS = 4000;
+const ATTACHMENTS_TAB_INDEX = "2";
 
 /**
  * Renders the Attachments tab: upload button, modal, and list from GET /cases/:id/attachments.
@@ -58,6 +61,18 @@ export default function CaseDetailsAttachmentsPanel({
   const { downloadAttachment, isDownloading, downloadingId } =
     useGetAttachment();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [minTimeElapsed, setMinTimeElapsed] = useState(false);
+  const minTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    minTimeRef.current = setTimeout(
+      () => setMinTimeElapsed(true),
+      SKELETON_MIN_DISPLAY_MS,
+    );
+    return () => {
+      if (minTimeRef.current) clearTimeout(minTimeRef.current);
+    };
+  }, []);
   const [currentPage, setCurrentPage] = useState(1);
   const [attachmentToDelete, setAttachmentToDelete] =
     useState<CaseAttachment | null>(null);
@@ -191,11 +206,11 @@ export default function CaseDetailsAttachmentsPanel({
   return (
     <>
       <Stack spacing={3}>
-        {!(allAttachments.length === 0 && !isLoading && !isError) && (
+        {!(allAttachments.length === 0 && !isLoading && minTimeElapsed && !isError) && (
           <Box sx={{ alignSelf: "flex-start" }}>{uploadButton}</Box>
         )}
 
-        {isLoading ? (
+        {isLoading || !minTimeElapsed ? (
           <AttachmentsListSkeleton />
         ) : isError ? (
           <ApiErrorState
@@ -272,6 +287,7 @@ export default function CaseDetailsAttachmentsPanel({
         open={uploadOpen}
         caseId={caseId}
         onSuccess={() => {
+          setPendingCaseDetailsTab(ATTACHMENTS_TAB_INDEX);
           window.location.reload();
         }}
         onClose={() => setUploadOpen(false)}

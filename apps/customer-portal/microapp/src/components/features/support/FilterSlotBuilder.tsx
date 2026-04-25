@@ -15,13 +15,11 @@
 // under the License.
 
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { SearchBar, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
-import type { NotificationFilter } from "@pages/NotificationsPage";
-import type { Status } from "./ItemCard";
+import { Box, SearchBar, Skeleton, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
 
 export interface FilterTab {
   label: string;
-  value: Status | NotificationFilter | "all";
+  value: string;
 }
 
 export interface FilterSlotBuilderProps {
@@ -105,6 +103,29 @@ export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilder
           <Tab key={index} label={tab.label} value={tab.value} disableRipple />
         ))}
       </Tabs>
+    </Stack>
+  );
+}
+
+export function FilterSlotBuilderSkeleton() {
+  return (
+    <Stack gap={2} pb={1} width="100%">
+      <Skeleton variant="rectangular" height={36} sx={{ mt: 1, borderRadius: 1 }} />
+
+      <Box sx={{ display: "flex", gap: 2, overflow: "hidden" }}>
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton
+            key={index}
+            variant="rectangular"
+            width={80}
+            height={40}
+            sx={{
+              borderRadius: 999,
+              flexShrink: 0,
+            }}
+          />
+        ))}
+      </Box>
     </Stack>
   );
 }

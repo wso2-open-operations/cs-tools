@@ -14,78 +14,132 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useLayoutEffect, useState } from "react";
-import { Box, Card, Chip, colors, Grid, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
-import { InfoField, OverlineSlot, StakeholderItem, StickyCommentBar, TimelineEntry } from "@components/features/detail";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Chip, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { InfoField, OverlineSlot, StakeholderItem, StakeholderItemSkeleton } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { ChecklistItem } from "@components/features/chat";
+import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import { SectionCard } from "@components/shared";
-import { Timeline } from "@components/ui";
 import { useLayout } from "@context/layout";
-
-import { MOCK_ACTIVITY_TIMELINE, MOCK_IMPLEMENTATION_STEPS, MOCK_STAKEHOLDERS } from "@src/mocks/data/change";
-import { Calendar, TriangleAlert, User, Users } from "@wso2/oxygen-ui-icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { changeRequests } from "@src/services/changes";
+import { useParams } from "react-router-dom";
+import { stripHtmlTags } from "@utils/others";
+import { ProgressTimeline } from "../components/features/detail/ProgressTimeline";
 
 export default function ChangeDetailPage() {
   const layout = useLayout();
-  const [comment, setComment] = useState("");
-  const [activities, setActivities] = useState(MOCK_ACTIVITY_TIMELINE);
+  const { id } = useParams();
+  const { data, isLoading } = useQuery(changeRequests.get(id!));
 
-  const handleSend = () => {
-    if (!comment.trim()) return;
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overlineSlotVariant, setOverlineSlotVariant] = useState<"normal" | "shrunk">("normal");
 
-    setActivities((prev) => [...prev, { author: "You", description: comment, timestamp: "Just Now" }]);
-  };
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
 
-  const AppBarSlot = () => (
-    <Stack direction="row" gap={1.5} mt={1}>
-      <StatusChip status="scheduled" size="small" />
-      <PriorityChip prefix="Impact" priority="low" size="small" />
-      <Chip label="Security Update" size="small" />
-    </Stack>
-  );
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const next = entry.isIntersecting ? "normal" : "shrunk";
+        setOverlineSlotVariant(next);
+      },
+      {
+        root: null,
+        rootMargin: "-80px 0px 0px 0px",
+        threshold: 1.0,
+      },
+    );
+
+    observer.observe(element);
+
+    return () => observer.unobserve(element);
+  }, []);
 
   useLayoutEffect(() => {
-    layout.setTitleOverride("Update API Gateway security policies");
-    layout.setOverlineSlotOverride(<OverlineSlot type="change" id="CR-1234" />);
-    layout.setAppBarSlotsOverride(<AppBarSlot />);
+    layout.setTitleOverride(
+      <OverlineSlot variant={overlineSlotVariant} type="change" id={data?.number} title={data?.title} />,
+    );
 
     return () => {
       layout.setTitleOverride(undefined);
-      layout.setOverlineSlotOverride(undefined);
-      layout.setAppBarSlotsOverride(undefined);
     };
-  }, []);
+  }, [data, overlineSlotVariant]);
 
   return (
     <>
       <Stack gap={2} mb={10}>
-        <MaintenanceNoticeCard />
+        <Typography ref={ref} variant="h5" fontWeight="medium">
+          {data?.title}
+        </Typography>
         <SectionCard title="Change Information">
           <Grid spacing={1.5} container>
             <Grid size={12}>
+              <InfoField label="Description" value={data?.description ? stripHtmlTags(data.description) : "N/A"} />
+            </Grid>
+            <Grid size={6}>
+              <InfoField label="Change Owner" value={data?.createdBy} icon={User} />
+            </Grid>
+            <Grid size={6}>
+              <InfoField label="Requested By" value={data?.assignedTeam} icon={Users} />
+            </Grid>
+            <Grid size={6}>
               <InfoField
-                label="Description"
-                value="Update API Gateway security policies to implement new authentication requirements and enhanced rate limiting. This change will improve security posture and prevent potential DDoS attacks."
+                label="Status"
+                value={
+                  data?.statusId ? (
+                    <StatusChip type="change" id={data.statusId} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
               />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Change Owner" value="Sarah Chen" icon={User} />
+              <InfoField
+                label="Impact"
+                value={
+                  data ? (
+                    <PriorityChip type="change" size="small" id={data?.impactId} />
+                  ) : (
+                    <Skeleton variant="rounded" width={70} height={22} sx={{ borderRadius: "16px" }} />
+                  )
+                }
+              />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Requested By" value="Security Team" icon={Users} />
+              <InfoField
+                label="Request Type"
+                value={
+                  data?.statusId ? (
+                    <Chip label={data.requestType ?? "N/A"} size="small" />
+                  ) : (
+                    <Skeleton variant="text" width={50} height={30} />
+                  )
+                }
+              />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Priority" value={<PriorityChip size="small" priority="medium" />} />
+              <InfoField label="Estimated Duration" value={!isLoading ? (data?.duration ?? "N/A") : undefined} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Estimated Duration" value="1 hour" />
+              <InfoField
+                label="Approval Status"
+                value={
+                  data ? (
+                    <Chip
+                      size="small"
+                      color={data.hasCustomerApproved ? "success" : "default"}
+                      label={data.hasCustomerApproved ? "Approved" : "Pending"}
+                    />
+                  ) : (
+                    <Skeleton variant="rounded" width={70} height={22} sx={{ borderRadius: "16px" }} />
+                  )
+                }
+              />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Approval Status" value={<StatusChip size="small" status="approved" />} />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Approved By" value="Change Advisory Board" />
+              <InfoField label="Approved By" value={!isLoading ? (data?.approvedBy ?? "N/A") : undefined} />
             </Grid>
           </Grid>
         </SectionCard>
@@ -93,101 +147,59 @@ export default function ChangeDetailPage() {
           <Grid spacing={1.5} container>
             <Grid size={12}>
               <InfoField
-                label="Affected Services"
+                label="Communication Plan"
                 value={
-                  <Stack direction="row" gap={1}>
-                    <Chip size="small" label="API Gateway" />
-                    <Chip size="small" label="Authentication Service" />
-                  </Stack>
+                  !isLoading
+                    ? data?.communicationPlan
+                      ? stripHtmlTags(data.communicationPlan)
+                      : "No communication plan available"
+                    : undefined
                 }
               />
-            </Grid>
-            <Grid size={12}>
-              <InfoField label="Affected Users" value="None - backend configuration only" />
-            </Grid>
-            <Grid size={12}>
-              <InfoField label="Expected Downtime" value={<ChecklistItem>No downtime expected</ChecklistItem>} />
             </Grid>
             <Grid size={12}>
               <InfoField
                 label="Rollback Plan"
                 value={
-                  <ChecklistItem icon={TriangleAlert} color="warning">
-                    Automated rollback to previous policy version available
-                  </ChecklistItem>
+                  !isLoading
+                    ? data?.rollbackPlan
+                      ? stripHtmlTags(data.rollbackPlan)
+                      : "No rollback plan available"
+                    : undefined
+                }
+              />
+            </Grid>
+            <Grid size={12}>
+              <InfoField
+                label="Test Plan"
+                value={
+                  !isLoading ? (data?.testPlan ? stripHtmlTags(data.testPlan) : "No test plan available") : undefined
                 }
               />
             </Grid>
           </Grid>
         </SectionCard>
-        <SectionCard title="Implementation Steps">
-          <Timeline>
-            {MOCK_IMPLEMENTATION_STEPS.map((step, index) => (
-              <TimelineEntry
-                key={index}
-                variant="step"
-                index={index + 1}
-                title={step.title}
-                description={step.description}
-                timestamp={step.timestamp}
-                last={index === MOCK_IMPLEMENTATION_STEPS.length - 1}
-              />
-            ))}
-          </Timeline>
+        <SectionCard title="Progress Timeline">
+          <ProgressTimeline id={id!} />
         </SectionCard>
         <SectionCard title="Stakeholders">
           <Stack gap={1.5}>
-            {MOCK_STAKEHOLDERS.map((stakeholder, index) => (
-              <StakeholderItem key={index} name={stakeholder.name} role={stakeholder.role} />
-            ))}
+            {data ? (
+              <>
+                {data.createdBy && <StakeholderItem name={data.createdBy} role="owner" />}
+                {data.approvedBy && <StakeholderItem name={data.approvedBy} role="approver" />}
+                {data.assignedTeam && <StakeholderItem name={data.assignedTeam} role="requestor" />}
+              </>
+            ) : (
+              <>
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <StakeholderItemSkeleton key={index} />
+                ))}
+              </>
+            )}
           </Stack>
-        </SectionCard>
-        <SectionCard title="Activity Timeline">
-          <Timeline>
-            {activities.map((props, index) => (
-              <TimelineEntry key={index} variant="activity" {...props} last={index === activities.length - 1} />
-            ))}
-          </Timeline>
-          <Box
-            sx={{
-              "& > .MuiStack-root": {
-                position: "static !important",
-                bottom: "auto !important",
-                p: 0,
-                m: 0,
-              },
-            }}
-          >
-            <StickyCommentBar placeholder="Add Comment" value={comment} onChange={setComment} onSend={handleSend} />
-          </Box>
         </SectionCard>
       </Stack>
     </>
-  );
-}
-
-export function MaintenanceNoticeCard() {
-  return (
-    <Card
-      component={Stack}
-      direction="row"
-      alignItems="center"
-      px={2}
-      py={1.5}
-      gap={2}
-      sx={{ bgcolor: colors.yellow[50] }}
-    >
-      <Box color="primary.main">
-        <Calendar size={pxToRem(26)} />
-      </Box>
-      <Stack>
-        <Typography variant="body1" fontWeight="medium" color="primary">
-          Scheduled Maintenance Window
-        </Typography>
-        <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
-          Nov 25, 2025 &nbsp; 10:00 PM - 11:00 PM EST
-        </Typography>
-      </Stack>
-    </Card>
   );
 }

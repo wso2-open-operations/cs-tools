@@ -25,6 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PostDeploymentAttachmentVariables } from "@features/project-details/types/projectDetailsApi";
 import type { PostDeploymentAttachmentResponse } from "@features/project-details/types/deployments";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Posts an attachment to a deployment (POST /deployments/:deploymentId/attachments).
@@ -84,9 +85,7 @@ export function usePostDeploymentAttachment(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error uploading deployment document: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: PostDeploymentAttachmentResponse = await response.json();

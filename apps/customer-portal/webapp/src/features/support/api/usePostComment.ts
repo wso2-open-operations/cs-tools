@@ -27,6 +27,7 @@ import type {
   PostCommentRequest,
   PostCommentVariables,
 } from "@features/support/types/supportApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export type { PostCommentRequest, PostCommentVariables };
 
@@ -80,9 +81,7 @@ export function usePostComment(): UseMutationResult<
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(
-          `Error posting comment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-        );
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
     },
     onSuccess: () => {

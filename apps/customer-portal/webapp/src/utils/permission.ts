@@ -60,6 +60,7 @@ function restrictivePermissions(): ProjectPermissions {
     hasQueryHours: false,
     hasTimeLogs: false,
     hasSecurityReportAnalysis: false,
+    hasSraWriteAccess: false,
     showOutstandingOpsChart: false,
     includeChangeRequestsInDashboardTotals: false,
     includeS0InSupportMetrics: false,
@@ -89,7 +90,6 @@ export function getProjectPermissions(
   const hasDeployments =
     features.hasDeploymentReadAccess || features.hasDeploymentWriteAccess;
   const hasTimeLogs = features.hasTimeLogsReadAccess;
-  const hasSra = features.hasSraReadAccess || features.hasSraWriteAccess;
   const hasCatastrophicSeverity = hasAcceptedSeverityLabel(
     features,
     CATASTROPHIC_SEVERITY_TAG,
@@ -102,7 +102,8 @@ export function getProjectPermissions(
     hasDeployments,
     hasQueryHours: hasTimeLogs,
     hasTimeLogs,
-    hasSecurityReportAnalysis: hasSra,
+    hasSecurityReportAnalysis: features.hasSraReadAccess,
+    hasSraWriteAccess: features.hasSraWriteAccess,
     showOutstandingOpsChart: hasSR || hasCR,
     includeChangeRequestsInDashboardTotals: hasCR,
     includeS0InSupportMetrics: hasCatastrophicSeverity,

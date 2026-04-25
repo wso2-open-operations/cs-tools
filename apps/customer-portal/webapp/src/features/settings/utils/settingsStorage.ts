@@ -19,6 +19,7 @@ const LAST_SELECTED_PROJECT_ID_KEY = "last_selected_project_id";
 const NOVERA_CHAT_ENABLED_KEY = "novera_chat_enabled";
 const PENDING_SUCCESS_MESSAGE_KEY = "pending_success_message";
 const PENDING_SETTINGS_TAB_KEY = "pending_settings_tab";
+const PENDING_CASE_DETAILS_TAB_KEY = "pending_case_details_tab";
 
 
 /**
@@ -155,6 +156,34 @@ export function consumePendingSuccessMessage(): string | null {
     const msg = sessionStorage.getItem(PENDING_SUCCESS_MESSAGE_KEY);
     if (msg !== null) sessionStorage.removeItem(PENDING_SUCCESS_MESSAGE_KEY);
     return msg;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stores the case details tab index to restore after the next page reload.
+ *
+ * @param {string} tabIndex - The visible tab index to restore.
+ */
+export function setPendingCaseDetailsTab(tabIndex: string): void {
+  try {
+    sessionStorage.setItem(PENDING_CASE_DETAILS_TAB_KEY, tabIndex);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Reads and clears the pending post-reload case details tab index.
+ *
+ * @returns {string | null} The tab index string, or null if none is pending.
+ */
+export function consumePendingCaseDetailsTab(): string | null {
+  try {
+    const tab = sessionStorage.getItem(PENDING_CASE_DETAILS_TAB_KEY);
+    if (tab !== null) sessionStorage.removeItem(PENDING_CASE_DETAILS_TAB_KEY);
+    return tab;
   } catch {
     return null;
   }

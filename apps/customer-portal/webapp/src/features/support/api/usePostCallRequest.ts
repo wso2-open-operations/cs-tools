@@ -25,6 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CreateCallRequest } from "@features/support/types/calls";
 import type { CreateCallResponse } from "@features/support/types/calls";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to create a new call request for a case (POST /cases/:caseId/call-requests).
@@ -72,18 +73,7 @@ export function usePostCallRequest(
 
         if (!response.ok) {
           const text = await response.text();
-          let errorMessage = `Error creating call request: ${response.status} ${response.statusText}`;
-          try {
-            const json = JSON.parse(text) as { message?: string };
-            if (typeof json.message === "string") {
-              errorMessage = json.message;
-            } else if (text) {
-              errorMessage += ` - ${text}`;
-            }
-          } catch {
-            if (text) errorMessage += ` - ${text}`;
-          }
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: CreateCallResponse = await response.json();

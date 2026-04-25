@@ -33,18 +33,42 @@ const ProductVulnerabilitiesTableSkeleton = ({
     <>
       {Array.from({ length: rowsPerPage }).map((_, index) => (
         <TableRow key={`skeleton-${index}`}>
-          <TableCell><Skeleton variant="text" width={100} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={110} height={20} /></TableCell>
-          <TableCell><Skeleton variant="rounded" width={70} height={24} /></TableCell>
-          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={60} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={160} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={70} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={80} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={90} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={100} height={20} /></TableCell>
-          <TableCell><Skeleton variant="text" width={90} height={20} /></TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={45} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={55} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="rounded" width={32} height={22} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={50} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={25} height={20} />
+          </TableCell>
+          <TableCell sx={{ maxWidth: 180 }}>
+            <Skeleton variant="text" width={70} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={25} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={40} height={20} />
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={35} height={20} />
+          </TableCell>
+          <TableCell sx={{ maxWidth: 160 }}>
+            <Skeleton variant="text" width={60} height={20} />
+          </TableCell>
+          <TableCell sx={{ maxWidth: 160 }}>
+            <Skeleton variant="text" width={50} height={20} />
+          </TableCell>
+          <TableCell sx={{ maxWidth: 160 }}>
+            <Skeleton variant="text" width={45} height={20} />
+          </TableCell>
         </TableRow>
       ))}
     </>

@@ -19,6 +19,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CatalogItemVariablesResponse } from "@features/operations/types/serviceRequests";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Fetches catalog item variables (GET /catalogs/:catalogId/items/:itemId).
@@ -55,9 +56,7 @@ export function useGetCatalogItemVariables(
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(
-          `Error fetching catalog item variables: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-        );
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
 
       const data: CatalogItemVariablesResponse = await response.json();

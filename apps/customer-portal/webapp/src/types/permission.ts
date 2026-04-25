@@ -45,6 +45,7 @@ export type ProjectPermissions = {
   hasQueryHours: boolean;
   hasTimeLogs: boolean;
   hasSecurityReportAnalysis: boolean;
+  hasSraWriteAccess: boolean;
   hasSR: boolean;
   hasCR: boolean;
   showOutstandingOpsChart: boolean;

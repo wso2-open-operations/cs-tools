@@ -81,8 +81,7 @@ function GetHelpDropdownContent(): JSX.Element {
       })
     : undefined;
   const isServiceRequestVisible = permissions?.hasSR ?? false;
-  const isSecurityReportVisible =
-    permissions?.hasSecurityReportAnalysis ?? false;
+  const isSecurityReportVisible = permissions?.hasSraWriteAccess ?? false;
   const isFeaturesBusy = !!projectId && isProjectFeaturesLoading;
   const isProjectsListBusy =
     isProjectsLoading ||

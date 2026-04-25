@@ -20,12 +20,14 @@ import { AppBar, TabBar } from "@components/core";
 
 export default function MainLayout() {
   return (
-    <Box bgcolor="components.portal.background.main" minHeight="100dvh">
+    // <Box bgcolor="components.portal.background.main" minHeight="100dvh">
+    <>
       <AppBar />
       <Box component="main" flexGrow={1} p={2} pb={15}>
         <Outlet />
       </Box>
       <TabBar />
-    </Box>
+    </>
+    // </Box>
   );
 }

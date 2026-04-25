@@ -14,8 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { MessageSquare, OctagonAlert, RefreshCcw, Settings, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { ItemType, Priority, Status } from "./ItemCard";
+import {
+  Briefcase,
+  MessageSquare,
+  OctagonAlert,
+  RefreshCcw,
+  Settings,
+  Shield,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
+import type { ItemType } from "./ItemCard";
 import { colors, type ChipProps } from "@wso2/oxygen-ui";
 
 export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> = {
@@ -35,24 +43,69 @@ export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> 
     icon: RefreshCcw,
     color: colors.cyan[500],
   },
+  sra: {
+    icon: Shield,
+    color: colors.orange[500],
+  },
+  engagement: {
+    icon: Briefcase,
+    color: colors.grey[600],
+  },
 };
 
-export const PRIORITY_CHIP_COLOR_CONFIG: Record<Priority, ChipProps["color"]> = {
-  low: "success",
-  medium: "info",
-  high: "primary",
+export const PRIORITY_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  13: "success",
+  12: "info",
+  11: "primary",
+  10: "primary",
 };
 
-export const STATUS_CHIP_COLOR_CONFIG: Record<Status, ChipProps["color"]> = {
-  "in progress": "info",
-  open: "primary",
-  resolved: "success",
-  waiting: "info",
-  closed: "default",
-  active: "info",
-  scheduled: "warning",
-  approved: "success",
-  draft: "default",
-  rejected: "error",
-  "pending approval": "warning",
+export const IMPACT_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  1: "error",
+  2: "warning",
+  3: "success",
+};
+
+export const CASE_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  1: "info",
+  10: "primary",
+  18: "success",
+  1003: "info",
+  6: "default",
+  3: "info",
+  1006: "info",
+};
+
+export const CONVERSATION_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  1: "info",
+  2: "success",
+  3: "success",
+  4: "primary",
+  5: "default",
+};
+
+export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+  "-5": "default",
+  "-4": "info",
+  "-3": "warning",
+  "5": "warning",
+  "-2": "primary",
+  "-1": "primary",
+  "0": "info",
+  "1": "info",
+  "2": "error",
+  "3": "success",
+  "4": "default",
+};
+
+export const STRING_OVERRIDES = {
+  // Engagement Type Labels Overrides
+  "New Feature / Improvement": "Improvement",
+
+  // Severity Type Names
+  "Low (P4)": "S4",
+  "Medium (P3)": "S3",
+  "High (P2)": "S2",
+  "Critical (P1)": "S1",
+  "Catastrophic (P0)": "S0",
 };

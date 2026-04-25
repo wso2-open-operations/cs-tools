@@ -28,6 +28,7 @@ import { Bot, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useState, useMemo, useEffect, type JSX } from "react";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { usePatchProject } from "@features/settings/api/usePatchProject";
+import { useDarkMode } from "@utils/useDarkMode";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   setNoveraChatEnabled,
@@ -120,6 +121,8 @@ export default function SettingsAiAssistant({
     [noveraEnabled, patchProject, notifyPatchSuccess, handlePatchError],
   );
 
+  const isDarkMode = useDarkMode();
+
   const disabledForSwitches =
     !canEdit || isProjectDetailsLoading || patchProject.isPending;
 
@@ -175,7 +178,7 @@ export default function SettingsAiAssistant({
           </Typography>
           {!canEdit && (
             <Typography
-              variant="body2"
+              variant="caption"
               color="text.secondary"
               sx={{ fontStyle: "italic", textAlign: "right", flexShrink: 0 }}
             >
@@ -188,8 +191,14 @@ export default function SettingsAiAssistant({
             sx={{
               p: 2.5,
               ...(!canEdit && {
-                bgcolor: "action.disabledBackground",
-                opacity: 0.7,
+                bgcolor: isDarkMode
+                  ? alpha(colors.grey[600], 0.6)
+                  : alpha(colors.grey[300], 0.0),
+                border: "1px solid",
+                borderColor: isDarkMode
+                  ? alpha(colors.grey[600], 0.3)
+                  : alpha(colors.grey[400], 0.3),
+                opacity: 0.8,
               }),
             }}
           >
@@ -212,7 +221,13 @@ export default function SettingsAiAssistant({
                 >
                   <Bot
                     size={20}
-                    color={!canEdit ? colors.grey[400] : colors.orange[600]}
+                    color={
+                      !canEdit
+                        ? isDarkMode
+                          ? colors.grey[600]
+                          : colors.grey[400]
+                        : colors.orange[600]
+                    }
                   />
                   <Typography
                     variant="body1"
@@ -229,7 +244,12 @@ export default function SettingsAiAssistant({
                     sx={{
                       height: 20,
                       fontSize: "0.7rem",
-                      ...(!canEdit && { color: "text.disabled", borderColor: "action.disabled" }),
+                      ...(!canEdit && {
+                        color: "text.disabled",
+                        borderColor: isDarkMode
+                          ? alpha(colors.grey[600], 0.5)
+                          : "action.disabled",
+                      }),
                     }}
                   />
                 </Box>
@@ -250,11 +270,15 @@ export default function SettingsAiAssistant({
                     sx={{
                       ...(!canEdit && {
                         "& .MuiSwitch-track": {
-                          bgcolor: "action.disabled",
+                          bgcolor: isDarkMode
+                            ? alpha(colors.grey[700], 0.8)
+                            : alpha(colors.grey[400], 0.35),
                           opacity: 1,
                         },
                         "& .MuiSwitch-thumb": {
-                          bgcolor: colors.grey[400],
+                          bgcolor: isDarkMode
+                            ? colors.grey[600]
+                            : colors.grey[300],
                         },
                       }),
                     }}

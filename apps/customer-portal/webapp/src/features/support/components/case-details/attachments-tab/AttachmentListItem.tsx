@@ -36,13 +36,15 @@ import {
   PencilLine,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { CaseAttachment } from "@features/support/types/cases";
 import {
   formatFileSize,
   getAttachmentFileCategory,
 } from "@features/support/utils/support";
 import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
+
+const PREVIEW_SKELETON_MIN_DISPLAY_MS = 4000;
 
 // TODO: Use attachment category enum when introduced (see support.ts AttachmentFileCategory).
 function getAttachmentIcon(att: CaseAttachment): JSX.Element {
@@ -80,8 +82,27 @@ export default function AttachmentListItem({
 }: AttachmentListItemProps): JSX.Element {
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageError, setImageError] = useState(false);
+  const [previewMinTimeElapsed, setPreviewMinTimeElapsed] = useState(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (imageExpanded) {
+      setPreviewMinTimeElapsed(false);
+      previewTimerRef.current = setTimeout(
+        () => setPreviewMinTimeElapsed(true),
+        PREVIEW_SKELETON_MIN_DISPLAY_MS,
+      );
+    } else {
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+      setPreviewMinTimeElapsed(false);
+    }
+    return () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, [imageExpanded]);
   const attachmentCategory = getAttachmentFileCategory(
     attachment.name ?? "",
     attachment.type ?? "",
@@ -166,14 +187,7 @@ export default function AttachmentListItem({
                 size="small"
                 aria-label={imageExpanded ? "Collapse image" : "Expand image"}
                 sx={{ color: "text.secondary" }}
-                onClick={() => {
-                  const next = !imageExpanded;
-                  setImageExpanded(next);
-                  if (!next) {
-                    setImageLoaded(false);
-                    setImageError(false);
-                  }
-                }}
+                onClick={() => setImageExpanded((prev) => !prev)}
               >
                 {imageExpanded ? (
                   <ChevronUp size={16} aria-hidden />
@@ -212,22 +226,13 @@ export default function AttachmentListItem({
 
         {hasPreviewImage && imageExpanded && (
           <Box sx={{ position: "relative", width: "100%" }}>
-            {!imageLoaded && !imageError && (
+            {!previewMinTimeElapsed ? (
               <Skeleton
                 variant="rectangular"
                 width="100%"
                 height={160}
                 sx={{ borderRadius: 1 }}
               />
-            )}
-            {imageError ? (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ py: 2, textAlign: "center" }}
-              >
-                Preview unavailable
-              </Typography>
             ) : (
               <Box
                 component="button"
@@ -240,17 +245,15 @@ export default function AttachmentListItem({
                   border: "none",
                   background: "none",
                   cursor: "pointer",
-                  alignSelf: "stretch",
                   width: "100%",
-                  display: imageLoaded ? "block" : "none",
+                  display: "block",
+                  textAlign: "left",
                 }}
               >
                 <Box
                   component="img"
                   src={attachment.previewUrl ?? undefined}
                   alt={attachment.name}
-                  onLoad={() => setImageLoaded(true)}
-                  onError={() => setImageError(true)}
                   sx={{
                     display: "block",
                     maxHeight: 400,

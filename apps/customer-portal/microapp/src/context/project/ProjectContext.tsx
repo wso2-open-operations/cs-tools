@@ -14,10 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ProjectFeaturesDto } from "@root/src/types";
 import { createContext } from "react";
 
 export type ProjectContextType = {
   projectId: string | null;
+  noveraEnabled: boolean;
+  kbReferencesEnabled: boolean;
+  features?: ProjectFeaturesDto;
+  projectTypeId?: string;
 
   setProjectId: (id: string | null) => void;
 };

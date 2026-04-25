@@ -21,6 +21,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ProductVulnerabilitiesSearchRequest } from "@features/security/types/security";
 import type { ProductVulnerabilitiesSearchResponse } from "@features/security/types/security";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Searches product vulnerabilities (POST /products/vulnerabilities/search).
@@ -61,9 +62,7 @@ export function usePostProductVulnerabilitiesSearch(
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(
-          `Error searching product vulnerabilities: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-        );
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
 
       const data: ProductVulnerabilitiesSearchResponse = await response.json();

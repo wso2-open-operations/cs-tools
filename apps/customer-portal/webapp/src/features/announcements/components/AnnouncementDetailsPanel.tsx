@@ -44,6 +44,7 @@ import {
   isAnnouncementDescriptionEffectivelyEmpty,
   normalizeAnnouncementDescriptionHtml,
 } from "@features/announcements/utils/announcements";
+import { useDarkMode } from "@utils/useDarkMode";
 
 /**
  * AnnouncementDetailsPanel displays announcement details: Back, title, date, issue type, state management buttons, and description.
@@ -61,6 +62,7 @@ export default function AnnouncementDetailsPanel({
   caseId = "",
 }: AnnouncementDetailsPanelProps): JSX.Element {
   const theme = useTheme();
+  const isDarkMode = useDarkMode();
 
   if (isLoading) {
     return (
@@ -253,6 +255,7 @@ export default function AnnouncementDetailsPanel({
           (() => {
             const normalizedHtml = normalizeAnnouncementDescriptionHtml(
               data.description,
+              isDarkMode,
             );
             const isEffectivelyEmpty =
               isAnnouncementDescriptionEffectivelyEmpty(data.description);

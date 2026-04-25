@@ -66,8 +66,8 @@ export const PROJECT_CARD_DATE_LOCALE = "en-US";
 
 export const PROJECT_CARD_STATS_NULL_PLACEHOLDER = "--";
 
-export const PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL =
-  "Outstanding support cases";
+export const PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL =
+  "Outstanding Items";
 
 export const PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL = "Active Chats";
 

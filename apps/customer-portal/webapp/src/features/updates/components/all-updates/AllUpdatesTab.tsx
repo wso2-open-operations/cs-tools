@@ -31,7 +31,7 @@ import {
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import searchingSvg from "@assets/search/searching.svg";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { useGetProductUpdateLevels } from "@features/updates/api/useGetProductUpdateLevels";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
@@ -45,6 +45,7 @@ import type {
   AllUpdatesTabSearchParams,
 } from "@features/updates/types/updates";
 import {
+  ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL,
   ALL_UPDATES_END_LEVEL_LABEL,
   ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE,
   ALL_UPDATES_IDLE_HINT,
@@ -81,13 +82,27 @@ import {
 export default function AllUpdatesTab(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const [urlParams, setUrlParams] = useSearchParams();
 
-  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(
-    ALL_UPDATES_TAB_INITIAL_FILTER,
-  );
+  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(() => {
+    const pn = urlParams.get("pn") ?? "";
+    const pv = urlParams.get("pv") ?? "";
+    const sl = urlParams.get("sl") ?? "";
+    const el = urlParams.get("el") ?? "";
+    return pn || pv || sl || el
+      ? { productName: pn, productVersion: pv, startLevel: sl, endLevel: el }
+      : ALL_UPDATES_TAB_INITIAL_FILTER;
+  });
   const [reportModalOpen, setReportModalOpen] = useState(false);
-  const [searchParams, setSearchParams] =
-    useState<AllUpdatesTabSearchParams | null>(null);
+  const [searchParams, setSearchParams] = useState<AllUpdatesTabSearchParams | null>(() => {
+    const pn = urlParams.get("pn") ?? "";
+    const pv = urlParams.get("pv") ?? "";
+    const start = Number(urlParams.get("sl") ?? "");
+    const end = Number(urlParams.get("el") ?? "");
+    return pn && pv && Number.isFinite(start) && Number.isFinite(end) && urlParams.get("sl") !== "" && urlParams.get("el") !== ""
+      ? { productName: pn, productVersion: pv, startingUpdateLevel: start, endingUpdateLevel: end }
+      : null;
+  });
 
   const {
     data: productLevelsData,
@@ -125,7 +140,7 @@ export default function AllUpdatesTab(): JSX.Element {
     if (!filter.startLevel || startLevelOptions.length === 0) return [];
     const start = Number(filter.startLevel);
     if (!Number.isFinite(start)) return [];
-    return startLevelOptions.filter((level) => level >= start);
+    return startLevelOptions.filter((level) => level > start);
   }, [startLevelOptions, filter.startLevel]);
 
   useEffect(() => {
@@ -157,7 +172,17 @@ export default function AllUpdatesTab(): JSX.Element {
       startingUpdateLevel: result.start,
       endingUpdateLevel: result.end,
     });
-  }, [filter]);
+    setUrlParams(
+      { pn: filter.productName, pv: filter.productVersion, sl: String(result.start), el: String(result.end) },
+      { replace: true },
+    );
+  }, [filter, setUrlParams]);
+
+  const handleClearFilters = useCallback(() => {
+    setFilter(ALL_UPDATES_TAB_INITIAL_FILTER);
+    setSearchParams(null);
+    setUrlParams({}, { replace: true });
+  }, [setUrlParams]);
 
   const handleView = useCallback(
     (levelKey: string) => {
@@ -200,12 +225,19 @@ export default function AllUpdatesTab(): JSX.Element {
 
   const canViewReport = !!reportData;
 
+  const hasActiveFilter =
+    filter.productName !== "" ||
+    filter.productVersion !== "" ||
+    filter.startLevel !== "" ||
+    filter.endLevel !== "";
+  const canClear = hasActiveFilter || searchParams !== null;
+
   if (isProductLevelsLoading) {
     return (
       <Stack spacing={3} sx={{ width: "100%" }}>
-        <Card variant="outlined" sx={{ borderRadius: 0 }}>
+        <Card variant="outlined">
           <CardContent sx={{ p: 3 }}>
-            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+            <Typography variant="subtitle1" sx={{ mb: 2 }}>
               {ALL_UPDATES_SECTION_TITLE}
             </Typography>
             <Grid container spacing={2}>
@@ -252,7 +284,7 @@ export default function AllUpdatesTab(): JSX.Element {
 
   return (
     <Stack spacing={3} sx={{ width: "100%" }}>
-      <Card variant="outlined" sx={{ borderRadius: 0 }}>
+      <Card variant="outlined">
         <CardContent sx={{ p: 3 }}>
           <Typography variant="subtitle1" sx={{ mb: 2 }}>
             {ALL_UPDATES_SECTION_TITLE}
@@ -394,7 +426,7 @@ export default function AllUpdatesTab(): JSX.Element {
               </FormControl>
             </Grid>
           </Grid>
-          <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+          <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
             <Button
               variant="contained"
               color="warning"
@@ -402,6 +434,13 @@ export default function AllUpdatesTab(): JSX.Element {
               disabled={!canSearch || isSearchLoading}
             >
               {ALL_UPDATES_SEARCH_BUTTON_LABEL}
+            </Button>
+            <Button
+              variant="text"
+              onClick={handleClearFilters}
+              disabled={!canClear}
+            >
+              {ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL}
             </Button>
             <Button
               variant="outlined"
@@ -430,11 +469,7 @@ export default function AllUpdatesTab(): JSX.Element {
           >
             Search for updates
           </Typography>
-          <Typography
-            variant="body2"
-            
-            sx={{ mt: 0.5, whiteSpace: "nowrap" }}
-          >
+          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "nowrap" }}>
             {ALL_UPDATES_IDLE_HINT}
           </Typography>
         </Box>

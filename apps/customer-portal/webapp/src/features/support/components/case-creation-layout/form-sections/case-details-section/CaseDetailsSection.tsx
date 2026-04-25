@@ -30,8 +30,7 @@ import {
 import { File, Sparkles, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
-import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
-import { getSeverityColor } from "@features/support/utils/support";
+import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
 
 /**
@@ -116,6 +115,7 @@ export function CaseDetailsSection({
   );
   const severityLevels = [...restrictedBase, ...filteredExtra].map((level) => ({
     ...level,
+    color: getSeverityLegendColor(level.label),
     label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
   }));
 
@@ -483,9 +483,7 @@ export function CaseDetailsSection({
                           width: 10,
                           height: 10,
                           borderRadius: "50%",
-                          bgcolor: getSeverityColor(
-                            selectedLevel?.label ?? CaseSeverityLevel.S4,
-                          ),
+                          bgcolor: selectedLevel?.color ?? getSeverityLegendColor(CaseSeverityLevel.S4),
                           flexShrink: 0,
                         }}
                       />
@@ -521,7 +519,7 @@ export function CaseDetailsSection({
                               width: 10,
                               height: 10,
                               borderRadius: "50%",
-                              bgcolor: getSeverityColor(selectedLevel.label),
+                              bgcolor: selectedLevel.color,
                               flexShrink: 0,
                             }}
                           />
@@ -545,7 +543,7 @@ export function CaseDetailsSection({
                               width: 12,
                               height: 12,
                               borderRadius: "50%",
-                              bgcolor: getSeverityColor(lvl.label),
+                              bgcolor: lvl.color,
                             }}
                           />
                           <Box

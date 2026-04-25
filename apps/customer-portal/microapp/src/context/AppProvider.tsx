@@ -16,11 +16,20 @@
 
 import LayoutProvider from "./layout/LayoutProvider";
 import ProjectProvider from "./project/ProjectProvider";
+import SnackbarProvider from "./snackbar/SnackbarProvider";
+import { ColorModeProvider } from "./theme";
+import MeProvider from "./me/MeProvider";
 
 export default function AppProvider({ children }: { children: React.ReactNode }) {
   return (
-    <LayoutProvider>
-      <ProjectProvider>{children}</ProjectProvider>
-    </LayoutProvider>
+    <ColorModeProvider>
+      <LayoutProvider>
+        <SnackbarProvider>
+          <ProjectProvider>
+            <MeProvider>{children}</MeProvider>
+          </ProjectProvider>
+        </SnackbarProvider>
+      </LayoutProvider>
+    </ColorModeProvider>
   );
 }

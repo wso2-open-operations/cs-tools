@@ -25,6 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CreateDeploymentRequest } from "@features/project-details/types/deployments";
 import type { CreateDeploymentResponse } from "@features/project-details/types/deployments";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to create a new deployment for a project.
@@ -76,9 +77,7 @@ export function usePostCreateDeployment(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error creating deployment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: CreateDeploymentResponse = await response.json();

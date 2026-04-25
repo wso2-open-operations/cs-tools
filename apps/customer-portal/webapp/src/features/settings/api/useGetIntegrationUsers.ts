@@ -20,6 +20,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { IntegrationUser } from "@features/settings/types/users";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to fetch integration users for a project (GET /projects/:projectId/integration-users).
@@ -60,9 +61,7 @@ export function useGetIntegrationUsers(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error fetching integration users: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: IntegrationUser[] = await response.json();

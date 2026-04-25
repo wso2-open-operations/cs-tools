@@ -21,6 +21,7 @@ import type {
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
+import { consumePendingCaseDetailsTab } from "@features/settings/utils/settingsStorage";
 import { useGetCaseAttachments } from "@features/support/api/useGetCaseAttachments";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -69,7 +70,10 @@ export default function CaseDetailsContent({
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(() => {
+    const pending = consumePendingCaseDetailsTab();
+    return pending !== null ? parseInt(pending, 10) : 0;
+  });
   const [focusMode, setFocusMode] = useState(false);
 
   const isEngagementRoute = location.pathname.includes("/engagements/");

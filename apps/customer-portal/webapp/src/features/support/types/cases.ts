@@ -102,6 +102,7 @@ export type ProjectCasesStats = {
   totalCount?: number;
   activeCount?: number;
   outstandingCount?: number;
+  actionRequiredCount?: number;
   averageResponseTime: number;
   resolvedCases: ResolvedCasesStats;
   changeRate?: CasesChangeRate;

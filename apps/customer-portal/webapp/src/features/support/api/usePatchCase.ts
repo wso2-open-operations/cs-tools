@@ -25,6 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchCaseRequest } from "@features/support/types/cases";
 import type { PatchCaseResponse } from "@features/support/types/supportApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export type { PatchCaseResponse };
 
@@ -65,15 +66,7 @@ export function usePatchCase(
 
       if (!response.ok) {
         const text = await response.text();
-        let msg = `Error updating case: ${response.status} ${response.statusText}`;
-        try {
-          const json = JSON.parse(text) as { message?: string };
-          if (typeof json.message === "string") msg = json.message;
-          else if (text) msg += ` - ${text}`;
-        } catch {
-          if (text) msg += ` - ${text}`;
-        }
-        throw new Error(msg);
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
 
       const data: PatchCaseResponse = await response.json();

@@ -113,6 +113,8 @@ public type Membership record {|
     string id;
     # State of the Membership
     string state;
+    # Whether the contact is a customer admin or not
+    boolean? isCsAdmin;
     # Whether the contact is a portal user or not
     boolean? isPortalUser;
     # Whether the contact is a Security contact or not

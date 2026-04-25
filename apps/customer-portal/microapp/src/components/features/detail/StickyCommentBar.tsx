@@ -15,24 +15,38 @@
 // under the License.
 
 import type { ChangeEvent, ReactNode, KeyboardEvent } from "react";
-import { Box, IconButton, Stack, TextField, pxToRem } from "@wso2/oxygen-ui";
+import { Box, CircularProgress, IconButton, Stack, TextField, pxToRem } from "@wso2/oxygen-ui";
 import { SendHorizonal } from "@wso2/oxygen-ui-icons-react";
+import { useThemeMode } from "@root/src/context/theme";
 
 interface StickyCommentBarProps {
   value: string;
   placeholder?: string;
   topSlot?: ReactNode;
+  bottomSlot?: ReactNode;
+  loading?: boolean;
+  disabled?: boolean;
 
   onChange: (value: string) => void;
   onSend: () => void;
 }
 
-export function StickyCommentBar({ value, placeholder, topSlot, onChange, onSend }: StickyCommentBarProps) {
+export function StickyCommentBar({
+  value,
+  placeholder,
+  topSlot,
+  bottomSlot,
+  loading = false,
+  disabled = false,
+  onChange,
+  onSend,
+}: StickyCommentBarProps) {
+  const mode = useThemeMode();
   const hasContent = value.trim().length > 0;
 
   const send = () => {
+    if (loading || !hasContent) return;
     onSend();
-    onChange("");
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -48,12 +62,12 @@ export function StickyCommentBar({ value, placeholder, topSlot, onChange, onSend
       width="100%"
       p={2}
       mx={-2}
-      bottom={100}
+      bottom={90}
       gap={4}
       justifyContent="space-between"
-      bgcolor="background.paper"
+      bgcolor={mode === "dark" ? "black" : "white"}
     >
-      {topSlot && <Box>{topSlot}</Box>}
+      {topSlot && <Box sx={{ m: -2 }}>{topSlot}</Box>}
 
       <Stack direction="row" gap={2}>
         <TextField
@@ -63,14 +77,21 @@ export function StickyCommentBar({ value, placeholder, topSlot, onChange, onSend
           sx={{ alignSelf: "center" }}
           onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
+          disabled={loading || disabled}
           fullWidth
         />
-        <IconButton color="primary" onClick={send}>
-          <Box color={hasContent ? "primary.main" : "text.disabled"}>
-            <SendHorizonal size={pxToRem(20)} />
-          </Box>
+        <IconButton color="primary" onClick={send} disabled={!hasContent || loading || disabled}>
+          {loading ? (
+            <CircularProgress size={20} color="primary" />
+          ) : (
+            <Box color={hasContent ? "primary.main" : "text.disabled"}>
+              <SendHorizonal size={pxToRem(20)} />
+            </Box>
+          )}
         </IconButton>
       </Stack>
+
+      {bottomSlot && <Box sx={{ m: -2 }}>{bottomSlot}</Box>}
     </Stack>
   );
 }

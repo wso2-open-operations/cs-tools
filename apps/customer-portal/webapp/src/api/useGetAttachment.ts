@@ -18,6 +18,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import type { AttachmentDownloadResponse } from "@features/support/types/attachments";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /** Input for GET /attachments/:id or inline list payload. */
 export interface DownloadBackendAttachmentInput {
@@ -88,10 +89,7 @@ async function downloadAttachmentThroughBackend(
       openExternalDownload(input.downloadUrl);
       return;
     }
-    throw new Error(
-      detail.trim() ||
-        `Download failed (${response.status} ${response.statusText})`,
-    );
+    throw new Error(parseApiResponseMessage(detail, response.status, response.statusText));
   }
 
   const data = (await response.json()) as AttachmentDownloadResponse;

@@ -27,6 +27,7 @@ import type {
   PatchCallRequest,
   CreateCallResponse,
 } from "@features/support/types/calls";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to update a call request (PATCH /cases/:caseId/call-requests/:id).
@@ -103,18 +104,7 @@ export function usePatchCallRequest(
 
         if (!response.ok) {
           const text = await response.text();
-          let errorMessage = `Error updating call request: ${response.status} ${response.statusText}`;
-          try {
-            const json = JSON.parse(text) as { message?: string };
-            if (typeof json.message === "string") {
-              errorMessage = json.message;
-            } else if (text) {
-              errorMessage += ` - ${text}`;
-            }
-          } catch {
-            if (text) errorMessage += ` - ${text}`;
-          }
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: CreateCallResponse = await response.json();

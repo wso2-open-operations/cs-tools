@@ -25,6 +25,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { CreateRegistryTokenRequest } from "@features/settings/types/registryTokens";
 import type { RegistryTokenCreationResponse } from "@features/settings/types/registryTokens";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to create a registry token (POST /projects/:projectId/registry-tokens).
@@ -74,18 +75,7 @@ export function useCreateRegistryToken(
 
         if (!response.ok) {
           const text = await response.text();
-          let errorMessage = `Error creating registry token: ${response.status} ${response.statusText}`;
-          try {
-            const json = JSON.parse(text) as { message?: string };
-            if (typeof json.message === "string") {
-              errorMessage = json.message;
-            } else if (text) {
-              errorMessage += ` - ${text}`;
-            }
-          } catch {
-            if (text) errorMessage += ` - ${text}`;
-          }
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: RegistryTokenCreationResponse = await response.json();

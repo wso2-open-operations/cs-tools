@@ -34,8 +34,7 @@ import {
   SEVERITY_API_LABELS,
 } from "@/features/dashboard/constants/dashboard";
 import { OperationsChartMode } from "@/features/dashboard/types/charts";
-import { CaseType, CaseStatus } from "@features/support/constants/supportConstants";
-import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
+import { CaseType } from "@features/support/constants/supportConstants";
 import {
   calculateProjectStats,
   getProjectPermissions,
@@ -246,7 +245,7 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorServiceRequest,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.SERVICE_REQUEST],
-    enabled: !!projectId && showOpsChart,
+    enabled: !!projectId && !awaitingProjectContext && permissions.hasSR,
   });
 
   // engagement stats
@@ -256,7 +255,7 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorEngagement,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.ENGAGEMENT],
-    enabled: !!projectId && permissions.hasEngagements,
+    enabled: !!projectId && !awaitingProjectContext && permissions.hasEngagements,
   });
 
   // change request stats
@@ -265,7 +264,7 @@ export default function DashboardPage(): JSX.Element {
     isLoading: isChangeRequestStatsLoading,
     isError: isErrorChangeRequestStats,
   } = useGetProjectChangeRequestsStats(projectId || "", {
-    enabled: !!projectId && includeCrStats,
+    enabled: !!projectId && !awaitingProjectContext && includeCrStats,
   });
 
 
@@ -468,55 +467,26 @@ export default function DashboardPage(): JSX.Element {
   const dashboardStatValues = useMemo<
     Partial<Record<DashboardStatKey, number | string>>
   >(() => {
-    const casesActionCount =
-      combinedCasesStats?.stateCount
-        ?.filter(
-          (s) =>
-            s.label === CaseStatus.AWAITING_INFO ||
-            s.label === CaseStatus.SOLUTION_PROPOSED,
-        )
-        .reduce((sum, s) => sum + s.count, 0) ?? 0;
-    const crActionCount = includeCrStats
-      ? ((changeRequestStats?.stateCount?.find(
-          (s) => s.label === ChangeRequestStates.CUSTOMER_REVIEW,
-        )?.count ?? 0) +
-        (changeRequestStats?.stateCount?.find(
-          (s) => s.label === ChangeRequestStates.CUSTOMER_APPROVAL,
-        )?.count ?? 0))
+    // Action Required: sum actionRequiredCount from cases + CR (based on permissions)
+    const casesActionRequired = combinedCasesStats?.actionRequiredCount ?? 0;
+    const crActionRequired = includeCrStats
+      ? (changeRequestStats?.actionRequiredCount ?? 0)
       : 0;
 
-    const casesOutstandingCount =
-      combinedCasesStats?.stateCount
-        ?.filter((s) => s.label !== CaseStatus.CLOSED)
-        .reduce((sum, s) => sum + s.count, 0) ?? 0;
-    const crOutstandingCount = includeCrStats
-      ? (changeRequestStats?.stateCount
-          ?.filter(
-            (s) =>
-              s.label !== ChangeRequestStates.ROLLBACK &&
-              s.label !== ChangeRequestStates.CLOSED &&
-              s.label !== ChangeRequestStates.CANCELED,
-          )
-          .reduce((sum, s) => sum + s.count, 0) ?? 0)
+    // Outstanding: sum outstandingCount from cases + CR (based on permissions)
+    const casesOutstanding = combinedCasesStats?.outstandingCount ?? 0;
+    const crOutstanding = includeCrStats
+      ? (changeRequestStats?.outstandingCount ?? 0)
       : 0;
 
-    const closedTotal =
-      defaultCaseStats?.stateCount?.find((s) => s.label === CaseStatus.CLOSED)
-        ?.count ?? 0;
-    const s0ClosedCount = !permissions.includeS0InSupportMetrics
-      ? Math.max(
-          0,
-          (defaultCaseStats?.severityCount?.find(
-            (s) => s.label === SEVERITY_API_LABELS[0],
-          )?.count ?? 0) -
-            (defaultCaseStats?.outstandingSeverityCount?.find(
-              (s) => s.label === SEVERITY_API_LABELS[0],
-            )?.count ?? 0),
-        )
+    // Closed Last 30 days: sum resolvedCases.pastThirtyDays from cases + resolvedCount.pastThirtyDays from CR
+    const casesResolved = combinedCasesStats?.resolvedCases?.pastThirtyDays ?? 0;
+    const crResolved = includeCrStats
+      ? (changeRequestStats?.resolvedCount?.pastThirtyDays ?? 0)
       : 0;
 
-    const avgHours =
-      (combinedCasesStats?.averageResponseTime ?? 0) * 60;
+    // Average Response Time: cases only (CR does not have averageResponseTime)
+    const avgHours = (combinedCasesStats?.averageResponseTime ?? 0) * 60;
     const totalMinutes = Math.round(avgHours);
     const hrs = Math.floor(totalMinutes / 60);
     const mins = totalMinutes % 60;
@@ -528,26 +498,22 @@ export default function DashboardPage(): JSX.Element {
           : `${mins} min`;
 
     return {
-      totalCases: casesActionCount + crActionCount,
-      openCases: casesOutstandingCount + crOutstandingCount,
-      resolvedCases: Math.max(0, closedTotal - s0ClosedCount),
+      totalCases: casesActionRequired + crActionRequired,
+      openCases: casesOutstanding + crOutstanding,
+      resolvedCases: casesResolved + crResolved,
       avgResponseTime,
     };
   }, [
-    changeRequestStats,
     combinedCasesStats,
-    defaultCaseStats,
+    changeRequestStats,
     includeCrStats,
-    permissions.includeS0InSupportMetrics,
   ]);
 
   const isDashboardStatsLoading =
     isCombinedCasesLoading ||
-    isDefaultCaseLoading ||
     (includeCrStats && isChangeRequestStatsLoading);
   const isDashboardStatsError =
     isErrorCombinedCases ||
-    isErrorDefaultCase ||
     (includeCrStats && isErrorChangeRequestStats);
 
   // render
