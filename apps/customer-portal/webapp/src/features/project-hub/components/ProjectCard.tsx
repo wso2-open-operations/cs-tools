@@ -40,6 +40,7 @@ export default function ProjectCard({
   activeCasesCount,
   activeChatsCount,
   actionRequiredCount,
+  outstandingCount,
   closureState,
   onViewDashboard,
 }: ProjectCardProps): JSX.Element {
@@ -81,7 +82,7 @@ export default function ProjectCard({
       <ProjectCardStats
         activeChatsCount={activeChatsCount}
         date={date}
-        activeCasesCount={activeCasesCount}
+        outstandingCount={outstandingCount ?? 0}
         actionRequiredCount={actionRequiredCount}
       />
       {/* project card actions */}
