@@ -91,13 +91,7 @@ export default function ProjectHub(): JSX.Element {
   const totalRecords = getTotalRecords(data);
 
   useEffect(() => {
-    if (
-      debouncedSearchQuery &&
-      hasNextPage &&
-      !isFetchingNextPage &&
-      !isLoading &&
-      !isError
-    ) {
+    if (hasNextPage && !isFetchingNextPage && !isLoading && !isError) {
       fetchNextPage();
     }
   }, [
@@ -346,6 +340,7 @@ export default function ProjectHub(): JSX.Element {
                   activeCasesCount={project.activeCasesCount}
                   activeChatsCount={project.activeChatsCount}
                   actionRequiredCount={project.actionRequiredCount ?? 0}
+                  outstandingCount={project.outstandingCount ?? 0}
                   closureState={project.closureState}
                 />
               </Box>
