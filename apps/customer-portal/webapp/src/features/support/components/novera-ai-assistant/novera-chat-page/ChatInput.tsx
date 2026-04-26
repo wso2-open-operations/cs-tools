@@ -85,7 +85,7 @@ export default function ChatInput({
               },
             }}
           >
-            Create Case
+            {isCreateCaseLoading ? "Loading..." : "Create Case"}
           </Button>
         </Box>
       </Box>

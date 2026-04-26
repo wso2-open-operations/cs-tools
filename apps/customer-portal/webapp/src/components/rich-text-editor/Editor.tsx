@@ -217,7 +217,7 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
  * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
  */
-const ClipboardImagePlugin = (): null => {
+const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): null => {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -225,12 +225,18 @@ const ClipboardImagePlugin = (): null => {
       const items = event.clipboardData?.items;
       if (!items) return;
 
+      const MAX_PASTE_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (!file) continue;
 
           event.preventDefault();
+
+          if (file.size > MAX_PASTE_IMAGE_SIZE) {
+            onPasteError?.();
+            break;
+          }
 
           const reader = new FileReader();
           reader.onload = (e) => {
@@ -312,6 +318,7 @@ const Editor = ({
   onFocus,
   onBlur,
   overlayElement,
+  onPasteError,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -334,6 +341,7 @@ const Editor = ({
   onBlur?: () => void;
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
+  onPasteError?: () => void;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -509,7 +517,7 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin />
+          <ClipboardImagePlugin onPasteError={onPasteError} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />

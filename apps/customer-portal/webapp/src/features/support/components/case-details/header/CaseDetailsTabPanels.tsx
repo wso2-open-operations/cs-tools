@@ -178,9 +178,6 @@ export default function CaseDetailsTabPanels({
                       {cr.number}
                     </Typography>
                   )}
-                  <Typography variant="caption" color="text.secondary">
-                    {cr.id}
-                  </Typography>
                 </Box>
                 <Typography
                   variant="body2"
