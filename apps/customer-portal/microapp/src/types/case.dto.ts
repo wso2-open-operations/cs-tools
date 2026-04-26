@@ -104,6 +104,8 @@ export interface GetCasesRequestDto {
     searchQuery?: string;
     severityId?: number;
     statusIds?: number[];
+    closedEndDate?: string;
+    closedStartDate?: string;
   };
   pagination?: {
     limit?: number;
@@ -229,4 +231,18 @@ export interface AttachmentDto {
   downloadUrl: string;
   previewUrl: string;
   description: string | null;
+}
+
+export interface GetProductsRequestDto {
+  filters?: {
+    productCategories?: string[];
+  };
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  };
+  sortBy?: {
+    field?: string;
+    order?: "asc" | "desc";
+  };
 }

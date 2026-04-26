@@ -120,4 +120,5 @@ export interface ProjectFeaturesDto {
   hasTimeLogsReadAccess: boolean;
   hasDeploymentWriteAccess: boolean;
   hasDeploymentReadAccess: boolean;
+  defaultCaseProductCategories: string[] | null;
 }

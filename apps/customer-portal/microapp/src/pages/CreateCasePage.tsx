@@ -93,13 +93,17 @@ export default function CreateCasePage() {
     label: overrideOrDefault(type.label),
   }));
 
+  const { data: features } = useQuery(projects.features(projectId!));
+
   const deploymentQuery = useQuery({
     ...projects.deployments(formik.values.project),
     enabled: !!formik.values.project,
   });
 
   const productQuery = useQuery({
-    ...projects.products(formik.values.deployment),
+    ...projects.products(formik.values.deployment, {
+      filters: { productCategories: features?.defaultCaseProductCategories ?? undefined },
+    }),
     enabled: !!formik.values.deployment,
   });
 
@@ -213,6 +217,7 @@ export default function CreateCasePage() {
 
   useEffect(() => {
     if (!deploymentsFieldDisabled) return;
+    if (!deploymentOptions.length) return;
 
     formik.setFieldValue("deployment", deploymentOptions[0].value);
   }, [deploymentsFieldDisabled]);
