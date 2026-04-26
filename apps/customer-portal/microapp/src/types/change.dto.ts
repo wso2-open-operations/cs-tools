@@ -15,6 +15,7 @@
 // under the License.
 
 import type { CasesStatsDto, EntityReference, Pagination } from "@src/types";
+import type { unstable_InstrumentRequestHandlerFunction } from "react-router-dom";
 
 export interface ChangeRequestsDto extends Pagination {
   changeRequests: ChangeRequestSummaryDto[];
@@ -76,4 +77,4 @@ export interface GetChangeRequestsRquestDto {
 export type ChangeRequestsStatsDto = Pick<
   CasesStatsDto,
   "totalCount" | "actionRequiredCount" | "activeCount" | "outstandingCount" | "stateCount" | "resolvedCases"
->;
+> & { resolvedCount: { total: number; currentMonth: number; pastThirtyDays: number } };
