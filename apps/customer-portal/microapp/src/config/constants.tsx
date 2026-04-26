@@ -24,7 +24,7 @@ import type { ItemCardProps } from "../components/features/support";
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
 export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
-  cases: { label: "Cases:", color: colors.red[300], icon: CircleAlert },
+  outstanding: { label: "Outstanding:", color: colors.red[300], icon: CircleAlert },
   chats: { label: "Chats:", color: colors.indigo[300], icon: MessageSquare },
 };
 

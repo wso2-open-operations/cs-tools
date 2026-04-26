@@ -15,7 +15,6 @@
 // under the License.
 
 import type { CasesStatsDto, EntityReference, Pagination } from "@src/types";
-import type { unstable_InstrumentRequestHandlerFunction } from "react-router-dom";
 
 export interface ChangeRequestsDto extends Pagination {
   changeRequests: ChangeRequestSummaryDto[];

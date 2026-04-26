@@ -104,7 +104,7 @@ function mapProjectDtoToProjectSummary(project: ProjectsDto["projects"][number])
     createdOn: new Date(project.createdOn.replace(" ", "T")),
     description: project.description ? project.description.replace(/<\/?[^>]+(>|$)/g, "") : "",
     metrics: {
-      cases: project.activeCasesCount,
+      outstanding: project.outstandingCount,
       chats: project.activeChatsCount,
     },
     status: project.slaStatus as ProjectStatus,

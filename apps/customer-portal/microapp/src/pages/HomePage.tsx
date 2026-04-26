@@ -27,7 +27,6 @@ import { useNavigate } from "react-router-dom";
 
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
 import type { ModeType } from "./AllItemsPage";
-import { useEffect } from "react";
 
 export default function HomePage() {
   const navigate = useNavigate();
