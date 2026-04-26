@@ -30,6 +30,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { getStatusColor, mapSeverityToDisplay } from "@features/support/utils/support";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CasesTableSkeleton from "@features/dashboard/components/cases-table/CasesTableSkeleton";
@@ -149,10 +150,10 @@ const CasesList = ({
                   <TableCell>
                     <Box>
                       <Typography variant="body2" color="text.primary">
-                        {row.createdOn ? row.createdOn.split(" ")[0] : "--"}
+                        {formatBackendTimestampForDisplay(row.createdOn, { month: "short", day: "numeric", year: "numeric" }) ?? "--"}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {row.createdOn ? row.createdOn.split(" ")[1] || "" : ""}
+                        {formatBackendTimestampForDisplay(row.createdOn, { hour: "numeric", minute: "2-digit", hour12: true }) ?? ""}
                       </Typography>
                     </Box>
                   </TableCell>
