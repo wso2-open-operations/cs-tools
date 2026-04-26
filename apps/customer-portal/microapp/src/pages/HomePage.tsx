@@ -27,6 +27,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
 import type { ModeType } from "./AllItemsPage";
+import { useEffect } from "react";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -75,13 +76,13 @@ export default function HomePage() {
       (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.outstandingCount ?? 0) : 0);
 
   const resolvedThisMonth =
-    defaultCaseTypeStats?.resolvedCases?.currentMonth === undefined &&
-    (!hasChangeRequestReadAccess || changeRequestCaseTypeStats?.resolvedCases?.currentMonth === undefined)
+    multipleCaseTypesStats?.resolvedCases?.pastThirtyDays === undefined &&
+    (!hasChangeRequestReadAccess || changeRequestCaseTypeStats?.resolvedCount?.pastThirtyDays === undefined)
       ? undefined
-      : (defaultCaseTypeStats?.resolvedCases?.currentMonth ?? 0) +
-        (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.resolvedCases?.currentMonth ?? 0) : 0);
+      : (multipleCaseTypesStats?.resolvedCases?.pastThirtyDays ?? 0) +
+        (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.resolvedCount?.pastThirtyDays ?? 0) : 0);
 
-  const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
+  const averageResponseTime = multipleCaseTypesStats?.averageResponseTime;
 
   const outstandingSupportCasesPieData = defaultCaseTypeStats?.outstandingSeverityCount.map((item) => ({
     id: item.id,
