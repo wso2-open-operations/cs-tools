@@ -84,7 +84,7 @@ import {
 export default function AllUpdatesTab(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
-  const [, setUrlParams] = useSearchParams();
+  const [urlParams, setUrlParams] = useSearchParams();
 
   const [filter, setFilter] = useState<AllUpdatesTabFilterState>(() => {
     const pn = urlParams.get("pn") ?? "";
