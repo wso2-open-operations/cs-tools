@@ -86,12 +86,30 @@ export default function AllUpdatesTab(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [, setUrlParams] = useSearchParams();
 
-  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(
-    ALL_UPDATES_TAB_INITIAL_FILTER,
-  );
+  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(() => {
+    const pn = urlParams.get("pn") ?? "";
+    const pv = urlParams.get("pv") ?? "";
+    const sl = urlParams.get("sl") ?? "";
+    const el = urlParams.get("el") ?? "";
+    return pn || pv || sl || el
+      ? { productName: pn, productVersion: pv, startLevel: sl, endLevel: el }
+      : ALL_UPDATES_TAB_INITIAL_FILTER;
+  });
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [searchParams, setSearchParams] =
-    useState<AllUpdatesTabSearchParams | null>(null);
+  const [searchParams, setSearchParams] = useState<AllUpdatesTabSearchParams | null>(() => {
+    const pn = urlParams.get("pn");
+    const pv = urlParams.get("pv");
+    const sl = urlParams.get("sl");
+    const el = urlParams.get("el");
+    if (pn && pv && sl && el) {
+      const start = Number(sl);
+      const end = Number(el);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        return { productName: pn, productVersion: pv, startingUpdateLevel: start, endingUpdateLevel: end };
+      }
+    }
+    return null;
+  });
 
   const {
     data: productLevelsData,
