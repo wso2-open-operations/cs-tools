@@ -279,6 +279,35 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
     pending.push({ srcPage: pg, x, y: baseY - 4, w, h: 6, key });
   };
 
+  // Render a labelled list of URLs as blue underlined external hyperlinks.
+  const renderUrlListField = (label: string, urls: string[]): void => {
+    if (urls.length === 0) return;
+    ensureSpace(14);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
+    doc.text(`${label}:`, margin, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    for (const url of urls) {
+      const urlLines = doc.splitTextToSize(url, contentW - 4);
+      ensureSpace(urlLines.length * 5 + 3);
+      for (const line of urlLines as string[]) {
+        const lineW = doc.getTextWidth(line);
+        doc.setTextColor(0, 102, 204);
+        doc.text(line, margin + 4, y);
+        doc.setDrawColor(0, 102, 204);
+        doc.line(margin + 4, y + 0.8, margin + 4 + lineW, y + 0.8);
+        doc.setDrawColor(0, 0, 0);
+        doc.link(margin + 4, y - 4, lineW, 5.5, { url });
+        y += 5;
+      }
+      doc.setTextColor(0, 0, 0);
+      y += 2;
+    }
+    y += 3;
+  };
+
   // Render a labelled field, skipping if value is empty.
   const renderField = (label: string, value: string | null | undefined): void => {
     if (!value?.trim()) return;
@@ -393,7 +422,7 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
     if (parsedDesc.generalDescription) renderField("General Description", parsedDesc.generalDescription);
     if (parsedDesc.implementationDetails) renderField("Implementation Details", parsedDesc.implementationDetails);
     if (parsedDesc.impact) renderField("Impact", parsedDesc.impact);
-    if (bugFixUrls.length > 0) renderField("Bug Fixes", bugFixUrls.join("\n"));
+    if (bugFixUrls.length > 0) renderUrlListField("Bug Fixes", bugFixUrls);
 
     // Instructions
     if (isInstructionsNonEmpty(entry.instructions)) {
