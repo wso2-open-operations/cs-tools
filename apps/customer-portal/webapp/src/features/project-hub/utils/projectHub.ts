@@ -40,8 +40,8 @@ export function resolveProjectHubContentView(
   isAuthLoading: boolean,
   isLoading: boolean,
   isError: boolean,
-  totalRecords: number,
-  searchQuery: string,
+  _totalRecords: number,
+  _searchQuery: string,
   projectsLength: number,
 ): ProjectHubContentView {
   if (isRedirectingToSingleProject) {
