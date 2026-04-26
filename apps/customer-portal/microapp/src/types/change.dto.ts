@@ -64,6 +64,8 @@ export interface GetChangeRequestsRquestDto {
     impactKey?: number;
     searchQuery?: string;
     stateKeys?: number[];
+    closedEndDate?: string;
+    closedStartDate?: string;
   };
   pagination?: {
     limit?: number;

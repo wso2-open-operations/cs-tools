@@ -153,6 +153,7 @@ export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
 export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
 
 export const RESOLVED_CASE_STATUS_IDS = [3];
+export const RESOLVED_CHANGE_REQUEST_STATUS_IDS = [3];
 
 export const PLURALS: Record<ItemCardProps["type"], string> = {
   case: "Cases",

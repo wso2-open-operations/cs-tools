@@ -27,7 +27,6 @@ import { useNavigate } from "react-router-dom";
 
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
 import type { ModeType } from "./AllItemsPage";
-import { useEffect } from "react";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -81,11 +80,6 @@ export default function HomePage() {
       ? undefined
       : (defaultCaseTypeStats?.resolvedCases?.currentMonth ?? 0) +
         (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.resolvedCases?.currentMonth ?? 0) : 0);
-
-  useEffect(() => {
-    console.log("others: ", defaultCaseTypeStats?.resolvedCases?.currentMonth);
-    console.log("changes: ", changeRequestCaseTypeStats?.resolvedCases?.currentMonth);
-  }, [defaultCaseTypeStats, changeRequestCaseTypeStats]);
 
   const averageResponseTime = defaultCaseTypeStats?.averageResponseTime;
 
@@ -180,12 +174,12 @@ export default function HomePage() {
         </Grid>
         <Grid size={6}>
           <MetricWidget
-            label="Closed"
+            label="Closed (30d)"
             value={resolvedThisMonth}
             icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
             onClick={() =>
               navigate("/multiple/all", {
-                state: { mode: { type: "status", status: "resolved", title: "Closed" } as ModeType },
+                state: { mode: { type: "status", status: "resolved", title: "Closed Items (30d)" } as ModeType },
               })
             }
           />

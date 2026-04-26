@@ -10,6 +10,7 @@ import { ItemCardExtended } from "./ItemCardExtended";
 import { ITEM_DETAIL_PATHS } from "@root/src/config/constants";
 import { GroupAccordion } from "../../ui/GroupAccordion";
 import { useEffect } from "react";
+import { useResolvedDateRange } from "@root/src/utils/useResolvedDateRange";
 
 export function ServiceRequestListContent({
   filter,
@@ -28,6 +29,8 @@ export function ServiceRequestListContent({
 
   const filters: GetCasesRequestDto["filters"] = {};
 
+  const resolvedDateRange = useResolvedDateRange(mode);
+
   if (mode) {
     switch (mode.type) {
       case "status":
@@ -42,6 +45,8 @@ export function ServiceRequestListContent({
 
           case "resolved":
             filters.statusIds = [3];
+            filters.closedStartDate = resolvedDateRange?.closedStartDate;
+            filters.closedEndDate = resolvedDateRange?.closedEndDate;
             break;
         }
     }
