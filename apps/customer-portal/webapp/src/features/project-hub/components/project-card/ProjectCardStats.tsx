@@ -41,7 +41,7 @@ import type { ProjectCardStatsProps } from "@features/project-hub/types/projectH
  * @returns {JSX.Element} The rendered stats section.
  */
 export default function ProjectCardStats({
-  activeCasesCount,
+  outstandingCount,
   activeChatsCount,
   actionRequiredCount,
   isError,
@@ -101,7 +101,7 @@ export default function ProjectCardStats({
             />
           ) : (
             <Typography variant="body2" color="primary">
-              {activeCasesCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
+              {outstandingCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
             </Typography>
           )}
         </Box>
