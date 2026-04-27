@@ -16,6 +16,7 @@
 
 import {
   $createRangeSelection,
+  $getRoot,
   $getSelection,
   $isRangeSelection,
   $setSelection,
@@ -123,6 +124,8 @@ const Toolbar = ({
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [blockVariant, setBlockVariant] = useState("body1");
+  const [elementAlign, setElementAlign] = useState<ElementFormatType>("");
+  const [hasContent, setHasContent] = useState(false);
 
   const [linkAnchorEl, setLinkAnchorEl] = useState<HTMLButtonElement | null>(
     null,
@@ -136,6 +139,7 @@ const Toolbar = ({
   }, [editor]);
 
   const updateToolbar = useCallback(() => {
+    setHasContent($getRoot().getTextContent().length > 0);
     const selection = $getSelection();
     if ($isRangeSelection(selection)) {
       setIsBold(selection.hasFormat("bold"));
@@ -156,9 +160,17 @@ const Toolbar = ({
       } catch {
         setBlockVariant("body1");
         setIsCode(false);
+        setElementAlign("");
         return;
       }
       setIsCode($isCodeNode(element));
+
+      const formatType =
+        "getFormatType" in element &&
+        typeof element.getFormatType === "function"
+          ? (element.getFormatType() as ElementFormatType)
+          : "";
+      setElementAlign(formatType);
 
       if ($isHeadingNode(element)) {
         setBlockVariant(element.getTag());
@@ -574,6 +586,10 @@ const Toolbar = ({
             <ToggleButton
               size="small"
               value="left"
+              selected={
+                elementAlign === "left" ||
+                (elementAlign === "" && hasContent)
+              }
               onClick={() => onFormatAlign("left")}
             >
               <AlignLeft size={16} />
@@ -584,6 +600,7 @@ const Toolbar = ({
             <ToggleButton
               size="small"
               value="center"
+              selected={elementAlign === "center"}
               onClick={() => onFormatAlign("center")}
             >
               <AlignCenter size={16} />
@@ -594,6 +611,7 @@ const Toolbar = ({
             <ToggleButton
               size="small"
               value="right"
+              selected={elementAlign === "right"}
               onClick={() => onFormatAlign("right")}
             >
               <AlignRight size={16} />
@@ -604,6 +622,7 @@ const Toolbar = ({
             <ToggleButton
               size="small"
               value="justify"
+              selected={elementAlign === "justify"}
               onClick={() => onFormatAlign("justify")}
             >
               <AlignJustify size={16} />
@@ -836,6 +855,10 @@ const Toolbar = ({
               variant="caption"
               sx={{ color: "text.secondary", whiteSpace: "nowrap", lineHeight: 1.4 }}
             >
+              <Typography component="span" variant="caption" fontWeight={600}>
+                Shift+Enter
+              </Typography>
+              {" or "}
               <Typography component="span" variant="caption" fontWeight={600}>
                 Ctrl+Enter
               </Typography>

@@ -192,7 +192,10 @@ export default function ActivityCommentInput({
 
     // Text (with or without attachments): post comment first, then upload attachments
     postComment.mutate(
-      { caseId, body: { content: currentValue.trim(), type: CommentType.COMMENT } },
+      {
+        caseId,
+        body: { content: currentValue.trim(), type: CommentType.COMMENT },
+      },
       {
         onSuccess: async () => {
           clearUI();
@@ -240,7 +243,9 @@ export default function ActivityCommentInput({
             onAttachmentRemove={handleAttachmentRemove}
             showKeyboardHint={!isCaseClosed}
             maxHeight="310px"
-            onPasteError={() => showError("Image exceeds the maximum allowed size of 10 MB.")}
+            onPasteError={() =>
+              showError("Image exceeds the maximum allowed size of 10 MB.")
+            }
             overlayElement={
               <Tooltip
                 title={
@@ -267,6 +272,8 @@ export default function ActivityCommentInput({
                       width: 36,
                       height: 36,
                       borderRadius: "50%",
+                      border: "1px solid",
+                      borderColor: "backgroundPaper",
                     }}
                   >
                     {postComment.isPending || isUploadingAttachments ? (
