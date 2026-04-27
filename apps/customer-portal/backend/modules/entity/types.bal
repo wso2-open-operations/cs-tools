@@ -349,7 +349,7 @@ public type UpdatedCase record {|
     # Updated state information
     ChoiceListItem state;
     # Case type information
-    ReferenceTableItem 'type;
+    ReferenceTableItem? 'type;
     json...;
 |};
 

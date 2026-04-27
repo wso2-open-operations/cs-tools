@@ -265,7 +265,7 @@ public type UpdatedCase record {|
     # Updated state information
     ReferenceItem state;
     # Case type information
-    ReferenceItem 'type;
+    ReferenceItem? 'type;
 |};
 
 # Updated user information.
