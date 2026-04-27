@@ -1,6 +1,7 @@
-import { Box } from "@wso2/oxygen-ui";
+import { Box, colors, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface TypewriterProps {
   tokens: string[];
@@ -10,6 +11,7 @@ interface TypewriterProps {
 }
 
 export function TypewriterText({ tokens, pending = false, animated = true, onAnimationComplete }: TypewriterProps) {
+  const theme = useTheme();
   const fullText = tokens.join("");
   const [cursor, setCursor] = useState(0);
   const hasCompletedRef = useRef(false);
@@ -39,7 +41,29 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
 
   return (
     <Box sx={{ "& p": { display: "inline", m: 0 } }}>
-      <Markdown>{animated ? fullText.slice(0, cursor) : fullText}</Markdown>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({ node, ...props }) => (
+            <div style={{ overflowX: "auto", marginTop: 10 }}>
+              <table
+                style={{
+                  width: "max-content",
+                  border: `1px solid ${colors.grey[500]}`,
+                  borderCollapse: "collapse",
+                }}
+                {...props}
+              />
+            </div>
+          ),
+          th: ({ node, ...props }) => <th style={{ border: `1px solid ${colors.grey[500]}` }} {...props} />,
+          td: ({ node, ...props }) => (
+            <td style={{ padding: 5, border: `1px solid ${colors.grey[500]}`, maxWidth: 500 }} {...props} />
+          ),
+        }}
+      >
+        {animated ? fullText.slice(0, cursor) : fullText}
+      </Markdown>
       <Box
         sx={{
           display: pending || (animated && cursor < fullText.length) ? "inline-block" : "none",

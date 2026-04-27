@@ -26,15 +26,7 @@ export interface ProjectMetricMeta {
   color?: string;
 }
 
-export function ProjectCard({
-  projectKey,
-  name,
-  description,
-  type,
-  status,
-  metrics,
-  onClick,
-}: Project & { onClick?: () => void }) {
+export function ProjectCard({ projectKey, name, metrics, onClick }: Project & { onClick?: () => void }) {
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
