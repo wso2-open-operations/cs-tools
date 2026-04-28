@@ -210,6 +210,7 @@ export default function SearchBar({
             cases={cases}
             isLoading={false}
             onCaseClick={handleCaseClick}
+            showInternalId
           />
         </Box>
       )}
