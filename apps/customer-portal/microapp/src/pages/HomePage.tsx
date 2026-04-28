@@ -32,7 +32,12 @@ export default function HomePage() {
   const navigate = useNavigate();
   const {
     projectId,
-    features: { hasServiceRequestReadAccess, hasChangeRequestReadAccess, hasEngagementsReadAccess } = {},
+    features: {
+      hasServiceRequestReadAccess,
+      hasChangeRequestReadAccess,
+      hasEngagementsReadAccess,
+      hasSraReadAccess,
+    } = {},
   } = useProject();
   const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["default_case"] }));
   const { data: engagementCaseTypeStats } = useQuery({
@@ -54,7 +59,7 @@ export default function HomePage() {
     cases.stats(projectId!, {
       caseTypes: [
         "default_case",
-        "security_report_analysis",
+        ...(hasSraReadAccess ? ["security_report_analysis"] : []),
         ...(hasEngagementsReadAccess ? ["engagement"] : []),
         ...(hasServiceRequestReadAccess ? ["service_request"] : []),
       ],

@@ -68,7 +68,7 @@ export default function SupportPage() {
         <Tab label="Chats" value="chat" disableRipple />
         {features?.hasServiceRequestReadAccess && <Tab label="Service Requests" value="service" disableRipple />}
         {features?.hasChangeRequestReadAccess && <Tab label="Change Requests" value="change" disableRipple />}
-        <Tab label="Security Report Analysis" value="sra" disableRipple />
+        {features?.hasSraReadAccess && <Tab label="Security Report Analysis" value="sra" disableRipple />}
         {features?.hasEngagementsReadAccess && <Tab label="Engagements" value="engagement" disableRipple />}
         <Tab label="Announcements" value="announcement" disableRipple />
       </Tabs>
