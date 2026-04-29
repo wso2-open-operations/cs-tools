@@ -34,14 +34,12 @@ export enum ClampedTextVariant {
 export type ProjectCardProps = {
   date: string;
   id: string;
-  activeCasesCount: number;
   activeChatsCount: number;
   actionRequiredCount: number;
   outstandingCount?: number | null;
   closureState?: string | null;
   onViewDashboard?: () => void;
   projectKey: string;
-  slaStatus: string;
   title: string;
 };
 

@@ -35,10 +35,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 // Mock sub-components
 vi.mock("../ProjectCardBadges", () => ({
-  default: ({ projectKey, slaStatus, isError, isLoading }: any) => (
-    <div data-testid="badges">
-      {isError ? "Error" : isLoading ? "Loading" : `${projectKey} ${slaStatus}`}
-    </div>
+  default: ({ projectKey }: any) => (
+    <div data-testid="badges">{projectKey}</div>
   ),
 }));
 
@@ -49,17 +47,9 @@ vi.mock("../ProjectCardInfo", () => ({
 }));
 
 vi.mock("../ProjectCardStats", () => ({
-  default: ({
-    activeChatsCount,
-    date,
-    activeCasesCount,
-    isError,
-    isLoading,
-  }: any) => (
+  default: ({ activeChatsCount, date }: any) => (
     <div data-testid="stats">
-      {activeChatsCount} {date} {activeCasesCount}{" "}
-      {isError ? "Error" : "No Error"}{" "}
-      {isLoading ? "Loading" : "Not Loading"}
+      {activeChatsCount} {date}
     </div>
   ),
 }));
@@ -92,10 +82,8 @@ describe("ProjectCard", () => {
   const defaultProps = {
     id: "1",
     projectKey: "PROJ",
-    slaStatus: "Needs Attention",
     title: "Project Title",
     date: "2026-01-17",
-    activeCasesCount: 10,
     activeChatsCount: 5,
     actionRequiredCount: 0,
   };

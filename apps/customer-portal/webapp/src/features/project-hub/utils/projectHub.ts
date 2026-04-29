@@ -28,9 +28,7 @@ import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
  * @param isAuthLoading - Asgardeo still loading.
  * @param isLoading - Projects query loading.
  * @param isError - Projects query failed.
- * @param totalRecords - Total projects from API metadata.
- * @param searchQuery - Current search input.
- * @param projectsLength - Projects on the current flattened list.
+ * @param projectsLength - Length of the current flattened projects list.
  * @returns {ProjectHubContentView} View id for the hub body.
  */
 export function resolveProjectHubContentView(

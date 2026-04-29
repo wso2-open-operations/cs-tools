@@ -39,7 +39,7 @@ import useInfiniteProjects, {
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
-import { paginatedSelectMenuListProps } from "@utils/common";
+import { PAGINATED_SELECT_MENU_MAX_HEIGHT_PX } from "@constants/common";
 import {
   PROJECT_HUB_PROJECTS_PAGE_SIZE,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS,
@@ -91,8 +91,14 @@ export default function ProjectSwitcher({
   const projects = useMemo(() => flattenProjectPages(data), [data]);
   const totalRecords = getTotalRecords(data);
 
+  // Track the true unfiltered total so the single-project check isn't misled by a search-filtered count.
+  const unfilteredTotalRef = useRef(0);
+  if (!debouncedSearchQuery) {
+    unfilteredTotalRef.current = totalRecords;
+  }
+
   // Persist the last known selected project name across search queries (projects list empties while loading)
-  const lastFoundRef = useRef<{ id: string; name: string } | undefined>();
+  const lastFoundRef = useRef<{ id: string; name: string } | undefined>(undefined);
   const selectedProject = useMemo(() => {
     const found = projects.find((p) => p.id === projectId);
     if (found) lastFoundRef.current = { id: found.id, name: found.name };
@@ -193,7 +199,7 @@ export default function ProjectSwitcher({
     );
   }
 
-  if (!isMenuOpen && !isLoading && totalRecords <= 1) {
+  if (!isMenuOpen && !isLoading && unfilteredTotalRef.current <= 1) {
     const project = selectedProject ?? projects[0];
 
     return (
@@ -252,7 +258,7 @@ export default function ProjectSwitcher({
             sx: { overflow: "hidden" },
           },
           MenuListProps: {
-            ...paginatedSelectMenuListProps(handleMenuScroll),
+            sx: { p: 0, overflow: "hidden" },
           },
         }}
         renderValue={() => (
@@ -274,12 +280,9 @@ export default function ProjectSwitcher({
           </Box>
         )}
       >
-        {/* Search box — sticky at top, stops events from reaching the Select */}
+        {/* Search box — non-scrollable header, stops events from reaching the Select */}
         <Box
           sx={{
-            position: "sticky",
-            top: 0,
-            zIndex: 1,
             bgcolor: "background.paper",
             px: 1,
             pt: 1,
@@ -305,43 +308,49 @@ export default function ProjectSwitcher({
           />
         </Box>
 
-        {/* Skeleton items shown while a new search query loads (keeps dropdown open) */}
-        {isLoading &&
-          [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
-            <Box key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%" }}>
-              <Skeleton variant="rounded" width="100%" height={40} />
-            </Box>
-          ))}
+        {/* Scrollable items container — sits below the search bar */}
+        <Box
+          sx={{ maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX, overflowY: "auto" }}
+          onScroll={handleMenuScroll}
+        >
+          {/* Skeleton items shown while a new search query loads (keeps dropdown open) */}
+          {isLoading &&
+            [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
+              <Box key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%" }}>
+                <Skeleton variant="rounded" width="100%" height={40} />
+              </Box>
+            ))}
 
-        {/* Project list items */}
-        {!isLoading &&
-          projects.map((project) => (
-            <ComplexSelect.MenuItem key={project.id} value={project.id}>
-              <ComplexSelect.MenuItem.Text
-                primary={project.name}
-                secondary={project.key}
-              />
-            </ComplexSelect.MenuItem>
-          ))}
+          {/* Project list items */}
+          {!isLoading &&
+            projects.map((project) => (
+              <ComplexSelect.MenuItem key={project.id} value={project.id}>
+                <ComplexSelect.MenuItem.Text
+                  primary={project.name}
+                  secondary={project.key}
+                />
+              </ComplexSelect.MenuItem>
+            ))}
 
-        {/* Spinner row while the next page loads on scroll */}
-        {!isLoading && (
-          <SelectMenuLoadMoreRow
-            visible={Boolean(isFetchingNextPage && projects.length > 0)}
-          />
-        )}
-
-        {/* Empty search result */}
-        {!isLoading &&
-          !isFetchingNextPage &&
-          projects.length === 0 &&
-          Boolean(debouncedSearchQuery) && (
-            <Box sx={{ px: 2, py: 1.5, textAlign: "center" }}>
-              <Typography variant="body2" color="text.secondary">
-                No projects found
-              </Typography>
-            </Box>
+          {/* Spinner row while the next page loads on scroll */}
+          {!isLoading && (
+            <SelectMenuLoadMoreRow
+              visible={Boolean(isFetchingNextPage && projects.length > 0)}
+            />
           )}
+
+          {/* Empty search result */}
+          {!isLoading &&
+            !isFetchingNextPage &&
+            projects.length === 0 &&
+            Boolean(debouncedSearchQuery) && (
+              <Box sx={{ px: 2, py: 1.5, textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                  No projects found
+                </Typography>
+              </Box>
+            )}
+        </Box>
       </ComplexSelect>
     </HeaderUI.Switchers>
   );

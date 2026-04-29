@@ -41,28 +41,16 @@ vi.mock("@wso2/oxygen-ui", () => ({
 
 describe("ProjectCardBadges", () => {
   it("should render project key chip", () => {
-    const props = {
-      projectKey: "PROJ-1",
-      slaStatus: "Needs Attention",
-    };
+    render(<ProjectCardBadges projectKey="PROJ-1" />);
 
-    render(<ProjectCardBadges {...props} />);
-
-    expect(screen.getByText(props.projectKey)).toBeInTheDocument();
-    expect(screen.getByText(props.slaStatus)).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
   });
 
-  it("should render both project key and SLA chips", () => {
-    const props = {
-      projectKey: "PROJ-123",
-      slaStatus: "Needs Attention",
-    };
-
-    render(<ProjectCardBadges {...props} />);
+  it("should render exactly one chip with the project key", () => {
+    render(<ProjectCardBadges projectKey="PROJ-123" />);
 
     const chips = screen.getAllByTestId("chip");
-    expect(chips).toHaveLength(2);
-    expect(chips[0].textContent).toBe(props.projectKey);
-    expect(chips[1].textContent).toBe(props.slaStatus);
+    expect(chips).toHaveLength(1);
+    expect(chips[0].textContent).toBe("PROJ-123");
   });
 });

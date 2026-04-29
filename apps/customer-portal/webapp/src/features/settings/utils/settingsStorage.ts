@@ -56,8 +56,8 @@ export function setSidebarCollapsed(collapsed: boolean): void {
 }
 
 /**
- * Reads the last selected project (id, name, key) from localStorage.
- * Falls back to the legacy ID-only entry if the richer record is absent.
+ * Reads the last selected project (id only) from localStorage.
+ * Falls back to the legacy ID-only key if the modern record is absent or unparseable.
  *
  * @returns {LastSelectedProject | null} The persisted project, or null.
  */
@@ -65,8 +65,13 @@ export function getLastSelectedProject(): LastSelectedProject | null {
   try {
     const stored = localStorage.getItem(LAST_SELECTED_PROJECT_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored) as { id?: string };
-      if (typeof parsed.id === "string" && parsed.id.length === 32) {
+      let parsed: { id?: string } | null = null;
+      try {
+        parsed = JSON.parse(stored) as { id?: string };
+      } catch {
+        // JSON parse failed; fall through to legacy key
+      }
+      if (parsed && typeof parsed.id === "string" && parsed.id.length === 32) {
         return { id: parsed.id };
       }
     }
@@ -106,6 +111,8 @@ export function setLastSelectedProject(project: LastSelectedProject): void {
 
 /**
  * Persists the last selected project id to localStorage.
+ * Writes to the canonical LAST_SELECTED_PROJECT_KEY so getLastSelectedProject
+ * picks it up, and keeps LAST_SELECTED_PROJECT_ID_KEY in sync.
  *
  * @param {string} projectId - The selected project id.
  * @deprecated Prefer {@link setLastSelectedProject}.
@@ -113,6 +120,7 @@ export function setLastSelectedProject(project: LastSelectedProject): void {
 export function setLastSelectedProjectId(projectId: string): void {
   if (projectId.length !== 32) return;
   try {
+    localStorage.setItem(LAST_SELECTED_PROJECT_KEY, JSON.stringify({ id: projectId }));
     localStorage.setItem(LAST_SELECTED_PROJECT_ID_KEY, projectId);
   } catch {
     return;

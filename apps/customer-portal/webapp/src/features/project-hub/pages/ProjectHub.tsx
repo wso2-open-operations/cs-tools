@@ -90,7 +90,7 @@ export default function ProjectHub(): JSX.Element {
 
   // Track the unfiltered total separately so the title never shows a search-result count.
   const totalProjectsRef = useRef(0);
-  if (!debouncedSearchQuery && totalRecords > 0) {
+  if (!debouncedSearchQuery) {
     totalProjectsRef.current = totalRecords;
   }
   const titleTotalRecords = debouncedSearchQuery ? totalProjectsRef.current : totalRecords;
@@ -316,10 +316,8 @@ export default function ProjectHub(): JSX.Element {
                 key={project.id}
                 id={project.id}
                 projectKey={project.key}
-                slaStatus={project.slaStatus}
                 title={project.name}
                 date={project.createdOn}
-                activeCasesCount={project.activeCasesCount}
                 activeChatsCount={project.activeChatsCount}
                 actionRequiredCount={project.actionRequiredCount ?? 0}
                 outstandingCount={project.outstandingCount ?? 0}
