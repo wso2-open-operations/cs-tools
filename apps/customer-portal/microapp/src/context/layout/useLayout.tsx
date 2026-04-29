@@ -15,7 +15,7 @@
 // under the License.
 
 import { useContext } from "react";
-import { LayoutContext } from "@src/context/layout";
+import { LayoutContext } from "@context/layout";
 
 export function useLayout() {
   const context = useContext(LayoutContext);

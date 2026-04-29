@@ -17,28 +17,24 @@
 import { Suspense, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
-import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
+import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/support";
 
-import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
-import { cases } from "@src/services/cases";
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { useProject } from "@context/project";
 import { ErrorBoundary, Fab } from "@components/core";
-import { chats } from "../services/chats";
-import { changeRequests } from "../services/changes";
-import { serviceRequests } from "../services/services";
-import EmptyState from "../components/shared/EmptyState";
-import { useNotify } from "../context/snackbar";
+import EmptyState from "@components/common/EmptyState";
+import { useNotify } from "@context/snackbar";
+import { ITEM_DETAIL_PATHS, TAB_CONFIG } from "@config/constants";
+import ErrorState from "@components/common/ErrorState";
 import {
-  ITEM_DETAIL_PATHS,
-  OUTSTANDING_CASE_STATUS_IDS,
-  OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS,
-  OUTSTANDING_CONVERSATIONS_STATUS_IDS,
-  TAB_CONFIG,
-} from "../config/constants";
-import { securityReportAnalysis } from "../services/sra";
-import { engagements } from "../services/engagements";
-import ErrorState from "../components/shared/ErrorState";
-import { announcements } from "../services/announcements";
+  useOutstandingCases,
+  useOutstandingChats,
+  useOutstandingChangeRequests,
+  useOutstandingServiceRequests,
+  useOutstandingSecurityReports,
+  useOutstandingEngagements,
+  useOutstandingAnnouncements,
+} from "@features/dashboard/hooks/useOutstandingItems";
 
 type TabType = ItemCardProps["type"];
 
@@ -153,15 +149,7 @@ function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
 
 function CaseItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    cases.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingCases(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -176,15 +164,7 @@ function CaseItemListContent() {
 
 function ChatItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    chats.all(projectId!, {
-      filters: {
-        stateKeys: OUTSTANDING_CONVERSATIONS_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingChats(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -199,12 +179,7 @@ function ChatItemListContent() {
 
 function ChangeRequestItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    changeRequests.all(projectId!, {
-      filters: { stateKeys: OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS },
-      pagination: { offset: 0, limit: 5 },
-    }),
-  );
+  const { data } = useOutstandingChangeRequests(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -219,15 +194,7 @@ function ChangeRequestItemListContent() {
 
 function ServiceRequestItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    serviceRequests.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingServiceRequests(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -242,15 +209,7 @@ function ServiceRequestItemListContent() {
 
 function SecurityReportAnalysisItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    securityReportAnalysis.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingSecurityReports(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -265,15 +224,7 @@ function SecurityReportAnalysisItemListContent() {
 
 function EngagementItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    engagements.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingEngagements(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 
@@ -288,15 +239,7 @@ function EngagementItemListContent() {
 
 function AnnouncementItemListContent() {
   const { projectId } = useProject();
-  const { data } = useSuspenseQuery(
-    announcements.all(projectId!, {
-      filters: {
-        statusIds: OUTSTANDING_CASE_STATUS_IDS,
-      },
-      pagination: { limit: 5 },
-      sortBy: { field: "createdOn", order: "desc" },
-    }),
-  );
+  const { data } = useOutstandingAnnouncements(projectId!);
 
   if (data.length === 0) return <EmptyState />;
 

@@ -16,8 +16,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { FiltersContext } from "./FiltersContext";
-import { cases } from "@root/src/services/cases";
-import { useProject } from "../project";
+import { cases } from "@features/cases/api/cases.queries";
+import { useProject } from "@context/project";
 
 export default function FiltersProvider({ children }: { children: React.ReactNode }) {
   const { projectId } = useProject();

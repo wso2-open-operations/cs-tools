@@ -16,10 +16,10 @@
 
 import { colors } from "@wso2/oxygen-ui";
 import { CircleAlert, Cloud, MessageSquare, Moon, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@src/types";
-import type { ProjectMetricMeta } from "@components/features/projects";
-import type { ProgressTimelineEntryProps } from "../components/features/detail";
-import type { ItemCardProps } from "../components/features/support";
+import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
+import type { ProjectMetricMeta } from "@features/projects/components";
+import type { ProgressTimelineEntryProps } from "@components/detail";
+import type { ItemCardProps } from "@components/support";
 
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
@@ -134,16 +134,6 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   engagement: "Search Engagement",
   announcement: "Search Announcements",
 };
-
-export const ACTION_REQUIRED_CASE_STATUS_IDS = [18, 6];
-export const ACTION_REQUIRED_CHANGE_REQUEST_STATUS_IDS = [1, 5];
-
-export const OUTSTANDING_CASE_STATUS_IDS = [1, 10, 18, 1003, 6, 1006];
-export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
-export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
-
-export const RESOLVED_CASE_STATUS_IDS = [3];
-export const RESOLVED_CHANGE_REQUEST_STATUS_IDS = [3];
 
 export const PLURALS: Record<ItemCardProps["type"], string> = {
   case: "Cases",

@@ -14,42 +14,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  CaseListContent,
-  ChangeRequestListContent,
-  ChatListContent,
-  FilterSlotBuilderSkeleton,
-  FilterSlotContent,
-  ItemCardExtendedSkeleton,
-  ServiceRequestListContent,
-  type ItemCardProps,
-} from "@components/features/support";
-import { Box, Skeleton, Stack } from "@wso2/oxygen-ui";
+import { FilterSlotBuilderSkeleton, FilterSlotContent, type ItemCardProps } from "@components/support";
+import { Box, Stack } from "@wso2/oxygen-ui";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { ErrorBoundary } from "../components/core";
-import { SecurityReportAnalysisListContent } from "../components/features/support/SecurityReportAnalysisListContent";
-import { EngagementListContent } from "../components/features/support/EngagementListContent";
-import ErrorState from "../components/shared/ErrorState";
+import { useCallback, useEffect, useState } from "react";
+import { ErrorBoundary } from "@components/core";
+import { CaseListContent } from "@features/cases/components/CaseListContent";
+import { ChangeRequestListContent } from "@features/changes/components/ChangeRequestListContent";
+import { ChatListContent } from "@features/chats/components/ChatListContent";
+import { ServiceRequestListContent } from "@features/service-requests/components/ServiceRequestListContent";
+import { SecurityReportAnalysisListContent } from "@features/sra/components/SecurityReportAnalysisListContent";
+import { EngagementListContent } from "@features/engagements/components/EngagementListContent";
+import { AnnouncementListContent } from "@features/announcements/components/AnnouncementListContent";
+import ErrorState from "@components/common/ErrorState";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
-import { STATUS_MODE_TYPES } from "../utils/filters";
-import EmptyState from "../components/shared/EmptyState";
-import { AnnouncementListContent } from "../components/features/support/AnnouncementListContent";
+import { STATUS_MODE_TYPES } from "@shared/utils/filter.utils";
+import EmptyState from "@components/common/EmptyState";
+import { ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
+import type { ModeType } from "@shared/types";
 
-export type ModeType = (OfStatusModeType | OfSeverityModeType) & {
-  title: string;
-};
-
-export interface OfStatusModeType {
-  type: "status";
-  status: "action_required" | "outstanding" | "resolved";
-}
-
-export interface OfSeverityModeType {
-  type: "severity";
-  id: string | number;
-}
+type AllItemsModeType = ModeType & { title: string };
 
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "multiple" }) {
   const [searchParams] = useSearchParams();
@@ -58,17 +43,17 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "
   const search = (searchParams.get("search") ?? "").toLowerCase();
   const { reset } = useQueryErrorResetBoundary();
 
-  const mode: ModeType | undefined = location.state?.mode;
+  const mode: AllItemsModeType | undefined = location.state?.mode;
 
-  const { setTitleOverride } = useLayout();
+  const { setLayoutOverrides } = useLayout();
 
   useEffect(() => {
     if (!mode) return;
 
-    setTitleOverride(mode.title);
+    setLayoutOverrides({ title: mode.title });
 
     return () => {
-      setTitleOverride(undefined);
+      setLayoutOverrides({ title: undefined });
     };
   }, [mode]);
 
@@ -172,7 +157,7 @@ function ItemsListContent({
   search: string;
 }) {
   const location = useLocation();
-  const mode: ModeType | undefined = location.state?.mode;
+  const mode: AllItemsModeType | undefined = location.state?.mode;
 
   const types = Array.isArray(type) ? type : [type];
   const grouped = Array.isArray(type);
@@ -208,14 +193,9 @@ function ItemsListContent({
 
 export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
   const location = useLocation();
-  const mode: ModeType | undefined = location.state?.mode;
+  const mode: AllItemsModeType | undefined = location.state?.mode;
 
-  const showTabs = useMemo(() => {
-    if (mode) {
-      return false;
-    }
-    return true;
-  }, [mode]);
+  const showTabs = !mode;
 
   return (
     <ErrorBoundary fallback={<FilterSlotBuilderSkeleton />}>
@@ -224,29 +204,4 @@ export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
   );
 }
 
-export function ItemsListContentSkeleton() {
-  return (
-    <>
-      {Array.from({ length: 10 }).map((_, index) => (
-        <ItemCardExtendedSkeleton key={index} />
-      ))}
-    </>
-  );
-}
-
-export function usePaginationSubtitleOverride(count?: number | null, total?: number | null) {
-  const layout = useLayout();
-  const disabled = count === null && total === null;
-  const data = count !== undefined && total !== undefined;
-
-  useLayoutEffect(() => {
-    if (!disabled)
-      layout.setSubtitleSlotOverride(
-        data ? `${count} of ${total}` : <Skeleton variant="text" width={50} height={20} />,
-      );
-
-    return () => layout.setSubtitleSlotOverride(null);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count, total]);
-}
+export { ItemsListContentSkeleton };

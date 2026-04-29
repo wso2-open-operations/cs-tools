@@ -17,8 +17,8 @@
 import { useState } from "react";
 import { ProjectContext } from "./ProjectContext";
 import { useQuery } from "@tanstack/react-query";
-import { projects } from "src/services/projects";
-import { setLastVisitedProjectId } from "@root/src/utils/others";
+import { projects } from "@features/projects/api/projects.queries";
+import { setLastVisitedProjectId } from "@shared/utils/storage.utils";
 
 export default function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(null);

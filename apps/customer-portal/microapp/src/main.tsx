@@ -14,13 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import App from "@src/App";
+import App from "./app/App";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import theme from "./theme";
-import "@src/index.css";
+import "./index.css";
 import axios from "axios";
 
 const queryClient = new QueryClient({

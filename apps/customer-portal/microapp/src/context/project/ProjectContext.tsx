@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ProjectFeaturesDto } from "@root/src/types";
+import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
 import { createContext } from "react";
 
 export type ProjectContextType = {

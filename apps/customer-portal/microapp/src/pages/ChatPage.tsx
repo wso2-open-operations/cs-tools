@@ -16,28 +16,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Backdrop, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
-import { StickyCommentBar } from "@components/features/detail";
-import { MessageBubble, type ChatMessage } from "@components/features/chat";
-import { useNavigate } from "react-router-dom";
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
-import { cases } from "@src/services/cases";
-import { projects } from "@src/services/projects";
+import { StickyCommentBar } from "@components/detail";
+import { MessageBubble, type ChatMessage } from "@features/chats/components";
 import { useProject } from "@context/project";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { Pin } from "@wso2/oxygen-ui-icons-react";
-import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "../config/endpoints";
-import { useMe } from "../context/me";
-import type { FinalNoveraResponse, NoveraResponse } from "../types/novera.dto";
-import { getAccessToken, getIdToken } from "../services/auth";
-import type { Product } from "../types";
+import { useNoveraWebSocket } from "@features/chats/hooks/useNoveraWebSocket";
+import { useChatData } from "@features/chats/hooks/useChatData";
 
 dayjs.extend(relativeTime);
 
 export default function ChatPage() {
-  const navigate = useNavigate();
-  const { projectId, projectTypeId } = useProject();
-  const { id: userId } = useMe();
+  const { projectId } = useProject();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -55,156 +46,10 @@ export default function ChatPage() {
     },
   ]);
 
-  const [activeStreamingMessage, setActiveStreamingMessage] = useState<ChatMessage | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null);
+  const { ws, activeStreamingMessage, handleAnimationComplete, sendMessage } = useNoveraWebSocket(projectId!);
 
-  useEffect(() => {
-    let websocket: WebSocket;
-
-    const init = async () => {
-      try {
-        const accessToken = getAccessToken();
-        const idToken = getIdToken();
-
-        websocket = new WebSocket(NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT(projectId!), [
-          "choreo-oauth2-token",
-          accessToken as string,
-          "cs-customer-portal",
-          idToken as string,
-        ]);
-
-        setWs(websocket);
-
-        websocket.onmessage = (event) => {
-          try {
-            const data: NoveraResponse = JSON.parse(event.data);
-            handleNoveraResponse(data);
-          } catch (error) {
-            console.error("Failed to parse Novera response:", error);
-          }
-        };
-
-        websocket.onerror = (error) => {
-          console.error("WebSocket error observed:", error);
-          websocket.close();
-        };
-      } catch (error) {
-        console.error("Initialization failed", error);
-      }
-    };
-
-    init();
-
-    return () => {
-      if (websocket) {
-        websocket.close();
-      }
-    };
-  }, [projectId]);
-
-  const { data: deployments = [], isLoading: deploymentsLoading } = useQuery(projects.deployments(projectId!));
-
-  const productQueries = useQueries({
-    queries: deployments.map((deployment) => ({
-      ...projects.products(deployment.id),
-      enabled: !!deployment.id,
-    })),
-  });
-
-  const productsLoading = productQueries.every((query) => query.isLoading);
-
-  const mutation = useMutation({
-    ...cases.classify,
-    onSuccess: (response) => {
-      setTimeout(() => {
-        navigate("/create", { state: { messages, classifications: response } });
-      }, 500);
-    },
-    onSettled: () => setIsAwaitingCreateCase(false),
-  });
-
-  const envProducts = deployments.reduce((acc, deployment, index) => {
-    const products = productQueries[index]?.data ?? [];
-    const productNames = products.map((p: Product) => p.name + " " + p.version);
-
-    return {
-      ...acc,
-      [deployment.name]: productNames,
-    };
-  }, {});
-
-  const [isWaitingForAnimation, setIsWaitingForAnimation] = useState(false);
-  const [pendingFinalData, setPendingFinalData] = useState<NoveraResponse | null>(null);
-
-  const handleNoveraResponse = (response: NoveraResponse) => {
-    switch (response.type) {
-      case "conversation_created":
-        setConversationId(response.conversationId);
-        break;
-
-      case "thinking_start":
-        setActiveStreamingMessage({
-          author: "assistant",
-          blocks: [{ type: "text", value: "" }],
-          thinking: true,
-          animated: true,
-        });
-        break;
-
-      case "thinking_step":
-        setActiveStreamingMessage((prev) => (prev ? { ...prev, thinking: response.label } : null));
-        break;
-
-      case "token":
-        setActiveStreamingMessage((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            blocks: prev.blocks.map((b) => (b.type === "text" ? { ...b, value: b.value + response.content } : b)),
-          };
-        });
-        break;
-
-      case "final":
-        setIsWaitingForAnimation(true);
-        setPendingFinalData(response);
-
-        break;
-    }
-  };
-
-  const handleAnimationComplete = () => {
-    if (isWaitingForAnimation && activeStreamingMessage && pendingFinalData) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          animated: false,
-          thinking: false,
-          author: "assistant",
-          blocks: [{ type: "text", value: (pendingFinalData as FinalNoveraResponse).payload.message }],
-          timestamp: dayjs().fromNow(),
-        },
-      ]);
-      setActiveStreamingMessage(null);
-      setIsWaitingForAnimation(false);
-      setPendingFinalData(null);
-    }
-  };
-
-  const sendMessage = (message: string) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "user_message",
-          accountId: userId,
-          conversationId: conversationId ?? "",
-          message: message,
-          envProducts,
-        }),
-      );
-    }
-  };
+  const { deploymentsLoading, productsLoading, envProducts, classifyMutation, isAwaitingCreateCase, handleCreateCase } =
+    useChatData(messages);
 
   const handleSend = () => {
     if (!comment.trim()) return;
@@ -222,32 +67,8 @@ export default function ChatPage() {
 
     setComment("");
 
-    sendMessage(comment);
+    sendMessage(comment, envProducts);
   };
-
-  const [isAwaitingCreateCase, setIsAwaitingCreateCase] = useState(false);
-
-  const handleCreateCase = () => {
-    setIsAwaitingCreateCase(true);
-  };
-
-  useEffect(() => {
-    if (isAwaitingCreateCase) {
-      mutation.mutate({
-        projectTypeId,
-        chatHistory: toString(messages),
-        envProducts: deployments.reduce((acc, deployment, index) => {
-          const products = productQueries[index]?.data ?? [];
-          const productNames = products.map((p) => p.name);
-
-          return {
-            ...acc,
-            [deployment.name]: productNames,
-          };
-        }, {}),
-      });
-    }
-  }, [isAwaitingCreateCase, deploymentsLoading, productsLoading]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -262,7 +83,7 @@ export default function ChatPage() {
           flexDirection: "column",
           gap: 2,
         }}
-        open={isAwaitingCreateCase && (deploymentsLoading || productsLoading || mutation.isPending)}
+        open={isAwaitingCreateCase && (deploymentsLoading || productsLoading || classifyMutation.isPending)}
       >
         <CircularProgress color="inherit" />
       </Backdrop>
@@ -273,7 +94,12 @@ export default function ChatPage() {
         ))}
 
         {activeStreamingMessage && (
-          <MessageBubble {...activeStreamingMessage} onAnimationComplete={handleAnimationComplete} />
+          <MessageBubble
+            {...activeStreamingMessage}
+            onAnimationComplete={() =>
+              handleAnimationComplete((msg) => setMessages((prev) => [...prev, msg]))
+            }
+          />
         )}
       </Stack>
       <div ref={bottomRef} />
@@ -311,16 +137,3 @@ export default function ChatPage() {
   );
 }
 
-const toString = (messages: ChatMessage[]): string => {
-  return messages
-    .map((msg) => {
-      const role = msg.author === "you" ? "User" : "Assistant";
-      const textContent = msg.blocks
-        .filter((block) => block.type === "text")
-        .map((block) => block.value)
-        .join(" ");
-
-      return `${role}: ${textContent}`;
-    })
-    .join("\n");
-};

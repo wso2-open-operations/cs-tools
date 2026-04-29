@@ -15,16 +15,16 @@
 // under the License.
 
 import axios from "axios";
-import { users } from "@root/src/services/users";
+import { users } from "@features/users/api/users.queries";
 import { useQuery } from "@tanstack/react-query";
 import { MeContext } from "./MeContext";
-import { LoadingFallback } from "@root/src/components/ui/LoadingFallback";
-import { AuthorizationFallback } from "@root/src/components/ui";
-import { ADMIN_USER_ROLE } from "@root/src/config/constants";
-import { getLastVisitedProjectId } from "@root/src/utils/others";
-import { projects } from "@root/src/services/projects";
+import { LoadingFallback } from "@components/ui/LoadingFallback";
+import { AuthorizationFallback } from "@components/ui";
+import { ADMIN_USER_ROLE } from "@config/constants";
+import { getLastVisitedProjectId } from "@shared/utils/storage.utils";
+import { projects } from "@features/projects/api/projects.queries";
 import { useEffect, useMemo, useState } from "react";
-import { useProject } from "../project";
+import { useProject } from "@context/project";
 import { useNavigate } from "react-router-dom";
 
 export default function MeProvider({ children }: { children: React.ReactNode }) {

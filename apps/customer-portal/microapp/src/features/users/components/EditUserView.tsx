@@ -1,0 +1,321 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useState, type ReactNode } from "react";
+import {
+  alpha,
+  Avatar,
+  Box,
+  Button,
+  Card,
+  CircularProgress,
+  pxToRem,
+  Stack,
+  TextField,
+  Typography,
+  useTheme,
+} from "@wso2/oxygen-ui";
+import { Link } from "react-router-dom";
+import { InvitationSummaryContent, RoleSelector } from "@features/users/components";
+import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { stringAvatar } from "@shared/utils/string.utils";
+import { ConfirmDialog } from "@components/common/ConfirmDialog";
+import type { useUserEditor } from "@features/users/hooks/useUserEditor";
+
+type EditUserViewProps = ReturnType<typeof useUserEditor> & { mode: "invite" | "edit" };
+
+export function EditUserView({
+  mode,
+  email,
+  setEmail,
+  firstName,
+  setFirstName,
+  lastName,
+  setLastName,
+  role,
+  setRole,
+  project,
+  createUserMutation,
+  editUserMutation,
+  deleteUserMutation,
+  handleSubmit,
+  isRoleUnchanged,
+}: EditUserViewProps) {
+  return (
+    <>
+      <Stack gap={2}>
+        {mode === "edit" && <UserSummaryCard firstName={firstName} lastName={lastName} email={email} />}
+        {mode === "invite" && <InvitationNotice />}
+        <SectionCard title="User Details">
+          <Stack gap={2}>
+            <TextField
+              size="small"
+              label="Email Address"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              helperText={mode === "edit" ? "Email cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
+            <TextField
+              size="small"
+              label="First Name"
+              value={firstName}
+              onChange={(event) => setFirstName(event.target.value)}
+              helperText={mode === "edit" ? "First Name cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
+            <TextField
+              size="small"
+              label="Last Name"
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+              helperText={mode === "edit" ? "Last Name cannot be edited" : undefined}
+              slotProps={{
+                htmlInput: { readOnly: mode === "edit" },
+              }}
+            />
+          </Stack>
+        </SectionCard>
+
+        <SectionCard title="User Role">
+          <RoleSelector value={role} onChange={setRole} />
+        </SectionCard>
+
+        {mode === "invite" && (
+          <>
+            <SectionCard title="Invitation Summary">
+              <InvitationSummaryContent
+                projectName={project?.name}
+                email={email}
+                name={firstName + " " + lastName}
+                role={role}
+              />
+            </SectionCard>
+            <ExpirationNotice />
+          </>
+        )}
+
+        {mode === "edit" && (
+          <>
+            <PermissionDetails />
+            <DangerZone onDelete={deleteUserMutation.mutate} isPending={deleteUserMutation.isPending} />
+          </>
+        )}
+
+        <Button
+          disabled={
+            mode === "edit"
+              ? isRoleUnchanged || editUserMutation.isPending
+              : createUserMutation.isPending
+          }
+          variant="contained"
+          startIcon={
+            createUserMutation.isPending || editUserMutation.isPending ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : undefined
+          }
+          onClick={handleSubmit}
+        >
+          {mode === "invite"
+            ? createUserMutation.isPending
+              ? "Sending..."
+              : "Send Invitation"
+            : editUserMutation.isPending
+              ? "Saving..."
+              : "Save Changes"}
+        </Button>
+
+        <Button
+          variant="outlined"
+          component={Link}
+          sx={{ textTransform: "initial", bgcolor: "background.paper" }}
+          to="/users"
+        >
+          Cancel
+        </Button>
+      </Stack>
+    </>
+  );
+}
+
+function SectionCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Card component={Stack} gap={2} p={2}>
+      <Typography variant="body2" color="text.secondary" fontWeight="medium">
+        {title}
+      </Typography>
+      {children}
+    </Card>
+  );
+}
+
+function InvitationNotice() {
+  const theme = useTheme();
+
+  return (
+    <Card
+      component={Stack}
+      direction="row"
+      sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5, gap: 2 })}
+    >
+      <Box color={theme.palette.info.main}>
+        <Info size={pxToRem(18)} />
+      </Box>
+      <Stack>
+        <Typography variant="body2" fontWeight="medium" color="info">
+          Direct User Invitation
+        </Typography>
+        <Typography variant="subtitle2" color="text.secondary">
+          Send an email invitation directly to a user to join this project. The invitation link will be valid for 7
+          days.
+        </Typography>
+      </Stack>
+    </Card>
+  );
+}
+
+function ExpirationNotice() {
+  const theme = useTheme();
+
+  return (
+    <Card
+      component={Stack}
+      direction="row"
+      alignItems="center"
+      px={2}
+      py={1.5}
+      gap={2}
+      sx={{ bgcolor: "components.popover.state.active.background" }}
+    >
+      <Clock4 size={pxToRem(50)} color={theme.palette.primary.main} />
+      <Typography variant="subtitle2" fontWeight="medium" color="text.secondary">
+        Important: &nbsp;
+        <Typography component="span" variant="subtitle2" fontWeight="regular">
+          Invitation links expire after 7 days. If the user doesn't accept the invitation within this timeframe, you'll
+          need to send a new invitation.
+        </Typography>
+      </Typography>
+    </Card>
+  );
+}
+
+function PermissionDetails() {
+  return (
+    <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5 })}>
+      <Typography variant="body2" fontWeight="medium" color="info">
+        Permission Details
+      </Typography>
+      <ul style={{ margin: 0, marginTop: 3, paddingLeft: 20 }}>
+        <li>
+          <Typography variant="subtitle2" color="text.secondary">
+            Create and manage own cases
+          </Typography>
+        </li>
+        <li>
+          <Typography variant="subtitle2" color="text.secondary">
+            Participate in chats
+          </Typography>
+        </li>
+        <li>
+          <Typography variant="subtitle2" color="text.secondary">
+            Submit service requests
+          </Typography>
+        </li>
+        <li>
+          <Typography variant="subtitle2" color="text.secondary">
+            View project analytics
+          </Typography>
+        </li>
+      </ul>
+    </Card>
+  );
+}
+
+function UserSummaryCard({ firstName, lastName, email }: { firstName: string; lastName: string; email: string }) {
+  const theme = useTheme();
+
+  return (
+    <Card component={Stack} textAlign="center" alignItems="center" gap={2} p={3}>
+      <Avatar
+        sx={(theme) => ({
+          width: 65,
+          height: 65,
+          bgcolor: "primary.main",
+          fontSize: theme.typography.h3,
+          fontWeight: "medium",
+        })}
+      >
+        {stringAvatar(firstName)}
+      </Avatar>
+      <Stack textAlign="center" gap={0.5}>
+        <Typography variant="h5" fontWeight="medium">
+          {firstName + " " + lastName}
+        </Typography>
+        <Stack direction="row" justifyContent="center" alignItems="center" gap={1}>
+          <Mail size={pxToRem(16)} color={theme.palette.text.secondary} />
+          <Typography variant="body2" fontWeight="regular" color="text.secondary">
+            {email}
+          </Typography>
+        </Stack>
+      </Stack>
+    </Card>
+  );
+}
+
+function DangerZone({ isPending, onDelete }: { isPending: boolean; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Card component={Stack} sx={(theme) => ({ bgcolor: alpha(theme.palette.error.main, 0.2), p: 1.5 })}>
+        <Typography variant="body2" fontWeight="medium" color="error">
+          Danger Zone
+        </Typography>
+        <Typography variant="subtitle2" color="text.secondary">
+          Send an email invitation directly to a user to join this project. The invitation link will be valid for 7
+          days.
+        </Typography>
+        <Button
+          variant="contained"
+          color="error"
+          disabled={isPending}
+          startIcon={isPending ? <CircularProgress size={16} color="inherit" /> : <Trash2 />}
+          sx={{ mt: 3 }}
+          onClick={() => setOpen(true)}
+        >
+          {isPending ? "Removing..." : "Remove User from Project"}
+        </Button>
+      </Card>
+
+      <ConfirmDialog
+        open={open}
+        title="Remove User"
+        description="Are you sure you want to remove this user?"
+        confirmColor="error"
+        confirmLabel="Remove"
+        onClose={() => setOpen(false)}
+        onConfirm={() => {
+          setOpen(false);
+          onDelete();
+        }}
+      />
+    </>
+  );
+}

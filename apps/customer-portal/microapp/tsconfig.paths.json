@@ -4,13 +4,17 @@
     "paths": {
       "@root/*": ["./*"],
       "@src/*": ["./src/*"],
-      "@components/*": ["./src/components/*"],
+      "@app/*": ["./src/app/*"],
+      "@components/*": ["./src/shared/components/*"],
       "@config/*": ["./src/config/*"],
       "@context/*": ["./src/context/*"],
       "@icons/*": ["./src/icons/*"],
       "@pages/*": ["./src/pages/*"],
       "@theme/*": ["./src/theme/*"],
-      "@utils/*": ["./src/utils/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@infrastructure/*": ["./src/infrastructure/*"],
+      "@features/*": ["./src/features/*"],
+      "@bridge/*": ["./src/bridge/*"]
     }
   }
 }

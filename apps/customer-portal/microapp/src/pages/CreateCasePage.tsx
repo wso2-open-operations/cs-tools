@@ -14,26 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { Folder } from "@wso2/oxygen-ui-icons-react";
 import { Button, Stack, Typography, InputAdornment, pxToRem, CircularProgress, Grid, Box } from "@wso2/oxygen-ui";
-import { SelectField, TextField, ConversationSummary } from "@components/features/create";
+import { SelectField, TextField, ConversationSummary } from "@features/cases/components";
 import { useFormik } from "formik";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useProject } from "@context/project";
-import { projects } from "@src/services/projects";
-import { cases } from "@src/services/cases";
-import type { CaseClassificationResponseDto, Case } from "@src/types";
-import { useEffect, useMemo, useState } from "react";
+import type { CaseClassificationResponseDto } from "@features/cases/types/case.dto";
+import type { Case } from "@features/cases/types/case.model";
 import * as Yup from "yup";
-import { overrideOrDefault } from "../utils/others";
-import { useNotify } from "../context/snackbar";
-import { useFilters } from "../context/filters";
-import { useLayout } from "../context/layout";
-import { RichText, SectionCard } from "../components/shared";
-import { InfoField } from "../components/features/detail";
+import { RichText, SectionCard } from "@components/common";
+import { InfoField } from "@components/detail";
 import DOMPurify from "dompurify";
-import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "../config/constants";
+import { useCreateCaseData } from "@features/cases/hooks/useCreateCaseData";
+import { useAutoFill } from "@features/cases/hooks/useAutoFill";
+import { useCreateCase } from "@features/cases/hooks/useCreateCase";
 
 type CreateCaseFormValues = {
   project: string;
@@ -46,17 +41,12 @@ type CreateCaseFormValues = {
 };
 
 export default function CreateCasePage() {
-  const navigate = useNavigate();
   const location = useLocation();
-  const layout = useLayout();
   const messages = location.state?.messages || [];
   const classifications: CaseClassificationResponseDto = location.state?.classifications;
   const relatedCase: Case | undefined = location.state?.case;
-  const queryClient = useQueryClient();
-  const { projectId, type } = useProject();
-  const notify = useNotify();
-
-  const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
+  const { projectId } = useProject();
+  const { mutation } = useCreateCase();
 
   const formik = useFormik<CreateCaseFormValues>({
     initialValues: {
@@ -86,141 +76,27 @@ export default function CreateCasePage() {
     },
   });
 
-  const { data: filters } = useFilters();
-  const issueTypeOptions = filters?.issueTypes.map((type) => ({ value: Number(type.id), label: type.label }));
-  const severityLevelOptions = filters?.severities.map((type) => ({
-    value: Number(type.id),
-    label: overrideOrDefault(type.label),
-  }));
+  const {
+    projectsOptions,
+    deploymentOptions,
+    productOptions,
+    issueTypeOptions,
+    severityLevelOptions,
+    deploymentsFieldDisabled,
+    isLoadingDeployments,
+    isLoadingProducts,
+  } = useCreateCaseData(formik.values.project, formik.values.deployment);
 
-  const { data: features } = useQuery(projects.features(projectId!));
-
-  const deploymentQuery = useQuery({
-    ...projects.deployments(formik.values.project),
-    enabled: !!formik.values.project,
+  const { classified, setClassified } = useAutoFill({
+    classifications,
+    relatedCase,
+    deploymentOptions,
+    productOptions,
+    issueTypeOptions,
+    severityLevelOptions,
+    deploymentsFieldDisabled,
+    setFieldValue: formik.setFieldValue,
   });
-
-  const productQuery = useQuery({
-    ...projects.products(formik.values.deployment, {
-      filters: { productCategories: features?.defaultCaseProductCategories ?? undefined },
-    }),
-    enabled: !!formik.values.deployment,
-  });
-
-  const projectsOptions = useSuspenseQuery(projects.all()).data.map((project) => ({
-    value: project.id,
-    label: project.name,
-  }));
-
-  const deploymentsFieldDisabled = type ? DEPLOYMENT_DISABLED_PROJECT_TYPES.includes(type) : false;
-
-  const deploymentOptions = useMemo(() => {
-    const data = deploymentQuery.data ?? [];
-
-    const filteredData = deploymentsFieldDisabled
-      ? data.filter((deployment) => deployment.type === "Primary Production").slice(0, 1)
-      : data;
-
-    return filteredData.map((deployment) => ({
-      value: deployment.id,
-      label: deployment.name,
-    }));
-  }, [deploymentQuery.data, deploymentsFieldDisabled]);
-
-  const productOptions = useMemo(
-    () =>
-      productQuery.data?.map((product) => ({
-        value: product.id,
-        label: `${product.name} ${product.version}`,
-      })) ?? [],
-    [productQuery.data],
-  );
-
-  const mutation = useMutation({
-    ...cases.create,
-    onSuccess: ({ id }) => {
-      queryClient.invalidateQueries({ queryKey: ["cases"] });
-      setTimeout(() => {
-        navigate(`/cases/${id}`);
-      }, 500);
-    },
-    onError: () => {
-      notify.error("Failed to create case. Please try again.");
-    },
-  });
-
-  useEffect(() => {
-    if (!classifications) return;
-
-    const autoFilledFields = new Set<keyof CreateCaseFormValues>();
-
-    const matchedDeployment = deploymentOptions.find((option) => option.label === classifications.caseInfo.environment);
-    if (matchedDeployment && !deploymentsFieldDisabled) {
-      formik.setFieldValue("deployment", matchedDeployment.value);
-      autoFilledFields.add("deployment");
-    }
-
-    const matchedProduct = productOptions.find((option) => option.label === classifications.caseInfo.productName);
-    if (matchedProduct) {
-      formik.setFieldValue("product", matchedProduct.value);
-      autoFilledFields.add("product");
-    }
-
-    const matchedType = issueTypeOptions?.find((option) => option.label === classifications.issueType);
-
-    if (matchedType) {
-      formik.setFieldValue("type", matchedType.value);
-      autoFilledFields.add("type");
-    }
-
-    const matchedSeverity = severityLevelOptions?.find((option) =>
-      option.label.includes(classifications.severityLevel),
-    );
-
-    if (matchedSeverity) {
-      formik.setFieldValue("severity", matchedSeverity.value);
-      autoFilledFields.add("severity");
-    }
-
-    if (classifications.caseInfo.shortDescription) {
-      formik.setFieldValue("title", classifications.caseInfo.shortDescription);
-      autoFilledFields.add("title");
-    }
-
-    if (classifications.caseInfo.description) {
-      formik.setFieldValue("description", classifications.caseInfo.description);
-      autoFilledFields.add("description");
-    }
-
-    setClassified(autoFilledFields);
-  }, [classifications, deploymentOptions]);
-
-  useEffect(() => {
-    if (!relatedCase) return;
-
-    layout.setTitleOverride("Create Related Case");
-
-    formik.setFieldValue("title", relatedCase.title);
-
-    const matchedDeployment = deploymentOptions.find((option) => option.label === relatedCase.deployment);
-    if (matchedDeployment) {
-      formik.setFieldValue("deployment", matchedDeployment.value);
-    }
-
-    const matchedProduct = productOptions.find((option) => option.label === relatedCase.product);
-    if (matchedProduct) {
-      formik.setFieldValue("product", matchedProduct.value);
-    }
-
-    return () => layout.setTitleOverride(undefined);
-  }, [relatedCase, deploymentOptions]);
-
-  useEffect(() => {
-    if (!deploymentsFieldDisabled) return;
-    if (!deploymentOptions.length) return;
-
-    formik.setFieldValue("deployment", deploymentOptions[0].value);
-  }, [deploymentsFieldDisabled]);
 
   return (
     <>
@@ -265,13 +141,13 @@ export default function CreateCasePage() {
                 formik.setFieldValue("product", "");
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   next.delete("product");
                   return next;
                 });
               }}
               disabled={
-                !!relatedCase || !formik.values.project || deploymentQuery.isLoading || deploymentsFieldDisabled
+                !!relatedCase || !formik.values.project || isLoadingDeployments || deploymentsFieldDisabled
               }
               error={formik.touched.deployment && Boolean(formik.errors.deployment)}
               helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
@@ -288,11 +164,11 @@ export default function CreateCasePage() {
                 formik.handleChange(e);
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   return next;
                 });
               }}
-              disabled={!!relatedCase || !formik.values.deployment || productQuery.isLoading}
+              disabled={!!relatedCase || !formik.values.deployment || isLoadingProducts}
               error={formik.values.deployment ? formik.touched.product && Boolean(formik.errors.product) : false}
               helperText={
                 formik.values.deployment
@@ -324,7 +200,7 @@ export default function CreateCasePage() {
                 formik.handleChange(e);
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   return next;
                 });
               }}
@@ -344,7 +220,7 @@ export default function CreateCasePage() {
                 formik.handleChange(e);
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   return next;
                 });
               }}
@@ -366,7 +242,7 @@ export default function CreateCasePage() {
                 formik.handleChange(e);
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   return next;
                 });
               }}
@@ -386,7 +262,7 @@ export default function CreateCasePage() {
                 formik.handleChange(e);
                 setClassified((prev) => {
                   const next = new Set(prev);
-                  next.delete(e.target.name as keyof CreateCaseFormValues);
+                  next.delete(e.target.name);
                   return next;
                 });
               }}
