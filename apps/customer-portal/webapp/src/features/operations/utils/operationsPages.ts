@@ -97,6 +97,11 @@ const SCHEDULED_CR_STATE_LABELS = new Set<string>([
   ChangeRequestStates.SCHEDULED,
 ]);
 
+/** Labels of CR states in the "closed" group. */
+const CLOSED_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.CLOSED,
+]);
+
 /**
  * Derives all customer-visible CR state IDs from the project filters response by excluding
  * internal pre-approval workflow states (New, Assess, Authorize).
@@ -156,6 +161,21 @@ export function resolveScheduledCrStateIds(
   if (!changeRequestStates) return undefined;
   return changeRequestStates
     .filter((s) => SCHEDULED_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
+
+/**
+ * Derives closed CR state IDs (Closed) from filter metadata.
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveClosedCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => CLOSED_CR_STATE_LABELS.has(s.label))
     .map((s) => Number(s.id));
 }
 

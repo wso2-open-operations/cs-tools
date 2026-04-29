@@ -35,6 +35,11 @@ import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
+import {
+  resolveActionRequiredCrStateIds,
+  resolveClosedCrStateIds,
+  resolveOutstandingCrStateIds,
+} from "@features/operations/utils/operationsPages";
 import { getProjectPermissions } from "@utils/permission";
 import {
   CaseType,
@@ -49,10 +54,6 @@ import EmptyState from "@components/empty-state/EmptyState";
 import type { CaseListItem } from "@features/support/types/cases";
 import type { ChangeRequestItem } from "@features/operations/types/changeRequests";
 
-// CR stateKeys are stable integers defined in CHANGE_REQUEST_STATE_API_ID_TO_LABEL.
-const CR_ACTION_REQUIRED_STATE_KEYS = [1, 5]; // Customer Review + Customer Approval
-const CR_OUTSTANDING_STATE_KEYS = [-5, -4, -3, 5, -2, -1, 0, 1]; // All except Rollback(2), Closed(3), Canceled(4)
-const CR_CLOSED_STATE_KEYS = [3]; // Closed
 
 export type DashboardItemsMode =
   | "action-required"
@@ -117,12 +118,11 @@ export default function DashboardItemsPage({
       .map((s) => Number(s.id));
   }, [mode, filterMetadata]);
 
-  const crStateKeys =
-    mode === "action-required"
-      ? CR_ACTION_REQUIRED_STATE_KEYS
-      : mode === "closed-last-30d"
-        ? CR_CLOSED_STATE_KEYS
-        : CR_OUTSTANDING_STATE_KEYS;
+  const crStateKeys = useMemo(() => {
+    if (mode === "action-required") return resolveActionRequiredCrStateIds(filterMetadata?.changeRequestStates);
+    if (mode === "closed-last-30d") return resolveClosedCrStateIds(filterMetadata?.changeRequestStates);
+    return resolveOutstandingCrStateIds(filterMetadata?.changeRequestStates);
+  }, [mode, filterMetadata?.changeRequestStates]);
 
   // filterMetadataLoaded tracks whether the metadata response has arrived (distinct from having IDs).
   // An error counts as "loaded" so the page does not stay on skeletons forever.
@@ -148,7 +148,11 @@ export default function DashboardItemsPage({
     !isProjectLoading &&
     hasStatusIds &&
     permissions.hasEngagements;
-  const crEnabled = !!projectId && permissions.hasCR && !isProjectLoading;
+  const crEnabled =
+    !!projectId &&
+    permissions.hasCR &&
+    !isProjectLoading &&
+    crStateKeys !== undefined;
 
   const closedLast30dRange = useMemo(
     () => (mode === "closed-last-30d" ? getLast30DaysUtcRange() : undefined),
@@ -236,7 +240,7 @@ export default function DashboardItemsPage({
     projectId || "",
     {
       filters: {
-        stateKeys: crStateKeys,
+        stateKeys: crStateKeys ?? [],
         ...closedLast30dRange,
       },
     },
