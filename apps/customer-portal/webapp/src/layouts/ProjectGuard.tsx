@@ -38,7 +38,8 @@ import { ProjectClosureState } from "@/types/permission";
  */
 function ProjectGuardContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
-  const { setIsErrorPageDisplayed, setIsProjectSuspended } = useErrorPageContext();
+  const { setIsErrorPageDisplayed, setIsProjectSuspended } =
+    useErrorPageContext();
 
   const { data, error, isLoading } = useGetProjectDetails(projectId ?? "");
   const {
@@ -46,6 +47,7 @@ function ProjectGuardContent(): JSX.Element {
     isLoading: isProjectsLoading,
     isFetching: isProjectsFetching,
     hasNextPage,
+    fetchNextPage,
   } = useInfiniteProjects({ pageSize: PROJECT_HUB_PROJECTS_PAGE_SIZE });
 
   const hasError = !isLoading && Boolean(error);
@@ -65,6 +67,23 @@ function ProjectGuardContent(): JSX.Element {
   useEffect(() => {
     setIsErrorPageDisplayed(isErrorPageDisplayed);
   }, [isErrorPageDisplayed, setIsErrorPageDisplayed]);
+
+  useEffect(() => {
+    if (
+      isProjectSuspended &&
+      hasNextPage &&
+      !isProjectsLoading &&
+      !isProjectsFetching
+    ) {
+      fetchNextPage();
+    }
+  }, [
+    isProjectSuspended,
+    hasNextPage,
+    isProjectsLoading,
+    isProjectsFetching,
+    fetchNextPage,
+  ]);
 
   useEffect(() => {
     setIsProjectSuspended(isProjectSuspended);
