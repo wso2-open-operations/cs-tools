@@ -375,22 +375,10 @@ export default function DashboardPage(): JSX.Element {
       includeCrStats && !!changeRequestStats && !isErrorChangeRequestStats;
 
     const serviceRequestsCount = hasServiceRequests
-      ? (serviceRequestStats?.activeCount ??
-        serviceRequestStats?.stateCount
-          ?.filter((state) => state.label !== "Closed")
-          .reduce((sum, state) => sum + state.count, 0) ??
-        serviceRequestStats?.outstandingCount ??
-        0)
+      ? (serviceRequestStats?.outstandingCount ?? 0)
       : 0;
     const changeRequestsCount = hasChangeRequests
-      ? (changeRequestStats?.activeCount ??
-        changeRequestStats?.stateCount
-          ?.filter(
-            (state) => state.label !== "Closed" && state.label !== "Canceled",
-          )
-          .reduce((sum, state) => sum + state.count, 0) ??
-        changeRequestStats?.outstandingCount ??
-        0)
+      ? (changeRequestStats?.outstandingCount ?? 0)
       : 0;
 
     return calculateProjectStats(

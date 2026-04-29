@@ -376,30 +376,3 @@ export const CHANGE_REQUEST_CALENDAR_LEGEND_STATES: ChangeRequestState[] = [
   ChangeRequestStates.CLOSED,
   ChangeRequestStates.CANCELED,
 ];
-
-/**
- * Only these CR workflow states should be shown in operations surfaces.
- */
-export const ALLOWED_CHANGE_REQUEST_STATE_IDS = [
-  5, // Customer Approval
-  -2, // Scheduled
-  -1, // Implement
-  0, // Review
-  1, // Customer Review
-  2, // Rollback
-  3, // Closed
-  4, // Canceled
-] as const;
-
-/**
- * Outstanding-only CR states (exclude Closed).
- */
-export const OUTSTANDING_CHANGE_REQUEST_STATE_IDS = [
-  5, // Customer Approval
-  -2, // Scheduled
-  -1, // Implement
-  0, // Review
-  1, // Customer Review
-  2, // Rollback
-  4, // Canceled
-] as const;

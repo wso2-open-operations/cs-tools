@@ -169,6 +169,7 @@ export type ChangeRequestsCalendarViewProps = {
   isLoading: boolean;
   isError?: boolean;
   onChangeRequestClick?: (item: ChangeRequestItem) => void;
+  legendStates?: { label: string }[];
 };
 
 export type ChangeRequestFilterOption = {

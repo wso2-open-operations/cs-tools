@@ -114,10 +114,12 @@ export default function ChangeRequestsPage(): JSX.Element {
     enabled: !!projectId,
   });
 
-  const changeRequestSearchRequest = useMemo(
-    () => buildChangeRequestSearchRequest(filters, searchTerm, outstandingOnly, actionRequired, scheduledOnly),
-    [searchTerm, filters, outstandingOnly, actionRequired, scheduledOnly],
-  );
+  const changeRequestSearchRequest = useMemo(() => {
+    const isPresetMode = outstandingOnly || actionRequired || scheduledOnly;
+    const effectiveFilters = isPresetMode ? {} : filters;
+    const effectiveSearchTerm = isPresetMode ? "" : searchTerm;
+    return buildChangeRequestSearchRequest(effectiveFilters, effectiveSearchTerm, outstandingOnly, actionRequired, scheduledOnly, filterMetadata?.changeRequestStates);
+  }, [searchTerm, filters, outstandingOnly, actionRequired, scheduledOnly, filterMetadata?.changeRequestStates]);
 
   const offset = (page - 1) * rowsPerPage;
 
@@ -131,7 +133,10 @@ export default function ChangeRequestsPage(): JSX.Element {
     offset,
     rowsPerPage,
     {
-      enabled: !!projectId && viewMode === ChangeRequestsViewMode.List,
+      enabled:
+        !!projectId &&
+        !!filterMetadata &&
+        viewMode === ChangeRequestsViewMode.List,
     },
   );
 
@@ -148,6 +153,7 @@ export default function ChangeRequestsPage(): JSX.Element {
     {
       enabled:
         !!projectId &&
+        !!filterMetadata &&
         (viewMode === ChangeRequestsViewMode.Calendar || isExporting),
     },
   );
@@ -375,6 +381,7 @@ export default function ChangeRequestsPage(): JSX.Element {
           isLoading={isLoading}
           isError={isError}
           onChangeRequestClick={handleChangeRequestClick}
+          legendStates={filterMetadata?.changeRequestStates}
         />
       )}
     </Stack>
