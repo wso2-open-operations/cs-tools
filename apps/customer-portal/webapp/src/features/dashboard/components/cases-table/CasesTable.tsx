@@ -67,6 +67,7 @@ const CasesTable = ({
   includeDeploymentFilter = true,
 }: CasesTableProps): JSX.Element => {
   // navigate function
+  const navigate = useModifierAwareNavigate();
   // asgardeo loading
   const { isLoading: isAuthLoading } = useAsgardeo();
   // filters
@@ -333,7 +334,7 @@ const CasesTable = ({
         onPageChange={handleChangePage}
         onRowsPerPageChange={handleChangeRowsPerPage}
         onCaseClick={(c) =>
-          navigateOrOpenNewTab(`/projects/${projectId}/support/cases/${c.id}`)
+          navigate(`/projects/${projectId}/support/cases/${c.id}`)
         }
         showPagination={!showAll}
         hasListRefinement={activeFiltersCount > 0}
