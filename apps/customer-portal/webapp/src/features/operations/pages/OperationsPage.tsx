@@ -52,11 +52,11 @@ import {
   OPERATIONS_HUB_HEADER_ACTION_CREATE_SR,
   OPERATIONS_HUB_PROJECT_ERROR_MESSAGE,
   OPERATIONS_HUB_STAT_ENTITY_NAME,
-  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
 } from "@features/operations/constants/operationsConstants";
 import {
   formatOperationsOverviewChangeRequestsSubtitle,
   formatOperationsOverviewServiceRequestsSubtitle,
+  resolveOutstandingCrStateIds,
 } from "@features/operations/utils/operationsPages";
 
 /**
@@ -106,6 +106,11 @@ export default function OperationsPage(): JSX.Element {
     [filterMetadata?.caseStates],
   );
 
+  const outstandingCrStateIds = useMemo(
+    () => resolveOutstandingCrStateIds(filterMetadata?.changeRequestStates),
+    [filterMetadata?.changeRequestStates],
+  );
+
   const {
     data: srData,
     isLoading: isSrDataLoading,
@@ -141,18 +146,23 @@ export default function OperationsPage(): JSX.Element {
     projectId || "",
     {
       filters: {
-        stateKeys: [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS],
+        stateKeys: outstandingCrStateIds ?? [],
       },
     },
     0,
     OPERATIONS_OVERVIEW_LIST_LIMIT,
-    { enabled: !!projectId && permissionsReady && isChangeRequestEnabled },
+    {
+      enabled:
+        !!projectId &&
+        permissionsReady &&
+        isChangeRequestEnabled &&
+        filterMetadata !== undefined &&
+        outstandingCrStateIds !== undefined,
+    },
   );
-  const changeRequests = crData?.changeRequests ?? [];
-
   const changeRequestsAsCases = useMemo<CaseListItem[]>(
     () =>
-      changeRequests.map((cr) => ({
+      (crData?.changeRequests ?? []).map((cr) => ({
         id: cr.id,
         internalId: cr.case?.internalId ?? cr.internalId ?? undefined,
         number: cr.number,
@@ -172,7 +182,7 @@ export default function OperationsPage(): JSX.Element {
         createdBy: cr.createdBy,
         updatedBy: cr.updatedBy,
       })),
-    [changeRequests],
+    [crData?.changeRequests],
   );
 
   const {
