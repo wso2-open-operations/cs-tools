@@ -26,6 +26,7 @@ import {
   resolveActionRequiredCrStateIds,
   resolveAllowedCrStateIds,
   resolveChangeRequestFilterListOptions,
+  resolveClosedCrStateIds,
   resolveOutstandingCrStateIds,
   resolveScheduledCrStateIds,
 } from "@features/operations/utils/operationsPages";
@@ -123,6 +124,22 @@ describe("resolveScheduledCrStateIds", () => {
       { id: "3", label: "Closed" },
     ];
     expect(resolveScheduledCrStateIds(states)).toEqual([-2]);
+  });
+});
+
+describe("resolveClosedCrStateIds", () => {
+  it("returns undefined when changeRequestStates is undefined", () => {
+    expect(resolveClosedCrStateIds(undefined)).toBeUndefined();
+  });
+
+  it("returns only the Closed state ID", () => {
+    const states = [
+      { id: "5", label: "Customer Approval" },
+      { id: "-2", label: "Scheduled" },
+      { id: "3", label: "Closed" },
+      { id: "4", label: "Canceled" },
+    ];
+    expect(resolveClosedCrStateIds(states)).toEqual([3]);
   });
 });
 
