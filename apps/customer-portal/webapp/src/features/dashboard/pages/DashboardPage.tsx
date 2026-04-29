@@ -15,8 +15,9 @@
 // under the License.
 
 import { Box } from "@wso2/oxygen-ui";
-import { useParams, useNavigate, useLocation } from "react-router";
+import { useParams, useLocation } from "react-router";
 import { useCallback, useEffect, useRef, useMemo, type JSX } from "react";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
@@ -65,7 +66,7 @@ export default function DashboardPage(): JSX.Element {
   const logger = useLogger();
   // project id
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
 
   type ChartNavAction =
@@ -255,7 +256,8 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorEngagement,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.ENGAGEMENT],
-    enabled: !!projectId && !awaitingProjectContext && permissions.hasEngagements,
+    enabled:
+      !!projectId && !awaitingProjectContext && permissions.hasEngagements,
   });
 
   // change request stats
@@ -266,8 +268,6 @@ export default function DashboardPage(): JSX.Element {
   } = useGetProjectChangeRequestsStats(projectId || "", {
     enabled: !!projectId && !awaitingProjectContext && includeCrStats,
   });
-
-
 
   // is dashboard loading
   const isDashboardLoading = isAuthLoading || awaitingProjectContext;
@@ -386,8 +386,7 @@ export default function DashboardPage(): JSX.Element {
       ? (changeRequestStats?.activeCount ??
         changeRequestStats?.stateCount
           ?.filter(
-            (state) =>
-              state.label !== "Closed" && state.label !== "Canceled",
+            (state) => state.label !== "Closed" && state.label !== "Canceled",
           )
           .reduce((sum, state) => sum + state.count, 0) ??
         changeRequestStats?.outstandingCount ??
@@ -412,19 +411,24 @@ export default function DashboardPage(): JSX.Element {
   const outstandingEngagements = useMemo(() => {
     const outstanding = engagementStats?.outstandingEngagementTypeCount ?? [];
 
-    const categories = OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA.map((chartEntry) => {
-      const matching = outstanding.filter(
-        (item) => item.label.toLowerCase() === chartEntry.name.toLowerCase(),
-      );
-      const value = matching.reduce((sum, item) => sum + (item.count ?? 0), 0);
-      const matchingIds = matching.map((item) => item.id);
-      return {
-        name: chartEntry.name,
-        value,
-        ...(matchingIds.length === 1 ? { id: matchingIds[0] } : {}),
-        ...(matchingIds.length > 1 ? { ids: matchingIds } : {}),
-      };
-    });
+    const categories = OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA.map(
+      (chartEntry) => {
+        const matching = outstanding.filter(
+          (item) => item.label.toLowerCase() === chartEntry.name.toLowerCase(),
+        );
+        const value = matching.reduce(
+          (sum, item) => sum + (item.count ?? 0),
+          0,
+        );
+        const matchingIds = matching.map((item) => item.id);
+        return {
+          name: chartEntry.name,
+          value,
+          ...(matchingIds.length === 1 ? { id: matchingIds[0] } : {}),
+          ...(matchingIds.length > 1 ? { ids: matchingIds } : {}),
+        };
+      },
+    );
 
     const total = categories.reduce((sum, item) => sum + item.value, 0);
     return { categories, total };
@@ -435,7 +439,11 @@ export default function DashboardPage(): JSX.Element {
       const category = outstandingEngagements.categories.find(
         (c) => (c.ids?.join(",") ?? c.id ?? c.name) === id,
       );
-      handleChartNavigation({ chart: "engagements", id, label: category?.name });
+      handleChartNavigation({
+        chart: "engagements",
+        id,
+        label: category?.name,
+      });
     },
     [handleChartNavigation, outstandingEngagements],
   );
@@ -480,7 +488,8 @@ export default function DashboardPage(): JSX.Element {
       : 0;
 
     // Closed Last 30 days: sum resolvedCases.pastThirtyDays from cases + resolvedCount.pastThirtyDays from CR
-    const casesResolved = combinedCasesStats?.resolvedCases?.pastThirtyDays ?? 0;
+    const casesResolved =
+      combinedCasesStats?.resolvedCases?.pastThirtyDays ?? 0;
     const crResolved = includeCrStats
       ? (changeRequestStats?.resolvedCount?.pastThirtyDays ?? 0)
       : 0;
@@ -503,18 +512,12 @@ export default function DashboardPage(): JSX.Element {
       resolvedCases: casesResolved + crResolved,
       avgResponseTime,
     };
-  }, [
-    combinedCasesStats,
-    changeRequestStats,
-    includeCrStats,
-  ]);
+  }, [combinedCasesStats, changeRequestStats, includeCrStats]);
 
   const isDashboardStatsLoading =
-    isCombinedCasesLoading ||
-    (includeCrStats && isChangeRequestStatsLoading);
+    isCombinedCasesLoading || (includeCrStats && isChangeRequestStatsLoading);
   const isDashboardStatsError =
-    isErrorCombinedCases ||
-    (includeCrStats && isErrorChangeRequestStats);
+    isErrorCombinedCases || (includeCrStats && isErrorChangeRequestStats);
 
   // render
   if (isForbidden) {
@@ -529,12 +532,16 @@ export default function DashboardPage(): JSX.Element {
           isError={isDashboardStatsError}
           entityName="dashboard statistics"
           configs={dashboardStatConfigs}
-          stats={dashboardStatValues as Partial<Record<DashboardStatKey, number>>}
+          stats={
+            dashboardStatValues as Partial<Record<DashboardStatKey, number>>
+          }
           valueFormatter={(value) => String(value)}
           nonClickableKeys={["avgResponseTime"]}
           onStatClick={(key) => {
             if (key === "totalCases") {
-              navigate("action-required", { state: { returnTo: location.pathname } });
+              navigate("action-required", {
+                state: { returnTo: location.pathname },
+              });
               return;
             }
             if (key === "openCases") {
