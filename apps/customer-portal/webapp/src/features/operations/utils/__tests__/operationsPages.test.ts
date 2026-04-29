@@ -23,7 +23,11 @@ import {
   flattenChangeRequestInfinitePages,
   formatOperationsOverviewServiceRequestsSubtitle,
   getOperationsNavSegment,
+  resolveActionRequiredCrStateIds,
+  resolveAllowedCrStateIds,
   resolveChangeRequestFilterListOptions,
+  resolveOutstandingCrStateIds,
+  resolveScheduledCrStateIds,
 } from "@features/operations/utils/operationsPages";
 import { ChangeRequestFilterDefinitionId } from "@features/operations/types/changeRequests";
 import {
@@ -45,20 +49,135 @@ describe("getOperationsNavSegment", () => {
   });
 });
 
+describe("resolveOutstandingCrStateIds", () => {
+  it("returns undefined when changeRequestStates is undefined", () => {
+    expect(resolveOutstandingCrStateIds(undefined)).toBeUndefined();
+  });
+
+  it("excludes Rollback, Closed, and Canceled by label", () => {
+    const states = [
+      { id: "5", label: "Customer Approval" },
+      { id: "-2", label: "Scheduled" },
+      { id: "-1", label: "Implement" },
+      { id: "0", label: "Review" },
+      { id: "1", label: "Customer Review" },
+      { id: "2", label: "Rollback" },
+      { id: "3", label: "Closed" },
+      { id: "4", label: "Canceled" },
+    ];
+    expect(resolveOutstandingCrStateIds(states)).toEqual([5, -2, -1, 0, 1]);
+  });
+
+  it("returns all IDs when no excluded labels are present", () => {
+    const states = [
+      { id: "-5", label: "New" },
+      { id: "-4", label: "Assess" },
+    ];
+    expect(resolveOutstandingCrStateIds(states)).toEqual([-5, -4]);
+  });
+});
+
+describe("resolveAllowedCrStateIds", () => {
+  it("returns undefined when changeRequestStates is undefined", () => {
+    expect(resolveAllowedCrStateIds(undefined)).toBeUndefined();
+  });
+
+  it("excludes New, Assess, and Authorize by label", () => {
+    const states = [
+      { id: "-5", label: "New" },
+      { id: "-4", label: "Assess" },
+      { id: "-3", label: "Authorize" },
+      { id: "5", label: "Customer Approval" },
+      { id: "-2", label: "Scheduled" },
+      { id: "3", label: "Closed" },
+    ];
+    expect(resolveAllowedCrStateIds(states)).toEqual([5, -2, 3]);
+  });
+});
+
+describe("resolveActionRequiredCrStateIds", () => {
+  it("returns undefined when changeRequestStates is undefined", () => {
+    expect(resolveActionRequiredCrStateIds(undefined)).toBeUndefined();
+  });
+
+  it("returns only Customer Approval and Customer Review IDs", () => {
+    const states = [
+      { id: "5", label: "Customer Approval" },
+      { id: "-2", label: "Scheduled" },
+      { id: "1", label: "Customer Review" },
+      { id: "3", label: "Closed" },
+    ];
+    expect(resolveActionRequiredCrStateIds(states)).toEqual([5, 1]);
+  });
+});
+
+describe("resolveScheduledCrStateIds", () => {
+  it("returns undefined when changeRequestStates is undefined", () => {
+    expect(resolveScheduledCrStateIds(undefined)).toBeUndefined();
+  });
+
+  it("returns only Scheduled ID", () => {
+    const states = [
+      { id: "5", label: "Customer Approval" },
+      { id: "-2", label: "Scheduled" },
+      { id: "3", label: "Closed" },
+    ];
+    expect(resolveScheduledCrStateIds(states)).toEqual([-2]);
+  });
+});
+
 describe("buildChangeRequestSearchRequest", () => {
-  it("maps filters and search", () => {
+  const allStates = [
+    { id: "-5", label: "New" },
+    { id: "-4", label: "Assess" },
+    { id: "-3", label: "Authorize" },
+    { id: "5", label: "Customer Approval" },
+    { id: "-2", label: "Scheduled" },
+    { id: "-1", label: "Implement" },
+    { id: "0", label: "Review" },
+    { id: "1", label: "Customer Review" },
+    { id: "2", label: "Rollback" },
+    { id: "3", label: "Closed" },
+    { id: "4", label: "Canceled" },
+  ];
+
+  it("maps filters and search using allowed states from metadata", () => {
     const req = buildChangeRequestSearchRequest(
       { stateId: "2", impactId: "1" },
       " q ",
+      false, false, false,
+      allStates,
     );
     expect(req.filters?.stateKeys).toEqual([2]);
     expect(req.filters?.impactKey).toBe(1);
     expect(req.filters?.searchQuery).toBe("q");
   });
 
-  it("uses outstanding state keys when outstandingOnly is true", () => {
+  it("returns empty stateKeys when changeRequestStates is not loaded", () => {
     const req = buildChangeRequestSearchRequest({}, "", true);
-    expect(req.filters?.stateKeys).toEqual([5, -2, -1, 0, 1, 2]);
+    expect(req.filters?.stateKeys).toEqual([]);
+  });
+
+  it("resolves outstanding state IDs from metadata when outstandingOnly is true", () => {
+    const req = buildChangeRequestSearchRequest({}, "", true, false, false, allStates);
+    expect(req.filters?.stateKeys).toEqual([5, -2, -1, 0, 1]);
+  });
+
+  it("resolves action-required state IDs from metadata", () => {
+    const req = buildChangeRequestSearchRequest({}, "", false, true, false, allStates);
+    expect(req.filters?.stateKeys).toEqual([5, 1]);
+  });
+
+  it("resolves scheduled state IDs from metadata", () => {
+    const req = buildChangeRequestSearchRequest({}, "", false, false, true, allStates);
+    expect(req.filters?.stateKeys).toEqual([-2]);
+  });
+
+  it("excludes New, Assess, Authorize from default allowed states", () => {
+    const req = buildChangeRequestSearchRequest({}, "", false, false, false, allStates);
+    expect(req.filters?.stateKeys).not.toContain(-5);
+    expect(req.filters?.stateKeys).not.toContain(-4);
+    expect(req.filters?.stateKeys).not.toContain(-3);
   });
 });
 
