@@ -16,7 +16,7 @@
 
 import { Form } from "@wso2/oxygen-ui";
 import { type JSX, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import ProjectCardActions from "@features/project-hub/components/project-card/ProjectCardActions";
 import ProjectCardBadges from "@features/project-hub/components/project-card/ProjectCardBadges";
@@ -43,7 +43,7 @@ export default function ProjectCard({
   closureState,
   onViewDashboard,
 }: ProjectCardProps): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { hideLoader } = useLoader();
   const isSuspended = closureState === ProjectClosureState.SUSPENDED;
 

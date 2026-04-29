@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate, useLocation } from "react-router";
+import { useParams, useLocation } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import {
   useState,
   useMemo,
@@ -76,7 +77,7 @@ import {
  * @returns {JSX.Element} The rendered Change Requests page.
  */
 export default function ChangeRequestsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
   const locationState = location.state as {
     returnTo?: string;

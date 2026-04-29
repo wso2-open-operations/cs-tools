@@ -16,10 +16,10 @@
 
 import {
   useParams,
-  useNavigate,
   useSearchParams,
   useLocation,
 } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import {
   useState,
   useMemo,
@@ -84,7 +84,7 @@ import { CaseStatus } from "@features/support/constants/supportConstants";
  * @returns {JSX.Element} The rendered Service Requests page.
  */
 export default function ServiceRequestsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();

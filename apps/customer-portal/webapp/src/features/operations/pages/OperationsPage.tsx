@@ -16,7 +16,8 @@
 
 import { type JSX, useMemo } from "react";
 import { Box, Button, Grid, Stack, Typography } from "@wso2/oxygen-ui";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { ArrowRight, FileText } from "@wso2/oxygen-ui-icons-react";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 import SupportOverviewCard from "@features/support/components/support-overview-cards/SupportOverviewCard";
@@ -65,7 +66,7 @@ import {
  * @returns {JSX.Element} The rendered Operations page.
  */
 export default function OperationsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const {
     data: project,

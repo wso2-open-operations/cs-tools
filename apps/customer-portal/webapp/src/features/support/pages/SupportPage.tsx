@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate } from "react-router";
+import { useParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useEffect, useMemo, type JSX } from "react";
 import { Grid, Stack } from "@wso2/oxygen-ui";
 import { FileText, MessageSquare } from "@wso2/oxygen-ui-icons-react";
@@ -49,7 +50,7 @@ import type { ChatHistoryItem } from "@features/support/types/conversations";
  */
 export default function SupportPage(): JSX.Element {
   const logger = useLogger();
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const supportPath = `/projects/${projectId}/support`;
 

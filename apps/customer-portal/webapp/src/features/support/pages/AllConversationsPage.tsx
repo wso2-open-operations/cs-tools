@@ -16,10 +16,10 @@
 
 import {
   useParams,
-  useNavigate,
   useSearchParams,
   useLocation,
 } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import {
   useState,
   useMemo,
@@ -57,7 +57,7 @@ import { SortOrder } from "@/types/common";
  * @returns {JSX.Element} The rendered All Conversations page.
  */
 export default function AllConversationsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
   const { projectId } = useParams<{ projectId: string }>();

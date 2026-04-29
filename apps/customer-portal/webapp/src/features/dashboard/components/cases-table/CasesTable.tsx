@@ -22,7 +22,7 @@ import {
   useEffect,
   type ChangeEvent,
 } from "react";
-import { useNavigate } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useAsgardeo } from "@asgardeo/react";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
@@ -35,7 +35,6 @@ import {
   countCasesTableActiveFilters,
   filterCasesTableMetadataOptions,
   mapCasesTableFilterOptionLabel,
-  navigateToProjectCaseDetail,
   resolveCasesTableDefaultStatusIds,
   resolveCasesTableSearchStatusIds,
 } from "@features/dashboard/utils/casesTable";
@@ -68,7 +67,7 @@ const CasesTable = ({
   includeDeploymentFilter = true,
 }: CasesTableProps): JSX.Element => {
   // navigate function
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   // asgardeo loading
   const { isLoading: isAuthLoading } = useAsgardeo();
   // filters
@@ -137,10 +136,7 @@ const CasesTable = ({
             restrictSeverityToLow,
           );
           options = filtered.map((item) => ({
-            label: mapCasesTableFilterOptionLabel(
-              def.metadataKey,
-              item.label,
-            ),
+            label: mapCasesTableFilterOptionLabel(def.metadataKey, item.label),
             value: item.id,
           }));
         }
@@ -338,7 +334,7 @@ const CasesTable = ({
         onPageChange={handleChangePage}
         onRowsPerPageChange={handleChangeRowsPerPage}
         onCaseClick={(c) =>
-          navigateToProjectCaseDetail(navigate, projectId, c.id)
+          navigate(`/projects/${projectId}/support/cases/${c.id}`)
         }
         showPagination={!showAll}
         hasListRefinement={activeFiltersCount > 0}

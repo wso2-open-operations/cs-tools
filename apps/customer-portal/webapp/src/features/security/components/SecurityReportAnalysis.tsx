@@ -22,7 +22,8 @@ import {
   useEffect,
   type JSX,
 } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useSessionState } from "@hooks/useSessionState";
 import { CaseType } from "@features/support/constants/supportConstants";
 import useGetProjectCases from "@api/useGetProjectCases";
@@ -76,7 +77,7 @@ type SecurityReportAnalysisProps = {
  * @returns {JSX.Element}
  */
 const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: SecurityReportAnalysisProps): JSX.Element => {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
