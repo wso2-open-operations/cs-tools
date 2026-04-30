@@ -250,7 +250,7 @@ export function CaseDetailsSection({
             maxHeight="210px"
             onInlineImageTypeError={() =>
               showError(
-                "Only JPG, JPEG, PNG, and WebP images can be inserted inline.",
+                "Only jpg, jpeg, png, and webp images can be inserted inline.",
               )
             }
           />
