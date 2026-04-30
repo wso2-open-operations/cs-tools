@@ -73,7 +73,7 @@ export function usePostCase(): UseMutationResult<
         const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
         if (payloadBytes > MAX_PAYLOAD_BYTES) {
           throw new Error(
-            "The case description exceeds the 10 MB limit. Please reduce the size or number of inline images and try again.",
+            "The case description exceeds the 10 MB limit. Please reduce the size or the number of inline images and try again.",
           );
         }
 
