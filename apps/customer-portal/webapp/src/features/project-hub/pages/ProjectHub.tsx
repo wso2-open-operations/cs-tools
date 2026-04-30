@@ -542,6 +542,7 @@ export default function ProjectHub(): JSX.Element {
                       <InputAdornment position="end">
                         <IconButton
                           size="small"
+                          aria-label="Clear search"
                           edge="end"
                           onClick={() => setSearchQuery("")}
                         >
