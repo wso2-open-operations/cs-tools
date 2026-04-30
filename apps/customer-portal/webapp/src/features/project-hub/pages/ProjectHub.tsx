@@ -171,6 +171,15 @@ export default function ProjectHub(): JSX.Element {
     }
   }, [isLoading, showLoader, hideLoader]);
 
+  const isCheckingAllSuspended =
+    !isLoading &&
+    !isAuthLoading &&
+    !isError &&
+    projects.length > 0 &&
+    !debouncedSearchQuery &&
+    hasNextPage === true &&
+    projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
+
   const allProjectsSuspended =
     !isLoading &&
     !isAuthLoading &&
@@ -187,7 +196,8 @@ export default function ProjectHub(): JSX.Element {
     !isError &&
     projects.length === 1 &&
     !searchQuery &&
-    !allProjectsSuspended;
+    !allProjectsSuspended &&
+    !isCheckingAllSuspended;
 
   useEffect(() => {
     if (isRedirectingToSingleProject) {
@@ -225,9 +235,11 @@ export default function ProjectHub(): JSX.Element {
         isLoading,
         isError,
         projects.length,
+        isCheckingAllSuspended,
       ),
     [
       isAuthLoading,
+      isCheckingAllSuspended,
       isError,
       isLoading,
       isRedirectingToSingleProject,
