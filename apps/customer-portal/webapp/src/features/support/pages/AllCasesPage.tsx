@@ -336,7 +336,7 @@ export default function AllCasesPage(): JSX.Element {
         }}
       />
 
-      {statusFilter ? (
+      {statusFilter || isDashboardSeverityNavigation ? (
         <Divider />
       ) : (
         <ListSearchPanel
