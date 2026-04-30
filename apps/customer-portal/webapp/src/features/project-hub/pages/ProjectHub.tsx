@@ -296,6 +296,30 @@ export default function ProjectHub(): JSX.Element {
       case ProjectHubContentView.AUTH_PENDING:
         return null;
       case ProjectHubContentView.LOADING_SKELETONS:
+        if (debouncedSearchQuery) {
+          return (
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: {
+                  xs: "repeat(3, 1fr)",
+                  lg: "repeat(4, 1fr)",
+                  xl: "repeat(5, 1fr)",
+                },
+                gap: 3,
+                width: "100%",
+                py: 1,
+              }}
+            >
+              {[...Array(colsPerRow)].map((_, i) => (
+                <ProjectCardSkeleton key={`skeleton-search-${i}`} />
+              ))}
+              {[...Array(GRID_GHOST_COUNT)].map((_, i) => (
+                <Box key={`ghost-search-${i}`} aria-hidden="true" sx={gridGhostSx} />
+              ))}
+            </Box>
+          );
+        }
         return (
           <Box
             sx={{
@@ -452,7 +476,7 @@ export default function ProjectHub(): JSX.Element {
               component="div"
               sx={{ display: "flex", alignItems: "center" }}
             >
-              {isLoading ? (
+              {isLoading && !debouncedSearchQuery ? (
                 <>
                   Your Projects&nbsp;(
                   <Skeleton
@@ -477,8 +501,8 @@ export default function ProjectHub(): JSX.Element {
           </Typography>
 
           {showSearchBar && (
-            <Box sx={{ mt: 2, width: "100%", maxWidth: isLoading ? 700 : 500 }}>
-              {isLoading ? (
+            <Box sx={{ mt: 2, width: "100%", maxWidth: 500 }}>
+              {isLoading && !debouncedSearchQuery ? (
                 <Skeleton variant="rounded" height={40} width="100%" />
               ) : (
                 <TextField
