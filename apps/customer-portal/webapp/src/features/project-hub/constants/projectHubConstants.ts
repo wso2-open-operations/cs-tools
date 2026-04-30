@@ -20,8 +20,8 @@ export const PROJECT_HUB_SEARCH_DEBOUNCE_MS = 300;
 /** Page size for infinite project list (must match `useInfiniteProjects`). */
 export const PROJECT_HUB_PROJECTS_PAGE_SIZE = 20;
 
-/** When total projects exceed this, require search before listing all cards. */
-export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 4;
+/** Show the search bar when the user has more than this many projects. */
+export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 1;
 
 /** Skeleton cards shown while loading the hub grid. */
 export const PROJECT_HUB_SKELETON_CARD_COUNT = 3;
@@ -46,20 +46,11 @@ export const PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE =
 
 export const PROJECT_HUB_SEARCH_PLACEHOLDER = "Search projects...";
 
-export const PROJECT_HUB_TITLE_SELECT = "Select Your Project";
-
 export const PROJECT_HUB_SUBTITLE_SELECT =
   "Choose a project to access your support cases, chat history, and dashboard";
 
-export const PROJECT_HUB_SUBTITLE_MANY_PROJECTS =
-  "Please use the search bar below to find your project";
-
-/**
- * @param totalRecords - Total project count from API.
- * @returns Hub title when the user has more than `PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH` projects.
- */
-export function formatProjectHubManyProjectsTitle(totalRecords: number): string {
-  return `You have ${totalRecords} projects`;
+export function formatProjectHubTitle(totalRecords: number): string {
+  return `Your Projects (${totalRecords})`;
 }
 
 export const PROJECT_CARD_DATE_LOCALE = "en-US";

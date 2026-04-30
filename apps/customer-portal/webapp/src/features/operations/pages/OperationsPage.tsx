@@ -16,7 +16,8 @@
 
 import { type JSX, useMemo } from "react";
 import { Box, Button, Grid, Stack, Typography } from "@wso2/oxygen-ui";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { ArrowRight, FileText } from "@wso2/oxygen-ui-icons-react";
 import ListStatGrid from "@components/list-view/ListStatGrid";
 import SupportOverviewCard from "@features/support/components/support-overview-cards/SupportOverviewCard";
@@ -51,11 +52,11 @@ import {
   OPERATIONS_HUB_HEADER_ACTION_CREATE_SR,
   OPERATIONS_HUB_PROJECT_ERROR_MESSAGE,
   OPERATIONS_HUB_STAT_ENTITY_NAME,
-  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
 } from "@features/operations/constants/operationsConstants";
 import {
   formatOperationsOverviewChangeRequestsSubtitle,
   formatOperationsOverviewServiceRequestsSubtitle,
+  resolveOutstandingCrStateIds,
 } from "@features/operations/utils/operationsPages";
 
 /**
@@ -65,7 +66,7 @@ import {
  * @returns {JSX.Element} The rendered Operations page.
  */
 export default function OperationsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const {
     data: project,
@@ -105,6 +106,11 @@ export default function OperationsPage(): JSX.Element {
     [filterMetadata?.caseStates],
   );
 
+  const outstandingCrStateIds = useMemo(
+    () => resolveOutstandingCrStateIds(filterMetadata?.changeRequestStates),
+    [filterMetadata?.changeRequestStates],
+  );
+
   const {
     data: srData,
     isLoading: isSrDataLoading,
@@ -140,18 +146,23 @@ export default function OperationsPage(): JSX.Element {
     projectId || "",
     {
       filters: {
-        stateKeys: [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS],
+        stateKeys: outstandingCrStateIds ?? [],
       },
     },
     0,
     OPERATIONS_OVERVIEW_LIST_LIMIT,
-    { enabled: !!projectId && permissionsReady && isChangeRequestEnabled },
+    {
+      enabled:
+        !!projectId &&
+        permissionsReady &&
+        isChangeRequestEnabled &&
+        filterMetadata !== undefined &&
+        outstandingCrStateIds !== undefined,
+    },
   );
-  const changeRequests = crData?.changeRequests ?? [];
-
   const changeRequestsAsCases = useMemo<CaseListItem[]>(
     () =>
-      changeRequests.map((cr) => ({
+      (crData?.changeRequests ?? []).map((cr) => ({
         id: cr.id,
         internalId: cr.case?.internalId ?? cr.internalId ?? undefined,
         number: cr.number,
@@ -171,7 +182,7 @@ export default function OperationsPage(): JSX.Element {
         createdBy: cr.createdBy,
         updatedBy: cr.updatedBy,
       })),
-    [changeRequests],
+    [crData?.changeRequests],
   );
 
   const {
@@ -433,7 +444,6 @@ export default function OperationsPage(): JSX.Element {
                   <OutstandingCasesList
                     cases={serviceRequests}
                     isLoading={isSrLoading}
-                    showInternalId
                     onCaseClick={
                       projectId
                         ? (c) =>
@@ -473,7 +483,6 @@ export default function OperationsPage(): JSX.Element {
                         isLoading={isCrLoading}
                         isError={isCrError}
                         useChangeRequestColors
-                        showInternalId
                         onCaseClick={
                           projectId
                             ? (c) =>

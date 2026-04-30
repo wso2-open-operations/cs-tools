@@ -17,7 +17,10 @@
 import { useEffect, type JSX, useMemo, useCallback } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useNavigate, useLocation, useParams } from "react-router";
-import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
+import useInfiniteProjects, {
+  flattenProjectPages,
+  getTotalRecords,
+} from "@api/useGetProjects";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useLogger } from "@hooks/useLogger";
 import Brand from "@components/header/Brand";
@@ -26,7 +29,7 @@ import SearchBar from "@components/header/SearchBar";
 import ProjectSwitcher from "@components/header/ProjectSwitcher";
 import { useAsgardeo } from "@asgardeo/react";
 import { shouldExcludeS0 } from "@utils/permission";
-import { setLastSelectedProjectId } from "@features/settings/utils/settingsStorage";
+import { setLastSelectedProject } from "@features/settings/utils/settingsStorage";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 
 interface HeaderProps {
@@ -53,12 +56,12 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
 
   const isProjectHub = location.pathname === "/";
 
-  const { data, isLoading, isError } = useInfiniteProjects({
+  const { data, isLoading: isProjectsLoading, isError } = useInfiniteProjects({
     pageSize: 20,
     enabled: !isProjectHub,
   });
 
-  // Flatten all pages into a single projects array
+  // Flatten all pages for selected-project lookup and excludeS0 check
   const projects = useMemo(() => flattenProjectPages(data), [data]);
 
   useEffect(() => {
@@ -66,6 +69,8 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
       logger.error("Failed to fetch projects in Header");
     }
   }, [isError, logger]);
+
+  const totalRecords = getTotalRecords(data);
 
   useEffect(() => {
     if (projects.length > 0) {
@@ -81,9 +86,8 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
 
   useEffect(() => {
     const id = projectId?.trim();
-    if (id) {
-      setLastSelectedProjectId(id);
-    }
+    if (!id) return;
+    setLastSelectedProject({ id });
   }, [projectId]);
 
   const excludeS0 = shouldExcludeS0(selectedProject?.type?.label, {
@@ -100,11 +104,11 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
       const project = projects.find((p) => p.id === id);
       if (project) {
         logger.debug(`Switching to project: ${project.name} (${project.id})`);
-        setLastSelectedProjectId(project.id);
-        navigate(`/projects/${project.id}/dashboard`);
       } else {
-        logger.warn(`Project with ID ${id} not found for switching`);
+        logger.debug(`Switching to project: ${id}`);
       }
+      setLastSelectedProject({ id });
+      navigate(`/projects/${id}/dashboard`);
     },
     [projects, logger, navigate],
   );
@@ -116,16 +120,14 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
         <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
       )}
       {/* header brand logo and title */}
-      <Brand isNavigationDisabled={projects.length <= 1} />
+      <Brand isNavigationDisabled={totalRecords <= 1} />
       {!isProjectHub && !hideProjectControls && (
         <>
           {/* header project switcher */}
           <ProjectSwitcher
-            projects={projects}
-            selectedProject={selectedProject}
+            projectId={projectId}
             onProjectChange={handleProjectChange}
-            isLoading={isLoading || isAuthLoading}
-            isError={isError}
+            isAuthLoading={isAuthLoading || isProjectsLoading}
           />
           {/* header search bar */}
           {!isProjectSuspended && (

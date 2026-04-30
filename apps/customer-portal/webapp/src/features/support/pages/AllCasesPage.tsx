@@ -16,10 +16,10 @@
 
 import {
   useParams,
-  useNavigate,
   useSearchParams,
   useLocation,
 } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import {
   useState,
   useMemo,
@@ -64,7 +64,7 @@ import ListItems from "@components/list-view/ListItems";
  * @returns {JSX.Element} The rendered All Cases page.
  */
 export default function AllCasesPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
   const { projectId } = useParams<{ projectId: string }>();
@@ -402,7 +402,6 @@ export default function AllCasesPage(): JSX.Element {
         isError={isCasesError}
         hasListRefinement={listHasRefinement}
         entityName="cases"
-        showInternalId
         onCaseClick={(c) =>
           navigate(`/projects/${projectId}/support/cases/${c.id}`)
         }

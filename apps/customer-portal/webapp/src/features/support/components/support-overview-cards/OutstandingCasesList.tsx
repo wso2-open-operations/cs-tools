@@ -50,7 +50,6 @@ export default function OutstandingCasesList({
   isError,
   onCaseClick,
   useChangeRequestColors = false,
-  showInternalId = false,
 }: OutstandingCasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -131,7 +130,7 @@ export default function OutstandingCasesList({
                   alignItems="center"
                   flexWrap="wrap"
                 >
-                  {showInternalId && c.internalId && (
+                  {c.internalId && (
                     <>
                       <Typography
                         variant="body2"

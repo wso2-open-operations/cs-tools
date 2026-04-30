@@ -15,7 +15,8 @@
 // under the License.
 
 import { useCallback, useMemo, useState, type JSX } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -48,7 +49,7 @@ const SECURITY_STAT_FILTER_INFO: Record<SecurityStatKey, { title: string; subtit
 };
 
 const SecurityPage = (): JSX.Element => {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: projectDetails } = useGetProjectDetails(projectId || "");

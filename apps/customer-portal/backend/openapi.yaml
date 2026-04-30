@@ -5781,7 +5781,10 @@ components:
         state:
           $ref: '#/components/schemas/ReferenceItem'
         type:
-          $ref: '#/components/schemas/ReferenceItem'
+          description: Case type information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
       additionalProperties: false
       description: Updated case details.
     UpdatedChangeRequest:

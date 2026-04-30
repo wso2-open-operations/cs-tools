@@ -90,6 +90,12 @@ export type UpdateDescriptionLevel = {
   securityAdvisories: SecurityAdvisory[];
 }
 
+// Flattened update description entry enriched with display date and level key.
+export type UpdateDescriptionEntry = UpdateDescriptionLevel & {
+  formattedDate: string;
+  levelKey: string;
+};
+
 // Item type for a single update level key from POST /updates/levels/search.
 export type UpdateLevelEntry = {
   updateType: string;
@@ -213,12 +219,17 @@ export type UpdateLevelsReportData = {
   levelCount: number;
   levelsRange: string;
   tableRows: UpdateLevelsReportTableRow[];
+  allEntries: UpdateDescriptionEntry[];
+  securityEntries: UpdateDescriptionEntry[];
+  entriesWithInstructions: UpdateDescriptionEntry[];
 };
 
 export type UpdateLevelsReportModalProps = {
   open: boolean;
   reportData: UpdateLevelsReportData | null;
   onClose: () => void;
+  onView?: (levelKey: string) => void;
+  rawData?: UpdateLevelsSearchResponse;
 };
 
 // --- Stats grid & cards ------------------------------------------------------

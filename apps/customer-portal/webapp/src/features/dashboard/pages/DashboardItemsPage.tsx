@@ -29,11 +29,17 @@ import {
 import { ArrowRight, ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, useCallback, type JSX } from "react";
 import { useParams, useNavigate, useLocation } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
+import {
+  resolveActionRequiredCrStateIds,
+  resolveClosedCrStateIds,
+  resolveOutstandingCrStateIds,
+} from "@features/operations/utils/operationsPages";
 import { getProjectPermissions } from "@utils/permission";
 import {
   CaseType,
@@ -44,13 +50,10 @@ import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListItems from "@components/list-view/ListItems";
 import ChangeRequestsList from "@features/operations/components/change-requests/ChangeRequestsList";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import EmptyState from "@components/empty-state/EmptyState";
 import type { CaseListItem } from "@features/support/types/cases";
 import type { ChangeRequestItem } from "@features/operations/types/changeRequests";
 
-// CR stateKeys are stable integers defined in CHANGE_REQUEST_STATE_API_ID_TO_LABEL.
-const CR_ACTION_REQUIRED_STATE_KEYS = [1, 5]; // Customer Review + Customer Approval
-const CR_OUTSTANDING_STATE_KEYS = [-5, -4, -3, 5, -2, -1, 0, 1]; // All except Rollback(2), Closed(3), Canceled(4)
-const CR_CLOSED_STATE_KEYS = [3]; // Closed
 
 export type DashboardItemsMode =
   | "action-required"
@@ -115,12 +118,11 @@ export default function DashboardItemsPage({
       .map((s) => Number(s.id));
   }, [mode, filterMetadata]);
 
-  const crStateKeys =
-    mode === "action-required"
-      ? CR_ACTION_REQUIRED_STATE_KEYS
-      : mode === "closed-last-30d"
-        ? CR_CLOSED_STATE_KEYS
-        : CR_OUTSTANDING_STATE_KEYS;
+  const crStateKeys = useMemo(() => {
+    if (mode === "action-required") return resolveActionRequiredCrStateIds(filterMetadata?.changeRequestStates);
+    if (mode === "closed-last-30d") return resolveClosedCrStateIds(filterMetadata?.changeRequestStates);
+    return resolveOutstandingCrStateIds(filterMetadata?.changeRequestStates);
+  }, [mode, filterMetadata?.changeRequestStates]);
 
   // filterMetadataLoaded tracks whether the metadata response has arrived (distinct from having IDs).
   // An error counts as "loaded" so the page does not stay on skeletons forever.
@@ -146,7 +148,11 @@ export default function DashboardItemsPage({
     !isProjectLoading &&
     hasStatusIds &&
     permissions.hasEngagements;
-  const crEnabled = !!projectId && permissions.hasCR && !isProjectLoading;
+  const crEnabled =
+    !!projectId &&
+    permissions.hasCR &&
+    !isProjectLoading &&
+    crStateKeys !== undefined;
 
   const closedLast30dRange = useMemo(
     () => (mode === "closed-last-30d" ? getLast30DaysUtcRange() : undefined),
@@ -234,7 +240,7 @@ export default function DashboardItemsPage({
     projectId || "",
     {
       filters: {
-        stateKeys: crStateKeys,
+        stateKeys: crStateKeys ?? [],
         ...closedLast30dRange,
       },
     },
@@ -278,8 +284,7 @@ export default function DashboardItemsPage({
 
   // --- Accordion state ---
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    () =>
-      new Set(["cases", "sr", "sra", "eng", "cr"]),
+    () => new Set(["cases", "sr", "sra", "eng", "cr"]),
   );
   const toggleSection = useCallback((id: string) => {
     setExpandedSections((prev) => {
@@ -290,46 +295,53 @@ export default function DashboardItemsPage({
     });
   }, []);
 
+  const navigateOrOpenNewTab = useModifierAwareNavigate();
+
   // --- Navigation helpers ---
   const handleCaseClick = useCallback(
     (item: CaseListItem) => {
-      navigate(`../../support/cases/${item.id}`, { relative: "path" });
+        navigateOrOpenNewTab(`../../support/cases/${item.id}`, {
+        relative: "path",
+      });
     },
-    [navigate],
+    [navigateOrOpenNewTab],
   );
 
   const handleSrClick = useCallback(
     (item: CaseListItem) => {
-      navigate(`../../operations/service-requests/${item.id}`, {
+      navigateOrOpenNewTab(`../../operations/service-requests/${item.id}`, {
         relative: "path",
       });
     },
-    [navigate],
+    [navigateOrOpenNewTab],
   );
 
   const handleSraClick = useCallback(
     (item: CaseListItem) => {
-      navigate(`../../security-center/security-report-analysis/${item.id}`, {
-        relative: "path",
-      });
+      navigateOrOpenNewTab(
+        `../../security-center/security-report-analysis/${item.id}`,
+        { relative: "path" },
+      );
     },
-    [navigate],
+    [navigateOrOpenNewTab],
   );
 
   const handleEngClick = useCallback(
     (item: CaseListItem) => {
-      navigate(`../../engagements/${item.id}`, { relative: "path" });
+      navigateOrOpenNewTab(`../../engagements/${item.id}`, {
+        relative: "path",
+      });
     },
-    [navigate],
+    [navigateOrOpenNewTab],
   );
 
   const handleCrClick = useCallback(
     (item: ChangeRequestItem) => {
-      navigate(`../../operations/change-requests/${item.id}`, {
+      navigateOrOpenNewTab(`../../operations/change-requests/${item.id}`, {
         relative: "path",
       });
     },
-    [navigate],
+    [navigateOrOpenNewTab],
   );
 
   // --- Section definitions ---
@@ -444,7 +456,6 @@ export default function DashboardItemsPage({
     },
   ];
 
-  const isOutstandingMode = mode === "outstanding-interactions";
   const isPageLoading = isProjectLoading || !filterMetadataLoaded;
   const isPageError = !isProjectLoading && isFilterMetadataError;
 
@@ -573,7 +584,6 @@ export default function DashboardItemsPage({
                       onCaseClick={section.onItemClick}
                       entityName={section.entityName}
                       hideSeverity={section.hideSeverity}
-                      showInternalId
                     />
                   </Box>
                   {section.total > 10 && (
@@ -609,23 +619,32 @@ export default function DashboardItemsPage({
           </Accordion>
         ))}
 
-
         {isPageError && (
           <Box sx={{ py: 4 }}>
             <ErrorIndicator entityName="items" />
           </Box>
         )}
 
-        {!isPageLoading &&
-          !isPageError &&
-          !isOutstandingMode &&
-          visibleSections.length === 0 && (
-            <Box sx={{ textAlign: "center", py: 8 }}>
-              <Typography variant="body1" color="text.secondary">
-                No items found.
-              </Typography>
-            </Box>
-          )}
+        {!isPageLoading && !isPageError && visibleSections.length === 0 && (
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "50vh",
+            }}
+          >
+            <EmptyState
+              description={
+                mode === "action-required"
+                  ? "No action required items."
+                  : mode === "closed-last-30d"
+                    ? "No closed items in the last 30 days."
+                    : "No outstanding items."
+              }
+            />
+          </Box>
+        )}
       </Stack>
     </Stack>
   );

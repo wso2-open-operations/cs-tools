@@ -39,10 +39,12 @@ import {
 import { useEffect, useRef, useState, type JSX } from "react";
 import type { CaseAttachment } from "@features/support/types/cases";
 import {
+  formatDateTime,
   formatFileSize,
   getAttachmentFileCategory,
 } from "@features/support/utils/support";
 import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
+import { useAttachmentPreview } from "@api/useAttachmentPreview";
 
 const PREVIEW_SKELETON_MIN_DISPLAY_MS = 4000;
 
@@ -107,7 +109,13 @@ export default function AttachmentListItem({
     attachment.name ?? "",
     attachment.type ?? "",
   );
-  const hasPreviewImage = attachmentCategory === "image" && !!attachment.previewUrl;
+  const isImageAttachment = attachmentCategory === "image";
+  const hasPreviewImage = isImageAttachment;
+
+  // Fetch authenticated image data URL only when the preview is expanded.
+  const { data: imageDataUrl, isLoading: isImageLoading } = useAttachmentPreview(
+    imageExpanded && isImageAttachment ? attachment.id : null,
+  );
 
   const deleteIconButton = onDelete ? (
     <IconButton
@@ -226,14 +234,14 @@ export default function AttachmentListItem({
 
         {hasPreviewImage && imageExpanded && (
           <Box sx={{ position: "relative", width: "100%" }}>
-            {!previewMinTimeElapsed ? (
+            {!previewMinTimeElapsed || isImageLoading ? (
               <Skeleton
                 variant="rectangular"
                 width="100%"
                 height={160}
                 sx={{ borderRadius: 1 }}
               />
-            ) : (
+            ) : imageDataUrl ? (
               <Box
                 component="button"
                 type="button"
@@ -252,7 +260,7 @@ export default function AttachmentListItem({
               >
                 <Box
                   component="img"
-                  src={attachment.previewUrl ?? undefined}
+                  src={imageDataUrl}
                   alt={attachment.name}
                   sx={{
                     display: "block",
@@ -263,7 +271,7 @@ export default function AttachmentListItem({
                   }}
                 />
               </Box>
-            )}
+            ) : null}
           </Box>
         )}
 
@@ -296,14 +304,14 @@ export default function AttachmentListItem({
             •
           </Typography>
           <Typography variant="caption" color="text.secondary" component="span">
-            {attachment.createdOn}
+            {formatDateTime(attachment.createdOn)}
           </Typography>
         </Stack>
       </Paper>
 
       <ImageFullscreenModal
         open={fullscreenOpen}
-        imageSrc={attachment.previewUrl ?? null}
+        imageSrc={imageDataUrl ?? null}
         onClose={() => setFullscreenOpen(false)}
       />
     </>

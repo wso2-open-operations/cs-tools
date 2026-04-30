@@ -41,7 +41,6 @@ export interface ListCardProps {
   caseItem: CaseListItem;
   onClick?: (caseItem: CaseListItem) => void;
   hideSeverity?: boolean;
-  showInternalId?: boolean;
 }
 
 /**
@@ -55,7 +54,6 @@ export default function ListCard({
   caseItem,
   onClick,
   hideSeverity = false,
-  showInternalId = false,
 }: ListCardProps): JSX.Element {
   const theme = useTheme();
   const colorPath = getStatusColor(caseItem.status?.label);
@@ -96,7 +94,7 @@ export default function ListCard({
             alignItems="center"
             sx={{ mb: 1, flexWrap: "wrap" }}
           >
-            {showInternalId && caseItem.internalId && (
+            {caseItem.internalId && (
               <>
                 <Typography variant="body2" fontWeight={500} color="text.secondary">
                   {caseItem.internalId}

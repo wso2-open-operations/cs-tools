@@ -446,13 +446,12 @@ export default function CreateServiceRequestPage(): JSX.Element {
   };
 
   const handleBack = () => {
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else if (projectId) {
-      navigate(`/projects/${projectId}/${basePath}/service-requests`);
-    } else {
-      navigate("/");
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    if (returnTo) {
+      navigate(returnTo);
+      return;
     }
+    navigate(-1);
   };
 
   const fileToBase64 = (file: File): Promise<string> =>

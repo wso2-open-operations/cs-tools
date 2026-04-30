@@ -17,6 +17,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectSwitcher from "@components/header/ProjectSwitcher";
+import * as useGetProjectsModule from "@api/useGetProjects";
 
 const mockProjects = [
   {
@@ -29,7 +30,6 @@ const mockProjects = [
     activeCasesCount: 3,
     activeChatsCount: 4,
     actionRequiredCount: 0,
-    slaStatus: "Needs Attention",
   },
   {
     id: "2",
@@ -41,18 +41,64 @@ const mockProjects = [
     activeCasesCount: 15,
     activeChatsCount: 5,
     actionRequiredCount: 0,
-    slaStatus: "Needs Attention",
   },
 ];
 
+const defaultHookReturn = {
+  data: {},
+  isLoading: false,
+  isError: false,
+  fetchNextPage: vi.fn(),
+  hasNextPage: false,
+  isFetchingNextPage: false,
+};
+
+vi.mock("@api/useGetProjects", () => ({
+  default: vi.fn(),
+  flattenProjectPages: vi.fn(),
+  getTotalRecords: vi.fn(),
+}));
+
+vi.mock("@api/useGetProjectDetails", () => ({
+  default: vi.fn(() => ({ data: undefined })),
+}));
+
+vi.mock("@hooks/useDebouncedValue", () => ({
+  useDebouncedValue: (value: string) => value,
+}));
+
+vi.mock("@components/select-menu-load-more-row/SelectMenuLoadMoreRow", () => ({
+  SelectMenuLoadMoreRow: () => null,
+}));
+
+vi.mock("@features/project-hub/constants/projectHubConstants", () => ({
+  PROJECT_HUB_PROJECTS_PAGE_SIZE: 10,
+  PROJECT_HUB_SEARCH_DEBOUNCE_MS: 300,
+  PROJECT_HUB_SEARCH_PLACEHOLDER: "Search projects...",
+}));
+
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: { children: any }) => <div>{children}</div>,
+  Box: ({ children, onScroll, onKeyDown, onMouseDown, onClick }: any) => (
+    <div onScroll={onScroll} onKeyDown={onKeyDown} onMouseDown={onMouseDown} onClick={onClick}>
+      {children}
+    </div>
+  ),
   Skeleton: ({ variant, width, height }: any) => (
     <div
       data-testid="skeleton"
       data-variant={variant}
       style={{ width, height }}
+    />
+  ),
+  Typography: ({ children }: any) => <span>{children}</span>,
+  Tooltip: ({ children }: any) => <>{children}</>,
+  TextField: ({ placeholder, value, onChange }: any) => (
+    <input
+      data-testid="search-input"
+      placeholder={placeholder}
+      value={value}
+      onChange={onChange}
     />
   ),
   ComplexSelect: Object.assign(
@@ -88,20 +134,15 @@ vi.mock("@wso2/oxygen-ui", () => ({
   },
 }));
 
-// Mock icons (include TriangleAlert for ErrorIndicator)
+// Mock icons
 vi.mock("@wso2/oxygen-ui-icons-react", () => ({
   FolderOpen: () => <svg data-testid="icon-FolderOpen" />,
+  Search: () => <svg data-testid="icon-Search" />,
   Info: () => <svg data-testid="icon-Info" />,
-  Server: () => <svg data-testid="icon-Server" />,
-  Clock: () => <svg data-testid="icon-Clock" />,
-  User: () => <svg data-testid="icon-User" />,
-  Shield: () => <svg data-testid="icon-Shield" />,
-  Rocket: () => <svg data-testid="icon-Rocket" />,
-  CircleAlert: () => <svg data-testid="icon-CircleAlert" />,
   TriangleAlert: () => <svg data-testid="icon-TriangleAlert" />,
 }));
 
-// Mock ErrorIndicator (path must match: @components/error-indicator)
+// Mock ErrorIndicator
 vi.mock("@components/error-indicator/ErrorIndicator", () => ({
   default: ({ entityName }: any) => (
     <div data-testid="error-indicator">Error: {entityName}</div>
@@ -113,13 +154,15 @@ describe("ProjectSwitcher", () => {
 
   beforeEach(() => {
     mockOnProjectChange.mockClear();
+    vi.mocked(useGetProjectsModule.default).mockReturnValue(defaultHookReturn as any);
+    vi.mocked(useGetProjectsModule.flattenProjectPages).mockReturnValue(mockProjects as any);
+    vi.mocked(useGetProjectsModule.getTotalRecords).mockReturnValue(2);
   });
 
   it("should render projects in the dropdown", () => {
     render(
       <ProjectSwitcher
-        projects={mockProjects}
-        selectedProject={mockProjects[0]}
+        projectId="1"
         onProjectChange={mockOnProjectChange}
       />,
     );
@@ -138,8 +181,7 @@ describe("ProjectSwitcher", () => {
   it("should call onProjectChange when a different project is selected", () => {
     render(
       <ProjectSwitcher
-        projects={mockProjects}
-        selectedProject={mockProjects[0]}
+        projectId="1"
         onProjectChange={mockOnProjectChange}
       />,
     );
@@ -151,11 +193,16 @@ describe("ProjectSwitcher", () => {
   });
 
   it("should render skeleton when isLoading is true", () => {
+    vi.mocked(useGetProjectsModule.default).mockReturnValue({
+      ...defaultHookReturn,
+      isLoading: true,
+    } as any);
+    vi.mocked(useGetProjectsModule.flattenProjectPages).mockReturnValue([]);
+    vi.mocked(useGetProjectsModule.getTotalRecords).mockReturnValue(0);
+
     render(
       <ProjectSwitcher
-        projects={mockProjects}
         onProjectChange={mockOnProjectChange}
-        isLoading={true}
       />,
     );
 
@@ -165,11 +212,16 @@ describe("ProjectSwitcher", () => {
   });
 
   it("should render error indicator when isError is true", () => {
+    vi.mocked(useGetProjectsModule.default).mockReturnValue({
+      ...defaultHookReturn,
+      isError: true,
+    } as any);
+    vi.mocked(useGetProjectsModule.flattenProjectPages).mockReturnValue([]);
+    vi.mocked(useGetProjectsModule.getTotalRecords).mockReturnValue(0);
+
     render(
       <ProjectSwitcher
-        projects={mockProjects}
         onProjectChange={mockOnProjectChange}
-        isError={true}
       />,
     );
 

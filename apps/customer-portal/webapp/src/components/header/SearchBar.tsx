@@ -18,6 +18,7 @@ import {
   Box,
   InputAdornment,
   Paper,
+  Stack,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -32,12 +33,17 @@ import {
   type JSX,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import useGetProjectCases from "@api/useGetProjectCases";
+import useGetProjectFilters from "@api/useGetProjectFilters";
+import useGetChangeRequests from "@features/operations/api/useGetChangeRequests";
 import type { CaseListItem } from "@features/support/types/cases";
-import ListItems from "@components/list-view/ListItems";
+import type { ChangeRequestItem } from "@features/operations/types/changeRequests";
 import ListSkeleton from "@components/list-view/ListSkeleton";
+import SearchCaseCard from "@components/header/SearchCaseCard";
+import SearchChangeRequestCard from "@components/header/SearchChangeRequestCard";
+import { getOperationsNavSegment } from "@features/operations/utils/operationsPages";
 
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
 import error500Svg from "@assets/error/error-500.svg";
@@ -63,6 +69,7 @@ export default function SearchBar({
   excludeS0 = false,
 }: SearchBarProps): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const { projectId: urlProjectId } = useParams<{ projectId?: string }>();
   const effectiveProjectId = projectId ?? urlProjectId ?? "";
 
@@ -100,6 +107,45 @@ export default function SearchBar({
     [rawCases, excludeS0],
   );
 
+  const { data: filterMetadata } = useGetProjectFilters(effectiveProjectId);
+
+  const changeRequestStateKeys = useMemo(() => {
+    const states = filterMetadata?.changeRequestStates ?? [];
+    return states.map((s) => Number(s.id)).filter((n) => Number.isFinite(n));
+  }, [filterMetadata?.changeRequestStates]);
+
+  const changeRequestSearchRequest = useMemo(
+    () => ({
+      filters: {
+        searchQuery: debouncedQuery,
+        stateKeys: changeRequestStateKeys,
+      },
+    }),
+    [debouncedQuery, changeRequestStateKeys],
+  );
+
+  const {
+    data: changeRequestData,
+    isLoading: isChangeRequestLoading,
+    isError: isChangeRequestError,
+  } = useGetChangeRequests(
+    effectiveProjectId,
+    changeRequestSearchRequest,
+    0,
+    10,
+    {
+      enabled:
+        !!effectiveProjectId &&
+        debouncedQuery.length > 0 &&
+        changeRequestStateKeys.length > 0,
+    },
+  );
+
+  const changeRequests = useMemo(
+    () => changeRequestData?.changeRequests ?? [],
+    [changeRequestData?.changeRequests],
+  );
+
   const handleCaseClick = useCallback(
     (caseItem: CaseListItem) => {
       if (effectiveProjectId) {
@@ -111,6 +157,19 @@ export default function SearchBar({
       }
     },
     [effectiveProjectId, navigate],
+  );
+
+  const handleChangeRequestClick = useCallback(
+    (item: ChangeRequestItem) => {
+      if (!effectiveProjectId) return;
+      const navSegment = getOperationsNavSegment(location.pathname);
+      navigate(
+        `/projects/${effectiveProjectId}/${navSegment}/change-requests/${item.id}`,
+      );
+      setSearchValue("");
+      setIsDropdownOpen(false);
+    },
+    [effectiveProjectId, location.pathname, navigate],
   );
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +196,11 @@ export default function SearchBar({
     }
   }, [showDropdown]);
 
+  const isAnyLoading = isLoading || isChangeRequestLoading;
+  const hasNoResults = cases.length === 0 && changeRequests.length === 0;
+  const hasAnyError = isError || isChangeRequestError;
+  const shouldShowError = hasAnyError && hasNoResults;
+
   const dropdownContent = showDropdown && dropdownRect && (
     <Paper
       data-testid="header-search-dropdown"
@@ -154,20 +218,20 @@ export default function SearchBar({
       {!effectiveProjectId ? (
         <Box sx={{ p: 3, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            Select a project to search cases.
+            Select a project to search.
           </Typography>
         </Box>
       ) : debouncedQuery.length === 0 ? (
         <Box sx={{ p: 3, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            Type to search cases...
+            Type to search cases and change requests...
           </Typography>
         </Box>
-      ) : isLoading ? (
+      ) : isAnyLoading ? (
         <Box sx={{ p: 2 }}>
           <ListSkeleton />
         </Box>
-      ) : isError ? (
+      ) : shouldShowError ? (
         <Box
           sx={{
             display: "flex",
@@ -187,7 +251,7 @@ export default function SearchBar({
             Failed to load search results.
           </Typography>
         </Box>
-      ) : cases.length === 0 ? (
+      ) : hasNoResults ? (
         <Box
           sx={{
             display: "flex",
@@ -201,16 +265,27 @@ export default function SearchBar({
             style={{ width: 200, height: "auto", marginBottom: 16 }}
           />
           <Typography variant="body2" color="text.secondary">
-            No cases found. Try adjusting your filters or search query.
+            No results found. Try adjusting your search query.
           </Typography>
         </Box>
       ) : (
         <Box sx={{ p: 2 }}>
-          <ListItems
-            cases={cases}
-            isLoading={false}
-            onCaseClick={handleCaseClick}
-          />
+          <Stack spacing={2}>
+            {cases.map((caseItem) => (
+              <SearchCaseCard
+                key={`case-${caseItem.id}`}
+                caseItem={caseItem}
+                onClick={handleCaseClick}
+              />
+            ))}
+            {changeRequests.map((cr) => (
+              <SearchChangeRequestCard
+                key={`change-request-${cr.id}`}
+                changeRequest={cr}
+                onClick={handleChangeRequestClick}
+              />
+            ))}
+          </Stack>
         </Box>
       )}
     </Paper>
@@ -241,7 +316,7 @@ export default function SearchBar({
       <TextField
         data-testid="header-search-input"
         size="small"
-        placeholder="Search cases, tickets, or users"
+        placeholder="What are you looking for?"
         fullWidth
         value={searchValue}
         onChange={(e) => {

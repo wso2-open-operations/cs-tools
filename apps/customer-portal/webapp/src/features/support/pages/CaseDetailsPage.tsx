@@ -151,7 +151,6 @@ export default function CaseDetailsPage(): JSX.Element {
       onBack={handleBack}
       onOpenRelatedCase={handleOpenRelatedCase}
       hideActionRow={false}
-      showEngineerOnly={isEngagementRoute}
     />
   );
 }

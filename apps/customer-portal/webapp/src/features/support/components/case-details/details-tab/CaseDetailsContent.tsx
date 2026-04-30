@@ -65,7 +65,6 @@ export default function CaseDetailsContent({
   onOpenRelatedCase,
   projectId = "",
   hideActionRow = false,
-  showEngineerOnly = false,
   isServiceRequest = false,
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
@@ -230,7 +229,6 @@ export default function CaseDetailsContent({
           />
           <CaseDetailsSkeleton
             hideActionRow={hideActionRow}
-            showEngineerOnly={showEngineerOnly}
             hideAssignedEngineer={hideAssignedEngineer}
             headerVariant={headerVariant}
           />
@@ -331,7 +329,7 @@ export default function CaseDetailsContent({
                   />
                 </Box>
 
-                {!isEngagementRoute && (!hideActionRow || showEngineerOnly) && (
+                {!hideActionRow && (
                   <CaseDetailsActionRow
                     assignedEngineer={assignedEngineer}
                     engineerInitials=""
@@ -341,7 +339,6 @@ export default function CaseDetailsContent({
                     projectId={resolvedProjectId}
                     caseId={caseId}
                     isLoading={isLoading}
-                    showOnlyEngineer={showEngineerOnly}
                     hideAssignedEngineer={hideAssignedEngineer}
                   />
                 )}

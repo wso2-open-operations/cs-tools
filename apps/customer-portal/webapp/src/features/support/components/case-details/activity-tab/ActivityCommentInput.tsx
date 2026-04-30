@@ -44,7 +44,7 @@ import { CommentType } from "@features/support/constants/supportConstants";
 export default function ActivityCommentInput({
   caseId,
   caseStatus,
-}: ActivityCommentInputProps): JSX.Element {
+}: ActivityCommentInputProps): JSX.Element | null {
   const [value, setValue] = useState("");
   const [resetTrigger, setResetTrigger] = useState(0);
   const postComment = usePostComment();
@@ -71,12 +71,14 @@ export default function ActivityCommentInput({
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
+
+  if (isCaseClosed) return null;
+
   const isDisabled =
     !isSignedIn ||
     isAuthLoading ||
     postComment.isPending ||
-    isUploadingAttachments ||
-    isCaseClosed;
+    isUploadingAttachments;
 
   const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
 
@@ -192,7 +194,10 @@ export default function ActivityCommentInput({
 
     // Text (with or without attachments): post comment first, then upload attachments
     postComment.mutate(
-      { caseId, body: { content: currentValue.trim(), type: CommentType.COMMENT } },
+      {
+        caseId,
+        body: { content: currentValue.trim(), type: CommentType.COMMENT },
+      },
       {
         onSuccess: async () => {
           clearUI();
@@ -227,27 +232,20 @@ export default function ActivityCommentInput({
             resetTrigger={resetTrigger}
             minHeight={120}
             showToolbar={true}
-            placeholder={
-              isCaseClosed
-                ? "Commenting is disabled for closed cases"
-                : "Write a comment..."
-            }
+            placeholder="Write a comment..."
             onSubmitKeyDown={handleSend}
             enterToSubmit={false}
-            shiftEnterToSubmit={!isCaseClosed}
+            shiftEnterToSubmit={true}
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
-            showKeyboardHint={!isCaseClosed}
+            showKeyboardHint={true}
             maxHeight="310px"
+            onPasteError={() =>
+              showError("Image exceeds the maximum allowed size of 10 MB.")
+            }
             overlayElement={
-              <Tooltip
-                title={
-                  isCaseClosed
-                    ? "Commenting is disabled for closed cases"
-                    : "Send comment"
-                }
-              >
+              <Tooltip title="Send comment">
                 <span>
                   <IconButton
                     disabled={
@@ -266,6 +264,8 @@ export default function ActivityCommentInput({
                       width: 36,
                       height: 36,
                       borderRadius: "50%",
+                      border: "1px solid",
+                      borderColor: "backgroundPaper",
                     }}
                   >
                     {postComment.isPending || isUploadingAttachments ? (

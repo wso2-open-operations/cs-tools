@@ -93,6 +93,7 @@ export default function CaseDetailsActivityPanel({
       type: comment.type ?? "comments",
       isEscalated: comment.isEscalated ?? false,
     }));
+
     return [...caseComments, ...conversationComments].sort(
       (a, b) => -compareByCreatedOnThenId(a, b),
     );
@@ -106,7 +107,8 @@ export default function CaseDetailsActivityPanel({
   const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
   const primaryBg = alpha(primaryLight, 0.1);
 
-  const isLoading = isCommentsLoading || (!!conversationId && isConversationLoading);
+  const isLoading =
+    isCommentsLoading || (!!conversationId && isConversationLoading);
   const isError = isCommentsError || (!!conversationId && isConversationError);
   const resolvedError = commentsError ?? conversationError;
 
@@ -215,7 +217,9 @@ export default function CaseDetailsActivityPanel({
 function ActivityContentWithImageModal(
   props: ActivityContentProps,
 ): JSX.Element {
-  const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(null);
+  const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(
+    null,
+  );
   return (
     <>
       <ActivityContent

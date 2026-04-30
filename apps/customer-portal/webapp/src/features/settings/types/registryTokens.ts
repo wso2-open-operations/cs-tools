@@ -31,6 +31,7 @@ export type RegistryToken = AuditMetadata & {
   name: string;
   displayName?: string;
   description: string;
+  creationTime?: string;
   tokenType?: RegistryTokenType;
   createdFor?: string;
   expiresAt?: number;

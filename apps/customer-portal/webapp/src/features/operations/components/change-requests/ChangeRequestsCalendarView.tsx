@@ -51,7 +51,10 @@ export default function ChangeRequestsCalendarView({
   isLoading,
   isError = false,
   onChangeRequestClick,
+  legendStates,
 }: ChangeRequestsCalendarViewProps): JSX.Element {
+  const effectiveLegendStates: { label: string }[] =
+    legendStates ?? CHANGE_REQUEST_CALENDAR_LEGEND_STATES.map((label) => ({ label }));
   const displayTimeZone = resolveDisplayTimeZone();
   const getZonedDateParts = (date: Date) => {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -393,11 +396,11 @@ export default function ChangeRequestsCalendarView({
             <Typography variant="body2" color="text.secondary">
               States:
             </Typography>
-            {CHANGE_REQUEST_CALENDAR_LEGEND_STATES.map((state) => {
-              const c = getChangeRequestStateColor(state);
+            {effectiveLegendStates.map((s) => {
+              const c = getChangeRequestStateColor(s);
               return (
                 <Box
-                  key={state}
+                  key={s.label}
                   sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
                 >
                   <Box
@@ -411,7 +414,7 @@ export default function ChangeRequestsCalendarView({
                     }}
                   />
                   <Typography variant="caption" color="text.secondary">
-                    {state}
+                    {s.label}
                   </Typography>
                 </Box>
               );

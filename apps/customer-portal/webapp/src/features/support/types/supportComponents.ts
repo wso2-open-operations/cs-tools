@@ -63,7 +63,6 @@ export type OutstandingCasesListProps = {
   isError?: boolean;
   onCaseClick?: (caseItem: CaseListItem) => void;
   useChangeRequestColors?: boolean;
-  showInternalId?: boolean;
 };
 
 export type CaseDetailsDetailsPanelProps = {
@@ -371,7 +370,6 @@ export type CaseDetailsContentProps = {
   onOpenRelatedCase?: () => void;
   projectId?: string;
   hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
   isServiceRequest?: boolean;
 };
 
@@ -414,7 +412,6 @@ export type CaseDetailsTabPanelsProps = {
 
 export type CaseDetailsSkeletonProps = {
   hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
   hideAssignedEngineer?: boolean;
   headerVariant?: CaseDetailsHeaderVariant;
 };
@@ -433,7 +430,6 @@ export type CaseDetailsActionRowProps = {
   projectId?: string;
   caseId?: string;
   isLoading?: boolean;
-  showOnlyEngineer?: boolean;
   hideAssignedEngineer?: boolean;
   restrictToCloseOnly?: boolean;
 };

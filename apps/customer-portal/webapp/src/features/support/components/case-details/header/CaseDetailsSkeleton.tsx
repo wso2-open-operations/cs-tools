@@ -80,7 +80,6 @@ export function CaseDetailsHeaderSkeleton({
  */
 export default function CaseDetailsSkeleton({
   hideActionRow = false,
-  showEngineerOnly = false,
   hideAssignedEngineer = false,
   headerVariant = "default",
 }: CaseDetailsSkeletonProps = {}): JSX.Element {
@@ -101,19 +100,16 @@ export default function CaseDetailsSkeleton({
         </Box>
 
         {/* Action buttons area (right side) */}
-        {!hideActionRow && !showEngineerOnly && (
+        {!hideActionRow && (
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
             <Skeleton variant="rounded" width={88} height={30} sx={{ borderRadius: "4px" }} />
             <Skeleton variant="rounded" width={96} height={30} sx={{ borderRadius: "4px" }} />
           </Stack>
         )}
-        {showEngineerOnly && (
-          <Skeleton variant="circular" width={32} height={32} sx={{ flexShrink: 0 }} />
-        )}
       </Box>
 
       {/* Security Report Analysis progress bar — shown instead of action row */}
-      {hideActionRow && !showEngineerOnly && (
+      {hideActionRow && (
         <Paper
           variant="outlined"
           sx={{

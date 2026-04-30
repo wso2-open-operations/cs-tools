@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useParams, useNavigate } from "react-router";
+import { useParams } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useState, useMemo, type JSX, type ChangeEvent } from "react";
 import { useSessionState } from "@hooks/useSessionState";
 import { Stack } from "@wso2/oxygen-ui";
@@ -54,7 +55,7 @@ import {
  * @returns {JSX.Element} The rendered Announcements page.
  */
 export default function AnnouncementsPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
 
   const sessionPrefix = `${projectId ?? "unknown"}-announcements`;

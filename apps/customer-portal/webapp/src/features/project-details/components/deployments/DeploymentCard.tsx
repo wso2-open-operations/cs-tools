@@ -81,6 +81,7 @@ export default function DeploymentCard({
         onChange={(_, isExpanded) => setExpanded(isExpanded)}
         disableGutters
         elevation={0}
+        TransitionProps={{ unmountOnExit: true }}
         sx={{
           border: "1px solid",
           borderColor: "divider",

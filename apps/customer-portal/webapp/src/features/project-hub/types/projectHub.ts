@@ -34,13 +34,12 @@ export enum ClampedTextVariant {
 export type ProjectCardProps = {
   date: string;
   id: string;
-  activeCasesCount: number;
   activeChatsCount: number;
   actionRequiredCount: number;
+  outstandingCount?: number | null;
   closureState?: string | null;
   onViewDashboard?: () => void;
   projectKey: string;
-  slaStatus: string;
   title: string;
 };
 
@@ -51,7 +50,7 @@ export type ProjectCardBadgesProps = {
 export type ProjectCardStatsProps = {
   activeChatsCount: number | undefined;
   date: string;
-  activeCasesCount: number | undefined;
+  outstandingCount: number | undefined;
   actionRequiredCount: number | undefined;
   isError?: boolean;
   isLoading?: boolean;

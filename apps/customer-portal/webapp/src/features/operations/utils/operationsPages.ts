@@ -33,11 +33,8 @@ import {
   OperationsNavSegment,
   ServiceRequestCaseSortField,
 } from "@features/operations/types/serviceRequests";
-import {
-  ALLOWED_CHANGE_REQUEST_STATE_IDS,
-  OUTSTANDING_CHANGE_REQUEST_STATE_IDS,
-} from "@features/operations/constants/operationsConstants";
-import type { SortOrder } from "@/types/common";
+import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
+import type { MetadataItem, SortOrder } from "@/types/common";
 
 /**
  * Resolves `operations` vs `support` from the current pathname.
@@ -75,20 +72,124 @@ export function formatOperationsOverviewChangeRequestsSubtitle(
   return `Latest ${limit} change requests`;
 }
 
-/** CR state IDs for "Action Required" (Customer Approval + Customer Review). */
-const ACTION_REQUIRED_CR_STATE_IDS = [5, 1] as const;
+/** Labels excluded from customer-facing "allowed" states (internal pre-approval workflow). */
+const EXCLUDED_ALLOWED_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.NEW,
+  ChangeRequestStates.ASSESS,
+  ChangeRequestStates.AUTHORIZE,
+]);
 
-/** CR state IDs for "Scheduled Only" (Upcoming). */
-const SCHEDULED_ONLY_CR_STATE_IDS = [-2] as const;
+/** Labels of CR states excluded from the "outstanding" view. */
+const EXCLUDED_OUTSTANDING_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.ROLLBACK,
+  ChangeRequestStates.CLOSED,
+  ChangeRequestStates.CANCELED,
+]);
+
+/** Labels of CR states in the "action required" group. */
+const ACTION_REQUIRED_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.CUSTOMER_APPROVAL,
+  ChangeRequestStates.CUSTOMER_REVIEW,
+]);
+
+/** Labels of CR states in the "scheduled" group. */
+const SCHEDULED_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.SCHEDULED,
+]);
+
+/** Labels of CR states in the "closed" group. */
+const CLOSED_CR_STATE_LABELS = new Set<string>([
+  ChangeRequestStates.CLOSED,
+]);
+
+/**
+ * Derives all customer-visible CR state IDs from the project filters response by excluding
+ * internal pre-approval workflow states (New, Assess, Authorize).
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveAllowedCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => !EXCLUDED_ALLOWED_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
+
+/**
+ * Derives outstanding CR state IDs from the project filters response by excluding
+ * states labeled "Rollback", "Closed", and "Canceled".
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveOutstandingCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => !EXCLUDED_OUTSTANDING_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
+
+/**
+ * Derives action-required CR state IDs (Customer Approval + Customer Review) from filter metadata.
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveActionRequiredCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => ACTION_REQUIRED_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
+
+/**
+ * Derives scheduled CR state IDs (Scheduled) from filter metadata.
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveScheduledCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => SCHEDULED_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
+
+/**
+ * Derives closed CR state IDs (Closed) from filter metadata.
+ *
+ * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
+ * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
+ */
+export function resolveClosedCrStateIds(
+  changeRequestStates: MetadataItem[] | undefined,
+): number[] | undefined {
+  if (!changeRequestStates) return undefined;
+  return changeRequestStates
+    .filter((s) => CLOSED_CR_STATE_LABELS.has(s.label))
+    .map((s) => Number(s.id));
+}
 
 /**
  * Builds the change-request search payload for the list/calendar/export flows.
+ * All CR state IDs are derived from `changeRequestStates` filter metadata using
+ * label-based resolution — no hardcoded numeric IDs.
  *
  * @param filters - UI filter state.
  * @param searchTerm - Raw search string.
- * @param outstandingOnly - Restrict to outstanding states via {@link OUTSTANDING_CHANGE_REQUEST_STATE_IDS}.
- * @param actionRequired - Restrict to action-required states via {@link ACTION_REQUIRED_CR_STATE_IDS}.
- * @param scheduledOnly - Restrict to scheduled state via {@link SCHEDULED_ONLY_CR_STATE_IDS}.
+ * @param outstandingOnly - Restrict to outstanding states.
+ * @param actionRequired - Restrict to action-required states.
+ * @param scheduledOnly - Restrict to scheduled state.
+ * @param changeRequestStates - Raw states metadata from `useGetProjectFilters`.
  * @returns Request body without pagination.
  */
 export function buildChangeRequestSearchRequest(
@@ -97,15 +198,17 @@ export function buildChangeRequestSearchRequest(
   outstandingOnly: boolean = false,
   actionRequired: boolean = false,
   scheduledOnly: boolean = false,
+  changeRequestStates?: MetadataItem[],
 ): Omit<ChangeRequestSearchRequest, "pagination"> {
   const selectedStateId = filters.stateId ? Number(filters.stateId) : undefined;
-  const allowedStateIds: number[] = actionRequired
-    ? [...ACTION_REQUIRED_CR_STATE_IDS]
+  const resolvedIds = actionRequired
+    ? resolveActionRequiredCrStateIds(changeRequestStates)
     : scheduledOnly
-      ? [...SCHEDULED_ONLY_CR_STATE_IDS]
+      ? resolveScheduledCrStateIds(changeRequestStates)
       : outstandingOnly
-        ? [...OUTSTANDING_CHANGE_REQUEST_STATE_IDS]
-        : [...ALLOWED_CHANGE_REQUEST_STATE_IDS];
+        ? resolveOutstandingCrStateIds(changeRequestStates)
+        : resolveAllowedCrStateIds(changeRequestStates);
+  const allowedStateIds = resolvedIds ?? [];
   const stateKeys =
     selectedStateId === undefined
       ? allowedStateIds

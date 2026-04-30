@@ -30,7 +30,6 @@ import {
 import { Clock, ExternalLink, Phone } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import {
-  formatCallRequestBackendDateTimeShort,
   formatUtcToLocal,
   getCallRequestStatusColor,
   resolveColorFromTheme,
@@ -175,7 +174,7 @@ export default function CallRequestCard({
               )}
               <Typography variant="caption" color="text.secondary">
                 Requested on{" "}
-                {formatCallRequestBackendDateTimeShort(call.createdOn)}
+                {call.createdOn ?? "--"}
               </Typography>
             </Box>
           </Stack>

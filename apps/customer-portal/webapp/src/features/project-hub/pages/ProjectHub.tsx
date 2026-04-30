@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, LinearProgress, TextField, Typography } from "@wso2/oxygen-ui";
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { Box, LinearProgress, Skeleton, TextField, Typography } from "@wso2/oxygen-ui";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import useInfiniteProjects, {
   flattenProjectPages,
@@ -44,7 +44,6 @@ import {
   PROJECT_HUB_REDIRECT_LOADER_MESSAGE,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS,
   PROJECT_HUB_SEARCH_PLACEHOLDER,
-  PROJECT_HUB_SKELETON_CARD_COUNT,
 } from "@features/project-hub/constants/projectHubConstants";
 import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
 import { ProjectClosureState } from "@/types/permission";
@@ -54,7 +53,6 @@ import {
   resolveProjectHubHeaderTitle,
   shouldHideProjectHubHeaderBlock,
   shouldShowProjectHubSearchBar,
-  shouldShowProjectHubSearchOnlyLayout,
 } from "@features/project-hub/utils/projectHub";
 
 /**
@@ -90,24 +88,42 @@ export default function ProjectHub(): JSX.Element {
   const projects = useMemo(() => flattenProjectPages(data), [data]);
   const totalRecords = getTotalRecords(data);
 
+  // Track the unfiltered total separately so the title never shows a search-result count.
+  const totalProjectsRef = useRef(0);
+  if (!debouncedSearchQuery) {
+    totalProjectsRef.current = totalRecords;
+  }
+  const titleTotalRecords = debouncedSearchQuery ? totalProjectsRef.current : totalRecords;
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  
   useEffect(() => {
-    if (
-      debouncedSearchQuery &&
-      hasNextPage &&
-      !isFetchingNextPage &&
-      !isLoading &&
-      !isError
-    ) {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { root: scrollContainerRef.current, rootMargin: "200px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  
+  useEffect(() => {
+    const allLoadedAreSuspended =
+      projects.length > 0 &&
+      debouncedSearchQuery === "" &&
+      projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
+    if (allLoadedAreSuspended && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
-  }, [
-    debouncedSearchQuery,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading,
-    isError,
-    fetchNextPage,
-  ]);
+  }, [projects, debouncedSearchQuery, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEffect(() => {
     if (isLoading) {
@@ -169,8 +185,6 @@ export default function ProjectHub(): JSX.Element {
         isAuthLoading,
         isLoading,
         isError,
-        totalRecords,
-        searchQuery,
         projects.length,
       ),
     [
@@ -179,22 +193,10 @@ export default function ProjectHub(): JSX.Element {
       isLoading,
       isRedirectingToSingleProject,
       projects.length,
-      searchQuery,
-      totalRecords,
     ],
   );
 
-  const showSearchBar = shouldShowProjectHubSearchBar(
-    totalRecords,
-    searchQuery,
-  );
-  const showOnlySearchBar = shouldShowProjectHubSearchOnlyLayout(
-    totalRecords,
-    searchQuery,
-    isLoading,
-    isAuthLoading,
-    isError,
-  );
+  const showSearchBar = shouldShowProjectHubSearchBar(titleTotalRecords, searchQuery);
   const hideHeaderBlock = shouldHideProjectHubHeaderBlock(
     isError,
     isLoading,
@@ -203,75 +205,56 @@ export default function ProjectHub(): JSX.Element {
     searchQuery,
   );
 
-  const headerTitle = resolveProjectHubHeaderTitle(
-    totalRecords,
-    hasSearchQuery,
-  );
-  const headerSubtitle = resolveProjectHubHeaderSubtitle(
-    totalRecords,
-    hasSearchQuery,
-  );
+  const headerTitle = resolveProjectHubHeaderTitle(titleTotalRecords);
+  const headerSubtitle = resolveProjectHubHeaderSubtitle();
 
-  const centeredLoader = (message: string): JSX.Element => (
-    <Box
-      sx={{
-        flex: 1,
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 2,
-      }}
-    >
-      <LinearProgress
-        color="warning"
-        sx={{ width: "80%", maxWidth: 400, height: 4 }}
-      />
-      <Typography variant="body2" color="text.secondary">
-        {message}
-      </Typography>
-    </Box>
-  );
-
-  const cardGridWrapperSx = {
-    flex: {
-      xs: "1 1 100%",
-      sm: "0 1 calc(50% - 24px)",
-      md: "0 1 calc(33.33% - 24px)",
-      lg: "0 1 calc(25% - 24px)",
-      xl: "0 1 calc(20% - 24px)",
-    },
-    maxWidth: {
-      xs: "100%",
-      sm: 400,
-    },
-    minWidth: 300,
+  const gridSx = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+    gap: 3,
+    width: "100%",
+    maxWidth: 1800,
+    mx: "auto",
+    py: 1,
   };
+
+  const GRID_GHOST_COUNT = 5;
+  const gridGhostSx = { overflow: "hidden", height: 0, visibility: "hidden" } as const;
 
   const renderMainContent = (): JSX.Element | null => {
     switch (contentView) {
       case ProjectHubContentView.REDIRECT_LOADER:
-        return centeredLoader(PROJECT_HUB_REDIRECT_LOADER_MESSAGE);
+        return (
+          <Box
+            sx={{
+              height: "100%",
+              minHeight: 300,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 2,
+            }}
+          >
+            <LinearProgress
+              color="warning"
+              sx={{ width: "80%", maxWidth: 400, height: 4 }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              {PROJECT_HUB_REDIRECT_LOADER_MESSAGE}
+            </Typography>
+          </Box>
+        );
       case ProjectHubContentView.AUTH_PENDING:
         return null;
       case ProjectHubContentView.LOADING_SKELETONS:
         return (
-          <Box
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              gap: 3,
-              maxWidth: 1800,
-              mx: "auto",
-              width: "100%",
-            }}
-          >
-            {[...Array(PROJECT_HUB_SKELETON_CARD_COUNT)].map((_, index) => (
-              <Box key={index} sx={cardGridWrapperSx}>
-                <ProjectCardSkeleton />
-              </Box>
+          <Box sx={gridSx}>
+            {[...Array(PROJECT_HUB_PROJECTS_PAGE_SIZE)].map((_, index) => (
+              <ProjectCardSkeleton key={index} />
+            ))}
+            {[...Array(GRID_GHOST_COUNT)].map((_, i) => (
+              <Box key={`ghost-init-${i}`} aria-hidden="true" sx={gridGhostSx} />
             ))}
           </Box>
         );
@@ -279,9 +262,11 @@ export default function ProjectHub(): JSX.Element {
         return (
           <Box
             sx={{
+              height: "100%",
+              minHeight: 300,
               display: "flex",
+              alignItems: "center",
               justifyContent: "center",
-              py: 10,
               px: 2,
             }}
           >
@@ -297,12 +282,13 @@ export default function ProjectHub(): JSX.Element {
         return (
           <Box
             sx={{
+              height: "100%",
+              minHeight: 300,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
               gap: 2,
-              py: 10,
             }}
           >
             {hasSearchQuery ? (
@@ -324,32 +310,35 @@ export default function ProjectHub(): JSX.Element {
         );
       case ProjectHubContentView.PROJECT_LIST:
         return (
-          <Box
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              gap: 3,
-              maxWidth: 1800,
-              mx: "auto",
-              width: "100%",
-            }}
-          >
+          <Box sx={gridSx}>
             {projects.map((project) => (
-              <Box key={project.id} sx={cardGridWrapperSx}>
-                <ProjectCard
-                  id={project.id}
-                  projectKey={project.key}
-                  slaStatus={project.slaStatus}
-                  title={project.name}
-                  date={project.createdOn}
-                  activeCasesCount={project.activeCasesCount}
-                  activeChatsCount={project.activeChatsCount}
-                  actionRequiredCount={project.actionRequiredCount ?? 0}
-                  closureState={project.closureState}
-                />
-              </Box>
+              <ProjectCard
+                key={project.id}
+                id={project.id}
+                projectKey={project.key}
+                title={project.name}
+                date={project.createdOn}
+                activeChatsCount={project.activeChatsCount}
+                actionRequiredCount={project.actionRequiredCount ?? 0}
+                outstandingCount={project.outstandingCount ?? 0}
+                closureState={project.closureState}
+              />
             ))}
+            {isFetchingNextPage && (
+              <>
+                {[...Array(PROJECT_HUB_PROJECTS_PAGE_SIZE)].map((_, i) => (
+                  <ProjectCardSkeleton key={`skeleton-next-${i}`} />
+                ))}
+                {[...Array(GRID_GHOST_COUNT)].map((_, i) => (
+                  <Box key={`ghost-next-${i}`} aria-hidden="true" sx={gridGhostSx} />
+                ))}
+              </>
+            )}
+            {/* sentinel: spans all columns so IntersectionObserver detects bottom */}
+            <Box
+              ref={sentinelRef}
+              sx={{ gridColumn: "1 / -1", height: 1 }}
+            />
           </Box>
         );
       default:
@@ -365,61 +354,56 @@ export default function ProjectHub(): JSX.Element {
     <Box
       sx={{
         width: "100%",
-        minHeight: "100%",
+        flex: 1,
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
+        overflow: "hidden",
       }}
     >
-      <Box
-        sx={{
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          pt: 2,
-          px: 2,
-        }}
-      >
-        {!hideHeaderBlock && (
+      {/* Fixed header: title, subtitle, search bar */}
+      {!hideHeaderBlock && (
+        <Box
+          sx={{
+            flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            textAlign: "center",
+            pt: 2,
+            pb: 1,
+            px: 2,
+          }}
+        >
           <Box
             sx={{
+              mb: 1,
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
-              textAlign: "center",
-              pb: 1,
+              gap: 1.5,
             }}
           >
-            <Box
-              sx={{
-                mb: 1,
-                display: "flex",
-                alignItems: "center",
-                gap: 1.5,
-              }}
-            >
-              <FolderOpen size={28} />
-              <Typography variant="h4">{headerTitle}</Typography>
-            </Box>
-
-            <Typography
-              variant="subtitle2"
-              color="text.secondary"
-              sx={{ maxWidth: 600 }}
-            >
-              {headerSubtitle}
+            <FolderOpen size={28} />
+            <Typography variant="h4" component="div" sx={{ display: "flex", alignItems: "center" }}>
+              {isLoading ? (
+                <>Your Projects&nbsp;(<Skeleton variant="text" width={28} sx={{ display: "inline-block" }} />)</>
+              ) : headerTitle}
             </Typography>
+          </Box>
 
-            {showSearchBar && (
-              <Box
-                sx={{
-                  mt: 2,
-                  width: "100%",
-                  maxWidth: 500,
-                }}
-              >
+          <Typography
+            variant="subtitle2"
+            color="text.secondary"
+            sx={{ maxWidth: 600 }}
+          >
+            {headerSubtitle}
+          </Typography>
+
+          {(isLoading || showSearchBar) && (
+            <Box sx={{ mt: 2, width: "100%", maxWidth: isLoading ? 700 : 500 }}>
+              {isLoading ? (
+                <Skeleton variant="rounded" height={40} width="100%" />
+              ) : (
                 <TextField
                   fullWidth
                   placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
@@ -432,24 +416,24 @@ export default function ProjectHub(): JSX.Element {
                   }}
                   size="small"
                 />
-              </Box>
-            )}
-          </Box>
-        )}
-        {!showOnlySearchBar && (
-          <Box
-            sx={{
-              width: "100%",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              alignItems: "center",
-              py: 1,
-            }}
-          >
-            {renderMainContent()}
-          </Box>
-        )}
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* Scrollable project grid — fills remaining height, triggers pagination on scroll */}
+      <Box
+        ref={scrollContainerRef}
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          px: 2,
+          pb: 2,
+        }}
+      >
+        {renderMainContent()}
       </Box>
     </Box>
   );

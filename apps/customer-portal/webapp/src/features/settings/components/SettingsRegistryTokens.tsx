@@ -76,7 +76,6 @@ import {
 } from "@features/settings/types/settings";
 import {
   formatRegistrySubTabLabel,
-  formatRegistryTokenDescription,
   formatRegistryTokenIsoDate,
   formatRegistryTokenTimestamp,
   getRegistryTokenDisplayStatus,
@@ -265,21 +264,22 @@ export default function SettingsRegistryTokens({
             <TableHead>
               <TableRow>
                 <TableCell>Token Name</TableCell>
-                <TableCell>User</TableCell>
-                <TableCell>Created</TableCell>
-                <TableCell>Last Used</TableCell>
-                <TableCell>Expires</TableCell>
+                <TableCell>Subscription End Date</TableCell>
+                <TableCell>Products</TableCell>
+                {isAdmin && <TableCell>Token Type</TableCell>}
+                {isAdmin && <TableCell>Created For</TableCell>}
+                {isAdmin && <TableCell>Created By</TableCell>}
+                <TableCell>Created On</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">Usage</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {isTableLoading ? (
-                skeletonRows(8)
+                skeletonRows(isAdmin ? 9 : 6)
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={isAdmin ? 9 : 6} align="center" sx={{ py: 3 }}>
                     <ErrorIndicator
                       entityName="registry tokens"
                       size="medium"
@@ -288,7 +288,7 @@ export default function SettingsRegistryTokens({
                 </TableRow>
               ) : filteredTokens.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={isAdmin ? 9 : 6} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       {REGISTRY_USER_TOKENS_EMPTY}
                     </Typography>
@@ -300,30 +300,49 @@ export default function SettingsRegistryTokens({
                   return (
                     <TableRow key={token.id ?? token.name} hover>
                       <TableCell>
-                        <Box>
-                          <Typography variant="body2" fontWeight={500}>
-                            {token.displayName ?? token.name}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Box>
-                          <Typography variant="body2">
-                            {token.createdFor ?? NULL_PLACEHOLDER}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {formatRegistryTokenIsoDate(token.createdOn)}
+                        <Typography variant="body2" fontWeight={500}>
+                          {token.displayName ?? token.name}
                         </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
                           {formatRegistryTokenTimestamp(token.expiresAt)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {token.permissions?.map((p) => p.namespace).join(", ") || NULL_PLACEHOLDER}
+                        </Typography>
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            icon={token.tokenType === RegistryTokenType.SERVICE ? <Server size={12} /> : <User size={12} />}
+                            label={token.tokenType ?? NULL_PLACEHOLDER}
+                            variant="outlined"
+                            color={token.tokenType === RegistryTokenType.SERVICE ? "error" : "info"}
+                            sx={{ typography: "caption", "& .MuiChip-icon": { ml: 0.75, mr: 0.5 }, "& .MuiChip-label": { pl: 0.5 } }}
+                          />
+                        </TableCell>
+                      )}
+                      {isAdmin && (
+                        <TableCell>
+                          <Typography variant="body2">
+                            {token.createdFor ?? NULL_PLACEHOLDER}
+                          </Typography>
+                        </TableCell>
+                      )}
+                      {isAdmin && (
+                        <TableCell>
+                          <Typography variant="body2">
+                            {token.createdBy ?? NULL_PLACEHOLDER}
+                          </Typography>
+                        </TableCell>
+                      )}
+                      <TableCell>
+                        <Typography variant="body2">
+                          {formatRegistryTokenIsoDate(token.creationTime ?? token.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -334,9 +353,6 @@ export default function SettingsRegistryTokens({
                           variant="outlined"
                           sx={{ typography: "caption" }}
                         />
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
                         <Tooltip
@@ -374,21 +390,22 @@ export default function SettingsRegistryTokens({
             <TableHead>
               <TableRow>
                 <TableCell>Token Name</TableCell>
-                <TableCell>Description</TableCell>
+                <TableCell>Subscription End Date</TableCell>
+                <TableCell>Products</TableCell>
+                <TableCell>Token Type</TableCell>
+                <TableCell>Created For</TableCell>
                 <TableCell>Created By</TableCell>
-                <TableCell>Last Used</TableCell>
-                <TableCell>Expires</TableCell>
+                <TableCell>Created On</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">Usage</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {isTableLoading ? (
-                skeletonRows(8)
+                skeletonRows(9)
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <ErrorIndicator
                       entityName="registry tokens"
                       size="medium"
@@ -397,7 +414,7 @@ export default function SettingsRegistryTokens({
                 </TableRow>
               ) : filteredTokens.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
                     <Typography variant="body2" color="text.secondary">
                       {REGISTRY_SERVICE_TOKENS_EMPTY}
                     </Typography>
@@ -415,22 +432,37 @@ export default function SettingsRegistryTokens({
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatRegistryTokenDescription(token.description)}
+                          {formatRegistryTokenTimestamp(token.expiresAt)}
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Box>
-                          <Typography variant="body2">
-                            {token.createdBy ?? NULL_PLACEHOLDER}
-                          </Typography>
-                        </Box>
+                        <Typography variant="body2">
+                          {token.permissions?.map((p) => p.namespace).join(", ") || NULL_PLACEHOLDER}
+                        </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
+                        <Chip
+                          size="small"
+                          icon={token.tokenType === RegistryTokenType.SERVICE ? <Server size={12} /> : <User size={12} />}
+                          label={token.tokenType ?? NULL_PLACEHOLDER}
+                          variant="outlined"
+                          color={token.tokenType === RegistryTokenType.SERVICE ? "error" : "info"}
+                          sx={{ typography: "caption", "& .MuiChip-icon": { ml: 0.75, mr: 0.5 }, "& .MuiChip-label": { pl: 0.5 } }}
+                        />
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {formatRegistryTokenTimestamp(token.expiresAt)}
+                          {token.createdFor ?? NULL_PLACEHOLDER}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {token.createdBy ?? NULL_PLACEHOLDER}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {formatRegistryTokenIsoDate(token.creationTime ?? token.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -441,9 +473,6 @@ export default function SettingsRegistryTokens({
                           variant="outlined"
                           sx={{ typography: "caption" }}
                         />
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="body2">{NULL_PLACEHOLDER}</Typography>
                       </TableCell>
                       <TableCell align="right">
                         <Tooltip
