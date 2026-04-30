@@ -16,6 +16,8 @@
 
 import {
   Box,
+  IconButton,
+  InputAdornment,
   LinearProgress,
   Skeleton,
   TextField,
@@ -35,7 +37,7 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import ProjectCard from "@features/project-hub/components/ProjectCard";
 import ProjectCardSkeleton from "@features/project-hub/components/project-card/ProjectCardSkeleton";
-import { FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
+import { FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
@@ -514,6 +516,13 @@ export default function ProjectHub(): JSX.Element {
                     startAdornment: (
                       <Search size={20} style={{ marginRight: 8 }} />
                     ),
+                    endAdornment: searchQuery ? (
+                      <InputAdornment position="end">
+                        <IconButton size="small" edge="end" onClick={() => setSearchQuery("")}>
+                          <X size={16} />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : undefined,
                   }}
                   size="small"
                 />

@@ -47,6 +47,7 @@ import {
   Server,
   Trash2,
   User,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
 import TabBar from "@components/tab-bar/TabBar";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
@@ -227,6 +228,13 @@ export default function SettingsRegistryTokens({
                 <Search size={18} color={theme.palette.text.secondary} />
               </InputAdornment>
             ),
+            endAdornment: searchQuery ? (
+              <InputAdornment position="end">
+                <IconButton size="small" edge="end" onClick={() => setSearchQuery("")}>
+                  <X size={16} />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
           }}
         />
         {/* Generate button: user token for all, service token for admins only */}
