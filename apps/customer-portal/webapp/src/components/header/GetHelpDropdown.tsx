@@ -37,6 +37,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 
 interface GetHelpMenuItem {
@@ -70,6 +71,7 @@ function GetHelpDropdownContent(): JSX.Element {
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
   const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
     useGetProjectFeatures(projectId || "");
   const areProjectFeaturesReady = !projectId || !!projectFeatures;
@@ -101,7 +103,8 @@ function GetHelpDropdownContent(): JSX.Element {
   const handleIssue = () => {
     handleClose();
     if (projectId) {
-      const noveraEnabled = selectedProject?.hasAgent ?? false;
+      const noveraEnabled =
+        projectDetails?.hasAgent ?? projectDetails?.account?.hasAgent ?? false;
       if (noveraEnabled) {
         navigate(`/projects/${projectId}/support/chat/describe-issue`);
       } else {
@@ -282,15 +285,15 @@ export default function GetHelpDropdown(): JSX.Element {
     () => flattenProjectPages(projectsData),
     [projectsData],
   );
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === projectId),
-    [projects, projectId],
-  );
+  const { data: projectDetails, isLoading: isProjectDetailsLoading } =
+    useGetProjectDetails(projectId || "");
   const isProjectsListBusy =
-    isProjectsLoading || (isProjectsFetching && projects.length === 0);
+    isProjectsLoading ||
+    (isProjectsFetching && projects.length === 0) ||
+    (!!projectId && isProjectDetailsLoading);
   if (
     !isProjectsListBusy &&
-    isProjectRestricted(selectedProject?.closureState)
+    isProjectRestricted(projectDetails?.closureState)
   ) {
     return <></>;
   }
