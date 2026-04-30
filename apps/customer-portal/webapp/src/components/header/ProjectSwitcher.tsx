@@ -41,6 +41,7 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import { PAGINATED_SELECT_MENU_MAX_HEIGHT_PX } from "@constants/common";
 import {
+  PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH,
   PROJECT_HUB_PROJECTS_PAGE_SIZE,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS,
   PROJECT_HUB_SEARCH_PLACEHOLDER,
@@ -258,7 +259,12 @@ export default function ProjectSwitcher({
             sx: { overflow: "hidden" },
           },
           MenuListProps: {
-            sx: { p: 0, overflow: "hidden" },
+            sx: {
+              p: 0,
+              maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX,
+              overflowY: "auto",
+            },
+            onScroll: handleMenuScroll as any,
           },
         }}
         renderValue={() => (
@@ -280,77 +286,78 @@ export default function ProjectSwitcher({
           </Box>
         )}
       >
-        {/* Search box — non-scrollable header, stops events from reaching the Select */}
-        <Box
-          sx={{
-            bgcolor: "background.paper",
-            px: 1,
-            pt: 1,
-            pb: 0.5,
-            borderBottom: "1px solid",
-            borderColor: "divider",
-          }}
-          onKeyDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <TextField
-            size="small"
-            fullWidth
-            placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <Search size={16} style={{ marginRight: 8, flexShrink: 0 }} />
-              ),
+        {/* Search box — sticky header, only shown when project count exceeds the minimum threshold */}
+        {unfilteredTotalRef.current > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && (
+          <Box
+            component="li"
+            sx={{
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+              bgcolor: "background.paper",
+              px: 1,
+              pt: 1,
+              pb: 0.5,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+              listStyle: "none",
             }}
-          />
-        </Box>
-
-        {/* Scrollable items container — sits below the search bar */}
-        <Box
-          sx={{ maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX, overflowY: "auto" }}
-          onScroll={handleMenuScroll}
-        >
-          {/* Skeleton items shown while a new search query loads (keeps dropdown open) */}
-          {isLoading &&
-            [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
-              <Box key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%" }}>
-                <Skeleton variant="rounded" width="100%" height={40} />
-              </Box>
-            ))}
-
-          {/* Project list items */}
-          {!isLoading &&
-            projects.map((project) => (
-              <ComplexSelect.MenuItem key={project.id} value={project.id}>
-                <ComplexSelect.MenuItem.Text
-                  primary={project.name}
-                  secondary={project.key}
-                />
-              </ComplexSelect.MenuItem>
-            ))}
-
-          {/* Spinner row while the next page loads on scroll */}
-          {!isLoading && (
-            <SelectMenuLoadMoreRow
-              visible={Boolean(isFetchingNextPage && projects.length > 0)}
+            onKeyDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <TextField
+              size="small"
+              fullWidth
+              placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <Search size={16} style={{ marginRight: 8, flexShrink: 0 }} />
+                ),
+              }}
             />
-          )}
+          </Box>
+        )}
 
-          {/* Empty search result */}
-          {!isLoading &&
-            !isFetchingNextPage &&
-            projects.length === 0 &&
-            Boolean(debouncedSearchQuery) && (
-              <Box sx={{ px: 2, py: 1.5, textAlign: "center" }}>
-                <Typography variant="body2" color="text.secondary">
-                  No projects found
-                </Typography>
-              </Box>
-            )}
-        </Box>
+        {/* Skeleton items shown while a new search query loads (keeps dropdown open) */}
+        {isLoading &&
+          [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
+            <Box component="li" key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%", listStyle: "none" }}>
+              <Skeleton variant="rounded" width="100%" height={40} />
+            </Box>
+          ))}
+
+        {/* Project list items — direct children so MUI wires up click handlers */}
+        {!isLoading &&
+          projects.map((project) => (
+            <ComplexSelect.MenuItem key={project.id} value={project.id}>
+              <ComplexSelect.MenuItem.Text
+                primary={project.name}
+                secondary={project.key}
+              />
+            </ComplexSelect.MenuItem>
+          ))}
+
+        {/* Spinner row while the next page loads on scroll */}
+        {!isLoading && (
+          <SelectMenuLoadMoreRow
+            visible={Boolean(isFetchingNextPage && projects.length > 0)}
+          />
+        )}
+
+        {/* Empty search result */}
+        {!isLoading &&
+          !isFetchingNextPage &&
+          projects.length === 0 &&
+          Boolean(debouncedSearchQuery) && (
+            <Box component="li" sx={{ px: 2, py: 1.5, textAlign: "center", listStyle: "none" }}>
+              <Typography variant="body2" color="text.secondary">
+                No projects found
+              </Typography>
+            </Box>
+          )}
       </ComplexSelect>
     </HeaderUI.Switchers>
   );
