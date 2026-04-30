@@ -36,6 +36,7 @@ import {
   scrollElement,
   INSERT_IMAGE_COMMAND,
 } from "@features/support/utils/richTextEditor";
+import { ALLOWED_INLINE_IMAGE_MIME_TYPES } from "@features/support/constants/supportConstants";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {
@@ -217,7 +218,13 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
  * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
  */
-const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): null => {
+const ClipboardImagePlugin = ({
+  onPasteError,
+  onImageTypeError,
+}: {
+  onPasteError?: () => void;
+  onImageTypeError?: () => void;
+}): null => {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -232,6 +239,11 @@ const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): 
           if (!file) continue;
 
           event.preventDefault();
+
+          if (!ALLOWED_INLINE_IMAGE_MIME_TYPES.has(item.type)) {
+            onImageTypeError?.();
+            break;
+          }
 
           if (file.size > MAX_PASTE_IMAGE_SIZE) {
             onPasteError?.();
@@ -319,6 +331,7 @@ const Editor = ({
   onBlur,
   overlayElement,
   onPasteError,
+  onInlineImageTypeError,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -342,6 +355,7 @@ const Editor = ({
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
   onPasteError?: () => void;
+  onInlineImageTypeError?: () => void;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -517,7 +531,7 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin onPasteError={onPasteError} />
+          <ClipboardImagePlugin onPasteError={onPasteError} onImageTypeError={onInlineImageTypeError} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
