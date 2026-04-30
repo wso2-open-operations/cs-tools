@@ -67,14 +67,22 @@ export function usePostComment(): UseMutationResult<
         throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
       }
 
+      const serializedBody = JSON.stringify({
+        content: body.content,
+        type: body.type,
+      });
+      const payloadBytes = new TextEncoder().encode(serializedBody).length;
+      const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+      if (payloadBytes > MAX_PAYLOAD_BYTES) {
+        throw new Error(
+          "The comment exceeds the 10 MB limit. Please reduce the size or the number of inline images and try again.",
+        );
+      }
+
       const requestUrl = `${baseUrl}/cases/${caseId}/comments`;
       const response = await authFetch(requestUrl, {
         method: "POST",
-
-        body: JSON.stringify({
-          content: body.content,
-          type: body.type,
-        }),
+        body: serializedBody,
       });
 
       logger.debug("[usePostComment] Response status:", response.status);
