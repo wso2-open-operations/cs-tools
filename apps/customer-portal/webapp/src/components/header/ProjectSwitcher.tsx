@@ -28,8 +28,8 @@ import {
 import { ChevronDown, ChevronUp, FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
+  useEffect,
   useMemo,
-  useRef,
   useState,
   type JSX,
   type MouseEvent,
@@ -98,18 +98,24 @@ export default function ProjectSwitcher({
   const totalRecords = getTotalRecords(data);
 
   // Track the true unfiltered total so the single-project check isn't misled by a search-filtered count.
-  const unfilteredTotalRef = useRef(0);
-  if (!debouncedSearchQuery) {
-    unfilteredTotalRef.current = totalRecords;
-  }
+  const [unfilteredTotal, setUnfilteredTotal] = useState(0);
+  useEffect(() => {
+    if (!debouncedSearchQuery && !isLoading) {
+      setUnfilteredTotal(totalRecords);
+    }
+  }, [debouncedSearchQuery, isLoading, totalRecords]);
 
   // Persist the last known selected project name across search queries (projects list empties while loading)
-  const lastFoundRef = useRef<{ id: string; name: string } | undefined>(undefined);
-  const selectedProject = useMemo(() => {
+  const [lastFound, setLastFound] = useState<{ id: string; name: string } | undefined>(undefined);
+  useEffect(() => {
     const found = projects.find((p) => p.id === projectId);
-    if (found) lastFoundRef.current = { id: found.id, name: found.name };
-    return found;
+    if (found) setLastFound({ id: found.id, name: found.name });
   }, [projects, projectId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId),
+    [projects, projectId],
+  );
 
   // Project details from React Query cache — populated by the dashboard's useGetProjectDetails call
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
@@ -117,9 +123,7 @@ export default function ProjectSwitcher({
   // Best display name: live list → last found while searching → project details API → fallback
   const displayName =
     selectedProject?.name ??
-    (lastFoundRef.current?.id === projectId
-      ? lastFoundRef.current?.name
-      : undefined) ??
+    (lastFound?.id === projectId ? lastFound?.name : undefined) ??
     projectDetails?.name ??
     "Select Project";
 
@@ -208,7 +212,7 @@ export default function ProjectSwitcher({
     );
   }
 
-  if (!isMenuOpen && !isLoading && unfilteredTotalRef.current <= 1) {
+  if (!isMenuOpen && !isLoading && unfilteredTotal <= 1) {
     const project = selectedProject ?? projects[0];
 
     return (
@@ -305,7 +309,7 @@ export default function ProjectSwitcher({
         }}
       >
         {/* Fixed search bar — never scrolls */}
-        {unfilteredTotalRef.current > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && (
+        {unfilteredTotal > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && (
           <Box
             sx={{
               flexShrink: 0,
