@@ -86,9 +86,7 @@ export function shouldHideProjectHubHeaderBlock(
 ): boolean {
   return (
     isError ||
-    (!isLoading &&
-      !isAuthLoading &&
-      projectsLength === 0 &&
-      !searchQuery.trim())
+    isLoading ||
+    (!isAuthLoading && projectsLength === 0 && !searchQuery.trim())
   );
 }
