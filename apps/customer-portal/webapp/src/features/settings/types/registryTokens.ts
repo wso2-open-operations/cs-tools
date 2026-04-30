@@ -43,6 +43,7 @@ export type RegistryToken = AuditMetadata & {
 // Response type for creating a registry token.
 export type RegistryTokenCreationResponse = {
   secret: string;
+  name?: string;
 };
 
 // Request type for creating a registry token.

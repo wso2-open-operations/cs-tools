@@ -50,6 +50,7 @@ export default function GenerateTokenModal({
   projectId,
   tokenType,
   isAdmin,
+  existingTokenNames = [],
 }: GenerateTokenModalProps): JSX.Element {
   const [robotName, setRobotName] = useState("");
   const [robotNameError, setRobotNameError] = useState<string | null>(null);
@@ -59,6 +60,7 @@ export default function GenerateTokenModal({
   const [createdForError, setCreatedForError] = useState<string | null>(null);
 
   const [secret, setSecret] = useState<string | null>(null);
+  const [fullTokenName, setFullTokenName] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [copiedName, setCopiedName] = useState(false);
@@ -74,6 +76,8 @@ export default function GenerateTokenModal({
     if (!value.trim()) return "Token name is required.";
     if (!REGISTRY_TOKEN_ROBOT_NAME_REGEX.test(value))
       return "Only lowercase letters, numbers, and dashes are allowed.";
+    if (existingTokenNames.some((n) => n.toLowerCase() === value.trim().toLowerCase()))
+      return "A token with this name already exists.";
     return null;
   }
 
@@ -101,6 +105,7 @@ export default function GenerateTokenModal({
       {
         onSuccess: (data) => {
           setSecret(data.secret);
+          setFullTokenName(data.name ?? null);
         },
       },
     );
@@ -113,6 +118,7 @@ export default function GenerateTokenModal({
     setSelectedUser(null);
     setCreatedForError(null);
     setSecret(null);
+    setFullTokenName(null);
     setShowSecret(false);
     setCopiedSecret(false);
     setCopiedName(false);
@@ -165,14 +171,14 @@ export default function GenerateTokenModal({
             <TextField
               label="Token Name"
               fullWidth
-              value={robotName}
+              value={fullTokenName ?? robotName}
               InputProps={{
                 readOnly: true,
                 endAdornment: (
                   <InputAdornment position="end">
                     <IconButton
                       size="small"
-                      onClick={() => handleCopy(robotName, "name")}
+                      onClick={() => handleCopy(fullTokenName ?? robotName, "name")}
                       color={copiedName ? "success" : "default"}
                       aria-label="Copy token name"
                     >
@@ -243,8 +249,7 @@ export default function GenerateTokenModal({
               onChange={(e) => {
                 const value = e.target.value.toLowerCase();
                 setRobotName(value);
-                if (robotNameError)
-                  setRobotNameError(validateRobotName(value));
+                setRobotNameError(validateRobotName(value));
               }}
               onBlur={() => setRobotNameError(validateRobotName(robotName))}
               error={!!robotNameError}
@@ -319,7 +324,7 @@ export default function GenerateTokenModal({
               variant="contained"
               color="warning"
               onClick={handleGenerate}
-              disabled={createMutation.isPending}
+              disabled={createMutation.isPending || !!robotNameError || (tokenType === RegistryTokenType.SERVICE && !selectedUser)}
               startIcon={
                 createMutation.isPending ? (
                   <CircularProgress size={16} color="inherit" />

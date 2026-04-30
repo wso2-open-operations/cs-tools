@@ -578,6 +578,7 @@ export default function SettingsRegistryTokens({
             : RegistryTokenType.USER
         }
         isAdmin={isAdmin}
+        existingTokenNames={allTokens.map((t) => t.displayName ?? t.name)}
       />
 
       <DeleteTokenModal
