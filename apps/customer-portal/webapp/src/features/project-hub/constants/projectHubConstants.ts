@@ -21,7 +21,7 @@ export const PROJECT_HUB_SEARCH_DEBOUNCE_MS = 300;
 export const PROJECT_HUB_PROJECTS_PAGE_SIZE = 20;
 
 /** Show the search bar when the user has more than this many projects. */
-export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 1;
+export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 5;
 
 /** Skeleton cards shown while loading the hub grid. */
 export const PROJECT_HUB_SKELETON_CARD_COUNT = 3;
