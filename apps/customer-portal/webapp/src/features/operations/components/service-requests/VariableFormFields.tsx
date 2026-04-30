@@ -446,7 +446,7 @@ export default function VariableFormFields({
                         if (!f) continue;
                         if (!isAllowedAttachment(f)) {
                           showError(
-                            `"${f.name}" is not a supported file type. Supported types: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, ZIP, JSON, XML, TXT, CSV, JPG, PNG, WebP, SH, HAR.`,
+                            `"${f.name}" is not supported. Only pdf, doc, docx, xls, xlsx, ppt, pptx, zip, json, xml, txt, csv, jpg, jpeg, png, webp, sh, and har file types are supported.`,
                           );
                           continue;
                         }
