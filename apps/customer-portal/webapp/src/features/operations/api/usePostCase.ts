@@ -68,19 +68,29 @@ export function usePostCase(): UseMutationResult<
           throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
         }
 
+        const serializedBody = JSON.stringify(body);
+        const payloadBytes = new TextEncoder().encode(serializedBody).length;
+        const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+        if (payloadBytes > MAX_PAYLOAD_BYTES) {
+          throw new Error(
+            "The case description exceeds the 10 MB limit. Please reduce the size or the number of inline images and try again.",
+          );
+        }
+
         const requestUrl = `${baseUrl}/cases`;
 
         const response = await authFetch(requestUrl, {
           method: "POST",
-
-          body: JSON.stringify(body),
+          body: serializedBody,
         });
 
         logger.debug(`[usePostCase] Response status: ${response.status}`);
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
+          throw new Error(
+            parseApiResponseMessage(text, response.status, response.statusText),
+          );
         }
 
         const data: CreateCaseResponse = await response.json();
