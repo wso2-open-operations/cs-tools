@@ -98,7 +98,7 @@ export default function ListSearchPanel({
       isFiltersOpen={isFiltersOpen}
       onFiltersToggle={onFiltersToggle}
       activeFiltersCount={countListSearchAndFilters(
-        searchTerm,
+        "",
         filtersForCount,
       )}
       onClearFilters={onClearFilters}

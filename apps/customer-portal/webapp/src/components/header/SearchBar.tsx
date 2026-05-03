@@ -16,13 +16,14 @@
 
 import {
   Box,
+  IconButton,
   InputAdornment,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Search } from "@wso2/oxygen-ui-icons-react";
+import { Search, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
   useRef,
@@ -331,6 +332,20 @@ export default function SearchBar({
                 <Search size={16} />
               </InputAdornment>
             ),
+            endAdornment: searchValue ? (
+              <InputAdornment position="end">
+                <IconButton
+                  size="small"
+                  edge="end"
+                  onClick={() => {
+                    setSearchValue("");
+                    setIsDropdownOpen(false);
+                  }}
+                >
+                  <X size={16} />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
           },
         }}
         sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}

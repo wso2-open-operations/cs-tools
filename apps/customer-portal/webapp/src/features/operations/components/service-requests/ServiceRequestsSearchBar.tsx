@@ -17,11 +17,12 @@
 import {
   Box,
   Button,
+  IconButton,
+  InputAdornment,
   Paper,
   TextField,
-  InputAdornment,
 } from "@wso2/oxygen-ui";
-import { RotateCcw, Search } from "@wso2/oxygen-ui-icons-react";
+import { RotateCcw, Search, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ChangeEvent } from "react";
 
 /** Status bucket filter for the legacy Service Requests search bar (tabs). */
@@ -110,6 +111,13 @@ export default function ServiceRequestsSearchBar({
                     <Search size={16} />
                   </InputAdornment>
                 ),
+                endAdornment: searchTerm ? (
+                  <InputAdornment position="end">
+                    <IconButton size="small" edge="end" onClick={() => onSearchChange("")}>
+                      <X size={16} />
+                    </IconButton>
+                  </InputAdornment>
+                ) : undefined,
               },
             }}
           />

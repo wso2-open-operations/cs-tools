@@ -391,6 +391,26 @@ function UpdateDetailCard({
                       title="Description"
                       content={advisory.description}
                     />
+                    {advisory.impact && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <UpdateSection title="Impact" content={advisory.impact} />
+                      </Box>
+                    )}
+                    {advisory.solution && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <UpdateSection title="Solution" content={advisory.solution} />
+                      </Box>
+                    )}
+                    {advisory.notes && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <UpdateSection title="Notes" content={advisory.notes} />
+                      </Box>
+                    )}
+                    {advisory.credits && advisory.credits !== "-" && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <UpdateSection title="Credits" content={advisory.credits} />
+                      </Box>
+                    )}
                   </Box>
                 ))}
               </Box>

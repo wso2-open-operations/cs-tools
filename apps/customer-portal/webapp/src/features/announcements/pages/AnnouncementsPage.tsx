@@ -150,7 +150,7 @@ export default function AnnouncementsPage(): JSX.Element {
         onSearchChange={handleSearchChange}
         isFiltersOpen={isFiltersOpen}
         onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
+        activeFiltersCount={countListSearchAndFilters("", filters)}
         onClearFilters={handleClearFilters}
         filtersContent={
           <ListFiltersPanel

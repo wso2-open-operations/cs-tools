@@ -18,6 +18,7 @@ import {
   Box,
   Button,
   Divider,
+  IconButton,
   InputAdornment,
   Paper,
   Skeleton,
@@ -102,6 +103,13 @@ export default function ListSearchBar({
                     <Search size={16} />
                   </InputAdornment>
                 ),
+                endAdornment: searchTerm ? (
+                  <InputAdornment position="end">
+                    <IconButton size="small" edge="end" onClick={() => onSearchChange("")}>
+                      <X size={16} />
+                    </IconButton>
+                  </InputAdornment>
+                ) : undefined,
               },
             }}
           />

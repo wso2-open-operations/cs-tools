@@ -189,7 +189,8 @@ export default function DashboardPage(): JSX.Element {
   );
 
   // has agent
-  const hasAgent = resolvedProject?.hasAgent ?? false;
+  const hasAgent =
+    projectDetails?.hasAgent ?? projectDetails?.account?.hasAgent ?? false;
 
   // include CR stats
   const includeCrStats = permissions.includeChangeRequestsInDashboardTotals;

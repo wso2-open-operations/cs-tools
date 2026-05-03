@@ -511,6 +511,55 @@ export type CommentType = (typeof CommentType)[keyof typeof CommentType];
 // Line count threshold for showing expand button in support activity section.
 export const COLLAPSE_LINE_THRESHOLD = 4;
 
+// Allowed MIME types for attachment file uploads.
+export const ALLOWED_ATTACHMENT_MIME_TYPES: ReadonlySet<string> = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip",
+  "application/json",
+  "application/xml",
+  "text/plain",
+  "text/csv",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/x-sh",
+  "application/x-har",
+]);
+
+// Allowed file extensions for attachment uploads (fallback when MIME type is empty or unreliable).
+export const ALLOWED_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "zip", "json", "xml", "txt", "csv",
+  "jpg", "jpeg", "png", "webp", "sh", "har",
+]);
+
+// accept attribute value for the attachment file input element.
+export const ALLOWED_ATTACHMENT_ACCEPT =
+  ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.xml,.txt,.csv,.jpg,.jpeg,.png,.webp,.sh,.har";
+
+// Allowed MIME types for inline images in the rich text editor.
+export const ALLOWED_INLINE_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+// accept attribute value for the inline image file input element.
+export const ALLOWED_INLINE_IMAGE_ACCEPT = ".jpg,.jpeg,.png,.webp";
+
+/** Returns true if the file is an allowed attachment type (checks MIME type then extension). */
+export function isAllowedAttachment(file: File): boolean {
+  if (ALLOWED_ATTACHMENT_MIME_TYPES.has(file.type)) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ALLOWED_ATTACHMENT_EXTENSIONS.has(ext);
+}
+
 // Case type input.
 export type CaseTypeInput = CaseTypeObject | string | null | undefined;
 

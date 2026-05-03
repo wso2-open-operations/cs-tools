@@ -16,20 +16,23 @@
 
 import {
   Box,
-  ComplexSelect,
   Header as HeaderUI,
+  MenuItem,
+  Paper,
+  Popover,
   Skeleton,
   TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, ChevronUp, FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
+  useEffect,
   useMemo,
-  useRef,
   useState,
   type JSX,
+  type MouseEvent,
   type UIEvent,
 } from "react";
 import useInfiniteProjects, {
@@ -41,6 +44,7 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
 import { PAGINATED_SELECT_MENU_MAX_HEIGHT_PX } from "@constants/common";
 import {
+  PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH,
   PROJECT_HUB_PROJECTS_PAGE_SIZE,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS,
   PROJECT_HUB_SEARCH_PLACEHOLDER,
@@ -70,7 +74,9 @@ export default function ProjectSwitcher({
   isAuthLoading = false,
 }: ProjectSwitcherProps): JSX.Element {
   const [searchQuery, setSearchQuery] = useState("");
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const isMenuOpen = Boolean(anchorEl);
+
   const debouncedSearchQuery = useDebouncedValue(
     searchQuery,
     PROJECT_HUB_SEARCH_DEBOUNCE_MS,
@@ -92,18 +98,24 @@ export default function ProjectSwitcher({
   const totalRecords = getTotalRecords(data);
 
   // Track the true unfiltered total so the single-project check isn't misled by a search-filtered count.
-  const unfilteredTotalRef = useRef(0);
-  if (!debouncedSearchQuery) {
-    unfilteredTotalRef.current = totalRecords;
-  }
+  const [unfilteredTotal, setUnfilteredTotal] = useState(0);
+  useEffect(() => {
+    if (!debouncedSearchQuery && !isLoading) {
+      setUnfilteredTotal(totalRecords);
+    }
+  }, [debouncedSearchQuery, isLoading, totalRecords]);
 
   // Persist the last known selected project name across search queries (projects list empties while loading)
-  const lastFoundRef = useRef<{ id: string; name: string } | undefined>(undefined);
-  const selectedProject = useMemo(() => {
+  const [lastFound, setLastFound] = useState<{ id: string; name: string } | undefined>(undefined);
+  useEffect(() => {
     const found = projects.find((p) => p.id === projectId);
-    if (found) lastFoundRef.current = { id: found.id, name: found.name };
-    return found;
+    if (found) setLastFound({ id: found.id, name: found.name });
   }, [projects, projectId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId),
+    [projects, projectId],
+  );
 
   // Project details from React Query cache — populated by the dashboard's useGetProjectDetails call
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
@@ -111,9 +123,7 @@ export default function ProjectSwitcher({
   // Best display name: live list → last found while searching → project details API → fallback
   const displayName =
     selectedProject?.name ??
-    (lastFoundRef.current?.id === projectId
-      ? lastFoundRef.current?.name
-      : undefined) ??
+    (lastFound?.id === projectId ? lastFound?.name : undefined) ??
     projectDetails?.name ??
     "Select Project";
 
@@ -133,9 +143,12 @@ export default function ProjectSwitcher({
     [hasNextPage, isFetchingNextPage, fetchNextPage],
   );
 
-  const handleOpen = useCallback(() => setIsMenuOpen(true), []);
+  const handleOpen = useCallback((event: MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  }, []);
+
   const handleClose = useCallback(() => {
-    setIsMenuOpen(false);
+    setAnchorEl(null);
     setSearchQuery("");
   }, []);
 
@@ -151,7 +164,7 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "action.disabledBackground",
-            borderRadius: 0,
+            borderRadius: 1,
           }}
         >
           <FolderOpen size={16} />
@@ -189,7 +202,7 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "error.main",
-            borderRadius: 0,
+            borderRadius: 1,
             color: "error.main",
           }}
         >
@@ -199,7 +212,7 @@ export default function ProjectSwitcher({
     );
   }
 
-  if (!isMenuOpen && !isLoading && unfilteredTotalRef.current <= 1) {
+  if (!isMenuOpen && !isLoading && unfilteredTotal <= 1) {
     const project = selectedProject ?? projects[0];
 
     return (
@@ -214,7 +227,7 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "divider",
-            borderRadius: 0,
+            borderRadius: 1,
             backgroundColor: "background.paper",
           }}
         >
@@ -239,81 +252,105 @@ export default function ProjectSwitcher({
 
   return (
     <HeaderUI.Switchers showDivider={false}>
-      <ComplexSelect
-        value={projectId || ""}
-        onChange={(event: any) => onProjectChange(event.target.value)}
-        onOpen={handleOpen}
-        onClose={handleClose}
-        size="small"
+      {/* Trigger button — styled to match the other switcher states */}
+      <Paper
+        onClick={handleOpen}
         sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          height: 40,
           minWidth: 200,
-          "& .MuiOutlinedInput-root": {
-            "& fieldset": { borderColor: "divider" },
-            "&:hover fieldset": { borderColor: "action.active" },
-            "&.Mui-focused fieldset": { borderColor: "primary.main" },
+          px: 1.5,
+          cursor: "pointer",
+          border: "1px solid",
+          borderColor: isMenuOpen ? "primary.main" : "divider",
+          userSelect: "none",
+          "&:hover": { borderColor: "action.active" },
+        }}
+      >
+        <FolderOpen size={16} />
+        <Tooltip title={displayName}>
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{
+              flex: 1,
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {displayName}
+          </Typography>
+        </Tooltip>
+        {isMenuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </Paper>
+
+      {/* Dropdown — Popover gives us full layout control: fixed search bar + scrollable items */}
+      <Popover
+        open={isMenuOpen}
+        anchorEl={anchorEl}
+        onClose={handleClose}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "left" }}
+        disableAutoFocus
+        disableEnforceFocus
+        slotProps={{
+          paper: {
+            sx: {
+              minWidth: anchorEl ? anchorEl.offsetWidth : 200,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              mt: 0.5,
+            },
           },
         }}
-        MenuProps={{
-          PaperProps: {
-            sx: { overflow: "hidden" },
-          },
-          MenuListProps: {
-            sx: { p: 0, overflow: "hidden" },
-          },
-        }}
-        renderValue={() => (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <FolderOpen size={16} />
-            <Tooltip title={displayName}>
-              <Typography
-                variant="body2"
-                noWrap
-                sx={{
-                  maxWidth: 220,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {displayName}
-              </Typography>
-            </Tooltip>
+      >
+        {/* Fixed search bar — never scrolls */}
+        {unfilteredTotal > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && (
+          <Box
+            sx={{
+              flexShrink: 0,
+              px: 1,
+              pt: 1,
+              pb: 0.5,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+            }}
+          >
+            <TextField
+              size="small"
+              fullWidth
+              autoFocus
+              placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <Search size={16} style={{ marginRight: 8, flexShrink: 0 }} />
+                ),
+              }}
+              inputProps={{ autoComplete: "off" }}
+              sx={{
+                "& input:-webkit-autofill, & input:-webkit-autofill:hover, & input:-webkit-autofill:focus": {
+                  WebkitBoxShadow: "0 0 0 100px transparent inset",
+                  WebkitTextFillColor: "inherit",
+                  transition: "background-color 5000s ease-in-out 0s",
+                },
+              }}
+            />
           </Box>
         )}
-      >
-        {/* Search box — non-scrollable header, stops events from reaching the Select */}
-        <Box
-          sx={{
-            bgcolor: "background.paper",
-            px: 1,
-            pt: 1,
-            pb: 0.5,
-            borderBottom: "1px solid",
-            borderColor: "divider",
-          }}
-          onKeyDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <TextField
-            size="small"
-            fullWidth
-            placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <Search size={16} style={{ marginRight: 8, flexShrink: 0 }} />
-              ),
-            }}
-          />
-        </Box>
 
         {/* Scrollable items container — sits below the search bar */}
         <Box
           sx={{ maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX, overflowY: "auto" }}
           onScroll={handleMenuScroll}
         >
-          {/* Skeleton items shown while a new search query loads (keeps dropdown open) */}
+          {/* Skeleton items shown while a new search query loads */}
           {isLoading &&
             [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
               <Box key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%" }}>
@@ -324,12 +361,20 @@ export default function ProjectSwitcher({
           {/* Project list items */}
           {!isLoading &&
             projects.map((project) => (
-              <ComplexSelect.MenuItem key={project.id} value={project.id}>
-                <ComplexSelect.MenuItem.Text
-                  primary={project.name}
-                  secondary={project.key}
-                />
-              </ComplexSelect.MenuItem>
+              <MenuItem
+                key={project.id}
+                selected={project.id === projectId}
+                onClick={() => {
+                  onProjectChange(project.id);
+                  handleClose();
+                }}
+                sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+              >
+                <Typography variant="body2">{project.name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {project.key}
+                </Typography>
+              </MenuItem>
             ))}
 
           {/* Spinner row while the next page loads on scroll */}
@@ -351,7 +396,7 @@ export default function ProjectSwitcher({
               </Box>
             )}
         </Box>
-      </ComplexSelect>
+      </Popover>
     </HeaderUI.Switchers>
   );
 }

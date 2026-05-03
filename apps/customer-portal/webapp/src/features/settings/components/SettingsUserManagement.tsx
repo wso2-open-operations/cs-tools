@@ -43,6 +43,7 @@ import {
   Search,
   Shield,
   Trash2,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import { usePostProjectContact } from "@features/settings/api/usePostProjectContact";
@@ -204,6 +205,13 @@ export default function SettingsUserManagement({
                 <Search size={18} color={theme.palette.text.secondary} />
               </InputAdornment>
             ),
+            endAdornment: searchQuery ? (
+              <InputAdornment position="end">
+                <IconButton size="small" edge="end" onClick={() => setSearchQuery("")}>
+                  <X size={16} />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
           }}
         />
         {canAddOrRemoveUsers && (

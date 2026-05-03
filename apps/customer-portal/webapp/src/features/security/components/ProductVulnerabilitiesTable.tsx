@@ -200,8 +200,8 @@ const ProductVulnerabilitiesTable = ({
   };
 
   const activeFilterCount = useMemo(
-    () => countProductVulnerabilityTableActiveFilters(searchInput, filters),
-    [filters, searchInput],
+    () => countProductVulnerabilityTableActiveFilters("", filters),
+    [filters],
   );
 
   // ── Render ───────────────────────────────────────────────────────────────────

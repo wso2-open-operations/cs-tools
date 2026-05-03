@@ -29,6 +29,7 @@ import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
  * @param isLoading - Projects query loading.
  * @param isError - Projects query failed.
  * @param projectsLength - Length of the current flattened projects list.
+ * @param isCheckingAllSuspended - Background-paginating to confirm all projects are suspended.
  * @returns {ProjectHubContentView} View id for the hub body.
  */
 export function resolveProjectHubContentView(
@@ -37,6 +38,7 @@ export function resolveProjectHubContentView(
   isLoading: boolean,
   isError: boolean,
   projectsLength: number,
+  isCheckingAllSuspended: boolean = false,
 ): ProjectHubContentView {
   if (isRedirectingToSingleProject) {
     return ProjectHubContentView.REDIRECT_LOADER;
@@ -44,7 +46,7 @@ export function resolveProjectHubContentView(
   if (isAuthLoading) {
     return ProjectHubContentView.AUTH_PENDING;
   }
-  if (isLoading) {
+  if (isLoading || isCheckingAllSuspended) {
     return ProjectHubContentView.LOADING_SKELETONS;
   }
   if (isError) {
@@ -84,11 +86,10 @@ export function shouldHideProjectHubHeaderBlock(
   projectsLength: number,
   searchQuery: string,
 ): boolean {
+  const trimmedSearch = searchQuery.trim();
   return (
     isError ||
-    (!isLoading &&
-      !isAuthLoading &&
-      projectsLength === 0 &&
-      !searchQuery.trim())
+    (isLoading && !trimmedSearch) ||
+    (!isAuthLoading && projectsLength === 0 && !trimmedSearch)
   );
 }

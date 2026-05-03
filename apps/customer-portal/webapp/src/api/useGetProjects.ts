@@ -138,7 +138,7 @@ export default function useInfiniteProjects({
       return totalFetched;
     },
     initialPageParam: 0,
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

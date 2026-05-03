@@ -77,6 +77,8 @@ import { mergeRegister } from "@lexical/utils";
 import {
   MAX_IMAGE_SIZE_BYTES,
   RICH_TEXT_BLOCK_TAGS,
+  ALLOWED_INLINE_IMAGE_MIME_TYPES,
+  ALLOWED_INLINE_IMAGE_ACCEPT,
 } from "@features/support/constants/supportConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
@@ -239,6 +241,13 @@ const Toolbar = ({
       const resetInput = () => {
         if (imageInputRef.current) imageInputRef.current.value = "";
       };
+      if (!ALLOWED_INLINE_IMAGE_MIME_TYPES.has(file.type)) {
+        showError(
+          `Image "${file.name}" is not a supported type. Only jpg, jpeg, png, and webp images can be inserted inline.`,
+        );
+        resetInput();
+        return;
+      }
       if (file.size > MAX_IMAGE_SIZE_BYTES) {
         showError(
           `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
@@ -587,8 +596,7 @@ const Toolbar = ({
               size="small"
               value="left"
               selected={
-                elementAlign === "left" ||
-                (elementAlign === "" && hasContent)
+                elementAlign === "left" || (elementAlign === "" && hasContent)
               }
               onClick={() => onFormatAlign("left")}
             >
@@ -777,7 +785,7 @@ const Toolbar = ({
                     ref={imageInputRef}
                     type="file"
                     hidden
-                    accept="image/*"
+                    accept={ALLOWED_INLINE_IMAGE_ACCEPT}
                     onChange={onImageUpload}
                   />
                 </ToggleButton>
@@ -838,7 +846,11 @@ const Toolbar = ({
             <Typography
               component="span"
               variant="caption"
-              sx={{ color: "text.secondary", whiteSpace: "nowrap", lineHeight: 1.4 }}
+              sx={{
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+                lineHeight: 1.4,
+              }}
             >
               <Typography component="span" variant="caption" fontWeight={600}>
                 Shift+Enter
@@ -853,7 +865,11 @@ const Toolbar = ({
             <Typography
               component="span"
               variant="caption"
-              sx={{ color: "text.secondary", whiteSpace: "nowrap", lineHeight: 1.4 }}
+              sx={{
+                color: "text.secondary",
+                whiteSpace: "nowrap",
+                lineHeight: 1.4,
+              }}
             >
               <Typography component="span" variant="caption" fontWeight={600}>
                 Shift+Enter

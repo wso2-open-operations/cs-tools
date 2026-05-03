@@ -120,6 +120,7 @@ export type GenerateTokenModalProps = {
   projectId: string;
   tokenType: RegistryTokenType;
   isAdmin: boolean;
+  existingTokenNames?: string[];
 };
 
 export type DeleteTokenModalProps = {

@@ -301,7 +301,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
           onSearchChange={handleSearchChange}
           isFiltersOpen={isFiltersOpen}
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-          activeFiltersCount={countListSearchAndFilters(searchTerm, filters)}
+          activeFiltersCount={countListSearchAndFilters("", filters)}
           onClearFilters={handleClearFilters}
           filtersContent={
             <ListFiltersPanel
