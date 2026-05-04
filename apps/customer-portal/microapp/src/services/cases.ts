@@ -15,7 +15,7 @@
 // under the License.
 
 import apiClient from "@src/services/apiClient";
-import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
   CaseSummary,
   CaseClassificationRequestDto,
@@ -195,7 +195,7 @@ export function toComment(dto: CommentDto): Comment {
 export function toAttachment(dto: AttachmentDto): Attachment {
   return {
     id: dto.id,
-    type: /^image\//.test(dto.type) ? "image" : "others",
+    type: /^image\//.test(dto.type) ? "image" : dto.type === "application/pdf" ? "pdf" : "others",
     fileName: dto.name,
     downloadUrl: dto.downloadUrl,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
@@ -260,5 +260,9 @@ export const cases = {
   attachments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
     queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id, body) }),
 
-  attachment: (id: string) => queryOptions({ queryKey: ["attachment", id], queryFn: () => getAttachment(id) }),
+  attachment: (id: string | undefined) =>
+    queryOptions<{ content: string }>({
+      queryKey: ["attachment", id],
+      queryFn: id ? () => getAttachment(id) : skipToken,
+    }),
 };
