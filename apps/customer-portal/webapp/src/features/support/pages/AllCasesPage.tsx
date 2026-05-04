@@ -232,14 +232,9 @@ export default function AllCasesPage(): JSX.Element {
 
   const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
-  const filteredAndSearchedCases = useMemo(
-    () => currentPageCases,
-    [currentPageCases],
-  );
+  const totalItems = apiTotalRecords || currentPageCases.length;
 
-  const totalItems = apiTotalRecords || filteredAndSearchedCases.length;
-
-  const paginatedCases = filteredAndSearchedCases;
+  const paginatedCases = currentPageCases;
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
