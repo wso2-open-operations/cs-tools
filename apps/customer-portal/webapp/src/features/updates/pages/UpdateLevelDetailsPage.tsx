@@ -29,15 +29,15 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import {
-  ArrowLeft,
-  ExternalLink,
-} from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
 import { getUpdateTypeChipColor } from "@features/updates/utils/updates";
-import type { SecurityAdvisory, UpdateDescriptionLevel } from "@features/updates/types/updates";
+import type {
+  SecurityAdvisory,
+  UpdateDescriptionLevel,
+} from "@features/updates/types/updates";
 import PendingUpdatesListSkeleton from "@features/updates/components/pending-updates/PendingUpdatesListSkeleton";
 import EmptyState from "@components/empty-state/EmptyState";
 import error500Svg from "@assets/error/error-500.svg";
@@ -56,7 +56,12 @@ function IllustrativeMessage({ message }: { message: string }): JSX.Element {
         py: 5,
       }}
     >
-      <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
+      <img
+        src={error500Svg}
+        alt=""
+        aria-hidden="true"
+        style={{ width: 200, height: "auto" }}
+      />
       <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
         {message}
       </Typography>
@@ -257,7 +262,7 @@ function UpdateDetailCard({
             </Box>
           )}
 
-          {/* Files Modified */}
+          {/* Updated Files */}
           {filesModified.length > 0 && (
             <Box>
               <Typography
@@ -265,7 +270,7 @@ function UpdateDetailCard({
                 fontWeight={700}
                 sx={{ mb: 0.75 }}
               >
-                Files Modified
+                Updated Files
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
                 {filesModified.map((f, i) => (
@@ -282,7 +287,7 @@ function UpdateDetailCard({
             </Box>
           )}
 
-          {/* Files Added */}
+          {/* Added Files */}
           {filesAdded.length > 0 && (
             <Box>
               <Typography
@@ -290,7 +295,7 @@ function UpdateDetailCard({
                 fontWeight={700}
                 sx={{ mb: 0.75 }}
               >
-                Files Added
+                Added Files
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
                 {filesAdded.map((f, i) => (
@@ -307,7 +312,7 @@ function UpdateDetailCard({
             </Box>
           )}
 
-          {/* Files Removed */}
+          {/* Removed Files */}
           {filesRemoved.length > 0 && (
             <Box>
               <Typography
@@ -315,7 +320,7 @@ function UpdateDetailCard({
                 fontWeight={700}
                 sx={{ mb: 0.75 }}
               >
-                Files Removed
+                Removed Files
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
                 {filesRemoved.map((f, i) => (
@@ -393,12 +398,18 @@ function UpdateDetailCard({
                     />
                     {advisory.impact && (
                       <Box sx={{ mt: 1.5 }}>
-                        <UpdateSection title="Impact" content={advisory.impact} />
+                        <UpdateSection
+                          title="Impact"
+                          content={advisory.impact}
+                        />
                       </Box>
                     )}
                     {advisory.solution && (
                       <Box sx={{ mt: 1.5 }}>
-                        <UpdateSection title="Solution" content={advisory.solution} />
+                        <UpdateSection
+                          title="Solution"
+                          content={advisory.solution}
+                        />
                       </Box>
                     )}
                     {advisory.notes && (
@@ -408,7 +419,10 @@ function UpdateDetailCard({
                     )}
                     {advisory.credits && advisory.credits !== "-" && (
                       <Box sx={{ mt: 1.5 }}>
-                        <UpdateSection title="Credits" content={advisory.credits} />
+                        <UpdateSection
+                          title="Credits"
+                          content={advisory.credits}
+                        />
                       </Box>
                     )}
                   </Box>

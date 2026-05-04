@@ -100,6 +100,34 @@ export function parseDescriptionSections(raw: string | null | undefined): Descri
   return result;
 }
 
+/**
+ * Parses a JSON-encoded file list string into a deduplicated, sorted array of file paths.
+ * Handles both JSON array format and plain comma-separated strings.
+ */
+export function parseFileList(raw: string | null | undefined): string[] {
+  if (!raw?.trim() || raw.trim() === "[]") return [];
+  const stripBrackets = (s: string) => s.replace(/^\[+|\]+$/g, "").trim();
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return [...new Set(
+        parsed.map((f: unknown) => stripBrackets(String(f))).filter(Boolean),
+      )].sort();
+    }
+    if (typeof parsed === "string") {
+      return [...new Set(
+        stripBrackets(parsed).split(",").map((f) => f.trim()).filter(Boolean),
+      )].sort();
+    }
+  } catch {
+    // not JSON — try comma-split after stripping outer brackets
+  }
+  const stripped = stripBrackets(raw);
+  return [...new Set(
+    stripped.split(",").map((f) => f.trim()).filter(Boolean),
+  )].sort();
+}
+
 export function isSafeHttpUrl(url: string): boolean {
   try {
     const { protocol } = new URL(url);
@@ -512,6 +540,55 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
 
       y += 6;
     }
+  }
+
+  // ===== FILE SUMMARY SECTIONS =====
+  const allFilesModified = new Set<string>();
+  const allFilesAdded = new Set<string>();
+  const allFilesRemoved = new Set<string>();
+
+  for (const entry of reportData.allEntries) {
+    for (const f of parseFileList(entry.filesModified)) allFilesModified.add(f);
+    for (const f of parseFileList(entry.filesAdded)) allFilesAdded.add(f);
+    for (const f of parseFileList(entry.filesRemoved)) allFilesRemoved.add(f);
+  }
+
+  const hasFileSections =
+    allFilesModified.size > 0 || allFilesAdded.size > 0 || allFilesRemoved.size > 0;
+
+  if (hasFileSections) {
+    ensureSpace(20);
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, pageW - margin, y);
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(0, 0, 0);
+    y += 10;
+
+    const renderFileSection = (title: string, files: Set<string>): void => {
+      if (files.size === 0) return;
+      const sorted = [...files].sort();
+      ensureSpace(25);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 102, 204);
+      doc.text(title, margin, y);
+      doc.setTextColor(0, 0, 0);
+      y += 8;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      for (const file of sorted) {
+        const lines = doc.splitTextToSize(`• ${file}`, contentW - 4);
+        ensureSpace(lines.length * 5 + 2);
+        doc.text(lines, margin + 2, y);
+        y += lines.length * 5 + 1;
+      }
+      y += 6;
+    };
+
+    renderFileSection("Updated Files", allFilesModified);
+    renderFileSection("Added Files", allFilesAdded);
+    renderFileSection("Removed Files", allFilesRemoved);
   }
 
   // ===== APPLY DEFERRED INTERNAL LINK ANNOTATIONS =====
