@@ -37,7 +37,6 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 import {
   hasListSearchOrFilters,
-  isS0Case,
   getLast30DaysUtcRange,
 } from "@features/support/utils/support";
 import {
@@ -114,7 +113,7 @@ export default function AllCasesPage(): JSX.Element {
         : { excludeS0: false, restrictSeverityToLow: false },
     [projectDetailsReady, project, projectFeatures],
   );
-  const { excludeS0, restrictSeverityToLow } = severityPolicy;
+  const { restrictSeverityToLow } = severityPolicy;
 
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
@@ -233,19 +232,9 @@ export default function AllCasesPage(): JSX.Element {
 
   const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
-  const filteredAndSearchedCases = useMemo(
-    () =>
-      excludeS0
-        ? currentPageCases.filter((c) => !isS0Case(c))
-        : currentPageCases,
-    [currentPageCases, excludeS0],
-  );
+  const totalItems = apiTotalRecords || currentPageCases.length;
 
-  const totalItems = excludeS0
-    ? filteredAndSearchedCases.length
-    : (apiTotalRecords || filteredAndSearchedCases.length);
-
-  const paginatedCases = filteredAndSearchedCases;
+  const paginatedCases = currentPageCases;
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -363,7 +352,6 @@ export default function AllCasesPage(): JSX.Element {
           isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
           onFilterChange={handleFilterChange}
           onClearFilters={handleClearFilters}
-          excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter={isDashboardSeverityNavigation}
           hideDeploymentFilter={!permissions.hasDeployments}
