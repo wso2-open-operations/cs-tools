@@ -470,7 +470,6 @@ export default function CreateCasePage(): JSX.Element {
         }
         setProduct("");
         setIssueType("");
-        // Don't clear severity when it's forced to S4 — the forceSeverityS4 effect handles it
         if (!forceSeverityS4) setSeverity("");
       } else if (!classificationResponse) {
         setDeployment(initialDeployment);
