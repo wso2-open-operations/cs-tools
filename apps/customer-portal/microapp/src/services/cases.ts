@@ -272,6 +272,7 @@ export const cases = {
     }),
 
   createAttachment: mutationOptions({
-    mutationFn: (body: CreateAttachmentRequestDto & { caseId: string }) => createAttachment(body.caseId, body),
+    mutationFn: ({ caseId, ...body }: CreateAttachmentRequestDto & { caseId: string }) =>
+      createAttachment(caseId, body),
   }),
 };

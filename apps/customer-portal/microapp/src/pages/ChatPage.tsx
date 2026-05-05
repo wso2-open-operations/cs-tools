@@ -157,22 +157,20 @@ export default function ChatPage() {
         break;
 
       case "token":
-        if (activeStreamingMessage) {
-          setActiveStreamingMessage((prev) => {
-            if (!prev) return null;
+        setActiveStreamingMessage((prev) => {
+          if (!prev) {
             return {
-              ...prev,
-              blocks: prev.blocks.map((b) => (b.type === "text" ? { ...b, value: b.value + response.content } : b)),
+              author: "assistant",
+              blocks: [{ type: "text", value: response.content }],
+              thinking: true,
+              animated: true,
             };
-          });
-        } else {
-          setActiveStreamingMessage({
-            author: "assistant",
-            blocks: [{ type: "text", value: response.content }],
-            thinking: true,
-            animated: true,
-          });
-        }
+          }
+          return {
+            ...prev,
+            blocks: prev.blocks.map((b) => (b.type === "text" ? { ...b, value: b.value + response.content } : b)),
+          };
+        });
         break;
 
       case "final":

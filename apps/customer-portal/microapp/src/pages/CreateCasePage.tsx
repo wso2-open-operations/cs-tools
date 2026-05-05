@@ -97,16 +97,23 @@ export default function CreateCasePage() {
         relatedCaseId: relatedCase?.id,
       });
 
-      for (const attachment of attachments) {
-        const content = await toBase64(attachment.raw);
+      await Promise.all(
+        attachments.map(async (attachment) => {
+          const content = await toBase64(attachment.raw);
+          await createAttachmentMutation.mutateAsync({
+            caseId: response.id,
+            type: attachment.type,
+            name: attachment.name,
+            content,
+          });
+        }),
+      );
 
-        createAttachmentMutation.mutateAsync({
-          caseId: response.id,
-          type: attachment.type,
-          name: attachment.name,
-          content,
-        });
-      }
+      queryClient.invalidateQueries({ queryKey: ["cases"] });
+
+      setTimeout(() => {
+        navigate(`/cases/${response.id}`);
+      }, 500);
     },
   });
 
@@ -162,12 +169,6 @@ export default function CreateCasePage() {
 
   const mutation = useMutation({
     ...cases.create,
-    onSuccess: ({ id }) => {
-      queryClient.invalidateQueries({ queryKey: ["cases"] });
-      setTimeout(() => {
-        navigate(`/cases/${id}`);
-      }, 500);
-    },
     onError: () => {
       notify.error("Failed to create case. Please try again.");
     },
