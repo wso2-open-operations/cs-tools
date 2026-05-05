@@ -62,9 +62,9 @@ If you opened a **direct link** to a folder or file before logging in, the app s
 
 ### 3.4 Shareable URLs
 
-- URLs are built with a `/patches/...` prefix and URL-encoded path segments (spaces and special characters are encoded).
+- URLs use a `/patches/...` prefix. For **readable paths**, spaces are shown as single hyphens, and **literal hyphens in a file or folder name are encoded as double hyphens** in the URL (for example a folder `September-Special` appears as `September--Special`, and `WSO2-2025-4585-…pdf` uses `--` wherever the real name has `-`). **Legacy** links that still use `%20` for spaces continue to work.
 - A link that ends with a **file name** (including an extension) opens that folder and selects the file for preview.
-- You can copy the browser address bar and share it with others who have portal access (they must be able to sign in).
+- You can copy the browser address bar and share it with others who have portal access (they must be able to sign in). After sign-in, the app restores a pasted `/patches/...` link even when the identity provider returns you to the site root (`/`).
 
 ### 3.5 Sign out
 
@@ -215,6 +215,7 @@ The SPA enforces login via **Asgardeo**. The backend endpoints shown above do no
 | CORS errors in browser | `allowOrigins` includes your webapp origin; HTTPS vs HTTP |
 | Preview fails | File missing or renamed on share; large PDF/browser PDF support; ID token still valid |
 | Auth loops | Asgardeo redirect URIs match `config.js` exactly (including path and port) |
+| Deep link opens home after login | `AUTH_SIGN_IN_REDIRECT_URL` should be the app root (e.g. `http://localhost:3000/`). The app saves `/patches/...` before sign-in and restores it when the IdP returns you to `/`. |
 
 ---
 

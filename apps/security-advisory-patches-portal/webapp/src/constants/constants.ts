@@ -39,3 +39,13 @@ export const FILE_TYPE_INFO: Record<string, { color: string; label: string }> = 
   zip: { color: '#FFA500', label: 'ZIP Archive' },
   default: { color: '#9e9e9e', label: 'File' },
 };
+
+// --- Session storage (per-tab; deep link + sign-in gate) ---
+
+/** Return URL after OAuth when sign-in started from a /patches/... deep link. */
+export const SEC_ADV_REDIRECT_PATH_KEY = 'sec_adv_redirect_path';
+
+/**
+ * Whether this tab already triggered signIn (avoids localStorage so other tabs do not skip sign-in).
+ */
+export const SEC_ADV_SIGN_IN_INIT_KEY = 'sec_adv_sign_in_initiated';

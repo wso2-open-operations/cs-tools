@@ -22,6 +22,7 @@ import { useAppDispatch } from '@src/slices/store';
 import { setAuthenticated, setUser, setLoading } from '@src/slices/authSlice/auth';
 import { APIService } from '@src/utils/apiService';
 import { UserInfo } from '@src/types/types';
+import { SEC_ADV_REDIRECT_PATH_KEY, SEC_ADV_SIGN_IN_INIT_KEY } from '@src/constants/constants';
 
 interface AppAuthContextType {
   appSignIn: () => void;
@@ -35,8 +36,9 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const { state, signIn, signOut, getBasicUserInfo, getIDToken } = useAuthContext();
 
   useEffect(() => {
-    const isSignInInitiated = localStorage.getItem('signInInitiated') === 'true';
-    
+    // Per-tab flag so another tab’s interrupted sign-in never blocks this tab (localStorage did that).
+    const isSignInInitiated = sessionStorage.getItem(SEC_ADV_SIGN_IN_INIT_KEY) === 'true';
+
     if (state.isAuthenticated) {
       Promise.all([getBasicUserInfo(), getIDToken()]).then(
         async ([basicUserInfo, idToken]) => {
@@ -50,13 +52,18 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
           dispatch(setAuthenticated(true));
           dispatch(setLoading(false));
 
+          // Deep link is already in the address bar; drop stale stash so we do not redirect later
+          if (typeof window !== 'undefined' && window.location.pathname.startsWith('/patches')) {
+            sessionStorage.removeItem(SEC_ADV_REDIRECT_PATH_KEY);
+          }
+
           // Initialize API service with token
           new APIService(idToken || '', async () => {
             const token = await getIDToken();
             return { idToken: token || '' };
           });
-          
-          localStorage.setItem('signInInitiated', 'false');
+
+          sessionStorage.setItem(SEC_ADV_SIGN_IN_INIT_KEY, 'false');
         }
       ).catch((error) => {
         console.error('Auth initialization error:', error);
@@ -64,7 +71,21 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
         dispatch(setLoading(false));
       });
     } else if (!isSignInInitiated) {
-      localStorage.setItem('signInInitiated', 'true');
+      sessionStorage.setItem(SEC_ADV_SIGN_IN_INIT_KEY, 'true');
+      const path = window.location.pathname + window.location.search;
+      if (path.startsWith('/patches')) {
+        sessionStorage.setItem(SEC_ADV_REDIRECT_PATH_KEY, path);
+      }
+      signIn();
+    } else if (
+      typeof window !== 'undefined' &&
+      window.location.pathname.startsWith('/patches')
+    ) {
+      // Same tab: sign-in was marked started but user is still not authenticated (aborted IdP, etc.)
+      sessionStorage.setItem(
+        SEC_ADV_REDIRECT_PATH_KEY,
+        window.location.pathname + window.location.search
+      );
       signIn();
     }
   }, [state.isAuthenticated, dispatch, getBasicUserInfo, getIDToken, signIn]);
@@ -75,7 +96,7 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await signOut();
       dispatch(setAuthenticated(false));
       dispatch(setUser(null));
-      localStorage.setItem('signInInitiated', 'false');
+      sessionStorage.setItem(SEC_ADV_SIGN_IN_INIT_KEY, 'false');
     } catch (error) {
       console.error('Sign out error:', error);
     } finally {

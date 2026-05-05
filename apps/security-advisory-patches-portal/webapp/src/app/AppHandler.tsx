@@ -14,14 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import { useAppAuth } from '@src/context/AuthContext';
 import { useAppSelector } from '@src/slices/store';
 import FileExplorerPage from '@src/view/FileExplorer/FileExplorerPage';
-
-const REDIRECT_PATH_KEY = 'sec_adv_redirect_path';
+import { SEC_ADV_REDIRECT_PATH_KEY } from '@src/constants/constants';
 
 const AppHandler: React.FC = () => {
   const { appSignOut } = useAppAuth();
@@ -29,35 +28,31 @@ const AppHandler: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Store the intended path when user is not authenticated
-  useEffect(() => {
-    if (!isAuthenticated && !isLoading && location.pathname !== '/') {
-      try {
-        sessionStorage.setItem(REDIRECT_PATH_KEY, location.pathname);
-      } catch (e) {
-        console.warn('Failed to store redirect path:', e);
-      }
+  // After OAuth, the browser is typically sent to signInRedirectURL (often "/" only). Restore the
+  // deep link we stored in AuthContext right before signIn(). useLayoutEffect avoids a flash of "/".
+  useLayoutEffect(() => {
+    if (!isAuthenticated || isLoading) {
+      return;
     }
-  }, [isAuthenticated, isLoading, location.pathname]);
-
-  // Redirect after authentication
-  useEffect(() => {
-    if (isAuthenticated && !isLoading) {
-      try {
-        const redirectPath = sessionStorage.getItem(REDIRECT_PATH_KEY);
-        if (redirectPath && redirectPath !== '/') {
-          sessionStorage.removeItem(REDIRECT_PATH_KEY);
-          // Navigate after a small delay to ensure app is fully initialized
-          const timer = setTimeout(() => {
-            navigate(redirectPath, { replace: true });
-          }, 100);
-          return () => clearTimeout(timer);
-        }
-      } catch (e) {
-        console.warn('Failed to retrieve redirect path:', e);
+    try {
+      const redirectPath = sessionStorage.getItem(SEC_ADV_REDIRECT_PATH_KEY);
+      if (!redirectPath?.startsWith('/patches')) {
+        return;
       }
+      // IdP often returns to "/" or exactly "/patches" (configured sign-in redirect)
+      const pathOnly = location.pathname;
+      const onOAuthLanding =
+        pathOnly === '/' ||
+        pathOnly === '' ||
+        pathOnly === '/patches';
+      if (onOAuthLanding) {
+        sessionStorage.removeItem(SEC_ADV_REDIRECT_PATH_KEY);
+        navigate(redirectPath, { replace: true });
+      }
+    } catch (e) {
+      console.warn('Failed to restore redirect path:', e);
     }
-  }, [isAuthenticated, isLoading, navigate]);
+  }, [isAuthenticated, isLoading, location.pathname, navigate]);
 
   // Show loader while loading OR not authenticated (redirecting to Asgardeo)
   if (isLoading || !isAuthenticated) {
@@ -92,8 +87,10 @@ const AppHandler: React.FC = () => {
 
   return (
     <Routes>
-      <Route path="/" element={<FileExplorerPage username={user?.username} onLogout={appSignOut} />} />
-      <Route path="/*" element={<FileExplorerPage username={user?.username} onLogout={appSignOut} />} />
+      <Route
+        path="*"
+        element={<FileExplorerPage username={user?.username} onLogout={appSignOut} />}
+      />
     </Routes>
   );
 };

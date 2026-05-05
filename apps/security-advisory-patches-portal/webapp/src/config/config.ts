@@ -34,7 +34,7 @@ export const AsgardeoConfig: BaseURLAuthClientConfig = {
   signOutRedirectURL: window.config?.AUTH_SIGN_OUT_REDIRECT_URL ?? '',
   clientID: window.config?.ASGARDEO_CLIENT_ID ?? '',
   baseUrl: window.config?.ASGARDEO_BASE_URL ?? '',
-  scope: ['openid', 'email', 'profile'],
+  scope: ['openid', 'profile'],
 };
 
 export const ServiceBaseUrl = window.config?.BACKEND_BASE_URL ?? '';

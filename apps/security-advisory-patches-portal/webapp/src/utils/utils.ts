@@ -30,21 +30,46 @@ export const formatFileSize = (bytes: number): string => {
 };
 
 /**
- * Convert segment to URL-encoded format using standard URL encoding
- * @param segment - Original segment (e.g., "August Special" or "August-Special")
- * @returns URL-encoded segment (e.g., "August%20Special" or "August-Special")
+ * Encode a path segment for shareable `/patches/...` URLs: spaces become "-", literal "-" become "--",
+ * then encodeURIComponent (customer-portal uses opaque ids in routes instead of this file-name scheme).
+ *
+ * Example: "September-Special" → "September--Special"; "Aug Sep" → "Aug-Sep"
  */
 export const toUrlFriendly = (segment: string): string => {
-  return encodeURIComponent(segment);
+  const escapedHyphens = segment.replace(/-/g, '--');
+  const spaced = escapedHyphens.replace(/\s+/g, '-');
+  return encodeURIComponent(spaced);
 };
 
 /**
- * Convert URL-encoded segment back to original format
- * @param segment - URL-encoded segment (e.g., "August%20Special" or "August-Special")
- * @returns Original segment (e.g., "August Special" or "August-Special")
+ * Private-use char — cannot appear in decoded Azure names; used only while decoding.
+ * "--" splits into literal "-" joins; remaining "-" in each chunk were spaces.
+ */
+const DASH_LITERAL_HOLD = '\uE000';
+
+/** Reverse {@link toUrlFriendly}: split on "--", turn single "-" into spaces, rejoin literal hyphens. */
+function unescapeDashSegment(raw: string): string {
+  return raw
+    .split('--')
+    .map((chunk) => chunk.replace(/-/g, ' '))
+    .join(DASH_LITERAL_HOLD)
+    .replace(new RegExp(DASH_LITERAL_HOLD, 'g'), '-');
+}
+
+/**
+ * Decode a URL path segment to the Azure/storage name.
+ * Legacy: if the segment still contains %20, only decodeURIComponent (old bookmarks).
+ * Otherwise: decodeURIComponent then unescape dash encoding (see toUrlFriendly).
  */
 export const fromUrlFriendly = (segment: string): string => {
-  return decodeURIComponent(segment);
+  if (segment.includes('%20')) {
+    return decodeURIComponent(segment);
+  }
+  const raw = decodeURIComponent(segment);
+  if (!raw.includes('-')) {
+    return raw;
+  }
+  return unescapeDashSegment(raw);
 };
 
 /**
