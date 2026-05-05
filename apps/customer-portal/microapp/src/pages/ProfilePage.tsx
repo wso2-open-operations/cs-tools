@@ -97,7 +97,7 @@ export default function ProfilePage() {
           name="Timezone"
           value={
             data ? (
-              data.timezone === "--None--" ? (
+              data.timezone === undefined ? (
                 "Not Configured"
               ) : (
                 data.timezone

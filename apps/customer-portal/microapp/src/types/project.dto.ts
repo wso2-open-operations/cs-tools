@@ -121,3 +121,8 @@ export interface ProjectFeaturesDto {
   hasDeploymentReadAccess: boolean;
   defaultCaseProductCategories: string[] | null;
 }
+
+export interface GetAllProjectsRequestDto {
+  filters?: { searchQuery?: string };
+  pagination?: Partial<Omit<Pagination, "totalRecords">>;
+}

@@ -24,11 +24,11 @@ import { useProject } from "@context/project";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
 import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { projects } from "@src/services/projects";
 import { goToMyAppsScreen } from "../microapp-bridge";
 import { useThemeMode } from "@root/src/context/theme";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
+import { projects } from "@root/src/services/projects";
+import { useInfiniteQuery } from "@tanstack/react-query";
 
 export function AppBar() {
   const theme = useTheme();
@@ -36,13 +36,11 @@ export function AppBar() {
   const { title, appBarVariant, overlineSlot, subtitleSlot, startSlot, endSlot, appBarSlots, hasBackAction } =
     useLayout();
   const config = APP_BAR_CONFIG[appBarVariant];
-  const { projectId } = useProject();
-  const { data: projectsData } = useSuspenseQuery(projects.all());
-  const project = projectsData?.find((project) => project.id === projectId);
-  const hasMultipleProjects = projectsData.length > 1;
+  const { projectName } = useProject();
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
+  const hasMultipleProjects = useInfiniteQuery(projects.paginated()).data?.pages[0].pagination.totalRecords !== 0;
 
   const ref = useRef<HTMLDivElement>(null);
 
@@ -70,8 +68,6 @@ export function AppBar() {
   };
 
   const mode = useThemeMode();
-
-  if (!project) return null;
 
   return (
     <>
@@ -121,7 +117,7 @@ export function AppBar() {
             <Stack direction="row" sx={{ alignItems: "center", flexGrow: 1, minWidth: 0, gap: 1 }}>
               <Folder color={theme.palette.text.secondary} size={pxToRem(18)} />
               <Typography variant="body1" color="text.secondary" sx={{ textTransform: "initial" }} noWrap>
-                {project.name}
+                {projectName}
               </Typography>
             </Stack>
             {hasMultipleProjects && <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />}
