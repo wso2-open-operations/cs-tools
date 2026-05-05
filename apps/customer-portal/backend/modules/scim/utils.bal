@@ -29,7 +29,7 @@ public isolated function isWso2Email(string email) returns boolean =>
 # + return - Mobile phone number if found, else nil
 public isolated function processPhoneNumber(User user) returns string? {
     string? mobilePhoneNumber = ();
-    PhoneNumber[]? phoneNumbers = user.phoneNumbers;
+    PhoneNumber[]? phoneNumbers = user?.phoneNumbers;
     if phoneNumbers != () {
         // Filter for mobile type phone numbers
         PhoneNumber[] mobilePhoneNumbers =
