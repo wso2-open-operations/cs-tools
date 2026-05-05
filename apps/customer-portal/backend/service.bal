@@ -85,6 +85,11 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         log:printInfo("Customer Portal backend started.");
     }
 
+    # Health check endpoint.
+    #
+    # + return - Health status message
+    resource function get health() returns http:Ok => {body: {status: "Customer Portal Backend is running healthy."}};
+
     # Fetch metadata information for the customer portal.
     #
     # + return - Metadata information or error response
