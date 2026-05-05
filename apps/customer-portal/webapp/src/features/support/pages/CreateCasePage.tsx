@@ -82,10 +82,11 @@ import {
   htmlToPlainText,
 } from "@features/support/utils/richTextEditor";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
-import type { ProductCategory, ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import type {
-  RelatedCaseState,
-} from "@features/support/types/createCasePage";
+  ProductCategory,
+  ProjectDeploymentItem,
+} from "@features/project-details/types/deployments";
+import type { RelatedCaseState } from "@features/support/types/createCasePage";
 
 const DEFAULT_CASE_TITLE = "Support case";
 const DEFAULT_CASE_DESCRIPTION = "Please describe your issue here.";
@@ -137,8 +138,10 @@ export default function CreateCasePage(): JSX.Element {
     useGetProjectFeatures(projectId || "");
   const severityPolicy =
     projectDetails && !isProjectFeaturesLoading && projectFeatures
-    ? getProjectSeverityPolicy(projectDetails.type?.label, { projectFeatures })
-    : { excludeS0: true, restrictSeverityToLow: true };
+      ? getProjectSeverityPolicy(projectDetails.type?.label, {
+          projectFeatures,
+        })
+      : { excludeS0: true, restrictSeverityToLow: true };
   const { excludeS0, restrictSeverityToLow: forceSeverityS4 } = severityPolicy;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
@@ -195,7 +198,12 @@ export default function CreateCasePage(): JSX.Element {
     {
       pageSize: 10,
       enabled: !!selectedDeploymentId,
-      request: { filters: { productCategories: (projectFeatures?.defaultCaseProductCategories ?? undefined) as ProductCategory[] | undefined } },
+      request: {
+        filters: {
+          productCategories: (projectFeatures?.defaultCaseProductCategories ??
+            undefined) as ProductCategory[] | undefined,
+        },
+      },
     },
   );
   const deploymentProductsLoading = deploymentProductsQuery.isLoading;
@@ -289,7 +297,6 @@ export default function CreateCasePage(): JSX.Element {
     }
   });
 
-
   useEffect(() => {
     if (locationState?.classificationResponse) {
       try {
@@ -306,7 +313,6 @@ export default function CreateCasePage(): JSX.Element {
       setClassificationResponse(locationState.classificationResponse);
     }
   }, [locationState?.classificationResponse, STORAGE_KEY, logger]);
-
 
   // Persist conversationId to survive page refresh
   const [conversationId, setConversationId] = useState<string | undefined>(
@@ -356,14 +362,14 @@ export default function CreateCasePage(): JSX.Element {
 
   const projectDisplay = projectDetails?.name ?? "";
 
-  const issueTypesList = (filters?.issueTypes || []) as {
-    id: string;
-    label: string;
-  }[];
-  const severityLevelsList = (filters?.severities || []) as {
-    id: string;
-    label: string;
-  }[];
+  const issueTypesList = useMemo(
+    () => (filters?.issueTypes ?? []) as { id: string; label: string }[],
+    [filters?.issueTypes],
+  );
+  const severityLevelsList = useMemo(
+    () => (filters?.severities ?? []) as { id: string; label: string }[],
+    [filters?.severities],
+  );
 
   useEffect(() => {
     if (isProjectLoading || isProjectFeaturesLoading || isFiltersLoading) {
@@ -464,7 +470,7 @@ export default function CreateCasePage(): JSX.Element {
         }
         setProduct("");
         setIssueType("");
-        setSeverity("");
+        if (!forceSeverityS4) setSeverity("");
       } else if (!classificationResponse) {
         setDeployment(initialDeployment);
         setProduct("");
@@ -478,6 +484,7 @@ export default function CreateCasePage(): JSX.Element {
   }, [
     baseDeploymentOptions,
     classificationResponse,
+    forceSeverityS4,
     isDeploymentsLoading,
     issueTypesList,
     isFiltersLoading,
@@ -868,7 +875,9 @@ export default function CreateCasePage(): JSX.Element {
             `/projects/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTabId.VULNERABILITIES}`,
           );
         } else {
-          window.location.assign(`/projects/${projectId}/support/cases/${caseId}`);
+          window.location.assign(
+            `/projects/${projectId}/support/cases/${caseId}`,
+          );
         }
         showSuccess("Case created successfully");
       },
@@ -915,7 +924,12 @@ export default function CreateCasePage(): JSX.Element {
   const renderContent = () => (
     <Grid container spacing={3}>
       {/* left column - form content (full width when skipChat or no sidebar content) */}
-      <Grid size={{ xs: 12, md: (skipChatMode || (!relatedCase && !conversationId)) ? 12 : 8 }}>
+      <Grid
+        size={{
+          xs: 12,
+          md: skipChatMode || (!relatedCase && !conversationId) ? 12 : 8,
+        }}
+      >
         {/* case creation form */}
         <Box
           component="form"
