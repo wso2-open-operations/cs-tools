@@ -76,6 +76,7 @@ export function MessageBubble({
                     to: { backgroundPosition: "-200% center" },
                   },
                   opacity: "80%",
+                  ml: 8,
                 }}
               >
                 {typeof thinking === "string" ? thinking : "Thinking"}

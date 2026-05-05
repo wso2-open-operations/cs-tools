@@ -15,8 +15,20 @@
 // under the License.
 
 import { useLocation, useNavigate } from "react-router-dom";
-import { Folder } from "@wso2/oxygen-ui-icons-react";
-import { Button, Stack, Typography, InputAdornment, pxToRem, CircularProgress, Grid, Box } from "@wso2/oxygen-ui";
+import { File, Folder, Image, Paperclip, Trash } from "@wso2/oxygen-ui-icons-react";
+import {
+  Button,
+  Stack,
+  Typography,
+  InputAdornment,
+  pxToRem,
+  CircularProgress,
+  Grid,
+  Box,
+  Card,
+  IconButton,
+  Divider,
+} from "@wso2/oxygen-ui";
 import { SelectField, TextField, ConversationSummary } from "@components/features/create";
 import { useFormik } from "formik";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -24,7 +36,7 @@ import { useProject } from "@context/project";
 import { projects } from "@src/services/projects";
 import { cases } from "@src/services/cases";
 import type { CaseClassificationResponseDto, Case } from "@src/types";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import * as Yup from "yup";
 import { overrideOrDefault } from "../utils/others";
 import { useNotify } from "../context/snackbar";
@@ -57,6 +69,7 @@ export default function CreateCasePage() {
   const notify = useNotify();
 
   const [classified, setClassified] = useState<Set<keyof CreateCaseFormValues>>(new Set());
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
   const formik = useFormik<CreateCaseFormValues>({
     initialValues: {
@@ -72,7 +85,7 @@ export default function CreateCasePage() {
     validateOnBlur: true,
     validateOnChange: true,
     onSubmit: async (values) => {
-      mutation.mutateAsync({
+      const response = await mutation.mutateAsync({
         type: "default_case",
         projectId: values.project,
         deploymentId: values.deployment,
@@ -83,6 +96,17 @@ export default function CreateCasePage() {
         severityKey: Number(values.severity),
         relatedCaseId: relatedCase?.id,
       });
+
+      for (const attachment of attachments) {
+        const content = await toBase64(attachment.raw);
+
+        createAttachmentMutation.mutateAsync({
+          caseId: response.id,
+          type: attachment.type,
+          name: attachment.name,
+          content,
+        });
+      }
     },
   });
 
@@ -148,6 +172,10 @@ export default function CreateCasePage() {
       notify.error("Failed to create case. Please try again.");
     },
   });
+
+  const createAttachmentMutation = useMutation(cases.createAttachment);
+
+  const isSaving = formik.isSubmitting || mutation.isPending;
 
   useEffect(() => {
     if (!classifications) return;
@@ -393,6 +421,8 @@ export default function CreateCasePage() {
               error={formik.touched.severity && Boolean(formik.errors.severity)}
               helperText={formik.touched.severity && formik.errors.severity ? formik.errors.severity : undefined}
             />
+
+            <AttachmentField onChange={(attachments) => setAttachments(attachments)} />
           </Stack>
 
           {messages.length > 0 && <ConversationSummary messages={messages} />}
@@ -400,12 +430,10 @@ export default function CreateCasePage() {
           <Button
             type="submit"
             variant="contained"
-            startIcon={
-              formik.isSubmitting || mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
-            }
+            startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : undefined}
             sx={{ textTransform: "initial" }}
           >
-            {formik.isSubmitting ? "Saving..." : "Create Case"}
+            {isSaving ? "Saving..." : "Create Case"}
           </Button>
         </Stack>
       </form>
@@ -451,5 +479,172 @@ function RelatedCaseSection({ relatedCase }: { relatedCase: Case }) {
         </Grid>
       </SectionCard>
     </Box>
+  );
+}
+
+interface AttachmentFile {
+  id: string;
+  name: string;
+  size: string;
+  type: string;
+  raw: File;
+}
+
+// utils
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function toAttachmentFile(file: File): AttachmentFile {
+  return {
+    id: `${file.name}-${file.lastModified}-${file.size}`,
+    name: file.name,
+    size: formatBytes(file.size),
+    type: file.type,
+    raw: file,
+  };
+}
+
+function toBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1]); // strips the data:*/*;base64, prefix
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function AttachmentField({ onChange }: { onChange?: (attachments: AttachmentFile[]) => void }) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+
+  const addFiles = (incoming: File[]) => {
+    const valid = incoming.filter((f) => f.size <= MAX_BYTES);
+    const mapped = valid.map(toAttachmentFile);
+
+    setAttachments((prev) => {
+      const existingIds = new Set(prev.map((a) => a.id));
+      const deduped = mapped.filter((a) => !existingIds.has(a.id));
+      const next = [...prev, ...deduped];
+      onChange?.(next);
+      return next;
+    });
+  };
+
+  const handleRemove = (id: string) => {
+    setAttachments((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      onChange?.(next);
+      return next;
+    });
+  };
+
+  const handleClick = () => {
+    ref.current?.click();
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+    addFiles(Array.from(files));
+    event.target.value = "";
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const files = event.dataTransfer.files;
+    if (!files) return;
+
+    addFiles(Array.from(files));
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
+  return (
+    <Stack gap={1}>
+      <input hidden multiple type="file" ref={ref} onChange={handleFileChange} />
+      <Typography variant="subtitle2">Attachments</Typography>
+      <Card
+        component={Stack}
+        sx={{
+          borderStyle: "dashed",
+          borderColor: "divider",
+          bgcolor: "background.paper",
+        }}
+      >
+        <Stack
+          sx={{ p: 2, gap: 2, textAlign: "center", alignItems: "center" }}
+          onClick={handleClick}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
+          <Paperclip />
+          <Stack>
+            <Typography variant="body2">Drag and drop files here, or click to browse</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>
+              Max 10 MB
+            </Typography>
+          </Stack>
+        </Stack>
+
+        {attachments.length > 0 && (
+          <Stack
+            sx={{ borderTop: "1px dashed", borderColor: "divider" }}
+            divider={<Divider sx={{ borderStyle: "dashed" }} />}
+          >
+            {attachments.map((attachment) => (
+              <AttachmentItem
+                key={attachment.id}
+                type={attachment.type}
+                name={attachment.name}
+                size={attachment.size}
+                onRemove={() => handleRemove(attachment.id)}
+              />
+            ))}
+          </Stack>
+        )}
+      </Card>
+    </Stack>
+  );
+}
+
+function AttachmentItem({
+  type,
+  name,
+  size,
+  onRemove,
+}: {
+  type: string;
+  name: string;
+  size: string;
+  onRemove: () => void;
+}) {
+  return (
+    <Stack direction="row" alignItems="center" gap={1} p={1}>
+      {type.startsWith("image/") ? <Image size={pxToRem(18)} /> : <File size={pxToRem(18)} />}
+      <Typography variant="body2" noWrap flex={1}>
+        {name}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" flexShrink={0} sx={{ opacity: 0.8 }}>
+        {size}
+      </Typography>
+      <IconButton
+        size="small"
+        color="error"
+        onClick={onRemove}
+        sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}
+      >
+        <Trash size={pxToRem(16)} />
+      </IconButton>
+    </Stack>
   );
 }

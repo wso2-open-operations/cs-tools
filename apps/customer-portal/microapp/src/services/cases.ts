@@ -40,6 +40,7 @@ import type {
   AttachmentsDto,
   AttachmentDto,
   Pagination,
+  CreateAttachmentRequestDto,
 } from "@src/types";
 
 import {
@@ -130,6 +131,10 @@ const getAttachments = async (id: string, body: Partial<Omit<Pagination, "totalR
 const getAttachment = async (id: string): Promise<{ content: string }> => {
   const response = (await apiClient.get<{ content: string }>(ATTACHMENT_DETAIL_ENDPOINT(id))).data;
   return response;
+};
+
+const createAttachment = async (id: string, body: CreateAttachmentRequestDto): Promise<void> => {
+  await apiClient.post<CommentDto>(CASE_ATTACHMENTS_ENDPOINT(id), body);
 };
 
 /* Mappers */
@@ -252,6 +257,7 @@ export const cases = {
     }),
 
   comments: (id: string) => queryOptions({ queryKey: ["comments", id], queryFn: () => getComments(id) }),
+
   createComment: (id: string) =>
     mutationOptions({
       mutationFn: (body: CreateCommentRequestDto) => createComment(id, body),
@@ -265,4 +271,8 @@ export const cases = {
       queryKey: ["attachment", id],
       queryFn: id ? () => getAttachment(id) : skipToken,
     }),
+
+  createAttachment: mutationOptions({
+    mutationFn: (body: CreateAttachmentRequestDto & { caseId: string }) => createAttachment(body.caseId, body),
+  }),
 };
