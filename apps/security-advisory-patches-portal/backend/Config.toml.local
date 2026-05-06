@@ -1,0 +1,8 @@
+# Azure File Share Configuration
+[security_advisories_fileshare.file_storage]
+fileShareName = ""
+
+[security_advisories_fileshare.file_storage.fileStorageConfig]
+accountName = ""
+accessKeyOrSAS = ""
+authorizationMethod = ""

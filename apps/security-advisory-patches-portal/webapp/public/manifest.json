@@ -1,0 +1,16 @@
+{
+  "short_name": "Patches Portal",
+  "name": "WSO2 Security Advisory Patches Portal",
+  "icons": [
+    {
+      "src": "wso2-logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}
+
