@@ -124,6 +124,8 @@ export default function ServiceRequestsList({
               alignItems: "stretch",
               gap: 1,
               minHeight: 172,
+              minWidth: 0,
+              overflow: "hidden",
             }}
           >
             <Form.CardHeader
@@ -189,7 +191,7 @@ export default function ServiceRequestsList({
               <Typography
                 variant="h6"
                 color="text.primary"
-                sx={{ mb: 1, fontWeight: 500 }}
+                sx={{ mb: 1, fontWeight: 500, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}
               >
                 {sr.title || NULL_PLACEHOLDER}
               </Typography>

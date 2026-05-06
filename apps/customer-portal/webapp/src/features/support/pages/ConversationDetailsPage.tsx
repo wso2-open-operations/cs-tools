@@ -60,7 +60,7 @@ import { resolveConversationListRowAction } from "@features/support/utils/conver
 import { NOVERA_DISPLAY_NAME } from "@features/support/constants/chatConstants";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { buildBotMarkdownComponents } from "@features/support/utils/markdown";
+import { buildBotMarkdownComponents, TextWithLinks } from "@features/support/utils/markdown";
 
 function ConversationMsgBubble({
   message,
@@ -206,9 +206,9 @@ function ConversationMsgBubble({
           ) : (
             <Typography
               variant="body2"
-              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}
             >
-              {message.text}
+              <TextWithLinks text={message.text ?? ""} />
             </Typography>
           )}
         </Paper>

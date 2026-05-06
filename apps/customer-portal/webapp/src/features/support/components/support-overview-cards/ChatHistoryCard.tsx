@@ -89,6 +89,7 @@ export default function ChatHistoryCard({
                 display: "-webkit-box",
                 WebkitLineClamp: 1,
                 WebkitBoxOrient: "vertical",
+                wordBreak: "break-all",
               }}
             >
               {item.title}

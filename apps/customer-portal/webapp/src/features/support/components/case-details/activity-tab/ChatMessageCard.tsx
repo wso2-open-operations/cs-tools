@@ -16,10 +16,11 @@
 
 import type { ChatMessageCardProps } from "@features/support/types/supportComponents";
 import { Box, Paper } from "@wso2/oxygen-ui";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { JSX } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linkifyBareUrls } from "@features/support/utils/support";
 
 const SAFE_PROTOCOLS = ["http:", "https:"];
 
@@ -125,6 +126,7 @@ export default function ChatMessageCard({
   onImageClick,
 }: ChatMessageCardProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null);
+  const linkedHtml = useMemo(() => linkifyBareUrls(htmlContent), [htmlContent]);
 
   const setImageA11yAttributes = useCallback((root: HTMLDivElement) => {
     const images = root.querySelectorAll("img");
@@ -323,7 +325,7 @@ export default function ChatMessageCard({
           </Box>
         ) : (
           <Box
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
+            dangerouslySetInnerHTML={{ __html: linkedHtml }}
             sx={{ minWidth: 0 }}
           />
         )}

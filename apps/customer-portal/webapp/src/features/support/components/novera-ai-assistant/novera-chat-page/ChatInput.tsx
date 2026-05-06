@@ -20,11 +20,13 @@ import {
   Button,
   IconButton,
   TextField,
+  Typography,
   alpha,
   colors,
 } from "@wso2/oxygen-ui";
 import { Send, FileText } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
+import { CHAT_MAX_CHARS } from "@features/support/constants/chatConstants";
 
 const CHAT_PLACEHOLDER = "Type your message...";
 
@@ -42,7 +44,8 @@ export default function ChatInput({
   isCreateCaseLoading = false,
   disabled = false,
 }: ChatInputProps): JSX.Element | null {
-  const isSendDisabled = !inputValue.trim() || isSending;
+  const isTooLong = inputValue.length > CHAT_MAX_CHARS;
+  const isSendDisabled = !inputValue.trim() || isSending || isTooLong;
 
   if (disabled) {
     return null;
@@ -93,31 +96,44 @@ export default function ChatInput({
       {/* Input Area */}
       <Box sx={{ p: 2, bgcolor: "background.paper", flexShrink: 0 }}>
         <Box sx={{ display: "flex", gap: 1, alignItems: "flex-end" }}>
-          <TextField
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder={CHAT_PLACEHOLDER}
-            multiline
-            maxRows={5}
-            fullWidth
-            variant="outlined"
-            size="small"
-            disabled={isSending}
-            sx={{
-              "& textarea": {
-                overflowWrap: "anywhere",
-                wordBreak: "break-word",
-                whiteSpace: "pre-wrap",
-              },
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                if (e.nativeEvent?.isComposing) return;
-                e.preventDefault();
-                if (!isSendDisabled) onSend();
-              }
-            }}
-          />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <TextField
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={CHAT_PLACEHOLDER}
+              multiline
+              maxRows={5}
+              fullWidth
+              variant="outlined"
+              size="small"
+              disabled={isSending}
+              error={isTooLong}
+              sx={{
+                "& textarea": {
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
+                  whiteSpace: "pre-wrap",
+                },
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  if (e.nativeEvent?.isComposing) return;
+                  e.preventDefault();
+                  if (!isSendDisabled) onSend();
+                }
+              }}
+            />
+            {isTooLong && (
+              <Typography
+                variant="caption"
+                color="error"
+                sx={{ mt: 0.5, display: "block" }}
+              >
+                Message is too long ({inputValue.length} characters). The
+                maximum allowed is {CHAT_MAX_CHARS} characters.
+              </Typography>
+            )}
+          </Box>
 
           {/* Send button */}
           <IconButton

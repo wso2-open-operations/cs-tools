@@ -35,7 +35,7 @@ import {
 } from "@features/support/constants/chatConstants";
 import RecommendationsCard from "@features/support/components/novera-ai-assistant/novera-chat-page/RecommendationsCard";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
-import { buildBotMarkdownComponents } from "@features/support/utils/markdown";
+import { buildBotMarkdownComponents, TextWithLinks } from "@features/support/utils/markdown";
 
 /** Tighter line breaks while tokens stream (model often sends blank lines). */
 function collapseStreamLineBreaks(s: string): string {
@@ -210,6 +210,7 @@ export default function ChatMessageBubble({
         sx={{
           flexDirection: isCurrentUserMessage ? "row-reverse" : "row",
           gap: 2,
+          minWidth: 0,
         }}
       >
         <Avatar
@@ -228,6 +229,7 @@ export default function ChatMessageBubble({
           spacing={0.75}
           sx={{
             minWidth: 0,
+            maxWidth: "100%",
             alignItems: isCurrentUserMessage ? "flex-end" : "flex-start",
           }}
         >
@@ -253,10 +255,13 @@ export default function ChatMessageBubble({
               bgcolor: primaryBg,
               color: "text.primary",
               boxShadow: "none",
+              minWidth: 0,
+              maxWidth: "100%",
+              overflow: "hidden",
             }}
           >
-            <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
-              {displayText}
+            <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+              <TextWithLinks text={displayText} />
             </Typography>
           </Paper>
         </Stack>

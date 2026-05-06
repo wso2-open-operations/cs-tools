@@ -33,6 +33,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { buildEnvProducts } from "@features/support/utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/permission";
 import type { ChatNavState } from "@features/support/types/conversations";
+import { CHAT_MAX_CHARS } from "@features/support/constants/chatConstants";
 
 const ISSUE_PLACEHOLDER =
   "Example: I'm experiencing API Gateway timeout issues in our production environment. The errors started appearing yesterday around 3 PM, and we're seeing 504 errors intermittently...";
@@ -117,8 +118,9 @@ export default function DescribeIssuePage(): JSX.Element {
     showError,
   ]);
 
+  const isMessageTooLong = value.length > CHAT_MAX_CHARS;
   const isSubmitDisabled =
-    !projectId || !plainText.trim() || isLoadingDeploymentProducts;
+    !projectId || !plainText.trim() || isLoadingDeploymentProducts || isMessageTooLong;
 
   return (
     <Box
@@ -206,6 +208,7 @@ export default function DescribeIssuePage(): JSX.Element {
                   rows={15}
                   fullWidth
                   variant="outlined"
+                  error={isMessageTooLong}
                   sx={{
                     flex: 1,
                     "& textarea": { overflowY: "auto", resize: "none" },
@@ -218,14 +221,25 @@ export default function DescribeIssuePage(): JSX.Element {
                     }
                   }}
                 />
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: "block", mt: 1 }}
-                >
-                  Tip: Include details like error messages, when the issue
-                  started, affected systems, and what you&apos;ve already tried.
-                </Typography>
+                {isMessageTooLong ? (
+                  <Typography
+                    variant="caption"
+                    color="error"
+                    sx={{ display: "block", mt: 1 }}
+                  >
+                    Message is too long ({value.length} characters). The maximum
+                    allowed is {CHAT_MAX_CHARS} characters.
+                  </Typography>
+                ) : (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 1 }}
+                  >
+                    Tip: Include details like error messages, when the issue
+                    started, affected systems, and what you&apos;ve already tried.
+                  </Typography>
+                )}
               </Box>
 
               <Box
