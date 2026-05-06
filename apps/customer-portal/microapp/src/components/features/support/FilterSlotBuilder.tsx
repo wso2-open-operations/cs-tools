@@ -25,9 +25,21 @@ export interface FilterTab {
 export interface FilterSlotBuilderProps {
   tabs: FilterTab[];
   searchPlaceholder?: string;
+  state?: unknown;
+
+  /** Hide the search bar */
+  showSearch?: boolean;
+  /** Hide the filter tabs section */
+  showTabs?: boolean;
 }
 
-export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilderProps) {
+export function FilterSlotBuilder({
+  tabs,
+  searchPlaceholder,
+  state,
+  showSearch = true,
+  showTabs = true,
+}: FilterSlotBuilderProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -50,59 +62,64 @@ export function FilterSlotBuilder({ tabs, searchPlaceholder }: FilterSlotBuilder
       }
     });
 
-    navigate(`${baseRoute}?${next.toString()}`, { replace: true });
+    navigate(`${baseRoute}?${next.toString()}`, { state, replace: true });
   };
 
   return (
     <Stack gap={2} pb={1}>
-      <SearchBar
-        size="small"
-        placeholder={searchPlaceholder}
-        value={searchValue}
-        onChange={(e) => updateParams({ [searchParamName]: e.target.value || null })}
-        sx={{
-          mt: 1,
-          bgcolor: "background.paper",
-        }}
-        fullWidth
-      />
-      <Tabs
-        value={activeFilter}
-        scrollButtons={false}
-        variant="scrollable"
-        onChange={(_, value) => updateParams({ [filterParamName]: value })}
-        sx={{
-          "& .MuiTabs-flexContainer": {
-            gap: 1.2,
-          },
+      {showSearch && (
+        <SearchBar
+          size="small"
+          placeholder={searchPlaceholder}
+          value={searchValue}
+          onChange={(e) => updateParams({ [searchParamName]: e.target.value || null })}
+          sx={{
+            mt: 1,
+            bgcolor: "background.paper",
+          }}
+          fullWidth
+        />
+      )}
 
-          "& .MuiTab-root": {
-            minHeight: 0,
-            minWidth: 0,
-            padding: "6px 12px",
-            borderRadius: 999,
-            textTransform: "none",
-            fontWeight: "medium",
-            color: "text.secondary",
-            backgroundColor: "background.paper",
-          },
+      {showTabs && (
+        <Tabs
+          value={activeFilter}
+          scrollButtons={false}
+          variant="scrollable"
+          onChange={(_, value) => updateParams({ [filterParamName]: value })}
+          sx={{
+            "& .MuiTabs-flexContainer": {
+              gap: 1.2,
+            },
 
-          "& .MuiTab-root.Mui-selected": {
-            color: "primary.contrastText",
-            backgroundColor: "primary.main",
-            fontWeight: "bold",
-          },
+            "& .MuiTab-root": {
+              minHeight: 0,
+              minWidth: 0,
+              padding: "6px 12px",
+              borderRadius: 999,
+              textTransform: "none",
+              fontWeight: "medium",
+              color: "text.secondary",
+              backgroundColor: "background.paper",
+            },
 
-          "& .MuiTabs-indicator": {
-            display: "none",
-          },
-        }}
-      >
-        <Tab label="All" value="all" disableRipple />
-        {tabs.map((tab, index) => (
-          <Tab key={index} label={tab.label} value={tab.value} disableRipple />
-        ))}
-      </Tabs>
+            "& .MuiTab-root.Mui-selected": {
+              color: "primary.contrastText",
+              backgroundColor: "primary.main",
+              fontWeight: "bold",
+            },
+
+            "& .MuiTabs-indicator": {
+              display: "none",
+            },
+          }}
+        >
+          <Tab label="All" value="all" disableRipple />
+          {tabs.map((tab, index) => (
+            <Tab key={index} label={tab.label} value={tab.value} disableRipple />
+          ))}
+        </Tabs>
+      )}
     </Stack>
   );
 }

@@ -16,25 +16,13 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  AppBar as MuiAppBar,
-  Button,
-  Chip,
-  IconButton,
-  Stack,
-  Typography,
-  pxToRem,
-  useTheme,
-  alpha,
-  Skeleton,
-} from "@wso2/oxygen-ui";
+import { AppBar as MuiAppBar, Button, IconButton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 
 import { ProjectSelector } from "@components/features/projects";
 import { useLayout } from "@src/context/layout";
 import { useProject } from "@context/project";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
-import { PROJECT_STATUS_META } from "@config/constants";
 import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
@@ -84,8 +72,6 @@ export function AppBar() {
   const mode = useThemeMode();
 
   if (!project) return null;
-
-  const statusChipColorVariant = project.status ? PROJECT_STATUS_META[project.status].color : "default";
 
   return (
     <>
@@ -140,24 +126,6 @@ export function AppBar() {
             </Stack>
             {hasMultipleProjects && <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />}
           </Button>
-        )}
-
-        {config.showChips && (
-          <Stack direction="row" gap={2} mt={1.5}>
-            {project.status ? (
-              <Chip
-                label={project.status}
-                size="small"
-                sx={(theme) => ({
-                  bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-                  color: theme.palette[statusChipColorVariant].light,
-                })}
-              />
-            ) : (
-              <Skeleton variant="rounded" width={80} height={24} />
-            )}
-            <Chip label={project.type} size="small" sx={{ alignSelf: "start" }} />
-          </Stack>
         )}
 
         {/* Additional AppBar Content */}

@@ -14,9 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
-import { Box, Card, Chip, Divider, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Card,
+  CardActionArea,
+  Chip,
+  Divider,
+  Skeleton,
+  Stack,
+  Typography,
+  pxToRem,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import { Calendar, ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
 import { PriorityChip, StatusChip } from "./Chip";
@@ -26,8 +35,7 @@ import { stripHtmlTags } from "@root/src/utils/others";
 import type { ServiceRequestSummary } from "@root/src/types/service.model";
 
 import { TYPE_CONFIG } from "./config";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "@root/src/utils/useDateTime";
 
 interface BaseItemCardExtendedProps {
   to: string;
@@ -57,172 +65,191 @@ interface EngagementItemCardExtendedProps extends BaseItemCardExtendedProps, Cas
   type: "engagement";
 }
 
+interface AnnouncementItemCardExtendedProps extends BaseItemCardExtendedProps, CaseSummary {
+  type: "announcement";
+}
+
 export type ItemCardExtendedProps =
   | CaseItemCardExtendedProps
   | ChatItemCardExtendedProps
   | ServiceItemCardExtendedProps
   | ChangeItemCardExtendedProps
   | SraItemCardExtendedProps
-  | EngagementItemCardExtendedProps;
+  | EngagementItemCardExtendedProps
+  | AnnouncementItemCardExtendedProps;
 
 export function ItemCardExtended(props: ItemCardExtendedProps) {
   const theme = useTheme();
+  const { fromNow } = useDateTime();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
   return (
-    <Card component={Link} to={to} sx={{ textDecoration: "none" }}>
-      <Stack bgcolor="background.paper" p={2} gap={2}>
-        <Stack gap={0.8}>
-          <Stack direction="row" justifyContent="space-between" gap={5}>
-            <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
-              <Icon size={pxToRem(19)} color={color} />
-              <Typography variant="subtitle2" color="text.secondary">
-                {props.number}
-              </Typography>
-              {(type === "case" || type === "service" || type === "sra") && (
-                <PriorityChip size="small" id={props.severityId} />
-              )}
-              {type === "service" && <Chip size="small" label={props.issueType ?? "N/A"} />}
-              {type === "engagement" && <Chip size="small" label={props.engagementType ?? "Unspecified"} />}
-              {type === "change" && (
-                <>
-                  <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />
-                  <Chip size="small" label={props.requestType ?? "N/A"} />
-                </>
-              )}
-            </Stack>
-            <Stack direction="row" gap={2}>
-              <StatusChip type={type} size="small" id={props.statusId} />
-              <Box color="text.secondary">
-                <ChevronRight size={pxToRem(18)} />
-              </Box>
-            </Stack>
-          </Stack>
+    <Card sx={{ textDecoration: "none" }}>
+      <CardActionArea component={Link} to={to}>
+        <Stack bgcolor="background.paper" p={2} gap={2}>
+          <Stack gap={0.8}>
+            <Stack direction="row" justifyContent="space-between" gap={3}>
+              <Stack direction="row" alignItems="center" gap={1} sx={{ flex: 1, minWidth: 0 }}>
+                <Icon size={pxToRem(19)} color={color} style={{ flexShrink: 0 }} />
+                <Typography noWrap variant="subtitle2" color="text.secondary">
+                  {type !== "chat" && props.internalId && (
+                    <>
+                      {props.internalId}
+                      <span style={{ opacity: 0.5, margin: "0 4px" }}>|</span>
+                    </>
+                  )}
 
-          <Stack gap={0.2}>
-            <Typography variant="body1" color="text.primary" noWrap>
+                  {props.number}
+                </Typography>
+                {(type === "case" || type === "service" || type === "sra") && (
+                  <PriorityChip size="small" id={props.severityId} />
+                )}
+                {type === "service" && <Chip size="small" label={props.issueType ?? "N/A"} />}
+                {type === "engagement" && <Chip size="small" label={props.engagementType ?? "Unspecified"} />}
+                {type === "change" && (
+                  <>
+                    <PriorityChip type="change" size="small" id={props.impactId} />
+                  </>
+                )}
+              </Stack>
+              <Stack direction="row" gap={2}>
+                {type !== "announcement" && <StatusChip type={type} size="small" id={props.statusId} />}
+                <Box color="text.secondary">
+                  <ChevronRight size={pxToRem(18)} />
+                </Box>
+              </Stack>
+            </Stack>
+
+            <Stack gap={0.2}>
+              <Typography variant="body1" color="text.primary" noWrap>
+                {(type === "case" ||
+                  type === "service" ||
+                  type === "change" ||
+                  type === "sra" ||
+                  type === "engagement" ||
+                  type === "announcement") &&
+                  props.title}
+                {type === "chat" && props.description}
+              </Typography>
               {(type === "case" ||
                 type === "service" ||
                 type === "change" ||
                 type === "sra" ||
-                type === "engagement") &&
-                props.title}
-              {type === "chat" && props.description}
-            </Typography>
-            {(type === "case" ||
-              type === "service" ||
-              type === "change" ||
-              type === "sra" ||
-              type === "engagement") && (
-              <Typography
-                variant="subtitle2"
-                color="text.secondary"
-                sx={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 3,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {stripHtmlTags(props.description)}
-              </Typography>
+                type === "engagement" ||
+                type === "announcement") && (
+                <Typography
+                  variant="subtitle2"
+                  color="text.secondary"
+                  sx={{
+                    display: "-webkit-box",
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}
+                >
+                  {stripHtmlTags(props.description)}
+                </Typography>
+              )}
+            </Stack>
+
+            {type === "change" && (
+              <Stack direction="row" alignItems="center" gap={1}>
+                <Calendar size={pxToRem(16)} color={theme.palette.text.secondary} />
+                <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+                  Scheduled:{" "}
+                  {props.endDate?.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  }) ?? "N/A"}
+                </Typography>
+              </Stack>
             )}
           </Stack>
 
-          {type === "change" && (
-            <Stack direction="row" alignItems="center" gap={1}>
-              <Calendar size={pxToRem(16)} color={theme.palette.text.secondary} />
-              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-                Scheduled:{" "}
-                {props.endDate?.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }) ?? "N/A"}
-              </Typography>
-            </Stack>
-          )}
-        </Stack>
+          <Divider />
 
-        <Divider />
-
-        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={5}>
-          <Stack direction="row" gap={3}>
-            <Stack>
-              <Typography variant="caption" color="text.secondary">
-                {(() => {
-                  switch (type) {
-                    case "case":
-                      return "Assigned";
-                    case "chat":
-                      return "Messages";
-                    case "service":
-                      return "Requested By";
-                    case "change":
-                      return "Owner";
-                    case "sra":
-                    case "engagement":
-                      return "Created By";
-                  }
-                })()}
-              </Typography>
-              <Typography variant="caption">
-                {(() => {
-                  switch (type) {
-                    case "case":
-                      return props.assigned ?? "N/A";
-                    case "chat":
-                      return props.count;
-                    case "sra":
-                    case "service":
-                    case "engagement":
-                      return props.createdBy;
-                    case "change":
-                      return props.assignedTeam ?? "N/A";
-                  }
-                })()}
-              </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" gap={5}>
+            <Stack direction="row" gap={3}>
+              <Stack>
+                <Typography variant="caption" color="text.secondary">
+                  {(() => {
+                    switch (type) {
+                      case "case":
+                        return "Assigned";
+                      case "chat":
+                        return "Messages";
+                      case "service":
+                        return "Requested By";
+                      case "change":
+                        return "Owner";
+                      case "sra":
+                      case "engagement":
+                        return "Created By";
+                    }
+                  })()}
+                </Typography>
+                <Typography variant="caption">
+                  {(() => {
+                    switch (type) {
+                      case "case":
+                        return props.assigned ?? "N/A";
+                      case "chat":
+                        return props.count;
+                      case "sra":
+                      case "service":
+                      case "engagement":
+                        return props.createdBy;
+                      case "change":
+                        return props.assignedTeam ?? "N/A";
+                      case "announcement":
+                        return <StatusChip type={type} size="small" id={props.statusId} />;
+                    }
+                  })()}
+                </Typography>
+              </Stack>
+              <Stack>
+                <Typography variant="caption" color="text.secondary">
+                  {(() => {
+                    switch (type) {
+                      case "service":
+                        return "Assignee";
+                      case "change":
+                        return "Priority";
+                    }
+                  })()}
+                </Typography>
+                <Typography variant="caption">
+                  {(() => {
+                    switch (type) {
+                      case "service":
+                        return props.assignee ?? "N/A";
+                      case "change":
+                        return <PriorityChip size="small" id={props.impactId} />;
+                    }
+                  })()}
+                </Typography>
+              </Stack>
             </Stack>
-            <Stack>
-              <Typography variant="caption" color="text.secondary">
-                {(() => {
-                  switch (type) {
-                    case "service":
-                      return "Assignee";
-                    case "change":
-                      return "Priority";
-                  }
-                })()}
-              </Typography>
-              <Typography variant="caption">
-                {(() => {
-                  switch (type) {
-                    case "service":
-                      return props.assignee ?? "N/A";
-                    case "change":
-                      return <PriorityChip size="small" id={props.impactId} />;
-                  }
-                })()}
-              </Typography>
-            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              {(() => {
+                switch (type) {
+                  case "case":
+                  case "chat":
+                  case "service":
+                  case "sra":
+                  case "engagement":
+                  case "announcement":
+                    return `Created ${fromNow(props.createdOn)}`;
+                  case "change":
+                    return `Updated ${fromNow(props.updatedOn)}`;
+                }
+              })()}
+            </Typography>
           </Stack>
-          <Typography variant="caption" color="text.secondary">
-            {(() => {
-              switch (type) {
-                case "case":
-                case "chat":
-                case "service":
-                case "sra":
-                case "engagement":
-                  return `Created ${dayjs(props.createdOn).fromNow()}`;
-                case "change":
-                  return `Updated ${dayjs(props.updatedOn).fromNow()}`;
-              }
-            })()}
-          </Typography>
         </Stack>
-      </Stack>
+      </CardActionArea>
     </Card>
   );
 }

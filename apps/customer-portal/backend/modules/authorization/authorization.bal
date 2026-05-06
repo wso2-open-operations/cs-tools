@@ -132,6 +132,11 @@ public isolated service class JwtInterceptor {
     isolated resource function default [string... path](http:RequestContext ctx, http:Request req)
         returns http:NextService|http:Unauthorized|http:InternalServerError|error? {
 
+        if req.method == http:GET && path.length() == 1 && path[0] == "health" {
+            // Skip authorization for health check endpoint
+            return ctx.next();
+        }
+        
         UserInfoPayload|error userInfo = getUserInfoFromRequest(req);
         if userInfo is error {
             return <http:InternalServerError>{body: {message: userInfo.message()}};

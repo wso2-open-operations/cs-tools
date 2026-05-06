@@ -16,7 +16,7 @@
 
 export type ProjectStatus = "All Good" | "Needs Attention";
 export type ProjectType = "Managed Cloud" | "Regular";
-export type ProjectMetricKey = "cases" | "chats";
+export type ProjectMetricKey = "outstanding" | "chats";
 export type ProjectMetricValue = number | string;
 export type ProjectMetrics = Partial<Record<ProjectMetricKey, ProjectMetricValue | undefined>>;
 
@@ -62,4 +62,5 @@ export interface Product {
   name: string;
   deploymentId: string;
   versionId?: string;
+  version?: string;
 }

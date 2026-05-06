@@ -28,7 +28,7 @@ import {
 import { BookOpen, ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import { useMemo, type JSX } from "react";
-import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import useGetAIChatHistory from "@features/support/api/useGetAIChatHistory";
 import { KB_ARTICLE_VIEW_BASE_URL } from "@features/support/constants/supportConstants";
 import { useConversationRecommendationsSearch } from "@features/support/api/useConversationRecommendationsSearch";
 import type { CaseDetails } from "@features/support/types/cases";
@@ -57,15 +57,8 @@ export default function CaseKnowledgeBaseRecommendations({
   const theme = useTheme();
   const accent = theme.palette.primary.main;
 
-  const { data: commentsData, isLoading: isCommentsLoading } =
-    useGetCaseComments(projectId, caseId, {
-      offset: 0,
-    });
-
-  const comments = useMemo(
-    () => commentsData?.comments ?? [],
-    [commentsData?.comments],
-  );
+  const { comments, isLoading: isCommentsLoading } =
+    useGetAIChatHistory(projectId, caseId);
 
   const payload = useMemo(
     () => buildRecommendationRequestFromCase(data, comments),

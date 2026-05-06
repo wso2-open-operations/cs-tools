@@ -24,7 +24,7 @@ import type { ItemCardProps } from "../components/features/support";
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
 export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
-  cases: { label: "Cases:", color: colors.red[300], icon: CircleAlert },
+  outstanding: { label: "Outstanding:", color: colors.red[300], icon: CircleAlert },
   chats: { label: "Chats:", color: colors.indigo[300], icon: MessageSquare },
 };
 
@@ -104,12 +104,13 @@ export const TIMELINE_META: Omit<ProgressTimelineEntryProps, "variant">[] = [
 ];
 
 export const TAB_CONFIG = {
-  case: { title: "Open Cases", subtitle: "Active support tickets" },
+  case: { title: "Outstanding Cases", subtitle: "Active support tickets" },
   chat: { title: "Chat History", subtitle: "Recent Novera conversations" },
   service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
   change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
   sra: { title: "Security Report Analysis", subtitle: "Security findings, assessments, and reviews" },
   engagement: { title: "Engagements", subtitle: "Ongoing and completed client engagements" },
+  announcement: { title: "Announcements", subtitle: "View and manage announcements for your project" },
 };
 
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
@@ -119,6 +120,7 @@ export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => st
   change: (id) => `/changes/${id}`,
   sra: (id) => `/sras/${id}`,
   engagement: (id) => `/engagements/${id}`,
+  announcement: (id) => `/announcements/${id}`,
 };
 
 export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";
@@ -130,6 +132,7 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = 
   change: "Search Change Requests",
   sra: "Search Security Report Analysis",
   engagement: "Search Engagement",
+  announcement: "Search Announcements",
 };
 
 export const CASE_STATE_IDS = {
@@ -141,3 +144,25 @@ export const CASE_STATE_IDS = {
   CLOSED: 3,
   REOPENED: 1006,
 } as const;
+
+export const ACTION_REQUIRED_CASE_STATUS_IDS = [18, 6];
+export const ACTION_REQUIRED_CHANGE_REQUEST_STATUS_IDS = [1, 5];
+
+export const OUTSTANDING_CASE_STATUS_IDS = [1, 10, 18, 1003, 6, 1006];
+export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
+export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
+
+export const RESOLVED_CASE_STATUS_IDS = [3];
+export const RESOLVED_CHANGE_REQUEST_STATUS_IDS = [3];
+
+export const PLURALS: Record<ItemCardProps["type"], string> = {
+  case: "Cases",
+  chat: "Chats",
+  service: "Service Requests",
+  change: "Change Requests",
+  sra: "Security Report Analysis",
+  engagement: "Engagements",
+  announcement: "Announcements",
+};
+
+export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

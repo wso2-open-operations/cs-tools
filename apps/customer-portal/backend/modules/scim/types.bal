@@ -44,7 +44,7 @@ public type User record {|
     # User UUID
     string id;
     # Phone numbers
-    PhoneNumber[]? phoneNumbers;
+    PhoneNumber[]? phoneNumbers?;
     # Schema scope
     SchemaScope? urn\:scim\:wso2\:schema;
     json...;

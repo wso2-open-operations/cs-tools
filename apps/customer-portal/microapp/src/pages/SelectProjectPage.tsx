@@ -91,9 +91,12 @@ function ProjectsListContent({ search }: { search: string }) {
   }, [projectsData, search]);
 
   useEffect(() => {
-    setProjectId(data[0].id);
-    navigate("/");
-  }, [data, navigate, setProjectId]);
+    if (projectsData.length !== 1) return;
+    if (search) return;
+
+    setProjectId(projectsData[0].id);
+    navigate("/", { replace: true });
+  }, [navigate, projectsData, search, setProjectId]);
 
   if (data.length === 0) return <EmptyState />;
 

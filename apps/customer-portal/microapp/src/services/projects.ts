@@ -18,6 +18,7 @@ import type {
   Deployment,
   DeploymentProductDto,
   DeploymentProductsDto,
+  GetProductsRequestDto,
   PaginatedArray,
   Pagination,
   Product,
@@ -79,12 +80,10 @@ const getDeploymentsByProject = async (
 
 const getProductsByDeployment = async (
   deploymentId: string,
-  body: Partial<Omit<Pagination, "totalRecords">>,
+  body: GetProductsRequestDto,
 ): Promise<PaginatedArray<Product>> => {
   const response = (
-    await apiClient.post<DeploymentProductsDto>(PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT(deploymentId), {
-      pagination: body,
-    })
+    await apiClient.post<DeploymentProductsDto>(PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT(deploymentId), body)
   ).data;
   const result = response.deployedProducts.map(toProduct) as PaginatedArray<Product>;
   result.pagination = {
@@ -105,7 +104,7 @@ function mapProjectDtoToProjectSummary(project: ProjectsDto["projects"][number])
     createdOn: new Date(project.createdOn.replace(" ", "T")),
     description: project.description ? project.description.replace(/<\/?[^>]+(>|$)/g, "") : "",
     metrics: {
-      cases: project.activeCasesCount,
+      outstanding: project.outstandingCount,
       chats: project.activeChatsCount,
     },
     status: project.slaStatus as ProjectStatus,
@@ -149,6 +148,7 @@ function toProduct(product: DeploymentProductDto): Product {
     name: product.product.label,
     deploymentId: product.deployment.id,
     versionId: product.version?.id ?? undefined,
+    version: product.version?.label,
   };
 }
 
@@ -196,16 +196,17 @@ export const projects = {
       },
     }),
 
-  products: (deploymentId: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
+  products: (deploymentId: string, body: GetProductsRequestDto = {}) =>
     queryOptions({
       queryKey: ["products", deploymentId],
       queryFn: () => getProductsByDeployment(deploymentId, body),
     }),
 
-  productsPaginated: (deploymentId: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
+  productsPaginated: (deploymentId: string, body: GetProductsRequestDto = {}) =>
     infiniteQueryOptions({
       queryKey: ["products", "paginated", deploymentId, body],
-      queryFn: ({ pageParam }) => getProductsByDeployment(deploymentId, { ...body, offset: pageParam }),
+      queryFn: ({ pageParam }) =>
+        getProductsByDeployment(deploymentId, { ...body, pagination: { ...body.pagination, offset: pageParam } }),
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;

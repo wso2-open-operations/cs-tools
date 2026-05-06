@@ -14,21 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { alpha, Chip, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
-import { Circle } from "@mui/icons-material";
 import type { Project } from "@src/types";
 
-import { PROJECT_STATUS_META } from "@config/constants";
-
-type ProjectPopoverItemProps = Pick<Project, "name" | "type" | "status" | "metrics"> & {
+type ProjectPopoverItemProps = Pick<Project, "name" | "metrics"> & {
   active?: boolean;
   onClick: () => void;
 };
 
-export function ProjectPopoverItem({ name, type, status, metrics, active = false, onClick }: ProjectPopoverItemProps) {
+export function ProjectPopoverItem({ name, active = false, onClick }: ProjectPopoverItemProps) {
   const theme = useTheme();
-  const statusChipColorVariant = status ? PROJECT_STATUS_META[status].color : "default";
 
   return (
     <Stack
@@ -45,29 +41,6 @@ export function ProjectPopoverItem({ name, type, status, metrics, active = false
           {name}
         </Typography>
         {active && <Check style={{ flexShrink: 0 }} color={theme.palette.primary.main} />}
-      </Stack>
-      <Stack direction="row" alignItems="center" gap={1.5}>
-        {status ? (
-          <Chip
-            label={status}
-            size="small"
-            sx={(theme) => ({
-              bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-              color: theme.palette[statusChipColorVariant].light,
-            })}
-          />
-        ) : (
-          <Skeleton variant="rounded" width={80} height={24} />
-        )}
-        <Typography color="text.secondary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}>
-          {type}
-        </Typography>
-      </Stack>
-      <Stack direction="row" alignItems="center" gap={1}>
-        <Circle sx={(theme) => ({ fontSize: theme.typography.pxToRem(6), color: "primary.main" })} />
-        <Typography color="text.secondary" sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}>
-          {metrics.cases ?? 0} Open Cases
-        </Typography>
       </Stack>
     </Stack>
   );

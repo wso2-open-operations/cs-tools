@@ -30,6 +30,7 @@ import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "../config/endpoints";
 import { useMe } from "../context/me";
 import type { FinalNoveraResponse, NoveraResponse } from "../types/novera.dto";
 import { getAccessToken, getIdToken } from "../services/auth";
+import type { Product } from "../types";
 
 dayjs.extend(relativeTime);
 
@@ -125,7 +126,7 @@ export default function ChatPage() {
 
   const envProducts = deployments.reduce((acc, deployment, index) => {
     const products = productQueries[index]?.data ?? [];
-    const productNames = products.map((p) => p.name);
+    const productNames = products.map((p: Product) => p.name + " " + p.version);
 
     return {
       ...acc,

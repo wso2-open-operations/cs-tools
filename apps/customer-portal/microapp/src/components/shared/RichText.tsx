@@ -15,8 +15,10 @@
 // under the License.
 
 import { Box, pxToRem, styled } from "@wso2/oxygen-ui";
+import { useEffect, useRef } from "react";
+import { openUrl } from "../microapp-bridge";
 
-export const RichText = styled(Box)(({ theme }) => ({
+export const RichTextBase = styled(Box)(({ theme }) => ({
   fontSize: pxToRem(13),
   lineHeight: 1.5,
 
@@ -51,3 +53,29 @@ export const RichText = styled(Box)(({ theme }) => ({
     lineHeight: "inherit !important",
   },
 }));
+
+export const RichText = (props: React.ComponentProps<typeof RichTextBase>) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const handler = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest("a");
+      if (!anchor) return;
+
+      e.preventDefault();
+      openUrl({
+        url: anchor.href,
+        presentationStyle: "FormSheet",
+        dismissButtonStyle: "close",
+      });
+    };
+
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
+  }, []);
+
+  return <RichTextBase ref={ref} {...props} />;
+};

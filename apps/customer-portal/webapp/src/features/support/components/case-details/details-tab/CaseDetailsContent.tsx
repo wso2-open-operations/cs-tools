@@ -25,7 +25,7 @@ import { consumePendingCaseDetailsTab } from "@features/settings/utils/settingsS
 import { useGetCaseAttachments } from "@features/support/api/useGetCaseAttachments";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
-import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import useGetAIChatHistory from "@features/support/api/useGetAIChatHistory";
 import { useConversationRecommendationsSearch } from "@features/support/api/useConversationRecommendationsSearch";
 import { buildRecommendationRequestFromCase } from "@features/support/utils/recommendations";
 import {
@@ -158,21 +158,17 @@ export default function CaseDetailsContent({
 
   // Eagerly fetch KB recommendations so the tab count is available on page load.
   // React Query deduplicates the network call when the KB tab component mounts later.
-  const { data: kbCommentsData, isLoading: isKbCommentsLoading } =
-    useGetCaseComments(
+  const { comments: kbComments, isLoading: isKbCommentsLoading } =
+    useGetAIChatHistory(
       hideKnowledgeBaseTab ? "" : resolvedProjectId,
       hideKnowledgeBaseTab ? "" : caseId,
-      { offset: 0 },
     );
   const kbPayload = useMemo(
     () =>
       hideKnowledgeBaseTab
         ? null
-        : buildRecommendationRequestFromCase(
-            data,
-            kbCommentsData?.comments ?? [],
-          ),
-    [hideKnowledgeBaseTab, data, kbCommentsData],
+        : buildRecommendationRequestFromCase(data, kbComments),
+    [hideKnowledgeBaseTab, data, kbComments],
   );
   const { data: kbRecData, isLoading: isKbRecLoading } =
     useConversationRecommendationsSearch(

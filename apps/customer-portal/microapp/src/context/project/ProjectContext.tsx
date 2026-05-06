@@ -23,6 +23,7 @@ export type ProjectContextType = {
   kbReferencesEnabled: boolean;
   features?: ProjectFeaturesDto;
   projectTypeId?: string;
+  type?: string;
 
   setProjectId: (id: string | null) => void;
 };

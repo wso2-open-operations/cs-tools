@@ -38,6 +38,7 @@ import UpdateProfileSettingsPage from "./pages/UpdateProfileSettingsPage";
 import { useScrollControl } from "./utils/others";
 import SecurityReportAnalysisDetailPage from "./pages/SecurityReportAnalysisDetailPage";
 import EngagementDetailPage from "./pages/EngagementDetailPage";
+import AnnouncementDetailPage from "./pages/AnnouncementDetailPage";
 
 const App: React.FC = () => {
   useLayoutEffect(() => {
@@ -99,6 +100,13 @@ const App: React.FC = () => {
               <Route path="/engagements">
                 <Route path="all" element={<AllItemsPage type="engagement" />} />
                 <Route path=":id" element={<EngagementDetailPage />} />
+              </Route>
+              <Route path="announcements">
+                <Route path="all" element={<AllItemsPage type="announcement" />} />
+                <Route path=":id" element={<AnnouncementDetailPage />} />
+              </Route>
+              <Route path="/multiple">
+                <Route path="all" element={<AllItemsPage type="multiple" />} />
               </Route>
             </Route>
           </Route>

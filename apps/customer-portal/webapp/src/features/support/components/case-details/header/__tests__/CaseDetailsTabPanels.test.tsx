@@ -122,17 +122,13 @@ vi.mock("@features/support/api/useGetCaseAttachments", () => ({
     data?.pages?.flatMap((p: any) => p.attachments ?? []) ?? [],
 }));
 
-vi.mock("@features/support/api/useGetCaseComments", () => ({
+vi.mock("@features/support/api/useGetAIChatHistory", () => ({
   __esModule: true,
   default: vi.fn(() => ({
-    data: {
-      comments: mockCaseComments,
-      totalRecords: mockCaseComments.length,
-      offset: 0,
-      limit: 50,
-    },
+    comments: mockCaseComments,
     isLoading: false,
     isError: false,
+    error: null,
   })),
 }));
 

@@ -104,6 +104,8 @@ export interface GetCasesRequestDto {
     searchQuery?: string;
     severityId?: number;
     statusIds?: number[];
+    closedEndDate?: string;
+    closedStartDate?: string;
   };
   pagination?: {
     limit?: number;
@@ -169,6 +171,7 @@ export interface CaseClassificationResponseDto {
 
 export interface CasesStatsDto {
   totalCount: number;
+  actionRequiredCount: number;
   activeCount: number;
   outstandingCount: number;
   averageResponseTime: number;
@@ -212,4 +215,34 @@ export interface CreateCommentRequestDto {
 
 export interface GetCasesStatsRequestDto {
   caseTypes: string[];
+}
+
+export interface AttachmentsDto extends Pagination {
+  attachments: AttachmentDto[];
+}
+
+export interface AttachmentDto {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  createdBy: string;
+  createdOn: string;
+  downloadUrl: string;
+  previewUrl: string;
+  description: string | null;
+}
+
+export interface GetProductsRequestDto {
+  filters?: {
+    productCategories?: string[];
+  };
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  };
+  sortBy?: {
+    field?: string;
+    order?: "asc" | "desc";
+  };
 }

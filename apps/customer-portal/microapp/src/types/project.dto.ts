@@ -56,6 +56,7 @@ export interface ProjectDto {
 
 type ProjectSummaryDto = Pick<ProjectDto, "id" | "name" | "key" | "createdOn" | "description" | "type"> & {
   activeCasesCount: number;
+  outstandingCount: number;
   activeChatsCount: number;
   slaStatus: string;
 };
@@ -120,4 +121,5 @@ export interface ProjectFeaturesDto {
   hasTimeLogsReadAccess: boolean;
   hasDeploymentWriteAccess: boolean;
   hasDeploymentReadAccess: boolean;
+  defaultCaseProductCategories: string[] | null;
 }

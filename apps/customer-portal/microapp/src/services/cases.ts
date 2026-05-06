@@ -36,9 +36,15 @@ import type {
   GetCasesStatsRequestDto,
   EditCaseResponseDto,
   EditCaseRequestDto,
+  Attachment,
+  AttachmentsDto,
+  AttachmentDto,
+  Pagination,
 } from "@src/types";
 
 import {
+  ATTACHMENT_DETAIL_ENDPOINT,
+  CASE_ATTACHMENTS_ENDPOINT,
   CASE_CLASSIFICATION_ENDPOINT,
   CASE_COMMENTS_ENDPOINT,
   CASE_DETAILS_ENDPOINT,
@@ -116,6 +122,16 @@ const createComment = async (id: string, body: CreateCommentRequestDto): Promise
   return toComment(response);
 };
 
+const getAttachments = async (id: string, body: Partial<Omit<Pagination, "totalRecords">>): Promise<Attachment[]> => {
+  const response = (await apiClient.get<AttachmentsDto>(CASE_ATTACHMENTS_ENDPOINT(id), { params: body })).data;
+  return response.attachments.map(toAttachment);
+};
+
+const getAttachment = async (id: string): Promise<{ content: string }> => {
+  const response = (await apiClient.get<{ content: string }>(ATTACHMENT_DETAIL_ENDPOINT(id))).data;
+  return response;
+};
+
 /* Mappers */
 export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
   return {
@@ -149,9 +165,9 @@ export function toCase(dto: CaseDto): Case {
     statusId: dto.status.id,
     severityId: dto.severity?.id,
     issueTypeId: dto.issueType?.id,
-    product: dto.product?.label,
+    product: dto.deployedProduct ? `${dto.deployedProduct?.label} ${dto.deployedProduct?.version}` : undefined,
     deployment: dto.deployment?.label ?? undefined,
-    reporter: dto.csManager?.label,
+    reporter: dto.createdBy,
     account: dto.account?.label,
     parentCaseId: dto.parentCase?.id,
     conversationId: dto.conversation?.id,
@@ -167,11 +183,23 @@ export function toComment(dto: CommentDto): Comment {
     createdBy: dto.createdBy,
     attachments: dto.inlineAttachments.map((attachment) => ({
       id: attachment.id,
+      type: "others",
       fileName: attachment.fileName,
       downloadUrl: attachment.downloadUrl,
       createdOn: new Date(attachment.createdOn.replace(" ", "T")),
       createdBy: attachment.createdBy,
     })),
+  };
+}
+
+export function toAttachment(dto: AttachmentDto): Attachment {
+  return {
+    id: dto.id,
+    type: /^image\//.test(dto.type) ? "image" : "others",
+    fileName: dto.name,
+    downloadUrl: dto.downloadUrl,
+    createdOn: new Date(dto.createdOn.replace(" ", "T")),
+    createdBy: dto.createdBy,
   };
 }
 
@@ -228,4 +256,9 @@ export const cases = {
     mutationOptions({
       mutationFn: (body: CreateCommentRequestDto) => createComment(id, body),
     }),
+
+  attachments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
+    queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id, body) }),
+
+  attachment: (id: string) => queryOptions({ queryKey: ["attachment", id], queryFn: () => getAttachment(id) }),
 };

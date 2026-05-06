@@ -14,12 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ms from "ms";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CheckIcon, CircleX, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { CheckIcon, CircleX, Download, Image, Paperclip, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
+import { Box, Card, Grid, IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
   InfoField,
@@ -29,7 +26,7 @@ import {
   type MenuOptionProps,
 } from "@components/features/detail";
 import { PriorityChip, StatusChip } from "@components/features/support";
-import { RichText, SectionCard } from "@components/shared";
+import { AttachmentPreviewDialog, RichText, SectionCard } from "@components/shared";
 import { useLayout } from "@context/layout";
 import { cases } from "@src/services/cases";
 import { CASE_STATE_IDS } from "@src/config/constants";
@@ -39,18 +36,23 @@ import { Comment } from "@components/features/detail";
 import { useFilters } from "../context/filters";
 import DOMPurify from "dompurify";
 import { useNotify } from "../context/snackbar";
-
-dayjs.extend(relativeTime);
+import type { Attachment } from "@src/types";
+import { useDateTime } from "../utils/useDateTime";
 
 export default function CaseDetailPage() {
   const notify = useNotify();
   const layout = useLayout();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { fromNow, format } = useDateTime();
   const [comment, setComment] = useState("");
 
   const { id } = useParams();
   const { data, isLoading } = useQuery(cases.get(id!));
+  const { data: attachments, isLoading: isAttachmentsLoading } = useQuery({
+    ...cases.attachments(id!),
+    enabled: Boolean(id),
+  });
   const { data: filters, isLoading: isFiltersLoading } = useFilters();
   const { data: comments, isFetching: isCommentsRefetching } = useQuery({
     ...cases.comments(id!),
@@ -58,9 +60,6 @@ export default function CaseDetailPage() {
   });
 
   const issueType = filters?.issueTypes.find((issueType) => issueType.id === data?.issueTypeId)?.label;
-  const slaResponseTimeInMilliseconds = Number.isFinite(Number(data?.slaResponseTime))
-    ? Number(data?.slaResponseTime)
-    : undefined;
 
   const mutation = useMutation({
     ...cases.createComment(id!),
@@ -142,7 +141,12 @@ export default function CaseDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="case" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="case"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {
@@ -165,6 +169,26 @@ export default function CaseDetailPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments]);
+
+  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [, setIsPreviewLoading] = useState(false);
+
+  const handlePreviewOpen = async (attachment: Attachment, blob: Blob) => {
+    setPreviewAttachment(attachment);
+    setIsPreviewLoading(true);
+    try {
+      const url = URL.createObjectURL(blob);
+      setPreviewSrc(url);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handlePreviewClose = () => {
+    setPreviewAttachment(null);
+    setPreviewSrc(null);
+  };
 
   return (
     <>
@@ -208,34 +232,10 @@ export default function CaseDetailPage() {
               <InfoField label="Category" value={isLoading || isFiltersLoading ? undefined : (issueType ?? "N/A")} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="SLA Response Time"
-                value={
-                  isLoading
-                    ? undefined
-                    : slaResponseTimeInMilliseconds !== undefined
-                      ? ms(slaResponseTimeInMilliseconds, { long: true })
-                      : "N/A"
-                }
-              />
+              <InfoField label="Last Updated" value={data?.updatedOn && fromNow(data.updatedOn)} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="Created"
-                value={data?.createdOn
-                  ?.toLocaleString("en-US", {
-                    month: "short",
-                    day: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })
-                  .replace("at", " ")}
-              />
-            </Grid>
-            <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+              <InfoField label="Created" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
           </Grid>
         </SectionCard>
@@ -249,12 +249,44 @@ export default function CaseDetailPage() {
             </Grid>
           </Grid>
         </SectionCard>
+        <SectionCard title="Attachments">
+          {isAttachmentsLoading ? (
+            <Grid spacing={1.5} container>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
+                  <Card variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack direction="row" gap={1} alignItems="center">
+                      <Skeleton variant="rounded" width={40} height={40} />
+                      <Stack gap={0.5} flex={1} minWidth={0}>
+                        <Skeleton variant="text" width="80%" />
+                        <Skeleton variant="text" width="50%" />
+                      </Stack>
+                      <Skeleton variant="circular" width={32} height={32} />
+                    </Stack>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          ) : attachments?.length ? (
+            <Grid spacing={1.5} container>
+              {attachments.map((attachment) => (
+                <Grid key={attachment.id} size={{ xs: 12 }}>
+                  <AttachmentCard attachment={attachment} onPreview={handlePreviewOpen} />
+                </Grid>
+              ))}
+            </Grid>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No attachments for this case.
+            </Typography>
+          )}
+        </SectionCard>
         <SectionCard title="Activity Timeline">
           <Stack gap={2} pt={1}>
             {comments ? (
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
+                  <Comment key={id} author={createdBy} timestamp={format(createdOn)}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}
@@ -277,7 +309,78 @@ export default function CaseDetailPage() {
         loading={isSendingComment}
       />
 
+      <AttachmentPreviewDialog
+        open={Boolean(previewAttachment)}
+        attachment={previewAttachment}
+        onClose={handlePreviewClose}
+        src={previewSrc}
+      />
+
       <div ref={bottomRef} />
+    </>
+  );
+}
+
+function AttachmentCard({
+  attachment,
+  onPreview,
+}: {
+  attachment: Attachment;
+  onPreview: (attachment: Attachment, blob: Blob) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { fromNow } = useDateTime();
+
+  const handlePreview = async () => {
+    const data = await queryClient.fetchQuery(cases.attachment(attachment.id));
+
+    const [prefix, base64] = data.content.split(",");
+    const mimeType = prefix.split(":")[1].split(";")[0];
+
+    const byteCharacters = atob(base64);
+    const byteArray = new Uint8Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteArray[i] = byteCharacters.charCodeAt(i);
+    }
+
+    const blob = new Blob([byteArray], { type: mimeType });
+
+    onPreview(attachment, blob);
+  };
+
+  return (
+    <>
+      <Card sx={{ p: 1.5 }}>
+        <Stack direction="row" alignItems="flex-start" gap={1}>
+          <Box
+            sx={{
+              flexShrink: 0,
+              width: 40,
+              height: 40,
+              borderRadius: 0.5,
+              overflow: "hidden",
+              bgcolor: "action.hover",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "text.secondary",
+            }}
+          >
+            {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
+          </Box>
+          <Stack gap={0.25} minWidth={0} flex={1}>
+            <Typography variant="subtitle2" fontWeight="medium" noWrap>
+              {attachment.fileName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {attachment.createdBy} · {fromNow(attachment.createdOn)}
+            </Typography>
+          </Stack>
+          <IconButton onClick={handlePreview}>
+            <Download size={pxToRem(18)} />
+          </IconButton>
+        </Stack>
+      </Card>
     </>
   );
 }

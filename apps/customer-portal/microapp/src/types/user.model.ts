@@ -20,7 +20,7 @@ export interface Me {
   firstName: string;
   lastName: string;
   phoneNumber?: string;
-  timezone: string;
+  timezone?: string;
   roles: string[];
 }
 

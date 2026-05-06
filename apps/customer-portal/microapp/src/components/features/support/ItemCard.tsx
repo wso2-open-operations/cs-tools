@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import { Card, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 import { Calendar, ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
 import { Circle } from "@mui/icons-material";
@@ -26,10 +24,9 @@ import { TYPE_CONFIG } from "./config";
 import type { CaseSummary, ChangeRequestSummary } from "@src/types";
 import type { Chat } from "@src/types/chat.model";
 import type { ServiceRequestSummary } from "@root/src/types/service.model";
+import { useDateTime } from "@root/src/utils/useDateTime";
 
-dayjs.extend(relativeTime);
-
-export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement";
+export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement" | "announcement";
 
 export type Status =
   | "in progress"
@@ -76,16 +73,22 @@ interface EngagementItemCardProps extends BaseItemCardProps, CaseSummary {
   type: "engagement";
 }
 
+interface AnnouncementItemCardProps extends BaseItemCardProps, CaseSummary {
+  type: "announcement";
+}
+
 export type ItemCardProps =
   | CaseItemCardProps
   | ChatItemCardProps
   | ChangeItemCardProps
   | ServiceItemCardProps
   | SraItemCardProps
-  | EngagementItemCardProps;
+  | EngagementItemCardProps
+  | AnnouncementItemCardProps;
 
 export function ItemCard(props: ItemCardProps) {
   const theme = useTheme();
+  const { fromNow } = useDateTime();
   const { type, to } = props;
   const { icon: Icon, color } = TYPE_CONFIG[type];
 
@@ -96,25 +99,37 @@ export function ItemCard(props: ItemCardProps) {
           <Stack direction="row" alignItems="center" gap={1}>
             <Icon size={pxToRem(18)} color={color} />
             <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+              {type !== "chat" && props.internalId && (
+                <>
+                  {props.internalId}
+                  <span style={{ opacity: 0.5, margin: "0 4px" }}>|</span>
+                </>
+              )}
+
               {props.number}
             </Typography>
-            {(type === "case" || type === "sra" || type === "service") && (
-              <PriorityChip size="small" id={props.severityId} />
-            )}
-            {type === "change" && <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />}
           </Stack>
           <ChevronRight size={pxToRem(18)} color={theme.palette.text.secondary} />
         </Stack>
 
         <Typography variant="body1" color="text.primary" mr={1} noWrap>
-          {(type === "case" || type === "sra" || type === "engagement" || type === "service" || type === "change") &&
+          {(type === "case" ||
+            type === "sra" ||
+            type === "engagement" ||
+            type === "service" ||
+            type === "change" ||
+            type === "announcement") &&
             props.title}
           {type === "chat" && props.description}
         </Typography>
 
         <Stack direction="row" alignItems="center" gap={1}>
-          <StatusChip type={type} size="small" id={props.statusId} />
-          <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
+          {type !== "announcement" && type !== "engagement" && (
+            <>
+              <StatusChip type={type} size="small" id={props.statusId} />
+              <Circle sx={(theme) => ({ color: "text.tertiary", fontSize: theme.typography.pxToRem(4) })} />
+            </>
+          )}
           <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
             {type === "case" && (props.assigned ?? "Not Assigned")}
             {type === "chat" && `${props.count} messages`}
@@ -148,7 +163,7 @@ export function ItemCard(props: ItemCardProps) {
           </Stack>
         )}
 
-        <Stack gap={0.5} mt={1}>
+        <Stack gap={0.5} mt={1} direction="row" justifyContent="space-between">
           <Stack direction="row" alignItems="center" gap={1}>
             <Clock4 size={pxToRem(13)} color={theme.palette.text.secondary} />
             <Typography
@@ -156,9 +171,16 @@ export function ItemCard(props: ItemCardProps) {
               color="text.tertiary"
               sx={(theme) => ({ fontSize: theme.typography.pxToRem(13) })}
             >
-              {dayjs(props.createdOn).fromNow()}
+              {fromNow(props.createdOn)}
             </Typography>
           </Stack>
+          {(type === "case" || type === "sra" || type === "service") && (
+            <PriorityChip size="small" id={props.severityId} />
+          )}
+          {type === "change" && <PriorityChip type="change" size="small" prefix="Impact" id={props.impactId} />}
+          {(type === "announcement" || type === "engagement") && (
+            <StatusChip type={type} size="small" id={props.statusId} />
+          )}
         </Stack>
       </Stack>
     </Card>

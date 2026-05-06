@@ -26,17 +26,15 @@ import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cases } from "@src/services/cases";
 import { stripHtmlTags } from "@utils/others";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import EmptyState from "../components/shared/EmptyState";
 import { engagements } from "../services/engagements";
 import DOMPurify from "dompurify";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function EngagementDetailPage() {
   const layout = useLayout();
   const queryClient = useQueryClient();
+  const { fromNow, format } = useDateTime();
   const [comment, setComment] = useState("");
 
   const { id } = useParams();
@@ -93,7 +91,12 @@ export default function EngagementDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="engagement" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="engagement"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {
@@ -149,22 +152,10 @@ export default function EngagementDetailPage() {
               <InfoField label="Assigned To" value={isLoading ? undefined : (data?.assigned ?? "N/A")} icon={Users} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="Created"
-                value={data?.createdOn
-                  ?.toLocaleString("en-US", {
-                    month: "short",
-                    day: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })
-                  .replace("at", " ")}
-              />
+              <InfoField label="Created" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+              <InfoField label="Last Updated" value={data?.updatedOn ? fromNow(data.updatedOn) : undefined} />
             </Grid>
           </Grid>
         </SectionCard>
@@ -194,7 +185,7 @@ export default function EngagementDetailPage() {
             ) : (
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
+                  <Comment key={id} author={createdBy} timestamp={format(createdOn)}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}

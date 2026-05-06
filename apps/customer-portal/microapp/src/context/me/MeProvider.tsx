@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import axios from "axios";
 import { users } from "@root/src/services/users";
 import { useQuery } from "@tanstack/react-query";
 import { MeContext } from "./MeContext";
 import { LoadingFallback } from "@root/src/components/ui/LoadingFallback";
-import axios from "axios";
 import { AuthorizationFallback } from "@root/src/components/ui";
 import { ADMIN_USER_ROLE } from "@root/src/config/constants";
 import { getLastVisitedProjectId } from "@root/src/utils/others";
@@ -64,7 +64,14 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
   if (!meData) return <AuthorizationFallback />;
 
   return (
-    <MeContext.Provider value={{ id: meData.id, roles: meData.roles, isAdmin: meData.roles.includes(ADMIN_USER_ROLE) }}>
+    <MeContext.Provider
+      value={{
+        id: meData.id,
+        roles: meData.roles,
+        isAdmin: meData.roles.includes(ADMIN_USER_ROLE),
+        timezone: meData.timezone,
+      }}
+    >
       {children}
     </MeContext.Provider>
   );

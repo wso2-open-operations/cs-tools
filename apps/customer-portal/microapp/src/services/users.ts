@@ -97,7 +97,7 @@ function toMe(dto: MeDto): Me {
     firstName: dto.firstName,
     lastName: dto.lastName,
     phoneNumber: dto.phoneNumber ?? undefined,
-    timezone: dto.timeZone,
+    timezone: dto.timeZone ?? undefined,
     roles: dto.roles,
   };
 }

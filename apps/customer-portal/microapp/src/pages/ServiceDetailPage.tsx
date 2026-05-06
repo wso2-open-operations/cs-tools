@@ -26,15 +26,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { serviceRequests } from "../services/services";
 import { cases } from "@src/services/cases";
 import { stripHtmlTags } from "@utils/others";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 import DOMPurify from "dompurify";
-
-dayjs.extend(relativeTime);
+import { useDateTime } from "../utils/useDateTime";
 
 export default function ServiceDetailPage() {
   const layout = useLayout();
   const queryClient = useQueryClient();
+  const { fromNow, format } = useDateTime();
   const [comment, setComment] = useState("");
 
   const { id } = useParams();
@@ -89,7 +87,12 @@ export default function ServiceDetailPage() {
 
   useLayoutEffect(() => {
     layout.setTitleOverride(
-      <OverlineSlot variant={overlineSlotVariant} type="service" id={data?.number} title={data?.title} />,
+      <OverlineSlot
+        variant={overlineSlotVariant}
+        type="service"
+        id={data?.number ? `${data.internalId} | ${data.number}` : undefined}
+        title={data?.title}
+      />,
     );
 
     return () => {
@@ -145,22 +148,10 @@ export default function ServiceDetailPage() {
               <InfoField label="Assigned To" value={isLoading ? undefined : (data?.assignee ?? "N/A")} icon={Users} />
             </Grid>
             <Grid size={6}>
-              <InfoField
-                label="Created"
-                value={data?.createdOn
-                  ?.toLocaleString("en-US", {
-                    month: "short",
-                    day: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })
-                  .replace("at", " ")}
-              />
+              <InfoField label="Created" value={data?.createdOn ? format(data.createdOn) : undefined} />
             </Grid>
             <Grid size={6}>
-              <InfoField label="Last Updated" value={data?.updatedOn && dayjs(data.updatedOn).fromNow()} />
+              <InfoField label="Last Updated" value={data?.updatedOn && fromNow(data.updatedOn)} />
             </Grid>
           </Grid>
         </SectionCard>
@@ -168,9 +159,6 @@ export default function ServiceDetailPage() {
           <Grid spacing={1.5} container>
             <Grid size={12}>
               <InfoField label="Product Name" value={isLoading ? undefined : data?.product || "N/A"} />
-            </Grid>
-            <Grid size={12}>
-              <InfoField label="Version" value={isLoading ? undefined : data?.productVersion || "N/A"} />
             </Grid>
             <Grid size={12}>
               <InfoField label="Deployment" value={isLoading ? undefined : data?.deployment || "N/A"} />
@@ -182,7 +170,7 @@ export default function ServiceDetailPage() {
             {comments ? (
               <>
                 {comments.map(({ id, content, createdOn, createdBy }) => (
-                  <Comment key={id} author={createdBy} timestamp={dayjs(createdOn).fromNow()}>
+                  <Comment key={id} author={createdBy} timestamp={format(createdOn)}>
                     <RichText dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
                   </Comment>
                 ))}

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, useMemo, type JSX } from "react";
+import { useState, useMemo, useEffect, useRef, type JSX } from "react";
 import {
   Box,
   Button,
@@ -43,7 +43,7 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePostComment } from "@features/support/api/usePostComment";
 import type { CaseDetails } from "@features/support/types/cases";
@@ -111,14 +111,31 @@ export default function ServiceRequestDetailContent({
   const [commentText, setCommentText] = useState("");
   const [commentResetTrigger, setCommentResetTrigger] = useState(0);
 
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
   const {
     data: commentsData,
     isLoading: isCommentsLoading,
     isError: isCommentsError,
-  } = useGetCaseComments(projectId ?? "", caseId, {
-    offset: 0,
-    limit: 50,
-  });
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useGetCaseCommentsInfinite(projectId ?? "", caseId);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasNextPage || isFetchingNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void fetchNextPage();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
   const postComment = usePostComment();
 
   const { data: filterMetadata } = useGetProjectFilters(projectId ?? "");
@@ -158,13 +175,13 @@ export default function ServiceRequestDetailContent({
     null;
 
   const commentsSorted = useMemo(() => {
-    const list = commentsData?.comments ?? [];
+    const list = commentsData?.pages?.flatMap((p) => p.comments) ?? [];
     return [...list].sort(
       (a, b) =>
         (parseBackendTimestamp(a.createdOn)?.getTime() ?? 0) -
         (parseBackendTimestamp(b.createdOn)?.getTime() ?? 0),
     );
-  }, [commentsData?.comments]);
+  }, [commentsData?.pages]);
 
   const commentsToShow = useMemo(
     () => commentsSorted.filter(hasDisplayableContent),
@@ -508,7 +525,8 @@ export default function ServiceRequestDetailContent({
                   No comments yet.
                 </Typography>
               ) : (
-                commentsToShow.map((comment: CaseComment) => {
+                <>
+                {commentsToShow.map((comment: CaseComment) => {
                   const isCurrentUser =
                     (comment.createdBy?.toLowerCase() ?? "") ===
                     currentUserEmail;
@@ -612,7 +630,23 @@ export default function ServiceRequestDetailContent({
                       </Box>
                     </Stack>
                   );
-                })
+                })}
+                <Box ref={sentinelRef} sx={{ py: 0.5 }}>
+                  {isFetchingNextPage && (
+                    <Stack spacing={2}>
+                      {[1, 2].map((i) => (
+                        <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
+                          <Skeleton variant="circular" width={32} height={32} />
+                          <Box sx={{ flex: 1 }}>
+                            <Skeleton variant="text" width="40%" height={16} sx={{ mb: 0.5 }} />
+                            <Skeleton variant="rounded" width="100%" height={48} />
+                          </Box>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+                </>
               )}
             </Stack>
             <Stack spacing={1.5}>

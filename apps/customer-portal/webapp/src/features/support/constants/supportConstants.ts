@@ -530,6 +530,10 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/webp",
   "application/x-sh",
   "application/x-har",
+  "text/x-log",
+  "application/x-log",
+  "application/toml",
+  "text/x-toml",
 ]);
 
 // Allowed file extensions for attachment uploads (fallback when MIME type is empty or unreliable).
@@ -537,11 +541,12 @@ export const ALLOWED_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
   "zip", "json", "xml", "txt", "csv",
   "jpg", "jpeg", "png", "webp", "sh", "har",
+  "log", "toml",
 ]);
 
 // accept attribute value for the attachment file input element.
 export const ALLOWED_ATTACHMENT_ACCEPT =
-  ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.xml,.txt,.csv,.jpg,.jpeg,.png,.webp,.sh,.har";
+  ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.xml,.txt,.csv,.jpg,.jpeg,.png,.webp,.sh,.har,.log,.toml";
 
 // Allowed MIME types for inline images in the rich text editor.
 export const ALLOWED_INLINE_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
