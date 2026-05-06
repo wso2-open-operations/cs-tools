@@ -16,6 +16,37 @@
 
 import { Box } from "@wso2/oxygen-ui";
 import type ReactMarkdown from "react-markdown";
+import type { JSX } from "react";
+
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+/**
+ * Renders plain text with bare URLs turned into clickable anchor tags.
+ * Safe protocols only (http/https).
+ */
+export function TextWithLinks({ text }: { text: string }): JSX.Element {
+  const parts = text.split(URL_REGEX);
+  return (
+    <>
+      {parts.map((part, i) =>
+        isSafeHref(part) ? (
+          <Box
+            key={i}
+            component="a"
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{ color: "primary.main", textDecoration: "underline", wordBreak: "break-all" }}
+          >
+            {part}
+          </Box>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
 
 /** Safe URL protocols for markdown links. */
 export const SAFE_PROTOCOLS = ["http:", "https:"];
