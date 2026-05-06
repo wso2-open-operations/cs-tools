@@ -124,8 +124,13 @@ export default function ChatInput({
               }}
             />
             {isTooLong && (
-              <Typography variant="caption" color="error" sx={{ mt: 0.5, display: "block" }}>
-                Message too long ({inputValue.length} chars). Maximum is {CHAT_MAX_CHARS} characters.
+              <Typography
+                variant="caption"
+                color="error"
+                sx={{ mt: 0.5, display: "block" }}
+              >
+                Message is too long ({inputValue.length} characters). The
+                maximum allowed is {CHAT_MAX_CHARS} characters.
               </Typography>
             )}
           </Box>
