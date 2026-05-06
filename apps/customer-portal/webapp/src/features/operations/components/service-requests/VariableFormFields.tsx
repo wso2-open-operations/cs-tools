@@ -28,11 +28,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, type JSX } from "react";
-import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import {
-  ALLOWED_ATTACHMENT_ACCEPT,
-  isAllowedAttachment,
-} from "@features/support/constants/supportConstants";
 import type { CatalogItemVariable } from "@features/operations/types/serviceRequests";
 import {
   isAttachmentField,
@@ -79,10 +74,7 @@ function parseRequiredLabel(questionText: string): { label: string } {
 
 function isTitleField(questionText: string): boolean {
   return (
-    questionText
-      .replace(/^\s*\*?\s*/, "")
-      .trim()
-      .toLowerCase() === "title"
+    questionText.replace(/^\s*\*?\s*/, "").trim().toLowerCase() === "title"
   );
 }
 
@@ -217,12 +209,8 @@ export default function VariableFormFields({
   onAttachmentAdd,
   userTimeZone,
 }: VariableFormFieldsProps): JSX.Element {
-  const { showError } = useErrorBanner();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
-  const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(
-    0,
-    effectiveTimeZone,
-  );
+  const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
   const sortedVariables = useMemo(
     () => (variables ? [...variables].sort((a, b) => a.order - b.order) : []),
     [variables],
@@ -362,11 +350,6 @@ export default function VariableFormFields({
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={onAttachmentRemove}
-            onInlineImageTypeError={() =>
-              showError(
-                "Only jpg, jpeg, png, and webp images can be inserted inline.",
-              )
-            }
           />
         </Grid>
       );
@@ -437,20 +420,16 @@ export default function VariableFormFields({
                   type="file"
                   hidden
                   multiple
-                  accept={ALLOWED_ATTACHMENT_ACCEPT}
                   onChange={(e) => {
                     const files = e.target.files;
                     if (files?.length) {
                       for (let i = 0; i < files.length; i++) {
                         const f = files[i];
-                        if (!f) continue;
-                        if (!isAllowedAttachment(f)) {
-                          showError(
-                            `"${f.name}" is not supported. Only pdf, doc, docx, xls, xlsx, ppt, pptx, zip, json, xml, txt, csv, jpg, jpeg, png, webp, sh, and har file types are supported.`,
+                        if (f)
+                          onAttachmentAdd(
+                            f,
+                            variable.questionText ?? undefined,
                           );
-                          continue;
-                        }
-                        onAttachmentAdd(f, variable.questionText ?? undefined);
                       }
                       e.target.value = "";
                     }
@@ -544,11 +523,7 @@ export default function VariableFormFields({
           onChange={(e) => onChange(variable.id, e.target.value)}
           disabled={isContext}
           error={isTitleTooLong}
-          helperText={
-            isTitleTooLong
-              ? "Title must be 160 characters or fewer."
-              : undefined
-          }
+          helperText={isTitleTooLong ? "Title must be 160 characters or fewer." : undefined}
         />
         {isTitle && (
           <Typography

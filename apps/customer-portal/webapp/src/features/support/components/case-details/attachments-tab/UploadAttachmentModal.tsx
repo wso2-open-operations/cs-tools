@@ -30,11 +30,7 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { usePostDeploymentAttachment } from "@features/project-details/api/usePostDeploymentAttachment";
-import {
-  MAX_ATTACHMENT_SIZE_BYTES,
-  ALLOWED_ATTACHMENT_ACCEPT,
-  isAllowedAttachment,
-} from "@features/support/constants/supportConstants";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
 import UploadAttachmentDropZone from "@case-details-attachments/UploadAttachmentDropZone";
 import SelectedFileDisplay from "@case-details-attachments/SelectedFileDisplay";
 
@@ -93,7 +89,6 @@ export default function UploadAttachmentModal({
   const [description, setDescription] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [fileSizeErrorVisible, setFileSizeErrorVisible] = useState(false);
-  const [fileTypeErrorVisible, setFileTypeErrorVisible] = useState(false);
   const [readErrorVisible, setReadErrorVisible] = useState(false);
 
   const fileTooLarge = file ? file.size > MAX_ATTACHMENT_SIZE_BYTES : false;
@@ -109,7 +104,6 @@ export default function UploadAttachmentModal({
     setName("");
     setDescription("");
     setFileSizeErrorVisible(false);
-    setFileTypeErrorVisible(false);
     setReadErrorVisible(false);
   }, []);
 
@@ -120,13 +114,6 @@ export default function UploadAttachmentModal({
 
   const setFileWithValidation = useCallback(
     (selected: File | null) => {
-      if (selected && !isAllowedAttachment(selected)) {
-        setFileTypeErrorVisible(true);
-        setFileSizeErrorVisible(false);
-        setFile(null);
-        return;
-      }
-      setFileTypeErrorVisible(false);
       setFile(selected);
       if (selected && selected.size > MAX_ATTACHMENT_SIZE_BYTES) {
         setFileSizeErrorVisible(true);
@@ -265,17 +252,6 @@ export default function UploadAttachmentModal({
         </IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 1 }}>
-        {fileTypeErrorVisible && (
-          <Alert
-            severity="error"
-            onClose={() => setFileTypeErrorVisible(false)}
-            sx={{ mb: 2 }}
-          >
-            This file type is not supported. Supported types: pdf, doc, docx,
-            xls, xlsx, ppt, pptx, zip, json, xml, txt, csv, jpg, jpeg, png,
-            webp, sh, har.
-          </Alert>
-        )}
         {fileSizeErrorVisible && (
           <Alert
             severity="error"
@@ -297,7 +273,7 @@ export default function UploadAttachmentModal({
         <input
           ref={fileInputRef}
           type="file"
-          accept={ALLOWED_ATTACHMENT_ACCEPT}
+          accept="*/*"
           onChange={handleFileChange}
           style={{ display: "none" }}
           aria-hidden
