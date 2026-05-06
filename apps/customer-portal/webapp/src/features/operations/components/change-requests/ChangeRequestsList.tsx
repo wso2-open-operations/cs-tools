@@ -140,6 +140,8 @@ export default function ChangeRequestsList({
               alignItems: "flex-start",
               justifyContent: "space-between",
               gap: 3,
+              minWidth: 0,
+              overflow: "hidden",
             }}
           >
             <Box
@@ -181,7 +183,7 @@ export default function ChangeRequestsList({
                 <Typography
                   variant="h6"
                   color="text.primary"
-                  sx={{ fontWeight: 500, fontSize: "1rem" }}
+                  sx={{ fontWeight: 500, fontSize: "1rem", overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}
                 >
                   {item.title || CHANGE_REQUESTS_LIST_PLACEHOLDER}
                 </Typography>
