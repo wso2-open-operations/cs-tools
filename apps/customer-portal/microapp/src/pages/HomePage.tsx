@@ -130,7 +130,6 @@ export default function HomePage() {
       : undefined;
 
   const navigateBySeverity = (id: string | number, label: string) => {
-    console.log("severity id: ", id);
     navigate("/cases/all", {
       state: { mode: { type: "severity", id, title: `Outstanding ${label} Cases` } as ModeType },
     });
