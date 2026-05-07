@@ -72,33 +72,16 @@ export function useScrollControl(position: "top" | "bottom" = "top", onRouteChan
 
 export const setLastVisitedProjectId = (projectId: string | null) => {
   if (projectId === null) {
-    document.cookie = `${LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY}=; path=/`;
+    localStorage.removeItem(LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY);
     return;
   }
-
-  document.cookie = `${LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY}=${projectId}; path=/`;
+  localStorage.setItem(LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY, projectId);
 };
 
 export function getLastVisitedProjectId(): string | undefined {
-  const name = LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY + "=";
-  const decodedCookie = decodeURIComponent(document.cookie);
-  const ca = decodedCookie.split(";");
-
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) == " ") {
-      c = c.substring(1);
-    }
-    if (c.indexOf(name) == 0) {
-      const value = c.substring(name.length, c.length);
-
-      if (!value || value === "null") return undefined;
-
-      return value;
-    }
-  }
-
-  return undefined;
+  const value = localStorage.getItem(LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY);
+  if (!value || value === "null") return undefined;
+  return value;
 }
 
 export function formatDuration(ms: number): string {

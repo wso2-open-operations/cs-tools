@@ -15,7 +15,7 @@
 // under the License.
 
 import apiClient from "@src/services/apiClient";
-import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, mutationOptions, queryOptions, skipToken } from "@tanstack/react-query";
 import type {
   CaseSummary,
   CaseClassificationRequestDto,
@@ -40,6 +40,7 @@ import type {
   AttachmentsDto,
   AttachmentDto,
   Pagination,
+  CreateAttachmentRequestDto,
 } from "@src/types";
 
 import {
@@ -132,6 +133,10 @@ const getAttachment = async (id: string): Promise<{ content: string }> => {
   return response;
 };
 
+const createAttachment = async (id: string, body: CreateAttachmentRequestDto): Promise<void> => {
+  await apiClient.post<CommentDto>(CASE_ATTACHMENTS_ENDPOINT(id), body);
+};
+
 /* Mappers */
 export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
   return {
@@ -195,7 +200,7 @@ export function toComment(dto: CommentDto): Comment {
 export function toAttachment(dto: AttachmentDto): Attachment {
   return {
     id: dto.id,
-    type: /^image\//.test(dto.type) ? "image" : "others",
+    type: /^image\//.test(dto.type) ? "image" : dto.type === "application/pdf" ? "pdf" : "others",
     fileName: dto.name,
     downloadUrl: dto.downloadUrl,
     createdOn: new Date(dto.createdOn.replace(" ", "T")),
@@ -225,9 +230,8 @@ export const cases = {
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;
-        const nextOffset = offset + 1;
-        const totalPages = Math.ceil(totalRecords / limit);
-        return nextOffset >= totalPages ? undefined : nextOffset;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
       },
     }),
 
@@ -252,6 +256,7 @@ export const cases = {
     }),
 
   comments: (id: string) => queryOptions({ queryKey: ["comments", id], queryFn: () => getComments(id) }),
+
   createComment: (id: string) =>
     mutationOptions({
       mutationFn: (body: CreateCommentRequestDto) => createComment(id, body),
@@ -260,5 +265,14 @@ export const cases = {
   attachments: (id: string, body: Partial<Omit<Pagination, "totalRecords">> = {}) =>
     queryOptions({ queryKey: ["cases", id, "attachments"], queryFn: () => getAttachments(id, body) }),
 
-  attachment: (id: string) => queryOptions({ queryKey: ["attachment", id], queryFn: () => getAttachment(id) }),
+  attachment: (id: string | undefined) =>
+    queryOptions<{ content: string }>({
+      queryKey: ["attachment", id],
+      queryFn: id ? () => getAttachment(id) : skipToken,
+    }),
+
+  createAttachment: mutationOptions({
+    mutationFn: ({ caseId, ...body }: CreateAttachmentRequestDto & { caseId: string }) =>
+      createAttachment(caseId, body),
+  }),
 };

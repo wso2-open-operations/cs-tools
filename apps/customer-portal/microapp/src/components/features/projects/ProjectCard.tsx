@@ -26,15 +26,7 @@ export interface ProjectMetricMeta {
   color?: string;
 }
 
-export function ProjectCard({
-  projectKey,
-  name,
-  description,
-  type,
-  status,
-  metrics,
-  onClick,
-}: Project & { onClick?: () => void }) {
+export function ProjectCard({ projectKey, name, metrics, onClick }: Project & { onClick?: () => void }) {
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
@@ -91,30 +83,17 @@ export function ProjectCardSkeleton() {
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
-          <Skeleton variant="text" width="30%" sx={{ fontSize: "subtitle2.fontSize" }} />
-          <Skeleton variant="rounded" width={80} height={22} />
-        </Stack>
-
+        <Skeleton variant="text" width="30%" sx={{ fontSize: "subtitle2.fontSize" }} />
         <Skeleton variant="text" width="100%" height={32} sx={{ mt: -0.8 }} />
-
-        <Skeleton variant="rounded" width={60} height={22} sx={{ alignSelf: "start" }} />
-
-        <Box>
-          <Skeleton variant="text" width="100%" />
-          <Skeleton variant="text" width="80%" />
-        </Box>
       </Stack>
 
       <Grid p={2} spacing={1.5} sx={{ bgcolor: "background.default" }} container>
-        {[...Array(2)].map((_, index) => (
-          <Grid key={index} size={{ xs: 6 }}>
-            <Stack gap={0.5}>
-              <Skeleton variant="text" width="40%" height={14} />
-              <Skeleton variant="text" width="60%" height={24} />
-            </Stack>
-          </Grid>
-        ))}
+        <Grid size={{ xs: 6 }}>
+          <Skeleton variant="text" width="90%" height={24} />
+        </Grid>
+        <Grid size={{ xs: 6 }}>
+          <Skeleton variant="text" width="90%" height={24} />
+        </Grid>
       </Grid>
 
       <Box p={2} pt={3}>

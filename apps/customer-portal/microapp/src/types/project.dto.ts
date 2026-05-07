@@ -112,14 +112,17 @@ export interface DeploymentProductDto {
 
 export interface ProjectFeaturesDto {
   acceptedSeverityValues: EntityReference[];
-  hasServiceRequestWriteAccess: boolean;
   hasServiceRequestReadAccess: boolean;
-  hasSraWriteAccess: boolean;
+  hasSraReadAccess: boolean;
   hasChangeRequestReadAccess: boolean;
   hasEngagementsReadAccess: boolean;
   hasUpdatesReadAccess: boolean;
   hasTimeLogsReadAccess: boolean;
-  hasDeploymentWriteAccess: boolean;
   hasDeploymentReadAccess: boolean;
   defaultCaseProductCategories: string[] | null;
+}
+
+export interface GetAllProjectsRequestDto {
+  filters?: { searchQuery?: string };
+  pagination?: Partial<Omit<Pagination, "totalRecords">>;
 }
