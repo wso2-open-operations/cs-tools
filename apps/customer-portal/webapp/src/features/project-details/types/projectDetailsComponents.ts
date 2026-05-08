@@ -41,6 +41,7 @@ export type ProjectStatisticsCardProps = {
   showDeploymentsStat?: boolean;
   showServiceRequestStat?: boolean;
   showChangeRequestStat?: boolean;
+  showSecurityReportStat?: boolean;
 };
 
 export type ProjectNameProps = {

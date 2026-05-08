@@ -177,6 +177,7 @@ export default function ProjectDetails(): JSX.Element {
                   showDeploymentsStat={permissions.hasDeployments}
                   showServiceRequestStat={permissions.hasSR}
                   showChangeRequestStat={permissions.hasCR}
+                  showSecurityReportStat={permissions.hasSecurityReportAnalysis}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 5 }}>

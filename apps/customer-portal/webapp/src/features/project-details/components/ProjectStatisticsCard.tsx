@@ -70,12 +70,14 @@ const ProjectStatisticsCard = ({
   showDeploymentsStat = true,
   showServiceRequestStat = true,
   showChangeRequestStat = true,
+  showSecurityReportStat = true,
 }: ProjectStatisticsCardProps): JSX.Element => {
   const gridSize = isSidebarOpen ? { xs: 12, xl: 4 } : { xs: 12, sm: 6, lg: 4 };
   const visibleStats = statItems.filter((s) => {
     if (s.key === "deployments" && !showDeploymentsStat) return false;
     if (s.key === "outstandingServiceRequestCount" && !showServiceRequestStat) return false;
     if (s.key === "outstandingChangeRequestCount" && !showChangeRequestStat) return false;
+    if (s.key === "outstandingSraCount" && !showSecurityReportStat) return false;
     return true;
   });
   const isStatLoading = isLoading || (!isError && !stats);
