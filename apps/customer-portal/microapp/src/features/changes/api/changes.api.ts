@@ -13,9 +13,15 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import {
+  CHANGE_REQUEST_DETAILS_ENDPOINT,
+  CHANGE_REQUEST_STATS_ENDPOINT,
+  PROJECT_CHANGE_REQUESTS_ENDPOINT,
+} from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
-import type { PaginatedArray } from "@shared/types";
+
+import { toChangeRequest, toChangeRequestSummary } from "@features/changes/mappers/change.mapper";
 import type {
   ChangeRequestDto,
   ChangeRequestsDto,
@@ -23,12 +29,8 @@ import type {
   GetChangeRequestsRequestDto,
 } from "@features/changes/types/change.dto";
 import type { ChangeRequest, ChangeRequestSummary } from "@features/changes/types/change.model";
-import { toChangeRequest, toChangeRequestSummary } from "@features/changes/mappers/change.mapper";
-import {
-  CHANGE_REQUEST_DETAILS_ENDPOINT,
-  CHANGE_REQUEST_STATS_ENDPOINT,
-  PROJECT_CHANGE_REQUESTS_ENDPOINT,
-} from "@config/endpoints";
+
+import type { PaginatedArray } from "@shared/types";
 
 export const getAllChangeRequests = async (
   id: string,

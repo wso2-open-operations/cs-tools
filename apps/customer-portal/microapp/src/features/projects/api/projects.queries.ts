@@ -13,18 +13,19 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
-import type { Pagination } from "@shared/types";
-import type { GetProductsRequestDto } from "@features/projects/types/project.dto";
+
 import {
   editProject,
   getAllProjects,
   getDeploymentsByProject,
-  getProject,
   getProductsByDeployment,
+  getProject,
   getProjectFeatures,
 } from "@features/projects/api/projects.api";
+import type { GetProductsRequestDto } from "@features/projects/types/project.dto";
+
+import type { Pagination } from "@shared/types";
 
 export const projects = {
   all: () => queryOptions({ queryKey: ["projects"], queryFn: getAllProjects }),

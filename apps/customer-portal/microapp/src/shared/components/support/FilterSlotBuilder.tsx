@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+
 import { Box, SearchBar, Skeleton, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
 
 export interface FilterTab {

@@ -1,5 +1,6 @@
-import type { CasesFiltersDto } from "@features/cases/types/case.dto";
 import { createContext } from "react";
+
+import type { CasesFiltersDto } from "@features/cases/types/case.dto";
 
 export type FiltersContextType = {
   data?: CasesFiltersDto;

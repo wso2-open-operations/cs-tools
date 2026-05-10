@@ -13,12 +13,15 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useState } from "react";
-import { ProjectContext } from "./ProjectContext";
+
 import { useQuery } from "@tanstack/react-query";
+
 import { projects } from "@features/projects/api/projects.queries";
+
 import { setLastVisitedProjectId } from "@shared/utils/storage.utils";
+
+import { ProjectContext } from "./ProjectContext";
 
 export default function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(null);

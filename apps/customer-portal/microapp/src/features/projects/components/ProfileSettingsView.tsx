@@ -13,28 +13,30 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import {
-  Button,
-  Stack,
-  Typography,
-  TextField,
-  pxToRem,
-  Card,
-  colors,
-  Select,
-  MenuItem,
-  FormHelperText,
-  FormControl,
-  CircularProgress,
-  alpha,
-} from "@wso2/oxygen-ui";
 import { Link } from "react-router-dom";
-import { SectionCard } from "@components/common";
+
+import * as Yup from "yup";
+import {
+  alpha,
+  Button,
+  Card,
+  CircularProgress,
+  colors,
+  FormControl,
+  FormHelperText,
+  MenuItem,
+  pxToRem,
+  Select,
+  Stack,
+  TextField,
+  Typography,
+} from "@wso2/oxygen-ui";
 import { Clock, Phone } from "@wso2/oxygen-ui-icons-react";
 import { useFormik } from "formik";
-import * as Yup from "yup";
+
 import type { useProfileSettings } from "@features/projects/hooks/useProfileSettings";
+
+import { SectionCard } from "@components/common";
 
 type ProfileSettingsViewProps = ReturnType<typeof useProfileSettings>;
 

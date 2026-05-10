@@ -13,10 +13,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { METADATA_ENDPOINT } from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
+
 import type { MetadataDto } from "@features/metadata/types/metadata.dto";
-import { METADATA_ENDPOINT } from "@config/endpoints";
 
 export const getMetadata = async (): Promise<MetadataDto> => {
   return (await apiClient.get<MetadataDto>(METADATA_ENDPOINT)).data;

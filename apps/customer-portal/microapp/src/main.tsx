@@ -13,15 +13,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import App from "./app/App";
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
-import theme from "./theme";
-import "./index.css";
 import axios from "axios";
+import { createRoot } from "react-dom/client";
+
+import App from "./app/App";
+import "./index.css";
+import theme from "./theme";
 
 const queryClient = new QueryClient({
   defaultOptions: {

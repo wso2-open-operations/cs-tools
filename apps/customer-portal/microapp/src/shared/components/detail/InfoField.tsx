@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
-import type { LucideIcon } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
+
+import { pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import type { LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
 interface InfoFieldProps {
   label: string;

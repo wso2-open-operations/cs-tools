@@ -13,15 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useState } from "react";
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+
 import { useNavigate } from "react-router-dom";
-import { cases } from "@features/cases/api/cases.queries";
-import { projects } from "@features/projects/api/projects.queries";
+
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+
 import { useProject } from "@context/project";
-import { buildEnvProducts, messagesToString } from "@features/chats/services/chatHistory.service";
+
+import { cases } from "@features/cases/api/cases.queries";
 import type { ChatMessage } from "@features/chats/components";
+import { buildEnvProducts, messagesToString } from "@features/chats/services/chatHistory.service";
+import { projects } from "@features/projects/api/projects.queries";
 import type { Product } from "@features/projects/types/project.model";
 
 export function useChatData(messages: ChatMessage[]) {
@@ -39,10 +42,7 @@ export function useChatData(messages: ChatMessage[]) {
 
   const productsLoading = productQueries.every((query) => query.isLoading);
 
-  const envProducts = buildEnvProducts(
-    deployments,
-    productQueries as { data?: { name: string; version: string }[] }[],
-  );
+  const envProducts = buildEnvProducts(deployments, productQueries as { data?: { name: string; version: string }[] }[]);
 
   const classifyMutation = useMutation({
     ...cases.classify,

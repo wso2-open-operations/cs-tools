@@ -13,10 +13,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { projects } from "@features/projects/api/projects.queries";
+
 import { useProject } from "@context/project";
+
+import { projects } from "@features/projects/api/projects.queries";
 
 export function useProjectSelector() {
   const { projectId, setProjectId } = useProject();

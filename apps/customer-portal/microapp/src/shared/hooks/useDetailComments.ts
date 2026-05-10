@@ -13,9 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useRef, useState } from "react";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { cases } from "@features/cases/api/cases.queries";
 
 export function useDetailComments(id: string) {

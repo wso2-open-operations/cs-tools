@@ -1,6 +1,7 @@
+import { type MouseEvent, type ReactNode, useState } from "react";
+
 import { Button, Divider, IconButton, Popover, Stack, Typography } from "@wso2/oxygen-ui";
 import { Ellipsis } from "@wso2/oxygen-ui-icons-react";
-import { useState, type MouseEvent, type ReactNode } from "react";
 
 export interface MenuOptionProps {
   label: string;

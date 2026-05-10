@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { BarChart } from "@wso2/oxygen-ui-charts-react";
-import { WidgetBox } from "@components/ui";
 import { Box, Skeleton } from "@wso2/oxygen-ui";
+import { BarChart } from "@wso2/oxygen-ui-charts-react";
+
+import { WidgetBox } from "@components/ui";
 
 export interface BarSeriesConfig {
   dataKey: string;

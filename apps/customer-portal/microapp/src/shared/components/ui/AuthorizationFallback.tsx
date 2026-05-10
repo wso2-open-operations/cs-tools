@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Backdrop, Box, Button, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { LockIcon, LogOutIcon } from "@wso2/oxygen-ui-icons-react";
+
 import { goToMyAppsScreen } from "@bridge/index";
 
 export function AuthorizationFallback() {

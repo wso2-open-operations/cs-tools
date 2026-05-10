@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { LocalStorageKeys } from "@shared/constants/app.constants";
 
 export function setLastVisitedProjectId(projectId: string | null): void {

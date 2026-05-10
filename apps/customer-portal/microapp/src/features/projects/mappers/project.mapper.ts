@@ -13,9 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { parseApiDate } from "@shared/utils/date.utils";
-import { stripHtmlTags } from "@shared/utils/string.utils";
 import type {
   DeploymentProductDto,
   ProjectDeploymentDto,
@@ -23,6 +20,9 @@ import type {
   ProjectsDto,
 } from "@features/projects/types/project.dto";
 import type { Deployment, Product, Project, ProjectInfo, ProjectStatus } from "@features/projects/types/project.model";
+
+import { parseApiDate } from "@shared/utils/date.utils";
+import { stripHtmlTags } from "@shared/utils/string.utils";
 
 export function toProjectSummary(dto: ProjectsDto["projects"][number]): Project {
   return {

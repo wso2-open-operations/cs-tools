@@ -13,15 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Suspense, useState } from "react";
+
 import { Box, SearchBar, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Folder } from "@wso2/oxygen-ui-icons-react";
+
+import { useNotify } from "@context/snackbar";
+
 import { ProjectCard, ProjectCardSkeleton } from "@features/projects/components";
 import { useProjectList } from "@features/projects/hooks/useProjectList";
-import { ErrorBoundary, ExitButton } from "@components/core";
+
 import EmptyState from "@components/common/EmptyState";
-import { useNotify } from "@context/snackbar";
+import { ErrorBoundary, ExitButton } from "@components/core";
 
 export function SelectProjectView() {
   const theme = useTheme();

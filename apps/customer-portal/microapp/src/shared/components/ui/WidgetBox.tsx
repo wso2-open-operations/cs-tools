@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import type { ReactNode } from "react";
-import { Card, CardActionArea, Stack, Typography, type CardProps } from "@wso2/oxygen-ui";
+
+import { Card, CardActionArea, type CardProps, Stack, Typography } from "@wso2/oxygen-ui";
 
 interface WidgetBoxProps extends Omit<CardProps, "variant"> {
   title?: string;

@@ -13,22 +13,22 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { ReactNode } from "react";
 
 import {
-  FormControl,
-  TextField as MuiTextField,
-  MenuItem,
-  Select,
-  Stack,
-  type SelectChangeEvent,
-  Chip,
   alpha,
-  pxToRem,
-  Typography,
+  Chip,
+  FormControl,
   FormHelperText,
+  MenuItem,
+  TextField as MuiTextField,
+  pxToRem,
+  Select,
+  type SelectChangeEvent,
+  Stack,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { Sparkle } from "@wso2/oxygen-ui-icons-react";
-import type { ReactNode } from "react";
 
 interface SelectFieldProps {
   name: string;

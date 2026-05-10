@@ -13,19 +13,19 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+import { type ChipProps, colors } from "@wso2/oxygen-ui";
 import {
   Briefcase,
+  type LucideIcon,
   Megaphone,
   MessageSquare,
   OctagonAlert,
   RefreshCcw,
   Settings,
   Shield,
-  type LucideIcon,
 } from "@wso2/oxygen-ui-icons-react";
+
 import type { ItemType } from "./ItemCard";
-import { colors, type ChipProps } from "@wso2/oxygen-ui";
 
 export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> = {
   case: {

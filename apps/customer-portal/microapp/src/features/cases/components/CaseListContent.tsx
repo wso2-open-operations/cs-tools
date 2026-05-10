@@ -1,14 +1,21 @@
+import { Fragment, useEffect } from "react";
+
+import { Typography } from "@wso2/oxygen-ui";
+
 import { useProject } from "@context/project";
-import type { ModeType } from "@shared/types";
-import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
-import { useCaseListFilters } from "@features/cases/hooks/useCaseListFilters";
+
+import { ITEM_DETAIL_PATHS } from "@config/constants";
+
 import { useCaseList } from "@features/cases/hooks/useCaseList";
+import { useCaseListFilters } from "@features/cases/hooks/useCaseListFilters";
+
+import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
+
+import type { ModeType } from "@shared/types";
+
 import { InfiniteScroll } from "@components/common";
 import EmptyState from "@components/common/EmptyState";
-import { Typography } from "@wso2/oxygen-ui";
-import { Fragment, useEffect } from "react";
 import { ItemCardExtended, ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
-import { ITEM_DETAIL_PATHS } from "@config/constants";
 import { GroupAccordion } from "@components/ui/GroupAccordion";
 
 export function CaseListContent({

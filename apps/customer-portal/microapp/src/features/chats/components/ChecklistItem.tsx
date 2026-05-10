@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, pxToRem, Stack, Typography, type SvgIconProps } from "@wso2/oxygen-ui";
-import { Check, CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import type { ElementType } from "react";
+
+import { Box, pxToRem, Stack, type SvgIconProps, Typography } from "@wso2/oxygen-ui";
+import { Check, CircleCheck } from "@wso2/oxygen-ui-icons-react";
 
 export function ChecklistItem({
   children,

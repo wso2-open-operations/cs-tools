@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import type { GetCasesRequestDto } from "@features/cases/types/case.dto";
+
 import { getAllAnnouncements, getAnnouncement } from "@features/announcements/api/announcements.api";
+import type { GetCasesRequestDto } from "@features/cases/types/case.dto";
 
 export const announcements = {
   get: (id: string) => queryOptions({ queryKey: ["announcements", id], queryFn: () => getAnnouncement(id) }),

@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { useProfileSettings } from "@features/projects/hooks/useProfileSettings";
 import { ProfileSettingsView } from "@features/projects/components/ProfileSettingsView";
+import { useProfileSettings } from "@features/projects/hooks/useProfileSettings";
 
 export default function UpdateProfileSettingsPage() {
   const { me, timeZones, mutation, buildPayload } = useProfileSettings();

@@ -13,16 +13,20 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode, useLayoutEffect } from "react";
 
-import { useLayoutEffect, type ReactNode } from "react";
-import { Card, Divider, Skeleton, Stack, Switch, Typography, colors } from "@wso2/oxygen-ui";
+import { Card, colors, Divider, Skeleton, Stack, Switch, Typography } from "@wso2/oxygen-ui";
 import { BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-icons-react";
+
 import { useLayout } from "@context/layout";
+
+import { openUrl } from "@bridge/index";
+
+import { CHANGE_PASSWORD_URL } from "@config/endpoints";
+
+import type { useProfileData } from "@features/projects/hooks/useProfileData";
 import { SettingListItem } from "@features/settings/components";
 import { Avatar } from "@features/users/components";
-import { openUrl } from "@bridge/index";
-import { CHANGE_PASSWORD_URL } from "@config/endpoints";
-import type { useProfileData } from "@features/projects/hooks/useProfileData";
 
 type ProfileViewProps = ReturnType<typeof useProfileData>;
 

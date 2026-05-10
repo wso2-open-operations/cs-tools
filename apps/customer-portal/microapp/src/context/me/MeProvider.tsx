@@ -13,19 +13,26 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import axios from "axios";
-import { users } from "@features/users/api/users.queries";
-import { useQuery } from "@tanstack/react-query";
-import { MeContext } from "./MeContext";
-import { LoadingFallback } from "@components/ui/LoadingFallback";
-import { AuthorizationFallback } from "@components/ui";
-import { ADMIN_USER_ROLE } from "@config/constants";
-import { getLastVisitedProjectId } from "@shared/utils/storage.utils";
-import { projects } from "@features/projects/api/projects.queries";
 import { useEffect, useMemo, useState } from "react";
-import { useProject } from "@context/project";
+
 import { useNavigate } from "react-router-dom";
+
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
+
+import { useProject } from "@context/project";
+
+import { ADMIN_USER_ROLE } from "@config/constants";
+
+import { projects } from "@features/projects/api/projects.queries";
+import { users } from "@features/users/api/users.queries";
+
+import { getLastVisitedProjectId } from "@shared/utils/storage.utils";
+
+import { AuthorizationFallback } from "@components/ui";
+import { LoadingFallback } from "@components/ui/LoadingFallback";
+
+import { MeContext } from "./MeContext";
 
 export default function MeProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();

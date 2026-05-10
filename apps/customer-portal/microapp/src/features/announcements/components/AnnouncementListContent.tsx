@@ -1,12 +1,17 @@
+import { useLayoutEffect } from "react";
+
+import { Typography } from "@wso2/oxygen-ui";
+
+import { useLayout } from "@context/layout";
 import { useProject } from "@context/project";
+
+import { ITEM_DETAIL_PATHS } from "@config/constants";
+
 import { useAnnouncementList } from "@features/announcements/hooks/useAnnouncementList";
+
 import { InfiniteScroll } from "@components/common";
 import EmptyState from "@components/common/EmptyState";
-import { Typography } from "@wso2/oxygen-ui";
 import { ItemCardExtended, ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
-import { ITEM_DETAIL_PATHS } from "@config/constants";
-import { useLayout } from "@context/layout";
-import { useLayoutEffect } from "react";
 
 export function AnnouncementListContent({ filter, search }: { filter: string; search: string }) {
   const { setLayoutOverrides } = useLayout();

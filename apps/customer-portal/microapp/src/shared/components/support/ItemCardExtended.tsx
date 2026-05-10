@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { Link } from "react-router-dom";
 
 import {
   Box,
@@ -20,23 +21,25 @@ import {
   CardActionArea,
   Chip,
   Divider,
+  pxToRem,
   Skeleton,
   Stack,
   Typography,
-  pxToRem,
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Calendar, ChevronRight } from "@wso2/oxygen-ui-icons-react";
-import { Link } from "react-router-dom";
-import { PriorityChip, StatusChip } from "./Chip";
+
 import type { CaseSummary } from "@features/cases/types/case.model";
 import type { ChangeRequestSummary } from "@features/changes/types/change.model";
 import type { Chat } from "@features/chats/types/chat.model";
-import { stripHtmlTags } from "@shared/utils/string.utils";
 import type { ServiceRequestSummary } from "@features/service-requests/types/service-request.model";
 
-import { TYPE_CONFIG } from "./config";
+import { stripHtmlTags } from "@shared/utils/string.utils";
+
 import { useDateTime } from "@shared/hooks/useDateTime";
+
+import { PriorityChip, StatusChip } from "./Chip";
+import { TYPE_CONFIG } from "./config";
 
 interface BaseItemCardExtendedProps {
   to: string;

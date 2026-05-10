@@ -13,11 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useNavigate } from "react-router-dom";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { cases } from "@features/cases/api/cases.queries";
+
 import { useNotify } from "@context/snackbar";
+
+import { cases } from "@features/cases/api/cases.queries";
 
 export function useCreateCase() {
   const navigate = useNavigate();

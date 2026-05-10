@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { ArrowLeftRightIcon, CheckIcon, PlusIcon } from "@wso2/oxygen-ui-icons-react";
+
 import type { MenuOptionProps } from "@components/detail";
 
 export function getCaseMenuOptions(

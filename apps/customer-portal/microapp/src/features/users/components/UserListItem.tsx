@@ -13,14 +13,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { Link } from "react-router-dom";
 
+import { Card, Chip, Avatar as MuiAvatar, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { Link } from "react-router-dom";
-import { Card, Stack, Avatar as MuiAvatar, Typography, Chip, useTheme, pxToRem, Skeleton } from "@wso2/oxygen-ui";
-import { ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
-import { capitalize, stringAvatar } from "@shared/utils/string.utils";
+
 import type { Role, User } from "@features/users/types/user.model";
+
+import { capitalize, stringAvatar } from "@shared/utils/string.utils";
 
 dayjs.extend(relativeTime);
 

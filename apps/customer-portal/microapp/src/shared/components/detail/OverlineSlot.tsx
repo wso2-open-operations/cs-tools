@@ -13,11 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+import { pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { motion, type Variants } from "framer-motion";
-import { Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
-import type { ItemCardProps } from "../support";
 
+import type { ItemCardProps } from "../support";
 import { TYPE_CONFIG } from "../support/config";
 
 export function OverlineSlot({

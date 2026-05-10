@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useParams } from "react-router-dom";
+
 import { ChangeDetailView } from "@features/changes/components/ChangeDetailView";
 import { useChangeDetail } from "@features/changes/hooks/useChangeDetail";
 

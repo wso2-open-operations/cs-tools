@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { Navigate, Outlet } from "react-router-dom";
 
 import { useProject } from "@context/project";
 import ProjectScopeProvider from "@context/ProjectScopeProvider";
-import { Navigate, Outlet } from "react-router-dom";
 
 const RequireProject = () => {
   const { projectId } = useProject();

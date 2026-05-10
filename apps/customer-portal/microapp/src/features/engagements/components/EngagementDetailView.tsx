@@ -13,22 +13,27 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect } from "react";
+
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Comment, CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/detail";
-import { CallRequestCard, PriorityChip, StatusChip } from "@components/support";
-import { useLayout } from "@context/layout";
-import { RichText, SectionCard } from "@components/common";
-import EmptyState from "@components/common/EmptyState";
 import DOMPurify from "dompurify";
-import { useDateTime } from "@shared/hooks/useDateTime";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
-import { stripHtmlTags } from "@shared/utils/string.utils";
+
+import { useLayout } from "@context/layout";
+
 import type { Case } from "@features/cases/types/case.model";
 import type { CallRequestsDto } from "@features/engagements/types/engagement.dto";
+
+import { stripHtmlTags } from "@shared/utils/string.utils";
+
+import { useDateTime } from "@shared/hooks/useDateTime";
 import type { useDetailComments } from "@shared/hooks/useDetailComments";
+import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+
+import { RichText, SectionCard } from "@components/common";
+import EmptyState from "@components/common/EmptyState";
+import { Comment, CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/detail";
+import { CallRequestCard, PriorityChip, StatusChip } from "@components/support";
 
 type EngagementDetailViewProps = {
   data: Case | undefined;

@@ -13,12 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useNavigate } from "react-router-dom";
 
 import { useMutation, useQueryClient, useSuspenseQueries } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { users } from "@features/users/api/users.queries";
-import { metadata } from "@features/metadata/api/metadata.queries";
+
 import { useNotify } from "@context/snackbar";
+
+import { metadata } from "@features/metadata/api/metadata.queries";
+import { users } from "@features/users/api/users.queries";
 import type { EditMeDto } from "@features/users/types/user.dto";
 
 export function useProfileSettings() {

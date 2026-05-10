@@ -1,11 +1,13 @@
 import { TIMELINE_META } from "@root/src/config/constants";
-import { ProgressTimelineEntrySkeleton, TimelineEntry } from "./TimelineEntry";
-import { Timeline } from "../ui";
-import type { CasesFiltersDto } from "@features/cases/types/case.dto";
-import type { ChangeRequest } from "@features/changes/types/change.model";
-import { useQuery } from "@tanstack/react-query";
-import { changeRequests } from "@features/changes/api/changes.queries";
 import { useFilters } from "@root/src/context/filters";
+import { useQuery } from "@tanstack/react-query";
+
+import type { CasesFiltersDto } from "@features/cases/types/case.dto";
+import { changeRequests } from "@features/changes/api/changes.queries";
+import type { ChangeRequest } from "@features/changes/types/change.model";
+
+import { Timeline } from "../ui";
+import { ProgressTimelineEntrySkeleton, TimelineEntry } from "./TimelineEntry";
 
 interface ProgressTimelineViewProps {
   hasCustomerApproved?: boolean;

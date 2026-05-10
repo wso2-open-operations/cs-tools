@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { useProfileData } from "@features/projects/hooks/useProfileData";
 import { ProfileView } from "@features/projects/components/ProfileView";
+import { useProfileData } from "@features/projects/hooks/useProfileData";
 
 export default function ProfilePage() {
   const profileData = useProfileData();

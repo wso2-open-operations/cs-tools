@@ -13,28 +13,32 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode, Suspense, useState } from "react";
 
-import { Suspense, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Card, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
-import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/support";
 
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
+import { Card, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
+
 import { useProject } from "@context/project";
-import { ErrorBoundary, Fab } from "@components/core";
-import EmptyState from "@components/common/EmptyState";
 import { useNotify } from "@context/snackbar";
+
 import { ITEM_DETAIL_PATHS, TAB_CONFIG } from "@config/constants";
-import ErrorState from "@components/common/ErrorState";
+
 import {
-  useOutstandingCases,
-  useOutstandingChats,
-  useOutstandingChangeRequests,
-  useOutstandingServiceRequests,
-  useOutstandingSecurityReports,
-  useOutstandingEngagements,
   useOutstandingAnnouncements,
+  useOutstandingCases,
+  useOutstandingChangeRequests,
+  useOutstandingChats,
+  useOutstandingEngagements,
+  useOutstandingSecurityReports,
+  useOutstandingServiceRequests,
 } from "@features/dashboard/hooks/useOutstandingItems";
+
+import EmptyState from "@components/common/EmptyState";
+import ErrorState from "@components/common/ErrorState";
+import { ErrorBoundary, Fab } from "@components/core";
+import { ItemCard, type ItemCardProps, ItemCardSkeleton, ItemListView } from "@components/support";
 
 type TabType = ItemCardProps["type"];
 

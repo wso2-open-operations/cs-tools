@@ -13,12 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, Card, Divider, pxToRem, Skeleton, Stack, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Box, Card, Divider, pxToRem, Skeleton, Stack, type SxProps, type Theme, Typography } from "@wso2/oxygen-ui";
 import { Sparkle } from "@wso2/oxygen-ui-icons-react";
-import { KBCard } from "./KBCard";
-import { ChecklistItem } from "./ChecklistItem";
+
 import { TypewriterText } from "@components/common";
+
+import { ChecklistItem } from "./ChecklistItem";
+import { KBCard } from "./KBCard";
 
 export type MessageBlock =
   | { type: "text"; value: string }

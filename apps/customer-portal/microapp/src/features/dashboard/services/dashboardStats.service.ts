@@ -13,18 +13,22 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { colors } from "@wso2/oxygen-ui";
-import type { PieDataItem } from "@features/dashboard/components/PieChartWidget";
-import type { CasesStatsDto } from "@features/cases/types/case.dto";
-import type { ChangeRequestsStatsDto } from "@features/changes/types/change.dto";
-import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
-import { overrideOrDefault } from "@shared/utils/string.utils";
+
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "@config/constants";
 
+import type { CasesStatsDto } from "@features/cases/types/case.dto";
+import type { ChangeRequestsStatsDto } from "@features/changes/types/change.dto";
+import type { PieDataItem } from "@features/dashboard/components/PieChartWidget";
+import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
+
+import { overrideOrDefault } from "@shared/utils/string.utils";
+
+import { CASE_TYPES, CHANGE_REQUESTS_LABEL, SERVICE_REQUESTS_LABEL } from "@shared/constants";
+
 export type DashboardStats = {
-  totalInteractions: number | undefined;
-  activeInteractions: number | undefined;
+  actionRequired: number | undefined;
+  outstanding: number | undefined;
   resolvedThisMonth: number | undefined;
   averageResponseTime: number | undefined;
   outstandingSupportCasesPieData: (PieDataItem & { id: string | number })[] | undefined;
@@ -40,19 +44,17 @@ export function computeDashboardStats(
   changeRequestCaseTypeStats: ChangeRequestsStatsDto | undefined,
   features: Pick<ProjectFeaturesDto, "hasChangeRequestReadAccess" | "hasServiceRequestReadAccess"> | undefined,
 ): DashboardStats {
-  const hasChangeRequestReadAccess = features?.hasChangeRequestReadAccess ?? false;
-  const hasServiceRequestReadAccess = features?.hasServiceRequestReadAccess ?? false;
+  const { hasChangeRequestReadAccess = false, hasServiceRequestReadAccess } = features ?? {};
 
-  const isInteractionsLoading =
-    multipleCaseTypesStats === undefined ||
-    (hasChangeRequestReadAccess && changeRequestCaseTypeStats === undefined);
+  const loading =
+    multipleCaseTypesStats === undefined || (hasChangeRequestReadAccess && changeRequestCaseTypeStats === undefined);
 
-  const totalInteractions = isInteractionsLoading
+  const actionRequired = loading
     ? undefined
     : (multipleCaseTypesStats?.actionRequiredCount ?? 0) +
       (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.actionRequiredCount ?? 0) : 0);
 
-  const activeInteractions = isInteractionsLoading
+  const outstanding = loading
     ? undefined
     : (multipleCaseTypesStats?.outstandingCount ?? 0) +
       (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.outstandingCount ?? 0) : 0);
@@ -82,18 +84,19 @@ export function computeDashboardStats(
     })) ?? [];
 
   const operationsData: (PieDataItem & { id: string | number })[] = [];
+
   if (hasServiceRequestReadAccess) {
     operationsData.push({
-      id: "service",
-      label: "Service Requests",
+      id: CASE_TYPES.SERVICE_REQUEST,
+      label: SERVICE_REQUESTS_LABEL,
       value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
       color: colors.orange[500],
     });
   }
   if (hasChangeRequestReadAccess) {
     operationsData.push({
-      id: "change",
-      label: "Change Requests",
+      id: CASE_TYPES.CHANGE_REQUEST,
+      label: CHANGE_REQUESTS_LABEL,
       value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
       color: colors.blue[500],
     });
@@ -106,8 +109,8 @@ export function computeDashboardStats(
       : undefined;
 
   return {
-    totalInteractions,
-    activeInteractions,
+    actionRequired,
+    outstanding,
     resolvedThisMonth,
     averageResponseTime,
     outstandingSupportCasesPieData,

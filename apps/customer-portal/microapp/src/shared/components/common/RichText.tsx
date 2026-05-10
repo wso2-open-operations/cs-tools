@@ -13,9 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useEffect, useRef } from "react";
 
 import { Box, pxToRem, styled } from "@wso2/oxygen-ui";
-import { useEffect, useRef } from "react";
+
 import { openUrl } from "@bridge/index";
 
 export const RichTextBase = styled(Box)(({ theme }) => ({

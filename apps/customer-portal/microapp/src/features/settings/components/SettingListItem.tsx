@@ -13,11 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import type { ReactNode } from "react";
+
+import { Link } from "react-router-dom";
+
 import { pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import { Link } from "react-router-dom";
 
 export function SettingListItem({
   name,

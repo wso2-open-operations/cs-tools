@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
+
 import type { Project } from "@features/projects/types/project.model";
 
 type ProjectPopoverItemProps = Pick<Project, "name" | "metrics"> & {

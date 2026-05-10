@@ -13,18 +13,22 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Suspense, useState } from "react";
+
 import { Link } from "react-router-dom";
-import { Card, Grid, Stack, Typography, Button, Divider, useTheme, SearchBar } from "@wso2/oxygen-ui";
+
+import { Button, Card, Divider, Grid, SearchBar, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
+
+import { useNotify } from "@context/snackbar";
+
 import { MetricWidget } from "@features/dashboard/components";
 import { UserListItem, UserListItemSkeleton } from "@features/users/components";
 import { useUserList } from "@features/users/hooks/useUserList";
-import { ErrorBoundary } from "@components/core";
-import EmptyState from "@components/common/EmptyState";
-import { useNotify } from "@context/snackbar";
 import type { useUserMetrics } from "@features/users/hooks/useUserList";
+
+import EmptyState from "@components/common/EmptyState";
+import { ErrorBoundary } from "@components/core";
 
 type UserListViewProps = {
   metrics: ReturnType<typeof useUserMetrics>;

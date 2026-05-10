@@ -13,9 +13,17 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import {
+  PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT,
+  PROJECT_DEPLOYMENTS_ENDPOINT,
+  PROJECT_DETAILS_ENDPOINT,
+  PROJECT_FEATURES_ENDPOINT,
+  PROJECTS_ENDPOINT,
+} from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
-import type { Pagination, PaginatedArray } from "@shared/types";
+
+import { toDeployment, toProduct, toProject, toProjectSummary } from "@features/projects/mappers/project.mapper";
 import type {
   DeploymentProductsDto,
   GetProductsRequestDto,
@@ -25,14 +33,8 @@ import type {
   ProjectsDto,
 } from "@features/projects/types/project.dto";
 import type { Deployment, Product, Project, ProjectInfo } from "@features/projects/types/project.model";
-import { toDeployment, toProduct, toProject, toProjectSummary } from "@features/projects/mappers/project.mapper";
-import {
-  PROJECT_DEPLOYMENTS_ENDPOINT,
-  PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT,
-  PROJECT_DETAILS_ENDPOINT,
-  PROJECT_FEATURES_ENDPOINT,
-  PROJECTS_ENDPOINT,
-} from "@config/endpoints";
+
+import type { PaginatedArray, Pagination } from "@shared/types";
 
 export const getAllProjects = async (): Promise<Project[]> => {
   const projects = (await apiClient.post<ProjectsDto>(PROJECTS_ENDPOINT, {})).data.projects;

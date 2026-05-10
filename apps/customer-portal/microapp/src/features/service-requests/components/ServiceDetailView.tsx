@@ -13,20 +13,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect } from "react";
+
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
+import DOMPurify from "dompurify";
+
+import { useLayout } from "@context/layout";
+
+import type { ServiceRequest } from "@features/service-requests/types/service-request.model";
+
+import { stripHtmlTags } from "@shared/utils/string.utils";
+
+import { useDateTime } from "@shared/hooks/useDateTime";
+import type { useDetailComments } from "@shared/hooks/useDetailComments";
+import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+
+import { RichText, SectionCard } from "@components/common";
 import { Comment, CommentSkeleton, InfoField, OverlineSlot, StickyCommentBar } from "@components/detail";
 import { PriorityChip, StatusChip } from "@components/support";
-import { useLayout } from "@context/layout";
-import { RichText, SectionCard } from "@components/common";
-import DOMPurify from "dompurify";
-import { useDateTime } from "@shared/hooks/useDateTime";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
-import { stripHtmlTags } from "@shared/utils/string.utils";
-import type { ServiceRequest } from "@features/service-requests/types/service-request.model";
-import type { useDetailComments } from "@shared/hooks/useDetailComments";
 
 type ServiceDetailViewProps = {
   data: ServiceRequest | undefined;

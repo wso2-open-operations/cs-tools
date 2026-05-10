@@ -13,11 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { Suspense } from "react";
 
-import { alpha, Box, CircularProgress, Popover, pxToRem, Stack, Typography, type PopoverProps } from "@wso2/oxygen-ui";
+import { alpha, Box, CircularProgress, Popover, type PopoverProps, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+
 import { ProjectPopoverItem } from "@features/projects/components";
 import { useProjectSelector } from "@features/projects/hooks/useProjectSelector";
-import { Suspense } from "react";
+
 import { ErrorBoundary } from "@components/core";
 
 export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {

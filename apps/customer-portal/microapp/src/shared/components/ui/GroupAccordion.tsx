@@ -1,9 +1,12 @@
+import { type ReactNode, useState } from "react";
+
 import { Box, Collapse, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { ListChevronsDownUp, ListChevronsUpDown } from "@wso2/oxygen-ui-icons-react";
-import { useState, type ReactNode } from "react";
-import { TYPE_CONFIG } from "../support/config";
-import type { ItemCardProps } from "../support";
+
 import { PLURALS } from "@config/constants";
+
+import type { ItemCardProps } from "../support";
+import { TYPE_CONFIG } from "../support/config";
 
 export function GroupAccordion({
   type,

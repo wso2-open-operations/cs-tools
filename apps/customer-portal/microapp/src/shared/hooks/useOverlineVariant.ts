@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useRef, useState } from "react";
 
 export function useOverlineVariant() {
@@ -24,10 +23,11 @@ export function useOverlineVariant() {
     const element = ref.current;
     if (!element) return;
 
-    const observer = new IntersectionObserver(
-      ([entry]) => setVariant(entry.isIntersecting ? "normal" : "shrunk"),
-      { root: null, rootMargin: "-80px 0px 0px 0px", threshold: 1.0 },
-    );
+    const observer = new IntersectionObserver(([entry]) => setVariant(entry.isIntersecting ? "normal" : "shrunk"), {
+      root: null,
+      rootMargin: "-80px 0px 0px 0px",
+      threshold: 1.0,
+    });
 
     observer.observe(element);
     return () => observer.unobserve(element);

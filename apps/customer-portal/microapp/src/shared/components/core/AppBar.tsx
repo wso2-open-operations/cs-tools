@@ -13,21 +13,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { AppBar as MuiAppBar, Button, IconButton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
 
-import { ProjectSelector } from "@features/projects/components";
+import { useNavigate } from "react-router-dom";
+
+import { useQuery } from "@tanstack/react-query";
+import { Button, IconButton, AppBar as MuiAppBar, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
+
 import { useLayout } from "@context/layout";
 import { useProject } from "@context/project";
+import { useThemeMode } from "@context/theme";
+
+import { goToMyAppsScreen } from "@bridge/index";
+
+import { projects } from "@features/projects/api/projects.queries";
+import { ProjectSelector } from "@features/projects/components";
 
 import { APP_BAR_CONFIG } from "@components/layout/config";
-import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
-import { useQuery } from "@tanstack/react-query";
-import { projects } from "@features/projects/api/projects.queries";
-import { goToMyAppsScreen } from "@bridge/index";
-import { useThemeMode } from "@context/theme";
+
 import { ConfirmDialog } from "../common/ConfirmDialog";
 
 export function AppBar() {

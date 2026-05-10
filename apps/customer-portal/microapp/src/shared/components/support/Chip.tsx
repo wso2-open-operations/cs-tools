@@ -13,12 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useFilters } from "@root/src/context/filters";
+import { alpha, Chip, type ChipProps, Skeleton } from "@wso2/oxygen-ui";
+
+import { overrideOrDefault } from "@shared/utils/string.utils";
 
 import type { ItemCardProps } from ".";
-import { alpha, Chip, Skeleton, type ChipProps } from "@wso2/oxygen-ui";
-import { overrideOrDefault } from "@shared/utils/string.utils";
-import { useFilters } from "@root/src/context/filters";
-
 import {
   CASE_STATUS_CHIP_COLOR_CONFIG,
   CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG,

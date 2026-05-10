@@ -13,17 +13,20 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useRef, useState } from "react";
+
 import { Backdrop, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
-import { StickyCommentBar } from "@components/detail";
-import { MessageBubble, type ChatMessage } from "@features/chats/components";
-import { useProject } from "@context/project";
+import { Pin } from "@wso2/oxygen-ui-icons-react";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { Pin } from "@wso2/oxygen-ui-icons-react";
-import { useNoveraWebSocket } from "@features/chats/hooks/useNoveraWebSocket";
+
+import { useProject } from "@context/project";
+
+import { type ChatMessage, MessageBubble } from "@features/chats/components";
 import { useChatData } from "@features/chats/hooks/useChatData";
+import { useNoveraWebSocket } from "@features/chats/hooks/useNoveraWebSocket";
+
+import { StickyCommentBar } from "@components/detail";
 
 dayjs.extend(relativeTime);
 
@@ -96,9 +99,7 @@ export default function ChatPage() {
         {activeStreamingMessage && (
           <MessageBubble
             {...activeStreamingMessage}
-            onAnimationComplete={() =>
-              handleAnimationComplete((msg) => setMessages((prev) => [...prev, msg]))
-            }
+            onAnimationComplete={() => handleAnimationComplete((msg) => setMessages((prev) => [...prev, msg]))}
           />
         )}
       </Stack>
@@ -136,4 +137,3 @@ export default function ChatPage() {
     </>
   );
 }
-

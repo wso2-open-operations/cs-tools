@@ -13,10 +13,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode, useCallback, useRef, useState } from "react";
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
-import { SnackbarContext, type SnackbarQueueItem } from "./SnackbarContext";
 import { Snackbar } from "@components/core";
+
+import { SnackbarContext, type SnackbarQueueItem } from "./SnackbarContext";
 
 export default function SnackbarProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<SnackbarQueueItem[]>([]);

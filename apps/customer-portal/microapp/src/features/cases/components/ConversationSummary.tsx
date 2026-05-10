@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Accordion, AccordionDetails, AccordionSummary, Box, Card, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, MessagesSquare } from "@wso2/oxygen-ui-icons-react";
-import { MessageBubble, type ChatMessage } from "@features/chats/components";
+
+import { type ChatMessage, MessageBubble } from "@features/chats/components";
 
 export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
   return (

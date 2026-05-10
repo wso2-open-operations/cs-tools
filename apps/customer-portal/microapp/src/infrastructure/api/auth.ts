@@ -13,11 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { jwtDecode } from "jwt-decode";
+
 import { getAccessTokenFromBridge, getToken } from "@bridge/index";
-import { LocalStorageKeys } from "@shared/constants/app.constants";
+
 import { Logger } from "@infrastructure/logging/logger";
+
+import { LocalStorageKeys } from "@shared/constants/app.constants";
 
 interface TokenPayload {
   email?: string;

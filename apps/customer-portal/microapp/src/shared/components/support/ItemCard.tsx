@@ -13,19 +13,22 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Card, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
-import { Calendar, ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
-import { Circle } from "@mui/icons-material";
-import { PriorityChip, StatusChip } from "@components/support";
 import { Link } from "react-router-dom";
 
-import { TYPE_CONFIG } from "./config";
+import { Circle } from "@mui/icons-material";
+import { Card, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Calendar, ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
+
 import type { CaseSummary } from "@features/cases/types/case.model";
 import type { ChangeRequestSummary } from "@features/changes/types/change.model";
 import type { Chat } from "@features/chats/types/chat.model";
 import type { ServiceRequestSummary } from "@features/service-requests/types/service-request.model";
+
 import { useDateTime } from "@shared/hooks/useDateTime";
+
+import { PriorityChip, StatusChip } from "@components/support";
+
+import { TYPE_CONFIG } from "./config";
 
 export type ItemType = "case" | "chat" | "service" | "change" | "sra" | "engagement" | "announcement";
 

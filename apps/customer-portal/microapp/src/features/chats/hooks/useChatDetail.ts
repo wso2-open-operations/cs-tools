@@ -13,12 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useMemo } from "react";
+
 import { useQuery } from "@tanstack/react-query";
+
 import { chats } from "@features/chats/api/chats.queries";
-import { useDateTime } from "@shared/hooks/useDateTime";
 import { mapCommentsToChatMessages } from "@features/chats/services/chatHistory.service";
+
+import { useDateTime } from "@shared/hooks/useDateTime";
 
 export function useChatDetail(id: string) {
   const { data } = useQuery(chats.get(id));

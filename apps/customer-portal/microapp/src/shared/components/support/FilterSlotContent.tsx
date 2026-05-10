@@ -1,8 +1,12 @@
 import { SEARCH_PLACEHOLDER_CONFIG } from "@root/src/config/constants";
-import { FilterSlotBuilder, FilterSlotBuilderSkeleton, type ItemCardProps } from ".";
+
 import { useFilters } from "@context/filters";
+
 import { getAllowedFilters } from "@shared/utils/filter.utils";
+
 import type { ModeType } from "@shared/types";
+
+import { FilterSlotBuilder, FilterSlotBuilderSkeleton, type ItemCardProps } from ".";
 
 export function FilterSlotContent({
   type,

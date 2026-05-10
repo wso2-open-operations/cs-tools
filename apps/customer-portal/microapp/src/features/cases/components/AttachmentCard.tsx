@@ -13,13 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, Card, IconButton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
-import { Download, Image, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Box, Card, IconButton, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { Download, Image, Paperclip } from "@wso2/oxygen-ui-icons-react";
+
 import { cases } from "@features/cases/api/cases.queries";
-import { useDateTime } from "@shared/hooks/useDateTime";
 import type { Attachment } from "@features/cases/types/case.model";
+
+import { useDateTime } from "@shared/hooks/useDateTime";
 
 export function AttachmentCard({
   attachment,

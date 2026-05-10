@@ -13,9 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useQuery } from "@tanstack/react-query";
+
 import { serviceRequests } from "@features/service-requests/api/service-requests.queries";
+
 import { useDetailComments } from "@shared/hooks/useDetailComments";
 
 export function useServiceDetail(id: string) {

@@ -13,17 +13,21 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect } from "react";
+
 import { Box, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { InfoField, OverlineSlot } from "@components/detail";
-import { StatusChip } from "@components/support";
-import { useLayout } from "@context/layout";
 import DOMPurify from "dompurify";
-import { RichText, SectionCard } from "@components/common";
+
+import { useLayout } from "@context/layout";
+
+import type { Case } from "@features/cases/types/case.model";
+
 import { useDateTime } from "@shared/hooks/useDateTime";
 import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
-import type { Case } from "@features/cases/types/case.model";
+
+import { RichText, SectionCard } from "@components/common";
+import { InfoField, OverlineSlot } from "@components/detail";
+import { StatusChip } from "@components/support";
 
 type AnnouncementDetailViewProps = {
   data: Case | undefined;

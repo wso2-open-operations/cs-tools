@@ -1,6 +1,7 @@
-import type { CallRequestDto } from "@features/engagements/types/engagement.dto";
-import { Card, Chip, colors, pxToRem, Stack, Typography, Box, Divider } from "@wso2/oxygen-ui";
+import { Box, Card, Chip, colors, Divider, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { Calendar, Clock, PhoneCall } from "@wso2/oxygen-ui-icons-react";
+
+import type { CallRequestDto } from "@features/engagements/types/engagement.dto";
 
 export function CallRequestCard(props: CallRequestDto) {
   return (

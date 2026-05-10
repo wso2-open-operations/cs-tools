@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import type { ChatMessage } from "@features/chats/components";
 import type { Comment } from "@features/cases/types/case.model";
+import type { ChatMessage } from "@features/chats/components";
 
 export function messagesToString(messages: ChatMessage[]): string {
   return messages

@@ -13,11 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useMemo } from "react";
+
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { users } from "@features/users/api/users.queries";
+
 import { useProject } from "@context/project";
+
+import { users } from "@features/users/api/users.queries";
 
 export function useUserMetrics(projectId: string) {
   const { data } = useQuery(users.all(projectId));

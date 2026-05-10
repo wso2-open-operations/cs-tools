@@ -13,12 +13,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import LayoutProvider from "@context/layout/LayoutProvider";
+import MeProvider from "@context/me/MeProvider";
 import ProjectProvider from "@context/project/ProjectProvider";
 import SnackbarProvider from "@context/snackbar/SnackbarProvider";
 import { ColorModeProvider } from "@context/theme";
-import MeProvider from "@context/me/MeProvider";
 
 export default function AppProvider({ children }: { children: React.ReactNode }) {
   return (

@@ -13,17 +13,28 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect } from "react";
+
 import { Chip, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { InfoField, OverlineSlot, ProgressTimeline, StakeholderItem, StakeholderItemSkeleton } from "@components/detail";
-import { PriorityChip, StatusChip } from "@components/support";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
-import { SectionCard } from "@components/common";
+
 import { useLayout } from "@context/layout";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
-import { stripHtmlTags } from "@shared/utils/string.utils";
+
 import type { ChangeRequest } from "@features/changes/types/change.model";
+
+import { stripHtmlTags } from "@shared/utils/string.utils";
+
+import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+
+import { SectionCard } from "@components/common";
+import {
+  InfoField,
+  OverlineSlot,
+  ProgressTimeline,
+  StakeholderItem,
+  StakeholderItemSkeleton,
+} from "@components/detail";
+import { PriorityChip, StatusChip } from "@components/support";
 
 type ChangeDetailViewProps = {
   data: ChangeRequest | undefined;

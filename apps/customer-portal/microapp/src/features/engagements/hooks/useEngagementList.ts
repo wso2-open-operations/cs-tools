@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { engagements } from "@features/engagements/api/engagements.queries";
+
 import type { GetCasesRequestDto } from "@features/cases/types/case.dto";
+import { engagements } from "@features/engagements/api/engagements.queries";
 
 export function useEngagementList(projectId: string, filters: GetCasesRequestDto["filters"]) {
   const totalQuery = useQuery(engagements.all(projectId));

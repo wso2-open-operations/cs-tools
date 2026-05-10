@@ -13,16 +13,19 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useState } from "react";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { users } from "@features/users/api/users.queries";
-import { projects } from "@features/projects/api/projects.queries";
+
+import { useMe } from "@context/me";
 import { useProject } from "@context/project";
 import { useNotify } from "@context/snackbar";
-import { useMe } from "@context/me";
-import { metadata } from "@features/metadata/api/metadata.queries";
+
 import { getVersion } from "@bridge/index";
+
+import { metadata } from "@features/metadata/api/metadata.queries";
+import { projects } from "@features/projects/api/projects.queries";
+import { users } from "@features/users/api/users.queries";
 
 export function useProfileData() {
   const notify = useNotify();
@@ -37,9 +40,13 @@ export function useProfileData() {
   const [isKbReferencesEnabled, setIsKbReferencesEnabled] = useState(kbReferencesEnabled);
   const [version, setVersion] = useState<string | undefined>(undefined);
 
-  useEffect(() => { getVersion((v) => setVersion(v)); }, []);
+  useEffect(() => {
+    getVersion((v) => setVersion(v));
+  }, []);
 
-  useEffect(() => { queryClient.prefetchQuery(metadata.get()); }, []);
+  useEffect(() => {
+    queryClient.prefetchQuery(metadata.get());
+  }, []);
 
   const projectEditMutation = useMutation({
     ...projects.edit(projectId!),

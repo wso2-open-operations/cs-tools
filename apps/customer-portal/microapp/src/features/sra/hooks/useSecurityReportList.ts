@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { securityReportAnalysis } from "@features/sra/api/sra.queries";
+
 import type { GetCasesRequestDto } from "@features/cases/types/case.dto";
+import { securityReportAnalysis } from "@features/sra/api/sra.queries";
 
 export function useSecurityReportList(projectId: string, filters: GetCasesRequestDto["filters"]) {
   const totalQuery = useQuery(securityReportAnalysis.all(projectId));

@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useState } from "react";
+
 import { Card, IconButton, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ThumbsDown, ThumbsUp } from "@wso2/oxygen-ui-icons-react";
 

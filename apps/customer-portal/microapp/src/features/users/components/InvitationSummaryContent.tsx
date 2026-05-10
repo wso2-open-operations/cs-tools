@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { Chip, Stack, Typography } from "@wso2/oxygen-ui";
+
 import type { RoleName } from "./RoleSelector";
 
 interface InvitationSummaryProps {

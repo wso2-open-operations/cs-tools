@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Stack, Chip, Radio, RadioGroup, FormControlLabel, Box, pxToRem, useRadioGroup } from "@wso2/oxygen-ui";
-import { ShieldUser } from "@wso2/oxygen-ui-icons-react";
 import { MOCK_ROLES } from "@src/mocks/data/users";
+import { Box, Chip, FormControlLabel, pxToRem, Radio, RadioGroup, Stack, useRadioGroup } from "@wso2/oxygen-ui";
+import { ShieldUser } from "@wso2/oxygen-ui-icons-react";
+
 import type { Role } from "@features/users/types/user.model";
 
 export type RoleName = (typeof MOCK_ROLES)[number]["name"];

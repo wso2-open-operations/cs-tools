@@ -13,8 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode, useState } from "react";
 
-import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+
 import {
   alpha,
   Avatar,
@@ -28,12 +30,14 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Link } from "react-router-dom";
-import { InvitationSummaryContent, RoleSelector } from "@features/users/components";
 import { Clock4, Info, Mail, Trash2 } from "@wso2/oxygen-ui-icons-react";
-import { stringAvatar } from "@shared/utils/string.utils";
-import { ConfirmDialog } from "@components/common/ConfirmDialog";
+
+import { InvitationSummaryContent, RoleSelector } from "@features/users/components";
 import type { useUserEditor } from "@features/users/hooks/useUserEditor";
+
+import { stringAvatar } from "@shared/utils/string.utils";
+
+import { ConfirmDialog } from "@components/common/ConfirmDialog";
 
 type EditUserViewProps = ReturnType<typeof useUserEditor> & { mode: "invite" | "edit" };
 
@@ -120,11 +124,7 @@ export function EditUserView({
         )}
 
         <Button
-          disabled={
-            mode === "edit"
-              ? isRoleUnchanged || editUserMutation.isPending
-              : createUserMutation.isPending
-          }
+          disabled={mode === "edit" ? isRoleUnchanged || editUserMutation.isPending : createUserMutation.isPending}
           variant="contained"
           startIcon={
             createUserMutation.isPending || editUserMutation.isPending ? (

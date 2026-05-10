@@ -13,14 +13,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useLayoutEffect, useRef } from "react";
 
 import { Link } from "react-router-dom";
+
 import { BottomNavigation, BottomNavigationAction, Box } from "@wso2/oxygen-ui";
 import { House, MessageSquare, User, Users } from "@wso2/oxygen-ui-icons-react";
+
 import { useLayout } from "@context/layout";
-import { useThemeMode } from "@context/theme";
-import { useLayoutEffect, useRef } from "react";
 import { useMe } from "@context/me";
+import { useThemeMode } from "@context/theme";
 
 export function TabBar() {
   const ref = useRef<HTMLDivElement>(null);

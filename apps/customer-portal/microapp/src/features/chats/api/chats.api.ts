@@ -13,9 +13,20 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import {
+  CHAT_ADD_MESSAGE_ENDPOINT,
+  CHAT_COMMENTS_ENDPOINT,
+  CHAT_DETAILS_ENDPOINT,
+  CHAT_INITIATE_ENDPOINT,
+  PROJECT_CHATS_ENDPOINT,
+} from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
-import type { PaginatedArray } from "@shared/types";
+
+import { toComment } from "@features/cases/mappers/case.mapper";
+import type { CommentsDto } from "@features/cases/types/case.dto";
+import type { Comment } from "@features/cases/types/case.model";
+import { toChat, toMessage } from "@features/chats/mappers/chat.mapper";
 import type {
   ChatDto,
   ChatsDto,
@@ -24,17 +35,8 @@ import type {
   MessageResponseDto,
 } from "@features/chats/types/chat.dto";
 import type { Chat, Message } from "@features/chats/types/chat.model";
-import { toChat, toMessage } from "@features/chats/mappers/chat.mapper";
-import { toComment } from "@features/cases/mappers/case.mapper";
-import type { Comment } from "@features/cases/types/case.model";
-import type { CommentsDto } from "@features/cases/types/case.dto";
-import {
-  CHAT_ADD_MESSAGE_ENDPOINT,
-  CHAT_COMMENTS_ENDPOINT,
-  CHAT_DETAILS_ENDPOINT,
-  CHAT_INITIATE_ENDPOINT,
-  PROJECT_CHATS_ENDPOINT,
-} from "@config/endpoints";
+
+import type { PaginatedArray } from "@shared/types";
 
 export const initiateChat = async (id: string, data: Omit<MessageDispatchDto, "region" | "tier">): Promise<Message> => {
   const response = (

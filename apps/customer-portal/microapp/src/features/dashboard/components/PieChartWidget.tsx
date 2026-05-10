@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
+import { Circle } from "@mui/icons-material";
 import { Box, CardActionArea, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { PieChart } from "@wso2/oxygen-ui-charts-react";
-import { Circle } from "@mui/icons-material";
+
 import { WidgetBox } from "@components/ui";
 
 export interface PieDataItem {

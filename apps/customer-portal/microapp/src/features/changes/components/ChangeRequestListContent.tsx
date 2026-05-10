@@ -1,15 +1,22 @@
+import { useEffect } from "react";
+
+import { Typography } from "@wso2/oxygen-ui";
+
 import { useProject } from "@context/project";
-import type { ModeType } from "@shared/types";
-import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
+
+import { ITEM_DETAIL_PATHS } from "@config/constants";
+
 import { useChangeListFilters } from "@features/changes/hooks/useChangeListFilters";
 import { useChangeRequestList } from "@features/changes/hooks/useChangeRequestList";
+
+import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
+
+import type { ModeType } from "@shared/types";
+
 import { InfiniteScroll } from "@components/common";
 import EmptyState from "@components/common/EmptyState";
-import { Typography } from "@wso2/oxygen-ui";
 import { ItemCardExtended, ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
-import { ITEM_DETAIL_PATHS } from "@config/constants";
 import { GroupAccordion } from "@components/ui/GroupAccordion";
-import { useEffect } from "react";
 
 export function ChangeRequestListContent({
   filter,

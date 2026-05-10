@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { parseApiDate } from "@shared/utils/date.utils";
 import type { AttachmentDto, CaseDto, CasesDto, CommentDto } from "@features/cases/types/case.dto";
 import type { Attachment, Case, CaseSummary, Comment } from "@features/cases/types/case.model";
+
+import { parseApiDate } from "@shared/utils/date.utils";
 
 export function toCaseSummary(dto: CasesDto["cases"][number]): CaseSummary {
   return {

@@ -13,20 +13,23 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { STATUS_MODE } from "@shared/constants";
 
 export interface EntityReference {
   id: string;
   label: string;
 }
 
+type StatusModeValue = (typeof STATUS_MODE)[keyof typeof STATUS_MODE];
+
 export type OfStatusModeType = {
   type: "status";
-  status: "action_required" | "outstanding" | "resolved";
+  status: StatusModeValue;
 };
 
 export type OfSeverityModeType = {
   type: "severity";
-  id: string;
+  id: string | number;
   title: string;
 };
 

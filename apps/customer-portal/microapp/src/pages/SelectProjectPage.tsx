@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { SelectProjectView } from "@features/projects/components/SelectProjectView";
 
 export default function SelectProjectPage() {

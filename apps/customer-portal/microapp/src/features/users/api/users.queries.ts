@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { mutationOptions, queryOptions } from "@tanstack/react-query";
-import type { CreateContactRequestDto, EditMeDto } from "@features/users/types/user.dto";
+
 import { createContact, deleteContact, editContact, editMe, getMe, getUsers } from "@features/users/api/users.api";
+import type { CreateContactRequestDto, EditMeDto } from "@features/users/types/user.dto";
 
 export const users = {
   me: () => queryOptions({ queryKey: ["me"], queryFn: getMe }),

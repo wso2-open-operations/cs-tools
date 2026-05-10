@@ -1,5 +1,6 @@
-import { Box, colors } from "@wso2/oxygen-ui";
 import { useEffect, useRef, useState } from "react";
+
+import { Box, colors } from "@wso2/oxygen-ui";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 

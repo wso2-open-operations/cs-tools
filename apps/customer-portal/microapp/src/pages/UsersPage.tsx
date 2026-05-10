@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useProject } from "@context/project";
-import { useUserMetrics } from "@features/users/hooks/useUserList";
+
 import { UserListView } from "@features/users/components/UserListView";
+import { useUserMetrics } from "@features/users/hooks/useUserList";
 
 export default function UsersPage() {
   const { projectId } = useProject();

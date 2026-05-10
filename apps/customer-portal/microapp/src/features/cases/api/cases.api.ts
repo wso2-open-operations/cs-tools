@@ -13,9 +13,21 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import {
+  ATTACHMENT_DETAIL_ENDPOINT,
+  CASE_ATTACHMENTS_ENDPOINT,
+  CASE_CLASSIFICATION_ENDPOINT,
+  CASE_COMMENTS_ENDPOINT,
+  CASE_DETAILS_ENDPOINT,
+  CASE_STATS_ENDPOINT,
+  CREATE_CASE_ENDPOINT,
+  PROJECT_CASES_ENDPOINT,
+  PROJECT_CASES_FILTERS_ENDPOINT,
+} from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
-import type { Pagination, PaginatedArray } from "@shared/types";
+
+import { toAttachment, toCase, toCaseSummary, toComment } from "@features/cases/mappers/case.mapper";
 import type {
   AttachmentsDto,
   CaseClassificationRequestDto,
@@ -28,25 +40,15 @@ import type {
   CommentsDto,
   CreateCaseRequestDto,
   CreateCaseResponseDto,
+  CreateCommentRequestDto,
   EditCaseRequestDto,
   EditCaseResponseDto,
   GetCasesRequestDto,
   GetCasesStatsRequestDto,
-  CreateCommentRequestDto,
 } from "@features/cases/types/case.dto";
 import type { Attachment, Case, CaseSummary, Comment } from "@features/cases/types/case.model";
-import { toAttachment, toCase, toCaseSummary, toComment } from "@features/cases/mappers/case.mapper";
-import {
-  ATTACHMENT_DETAIL_ENDPOINT,
-  CASE_ATTACHMENTS_ENDPOINT,
-  CASE_CLASSIFICATION_ENDPOINT,
-  CASE_COMMENTS_ENDPOINT,
-  CASE_DETAILS_ENDPOINT,
-  CASE_STATS_ENDPOINT,
-  CREATE_CASE_ENDPOINT,
-  PROJECT_CASES_ENDPOINT,
-  PROJECT_CASES_FILTERS_ENDPOINT,
-} from "@config/endpoints";
+
+import type { PaginatedArray, Pagination } from "@shared/types";
 
 export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Promise<PaginatedArray<CaseSummary>> => {
   const response = (

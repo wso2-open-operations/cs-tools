@@ -13,12 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, Card, Stack, Typography, useTheme, pxToRem, colors, Divider, Skeleton } from "@wso2/oxygen-ui";
-import { ArrowUpRight, Circle, CircleCheck, CircleDot, Paperclip } from "@wso2/oxygen-ui-icons-react";
-import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } from "@mui/lab";
-import type { Attachment } from "@features/cases/types/case.model";
 import type { ReactNode } from "react";
+
+import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } from "@mui/lab";
+import { Box, Card, colors, Divider, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { ArrowUpRight, Circle, CircleCheck, CircleDot, Paperclip } from "@wso2/oxygen-ui-icons-react";
+
+import type { Attachment } from "@features/cases/types/case.model";
 
 interface TimelineEntryBaseProps {
   timestamp?: string;

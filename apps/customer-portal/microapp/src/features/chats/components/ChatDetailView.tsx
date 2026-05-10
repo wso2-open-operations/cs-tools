@@ -13,18 +13,22 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useLayoutEffect, useRef } from "react";
+
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { StatusChip } from "@components/support";
-import { InfoField, OverlineSlot } from "@components/detail";
-import { ConversationFeedback, MessageBubble, MessageBubbleSkeleton } from "@features/chats/components";
+
 import { useLayout } from "@context/layout";
-import { SectionCard } from "@components/common";
+
+import { ConversationFeedback, MessageBubble, MessageBubbleSkeleton } from "@features/chats/components";
+import type { ChatMessage } from "@features/chats/components";
+import type { Chat } from "@features/chats/types/chat.model";
+
 import { useDateTime } from "@shared/hooks/useDateTime";
 import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
-import type { Chat } from "@features/chats/types/chat.model";
-import type { ChatMessage } from "@features/chats/components";
+
+import { SectionCard } from "@components/common";
+import { InfoField, OverlineSlot } from "@components/detail";
+import { StatusChip } from "@components/support";
 
 type ChatDetailViewProps = {
   data: Chat | undefined;

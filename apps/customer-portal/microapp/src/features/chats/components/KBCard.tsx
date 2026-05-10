@@ -13,8 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, Card, Stack, Typography, pxToRem, colors } from "@wso2/oxygen-ui";
+import { Box, Card, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { BookOpen } from "@wso2/oxygen-ui-icons-react";
 
 export function KBCard({ id, title }: { id: string; title: string }) {

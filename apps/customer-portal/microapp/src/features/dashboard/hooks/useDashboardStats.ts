@@ -13,14 +13,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+
+import { useProject } from "@context/project";
+
 import { cases } from "@features/cases/api/cases.queries";
 import { changeRequests } from "@features/changes/api/changes.queries";
-import { useProject } from "@context/project";
 import { computeDashboardStats, type DashboardStats } from "@features/dashboard/services/dashboardStats.service";
-import type { ModeType } from "@shared/types";
+
+import { CASE_TYPES } from "@shared/constants";
+import { useNavigation } from "@shared/hooks";
 
 export function useDashboardStats(): {
   stats: DashboardStats;
@@ -28,32 +30,35 @@ export function useDashboardStats(): {
   navigateBySeverity: (id: string | number, label: string) => void;
   navigateByOperationsType: (id: string | number, type: string) => void;
 } {
-  const navigate = useNavigate();
-  const {
-    projectId,
-    features,
-  } = useProject();
+  const { toBySeverity, toOutstandingServiceRequests, toOutstandingChangeRequests } = useNavigation();
+  const { projectId, features } = useProject();
 
-  const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["default_case"] }));
+  const { hasServiceRequestReadAccess, hasChangeRequestReadAccess, hasEngagementsReadAccess } = features ?? {};
+
+  const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: [CASE_TYPES.DEFAULT] }));
+
   const { data: engagementCaseTypeStats } = useQuery({
-    ...cases.stats(projectId!, { caseTypes: ["engagement"] }),
-    enabled: features?.hasEngagementsReadAccess,
+    ...cases.stats(projectId!, { caseTypes: [CASE_TYPES.ENGAGEMENT] }),
+    enabled: !!hasEngagementsReadAccess,
   });
+
   const { data: serviceRequestCaseTypeStats } = useQuery({
-    ...cases.stats(projectId!, { caseTypes: ["service_request"] }),
-    enabled: features?.hasServiceRequestReadAccess,
+    ...cases.stats(projectId!, { caseTypes: [CASE_TYPES.SERVICE_REQUEST] }),
+    enabled: !!hasServiceRequestReadAccess,
   });
+
   const { data: changeRequestCaseTypeStats } = useQuery({
     ...changeRequests.stats(projectId!),
-    enabled: !!features?.hasChangeRequestReadAccess,
+    enabled: !!hasChangeRequestReadAccess,
   });
+
   const { data: multipleCaseTypesStats } = useQuery(
     cases.stats(projectId!, {
       caseTypes: [
-        "default_case",
-        "security_report_analysis",
-        ...(features?.hasEngagementsReadAccess ? ["engagement"] : []),
-        ...(features?.hasServiceRequestReadAccess ? ["service_request"] : []),
+        CASE_TYPES.DEFAULT,
+        CASE_TYPES.SECURITY_REPORT_ANALYSIS,
+        ...(hasEngagementsReadAccess ? [CASE_TYPES.ENGAGEMENT] : []),
+        ...(hasServiceRequestReadAccess ? [CASE_TYPES.SERVICE_REQUEST] : []),
       ],
     }),
   );
@@ -67,22 +72,10 @@ export function useDashboardStats(): {
     features,
   );
 
-  const navigateBySeverity = (id: string | number, label: string) => {
-    navigate("/cases/all", {
-      state: { mode: { type: "severity", id, title: `Outstanding ${label} Cases` } as ModeType },
-    });
+  const navigateByOperationsType = (type: string | number) => {
+    if (type === CASE_TYPES.SERVICE_REQUEST) toOutstandingServiceRequests();
+    if (type === CASE_TYPES.CHANGE_REQUEST) toOutstandingChangeRequests();
   };
 
-  const navigateByOperationsType = (_: string | number, type: string) => {
-    if (type === "Service Requests")
-      navigate("/services/all", {
-        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Service Requests" } as ModeType },
-      });
-    if (type === "Change Requests")
-      navigate("/changes/all", {
-        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Change Requests" } as ModeType },
-      });
-  };
-
-  return { stats, features, navigateBySeverity, navigateByOperationsType };
+  return { stats, features, navigateBySeverity: toBySeverity, navigateByOperationsType };
 }

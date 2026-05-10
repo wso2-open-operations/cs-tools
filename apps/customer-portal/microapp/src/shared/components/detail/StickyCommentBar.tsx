@@ -13,11 +13,11 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
 
-import type { ChangeEvent, ReactNode, KeyboardEvent } from "react";
-import { Box, CircularProgress, IconButton, Stack, TextField, pxToRem } from "@wso2/oxygen-ui";
-import { SendHorizonal } from "@wso2/oxygen-ui-icons-react";
 import { useThemeMode } from "@root/src/context/theme";
+import { Box, CircularProgress, IconButton, pxToRem, Stack, TextField } from "@wso2/oxygen-ui";
+import { SendHorizonal } from "@wso2/oxygen-ui-icons-react";
 
 interface StickyCommentBarProps {
   value: string;

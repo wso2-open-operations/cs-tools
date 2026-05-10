@@ -13,22 +13,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLocation } from "react-router-dom";
-import { Folder } from "@wso2/oxygen-ui-icons-react";
-import { Button, Stack, Typography, InputAdornment, pxToRem, CircularProgress, Grid, Box } from "@wso2/oxygen-ui";
-import { SelectField, TextField, ConversationSummary } from "@features/cases/components";
-import { useFormik } from "formik";
-import { useProject } from "@context/project";
-import type { CaseClassificationResponseDto } from "@features/cases/types/case.dto";
-import type { Case } from "@features/cases/types/case.model";
+
 import * as Yup from "yup";
-import { RichText, SectionCard } from "@components/common";
-import { InfoField } from "@components/detail";
+import { Box, Button, CircularProgress, Grid, InputAdornment, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { Folder } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
-import { useCreateCaseData } from "@features/cases/hooks/useCreateCaseData";
+import { useFormik } from "formik";
+
+import { useProject } from "@context/project";
+
+import { ConversationSummary, SelectField, TextField } from "@features/cases/components";
 import { useAutoFill } from "@features/cases/hooks/useAutoFill";
 import { useCreateCase } from "@features/cases/hooks/useCreateCase";
+import { useCreateCaseData } from "@features/cases/hooks/useCreateCaseData";
+import type { CaseClassificationResponseDto } from "@features/cases/types/case.dto";
+import type { Case } from "@features/cases/types/case.model";
+
+import { RichText, SectionCard } from "@components/common";
+import { InfoField } from "@components/detail";
 
 type CreateCaseFormValues = {
   project: string;
@@ -146,9 +149,7 @@ export default function CreateCasePage() {
                   return next;
                 });
               }}
-              disabled={
-                !!relatedCase || !formik.values.project || isLoadingDeployments || deploymentsFieldDisabled
-              }
+              disabled={!!relatedCase || !formik.values.project || isLoadingDeployments || deploymentsFieldDisabled}
               error={formik.touched.deployment && Boolean(formik.errors.deployment)}
               helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
             />

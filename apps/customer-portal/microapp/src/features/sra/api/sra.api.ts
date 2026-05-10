@@ -13,13 +13,15 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { CASE_DETAILS_ENDPOINT, PROJECT_CASES_ENDPOINT } from "@config/endpoints";
 
 import apiClient from "@infrastructure/api/client";
-import type { PaginatedArray } from "@shared/types";
-import type { GetCasesRequestDto, CaseDto, CasesDto } from "@features/cases/types/case.dto";
-import type { Case, CaseSummary } from "@features/cases/types/case.model";
+
 import { toCase, toCaseSummary } from "@features/cases/mappers/case.mapper";
-import { CASE_DETAILS_ENDPOINT, PROJECT_CASES_ENDPOINT } from "@config/endpoints";
+import type { CaseDto, CasesDto, GetCasesRequestDto } from "@features/cases/types/case.dto";
+import type { Case, CaseSummary } from "@features/cases/types/case.model";
+
+import type { PaginatedArray } from "@shared/types";
 
 export const getAllSecurityReportAnalysis = async (
   id: string,

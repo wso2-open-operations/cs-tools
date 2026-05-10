@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { ErrorMessages } from "@shared/constants/app.constants";
-import { Topic, type EdgeInsets, type LogLevel, type TopicType } from "./types";
+
+import { type EdgeInsets, type LogLevel, Topic, type TopicType } from "./types";
 
 type Callback<T> = (data?: T) => void;
 

@@ -1,11 +1,16 @@
+import { Typography } from "@wso2/oxygen-ui";
+
 import { useProject } from "@context/project";
-import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
+
+import { ITEM_DETAIL_PATHS } from "@config/constants";
+
 import { useChatList } from "@features/chats/hooks/useChatList";
+
+import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
+
 import { InfiniteScroll } from "@components/common";
 import EmptyState from "@components/common/EmptyState";
-import { Typography } from "@wso2/oxygen-ui";
 import { ItemCardExtended, ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
-import { ITEM_DETAIL_PATHS } from "@config/constants";
 
 export function ChatListContent({ filter, search }: { filter: string; search: string }) {
   const { projectId } = useProject();

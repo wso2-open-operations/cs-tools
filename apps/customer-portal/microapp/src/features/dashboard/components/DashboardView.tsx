@@ -13,62 +13,64 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Grid, colors, pxToRem } from "@wso2/oxygen-ui";
+import {
+  DASHBOARD_METRIC_ACTION_REQUIRED,
+  DASHBOARD_METRIC_AVG_RESPONSE_TIME,
+  DASHBOARD_METRIC_CLOSED,
+  DASHBOARD_METRIC_OUTSTANDING,
+  DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS,
+  DASHBOARD_WIDGET_OUTSTANDING_OPERATIONS,
+  DASHBOARD_WIDGET_OUTSTANDING_SUPPORT_CASES,
+} from "@root/src/shared/constants";
+import { useNavigation } from "@root/src/shared/hooks";
+import { colors, Grid, pxToRem } from "@wso2/oxygen-ui";
 import { Activity, CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
+
 import { MetricWidget, PieChartWidget } from "@features/dashboard/components";
-import { useNavigate } from "react-router-dom";
-import type { ModeType } from "@shared/types";
 import type { useDashboardStats } from "@features/dashboard/hooks/useDashboardStats";
 
 type DashboardViewProps = ReturnType<typeof useDashboardStats>;
 
 export function DashboardView({ stats, features, navigateBySeverity, navigateByOperationsType }: DashboardViewProps) {
-  const navigate = useNavigate();
+  const { toClosedItems, toOutstandingItems, toActionRequiredItems } = useNavigation();
+  const {
+    hasServiceRequestReadAccess = false,
+    hasChangeRequestReadAccess = false,
+    hasEngagementsReadAccess = false,
+  } = features ?? {};
 
   return (
     <Grid spacing={1.5} container>
       <Grid size={6}>
         <MetricWidget
-          label="Action Required"
-          value={stats.totalInteractions}
+          label={DASHBOARD_METRIC_ACTION_REQUIRED}
+          value={stats.actionRequired}
           icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
-          onClick={() =>
-            navigate("/multiple/all", {
-              state: {
-                mode: { type: "status", status: "action_required", title: "Action Required Items" } as ModeType,
-              },
-            })
-          }
+          onClick={toActionRequiredItems}
         />
       </Grid>
+
       <Grid size={6}>
         <MetricWidget
-          label="Outstanding"
-          value={stats.activeInteractions}
+          label={DASHBOARD_METRIC_OUTSTANDING}
+          value={stats.outstanding}
           icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
-          onClick={() =>
-            navigate("/multiple/all", {
-              state: { mode: { type: "status", status: "outstanding", title: "Outstanding Items" } as ModeType },
-            })
-          }
+          onClick={toOutstandingItems}
         />
       </Grid>
+
       <Grid size={6}>
         <MetricWidget
-          label="Closed (30d)"
+          label={DASHBOARD_METRIC_CLOSED}
           value={stats.resolvedThisMonth}
           icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
-          onClick={() =>
-            navigate("/multiple/all", {
-              state: { mode: { type: "status", status: "resolved", title: "Closed Items (30d)" } as ModeType },
-            })
-          }
+          onClick={toClosedItems}
         />
       </Grid>
+
       <Grid size={6}>
         <MetricWidget
-          label="Average Response Time"
+          label={DASHBOARD_METRIC_AVG_RESPONSE_TIME}
           value={stats.averageResponseTime !== undefined ? `${stats.averageResponseTime}h` : undefined}
           icon={<Activity size={pxToRem(18)} color={colors.cyan[500]} />}
         />
@@ -76,25 +78,25 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
 
       <Grid size={6}>
         <PieChartWidget
-          title="Outstanding Support Cases"
+          title={DASHBOARD_WIDGET_OUTSTANDING_SUPPORT_CASES}
           data={stats.outstandingSupportCasesPieData}
           onClick={navigateBySeverity}
         />
       </Grid>
 
-      {(features?.hasServiceRequestReadAccess || features?.hasChangeRequestReadAccess) && (
+      {(hasServiceRequestReadAccess || hasChangeRequestReadAccess) && (
         <Grid size={6}>
           <PieChartWidget
-            title="Outstanding Operations"
+            title={DASHBOARD_WIDGET_OUTSTANDING_OPERATIONS}
             data={stats.outstandingOperationsPieData}
             onClick={navigateByOperationsType}
           />
         </Grid>
       )}
 
-      {features?.hasEngagementsReadAccess && (
+      {hasEngagementsReadAccess && (
         <Grid size={6}>
-          <PieChartWidget title="Outstanding Engagements" data={stats.outstandingEngagementsPieData} />
+          <PieChartWidget title={DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS} data={stats.outstandingEngagementsPieData} />
         </Grid>
       )}
     </Grid>

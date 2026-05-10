@@ -23,3 +23,9 @@ export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
 
 export const RESOLVED_CASE_STATUS_IDS = [3];
 export const RESOLVED_CHANGE_REQUEST_STATUS_IDS = [3];
+
+export const STATUS_MODE = {
+  ACTION_REQUIRED: "action_required",
+  OUTSTANDING: "outstanding",
+  RESOLVED: "resolved",
+} as const;

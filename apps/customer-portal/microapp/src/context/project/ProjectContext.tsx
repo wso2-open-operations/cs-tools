@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { createContext } from "react";
 
 import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
-import { createContext } from "react";
 
 export type ProjectContextType = {
   projectId: string | null;

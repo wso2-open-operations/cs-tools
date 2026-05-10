@@ -13,12 +13,15 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { matchPath, useLocation } from "react-router-dom";
+
 import { LayoutContext, type LayoutContextType, type LayoutOverrides } from "@context/layout";
-import { MAIN_LAYOUT_CONFIG, type MainLayoutConfigType } from "@components/layout/config";
+
 import { Logger } from "@infrastructure/logging/logger";
+
+import { MAIN_LAYOUT_CONFIG, type MainLayoutConfigType } from "@components/layout/config";
 
 export default function LayoutProvider({ children }: { children: React.ReactNode }) {
   const location = useLocation();

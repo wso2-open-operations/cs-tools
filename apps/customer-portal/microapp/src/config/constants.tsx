@@ -13,11 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { colors } from "@wso2/oxygen-ui";
-import { CircleAlert, Cloud, MessageSquare, Moon, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
+import { CircleAlert, Cloud, type LucideIcon, MessageSquare, Moon } from "@wso2/oxygen-ui-icons-react";
+
 import type { ProjectMetricMeta } from "@features/projects/components";
+import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
+
 import type { ProgressTimelineEntryProps } from "@components/detail";
 import type { ItemCardProps } from "@components/support";
 

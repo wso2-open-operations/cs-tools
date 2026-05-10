@@ -13,11 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Box, Button, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { PROJECT_METRIC_META } from "@root/src/config/constants";
+import { Box, Button, Card, Grid, pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
-import { PROJECT_METRIC_META } from "@root/src/config/constants";
 import type { Project, ProjectMetricKey, ProjectMetricValue } from "@features/projects/types/project.model";
 
 export interface ProjectMetricMeta {

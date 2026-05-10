@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { parseApiDate } from "@shared/utils/date.utils";
 import type { ServiceRequestDto, ServiceRequestsDto } from "@features/service-requests/types/service-request.dto";
 import type { ServiceRequest, ServiceRequestSummary } from "@features/service-requests/types/service-request.model";
+
+import { parseApiDate } from "@shared/utils/date.utils";
 
 export function toServiceRequestSummary(dto: ServiceRequestsDto["cases"][number]): ServiceRequestSummary {
   return {

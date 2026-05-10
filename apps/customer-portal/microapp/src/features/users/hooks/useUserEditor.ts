@@ -13,14 +13,17 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useState } from "react";
+
 import { useLocation, useNavigate } from "react-router-dom";
+
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { users } from "@features/users/api/users.queries";
-import { projects } from "@features/projects/api/projects.queries";
+
 import { useProject } from "@context/project";
 import { useNotify } from "@context/snackbar";
+
+import { projects } from "@features/projects/api/projects.queries";
+import { users } from "@features/users/api/users.queries";
 import type { Role } from "@features/users/types/user.model";
 
 const DEFAULT_USER_ROLE: Role = "Portal User";

@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import type React from "react";
 import { useCallback, useRef } from "react";
+
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
 import { Stack } from "@wso2/oxygen-ui";
 

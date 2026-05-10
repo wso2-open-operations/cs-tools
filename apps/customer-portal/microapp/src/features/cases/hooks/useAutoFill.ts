@@ -13,9 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useState } from "react";
+
 import { useLayout } from "@context/layout";
+
 import type { CaseClassificationResponseDto } from "@features/cases/types/case.dto";
 import type { Case } from "@features/cases/types/case.model";
 

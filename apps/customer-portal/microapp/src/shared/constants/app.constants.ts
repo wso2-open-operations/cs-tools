@@ -23,3 +23,11 @@ export const LocalStorageKeys = {
   idToken: "idToken",
   lastVisitedProjectId: "last-active-project-id",
 };
+
+export const CASE_TYPES = {
+  DEFAULT: "default_case",
+  SERVICE_REQUEST: "service_request",
+  CHANGE_REQUEST: "change_request",
+  SECURITY_REPORT_ANALYSIS: "security_report_analysis",
+  ENGAGEMENT: "engagement",
+} as const;

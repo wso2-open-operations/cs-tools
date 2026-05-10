@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
-import type { GetChatsRequestDto, MessageDispatchDto } from "@features/chats/types/chat.dto";
+
 import { getAllChats, getChat, getChatComments, initiateChat, sendChatMessage } from "@features/chats/api/chats.api";
+import type { GetChatsRequestDto, MessageDispatchDto } from "@features/chats/types/chat.dto";
 
 export const chats = {
   initiate: (id: string) =>

@@ -13,13 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { DashboardView } from "@features/dashboard/components/DashboardView";
+import { useDashboardStats } from "@features/dashboard/hooks/useDashboardStats";
 
 import { Fab } from "@components/core";
-import { useDashboardStats } from "@features/dashboard/hooks/useDashboardStats";
-import { DashboardView } from "@features/dashboard/components/DashboardView";
 
 export default function HomePage() {
   const dashboardStats = useDashboardStats();
+
   return (
     <>
       <DashboardView {...dashboardStats} />

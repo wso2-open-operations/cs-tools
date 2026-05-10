@@ -13,9 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect } from "react";
+
 import { matchPath, useLocation } from "react-router-dom";
+
 import { SCROLL_OVERRIDES } from "@components/layout/config";
 
 export function useScrollControl(position: "top" | "bottom" = "top", onRouteChange = true) {

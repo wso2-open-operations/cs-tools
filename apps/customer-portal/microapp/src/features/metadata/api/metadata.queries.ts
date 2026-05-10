@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { queryOptions } from "@tanstack/react-query";
+
 import { getMetadata } from "@features/metadata/api/metadata.api";
 
 export const metadata = {

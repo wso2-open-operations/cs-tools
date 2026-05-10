@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Card, Chip, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { Circle } from "@mui/icons-material";
+import { Card, Chip, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+
 import type { ItemType } from "@components/support";
 import { TYPE_CONFIG } from "@components/support/config";
 

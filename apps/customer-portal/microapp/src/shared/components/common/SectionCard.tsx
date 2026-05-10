@@ -13,8 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import type { ReactNode } from "react";
+
 import { Card, Stack, Typography } from "@wso2/oxygen-ui";
 
 export function SectionCard({ title, children }: { title?: string; children: ReactNode }) {

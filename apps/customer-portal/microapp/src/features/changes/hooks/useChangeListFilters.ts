@@ -13,15 +13,17 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { GetChangeRequestsRequestDto } from "@features/changes/types/change.dto";
 
-import type { ModeType } from "@shared/types/common.types";
-import { useResolvedDateRange } from "@shared/hooks/useResolvedDateRange";
 import {
   ACTION_REQUIRED_CHANGE_REQUEST_STATUS_IDS,
   OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS,
   RESOLVED_CHANGE_REQUEST_STATUS_IDS,
 } from "@shared/constants/status.constants";
-import type { GetChangeRequestsRequestDto } from "@features/changes/types/change.dto";
+
+import type { ModeType } from "@shared/types/common.types";
+
+import { useResolvedDateRange } from "@shared/hooks/useResolvedDateRange";
 
 export function useChangeListFilters(
   mode: ModeType | undefined,

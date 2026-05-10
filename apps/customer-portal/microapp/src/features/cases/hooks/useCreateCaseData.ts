@@ -13,14 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useMemo } from "react";
+
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { useProject } from "@context/project";
+
 import { useFilters } from "@context/filters";
-import { projects } from "@features/projects/api/projects.queries";
-import { overrideOrDefault } from "@shared/utils/string.utils";
+import { useProject } from "@context/project";
+
 import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "@config/constants";
+
+import { projects } from "@features/projects/api/projects.queries";
+
+import { overrideOrDefault } from "@shared/utils/string.utils";
 
 export function useCreateCaseData(formProjectId: string, formDeploymentId: string) {
   const { type } = useProject();

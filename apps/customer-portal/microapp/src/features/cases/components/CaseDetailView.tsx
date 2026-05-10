@@ -13,23 +13,27 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useLayoutEffect } from "react";
-import { User, Users } from "@wso2/oxygen-ui-icons-react";
+
 import { Card, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
-import { CommentSkeleton, InfoField, MenuOptions, OverlineSlot, StickyCommentBar } from "@components/detail";
-import { PriorityChip, StatusChip } from "@components/support";
-import { AttachmentPreviewDialog, RichText, SectionCard } from "@components/common";
-import { useLayout } from "@context/layout";
-import { Comment } from "@components/detail";
+import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
-import { useDateTime } from "@shared/hooks/useDateTime";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+
+import { useLayout } from "@context/layout";
+
 import { AttachmentCard } from "@features/cases/components/AttachmentCard";
-import type { Case, Attachment } from "@features/cases/types/case.model";
-import type { MenuOptionProps } from "@components/detail";
-import type { useDetailComments } from "@shared/hooks/useDetailComments";
 import type { useAttachmentPreview } from "@features/cases/hooks/useAttachmentPreview";
+import type { Attachment, Case } from "@features/cases/types/case.model";
+
+import { useDateTime } from "@shared/hooks/useDateTime";
+import type { useDetailComments } from "@shared/hooks/useDetailComments";
+import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+
+import { AttachmentPreviewDialog, RichText, SectionCard } from "@components/common";
+import { CommentSkeleton, InfoField, MenuOptions, OverlineSlot, StickyCommentBar } from "@components/detail";
+import { Comment } from "@components/detail";
+import type { MenuOptionProps } from "@components/detail";
+import { PriorityChip, StatusChip } from "@components/support";
 
 type CaseDetailViewProps = {
   data: Case | undefined;

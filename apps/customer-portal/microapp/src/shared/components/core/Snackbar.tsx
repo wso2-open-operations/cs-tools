@@ -13,10 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type ReactNode } from "react";
 
 import { Alert, Fade, Snackbar as MuiSnackbar } from "@wso2/oxygen-ui";
 import { BanIcon, CheckIcon, InfoIcon, TriangleAlertIcon } from "@wso2/oxygen-ui-icons-react";
-import { type ReactNode } from "react";
 
 const DEFAULT_DURATION = 4000;
 

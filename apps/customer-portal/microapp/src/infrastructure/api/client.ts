@@ -13,11 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import { Logger } from "@infrastructure/logging/logger";
-import { refreshToken } from "@infrastructure/api/auth";
+
 import { BACKEND_URL } from "@config/endpoints";
+
+import { refreshToken } from "@infrastructure/api/auth";
+import { Logger } from "@infrastructure/logging/logger";
 
 let isRefreshing = false;
 let failedQueue: {

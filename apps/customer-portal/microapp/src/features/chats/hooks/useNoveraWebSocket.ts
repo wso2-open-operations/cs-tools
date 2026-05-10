@@ -13,13 +13,17 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 import { useEffect, useState } from "react";
+
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "@config/endpoints";
+
 import { useMe } from "@context/me";
+
+import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "@config/endpoints";
+
 import { getAccessToken, getIdToken } from "@infrastructure/api/auth";
+
 import type { ChatMessage } from "@features/chats/components";
 import type { FinalNoveraResponse, NoveraResponse } from "@features/chats/types/novera.dto";
 

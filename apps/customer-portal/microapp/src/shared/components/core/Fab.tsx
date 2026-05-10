@@ -13,16 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { useProject } from "@context/project";
 import { Fab as MuiFab, useTheme } from "@wso2/oxygen-ui";
 import { MessageSquareIcon } from "@wso2/oxygen-ui-icons-react";
-import { useNavigate } from "react-router-dom";
+
+import { useNavigation } from "@shared/hooks";
 
 export function Fab() {
-  const navigate = useNavigate();
   const theme = useTheme();
-  const { noveraEnabled } = useProject();
+  const { toCaseCreate } = useNavigation();
 
   return (
     <MuiFab
@@ -38,7 +36,7 @@ export function Fab() {
       }}
       onClick={(event) => {
         event.preventDefault();
-        navigate(noveraEnabled ? "/chat" : "/create");
+        toCaseCreate();
       }}
     >
       <MessageSquareIcon fill={theme.palette.primary.contrastText} />

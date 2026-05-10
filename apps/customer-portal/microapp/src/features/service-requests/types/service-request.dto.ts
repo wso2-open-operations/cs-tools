@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { CaseDto, CaseSummaryDto } from "@features/cases/types/case.dto";
 
 import type { EntityReference, Pagination } from "@shared/types";
-import type { CaseDto, CaseSummaryDto } from "@features/cases/types/case.dto";
 
 export interface ServiceRequestsDto extends Pagination {
   cases: ServiceRequestSummaryDto[];
