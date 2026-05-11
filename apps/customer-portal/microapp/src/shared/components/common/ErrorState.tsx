@@ -26,7 +26,7 @@ interface ErrorStateProps {
   retryButtonText?: string;
 }
 
-export default function ErrorState({
+export function ErrorState({
   title = "Something went wrong",
   description = "We encountered an unexpected error while loading this content.",
   icon = <CircleX size={48} />,

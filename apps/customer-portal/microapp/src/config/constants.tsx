@@ -104,16 +104,6 @@ export const TIMELINE_META: Omit<ProgressTimelineEntryProps, "variant">[] = [
   },
 ];
 
-export const TAB_CONFIG = {
-  case: { title: "Outstanding Cases", subtitle: "Active support tickets" },
-  chat: { title: "Chat History", subtitle: "Recent Novera conversations" },
-  service: { title: "Service Requests", subtitle: "Managed cloud service requests" },
-  change: { title: "Change Requests", subtitle: "Scheduled and pending changes" },
-  sra: { title: "Security Report Analysis", subtitle: "Security findings, assessments, and reviews" },
-  engagement: { title: "Engagements", subtitle: "Ongoing and completed client engagements" },
-  announcement: { title: "Announcements", subtitle: "View and manage announcements for your project" },
-};
-
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
   case: (id) => `/cases/${id}`,
   chat: (id) => `/chats/${id}`,

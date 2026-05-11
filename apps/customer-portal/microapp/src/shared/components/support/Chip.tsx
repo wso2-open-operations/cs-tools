@@ -13,52 +13,23 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useFilters } from "@root/src/context/filters";
 import { alpha, Chip, type ChipProps, Skeleton } from "@wso2/oxygen-ui";
 
-import { overrideOrDefault } from "@shared/utils/string.utils";
-
-import type { ItemCardProps } from ".";
-import {
-  CASE_STATUS_CHIP_COLOR_CONFIG,
-  CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG,
-  CONVERSATION_STATUS_CHIP_COLOR_CONFIG,
-  IMPACT_CHIP_COLOR_CONFIG,
-  PRIORITY_CHIP_COLOR_CONFIG,
-} from "./config";
+import { CASE_TYPES } from "@shared/constants";
+import { usePriorityChip, useStatusChip } from "@shared/hooks";
+import type { CaseType } from "@shared/types";
+import { overrideOrDefault } from "@shared/utils";
 
 interface PriorityChipProps extends Omit<ChipProps, "label"> {
   prefix?: string;
   id?: string;
-  type?: ItemCardProps["type"];
+  type?: CaseType;
 }
 
-export function PriorityChip({ prefix, id, type = "case", ...props }: PriorityChipProps) {
-  const { data, isLoading } = useFilters();
+export function PriorityChip({ prefix, id, type = CASE_TYPES.DEFAULT, ...props }: PriorityChipProps) {
+  const { label, color } = usePriorityChip(type, id) ?? {};
 
-  if (isLoading || !data) return <SkeletonChip />;
-
-  const label =
-    (() => {
-      switch (type) {
-        case "change":
-          return data?.changeRequestImpacts;
-        default:
-          return data?.severities;
-      }
-    })()
-      .find((s) => s.id === id)
-      ?.label.replace(/^\d+ - /, "") ?? "N/A";
-
-  const color =
-    (() => {
-      switch (type) {
-        case "change":
-          return IMPACT_CHIP_COLOR_CONFIG;
-        default:
-          return PRIORITY_CHIP_COLOR_CONFIG;
-      }
-    })()?.[id ?? ""] ?? "default";
+  if (!label || !color) return <SkeletonChip />;
 
   return (
     <Chip
@@ -78,41 +49,16 @@ export function PriorityChip({ prefix, id, type = "case", ...props }: PriorityCh
 
 interface StatusChipProps extends Omit<ChipProps, "label"> {
   id?: string;
-  type?: ItemCardProps["type"];
+  type?: CaseType;
 }
 
-export function StatusChip({ id, type = "case", ...props }: StatusChipProps) {
-  const { data, isLoading } = useFilters();
+export function StatusChip({ id, type = CASE_TYPES.DEFAULT, ...props }: StatusChipProps) {
+  const { label, color } = useStatusChip(type, id) ?? {};
 
-  if (isLoading || !data) return <SkeletonChip />;
-
-  const label =
-    (() => {
-      switch (type) {
-        case "chat":
-          return data.conversationStates;
-        case "change":
-          return data.changeRequestStates;
-        default:
-          return data.caseStates;
-      }
-    })().find((s) => s.id === id)?.label ?? "N/A";
-
-  const color =
-    (() => {
-      switch (type) {
-        case "chat":
-          return CONVERSATION_STATUS_CHIP_COLOR_CONFIG;
-        case "change":
-          return CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG;
-        default:
-          return CASE_STATUS_CHIP_COLOR_CONFIG;
-      }
-    })()?.[id ?? ""] ?? "default";
+  if (!label || !color) return <SkeletonChip />;
 
   return (
     <Chip
-      color={color}
       label={label}
       {...props}
       sx={

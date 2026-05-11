@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router-dom";
 
-import { useProject } from "@root/src/context/project";
+import { useProject } from "@context/project";
 
-import { OUTSTANDING_CASES_BY_SEVERITY_TITLE, ROUTES } from "@shared/constants";
+import { CASE_TYPES, OUTSTANDING_CASES_BY_SEVERITY_TITLE, ROUTES } from "@shared/constants";
 import type { ModeType } from "@shared/types";
 
 export const useCaseNavigation = () => {
@@ -11,10 +11,10 @@ export const useCaseNavigation = () => {
 
   return {
     toBySeverity: (id: string | number, label: string) =>
-      navigate(ROUTES.cases.all, {
+      navigate(ROUTES[CASE_TYPES.DEFAULT].all, {
         state: { mode: { type: "severity", id, title: OUTSTANDING_CASES_BY_SEVERITY_TITLE(label) } as ModeType },
       }),
 
-    toCaseCreate: () => navigate(noveraEnabled ? ROUTES.chat : ROUTES.cases.create),
+    toCaseCreate: () => navigate(noveraEnabled ? ROUTES[CASE_TYPES.CHAT].create : ROUTES[CASE_TYPES.DEFAULT].create),
   };
 };

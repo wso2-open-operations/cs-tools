@@ -39,7 +39,7 @@ import UsersPage from "@pages/UsersPage";
 
 import { useScrollControl } from "@shared/hooks/useScrollControl";
 
-import ErrorState from "@components/common/ErrorState";
+import { ErrorState } from "@components/common";
 import MainLayout from "@components/layout/MainLayout";
 import RequireProject from "@components/layout/RequireProject";
 
@@ -64,6 +64,7 @@ const App: React.FC = () => {
     <Router>
       <AppProvider>
         <ScrollHandler />
+
         <Routes>
           <Route path="/select" element={<SelectProjectPage />} />
 

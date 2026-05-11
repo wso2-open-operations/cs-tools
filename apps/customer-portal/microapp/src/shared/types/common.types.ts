@@ -13,7 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import type { STATUS_MODE } from "@shared/constants";
+import type { CASE_TYPES, STATUS_MODE } from "@shared/constants";
 
 export interface EntityReference {
   id: string;
@@ -34,3 +34,5 @@ export type OfSeverityModeType = {
 };
 
 export type ModeType = OfStatusModeType | OfSeverityModeType;
+
+export type CaseType = (typeof CASE_TYPES)[keyof typeof CASE_TYPES];

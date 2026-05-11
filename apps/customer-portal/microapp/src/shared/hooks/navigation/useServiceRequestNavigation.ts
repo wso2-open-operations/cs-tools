@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import { OUTSTANDING_SERVICE_REQUESTS_TITLE, ROUTES, STATUS_MODE } from "@shared/constants";
+import { CASE_TYPES, OUTSTANDING_SERVICE_REQUESTS_TITLE, ROUTES, STATUS_MODE } from "@shared/constants";
 import type { ModeType } from "@shared/types";
 
 export const useServiceRequestNavigation = () => {
@@ -8,7 +8,7 @@ export const useServiceRequestNavigation = () => {
 
   return {
     toOutstandingServiceRequests: () =>
-      navigate(ROUTES.service_requests.all, {
+      navigate(ROUTES[CASE_TYPES.SERVICE_REQUEST].all, {
         state: {
           mode: { type: "status", status: STATUS_MODE.OUTSTANDING } as ModeType,
           title: OUTSTANDING_SERVICE_REQUESTS_TITLE,

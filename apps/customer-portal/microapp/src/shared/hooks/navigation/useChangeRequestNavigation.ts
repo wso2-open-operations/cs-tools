@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import { OUTSTANDING_CHANGE_REQUESTS_TITLE, ROUTES, STATUS_MODE } from "@shared/constants";
+import { CASE_TYPES, OUTSTANDING_CHANGE_REQUESTS_TITLE, ROUTES, STATUS_MODE } from "@shared/constants";
 import type { ModeType } from "@shared/types";
 
 export const useChangeRequestNavigation = () => {
@@ -8,7 +8,7 @@ export const useChangeRequestNavigation = () => {
 
   return {
     toOutstandingChangeRequests: () =>
-      navigate(ROUTES.change_requests.all, {
+      navigate(ROUTES[CASE_TYPES.CHANGE_REQUEST].all, {
         state: {
           mode: {
             type: "status",

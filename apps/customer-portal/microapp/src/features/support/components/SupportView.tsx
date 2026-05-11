@@ -13,5 +13,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { ItemList, Tabs } from "@features/support/components";
+import { useActiveTab } from "@features/support/hooks";
 
-export * from "./NotificationsListItem";
+export function SupportView() {
+  const { tab, setTab } = useActiveTab();
+
+  return (
+    <>
+      <Tabs value={tab} onTabChange={setTab} />
+      <ItemList tab={tab} />
+    </>
+  );
+}

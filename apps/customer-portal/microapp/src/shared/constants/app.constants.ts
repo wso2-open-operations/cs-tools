@@ -30,4 +30,6 @@ export const CASE_TYPES = {
   CHANGE_REQUEST: "change_request",
   SECURITY_REPORT_ANALYSIS: "security_report_analysis",
   ENGAGEMENT: "engagement",
+  ANNOUNCEMENT: "announcement",
+  CHAT: "chat",
 } as const;

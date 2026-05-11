@@ -17,21 +17,21 @@ import type { ReactNode } from "react";
 
 import { Link } from "react-router-dom";
 
-import { Button, Divider, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Button, Card, Divider, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
 
-interface ItemListViewProps {
+interface ItemListWrapperProps {
   title: string;
   subtitle?: string;
   viewAllPath: string;
   children: ReactNode;
 }
 
-export function ItemListView({ title, subtitle, viewAllPath, children }: ItemListViewProps) {
+export function ItemListWrapper({ title, subtitle, viewAllPath, children }: ItemListWrapperProps) {
   const theme = useTheme();
 
   return (
-    <>
+    <Card component={Stack} p={2} mt={2} gap={0.5}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" pb={1} width="100%">
         <Stack mr={2} minWidth={0}>
           <Typography variant="h6">{title}</Typography>
@@ -54,6 +54,6 @@ export function ItemListView({ title, subtitle, viewAllPath, children }: ItemLis
       <Stack gap={2} pt={2}>
         {children}
       </Stack>
-    </>
+    </Card>
   );
 }

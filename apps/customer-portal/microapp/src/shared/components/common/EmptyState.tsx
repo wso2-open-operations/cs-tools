@@ -13,16 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { ReactNode } from "react";
+
 import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import { Inbox } from "@wso2/oxygen-ui-icons-react";
 
 interface EmptyStateProps {
   title?: string;
   description?: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
 }
 
-export default function EmptyState({
+export function EmptyState({
   title = "No items found",
   description = "There are no items to display at the moment.",
   icon = <Inbox size={48} />,

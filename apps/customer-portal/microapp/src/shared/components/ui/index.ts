@@ -18,3 +18,4 @@ export * from "./NotificationBadge";
 export * from "./WidgetBox";
 export * from "./Timeline";
 export * from "./AuthorizationFallback";
+export * from "./Dot";

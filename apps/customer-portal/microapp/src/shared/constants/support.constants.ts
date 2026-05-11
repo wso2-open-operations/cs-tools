@@ -1,18 +1,3 @@
-// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
-//
-// WSO2 LLC. licenses this file to you under the Apache License,
-// Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
 import { type ChipProps, colors } from "@wso2/oxygen-ui";
 import {
   Briefcase,
@@ -25,34 +10,66 @@ import {
   Shield,
 } from "@wso2/oxygen-ui-icons-react";
 
-import type { ItemType } from "./ItemCard";
+import { CASE_TYPES } from "@shared/constants";
+import type { CaseType } from "@shared/types";
 
-export const TYPE_CONFIG: Record<ItemType, { icon: LucideIcon; color: string }> = {
-  case: {
+export const SUPPORT_TAB_VIEW_CONFIG: Record<CaseType, { title: string; subtitle: string }> = {
+  default_case: { title: "Outstanding Cases", subtitle: "Active support tickets" },
+  chat: { title: "Chat History", subtitle: "Recent Novera conversations" },
+  service_request: {
+    title: "Service Requests",
+    subtitle: "Managed cloud service requests",
+  },
+  change_request: {
+    title: "Change Requests",
+    subtitle: "Scheduled and pending changes",
+  },
+  security_report_analysis: {
+    title: "Security Report Analysis",
+    subtitle: "Security findings, assessments, and reviews",
+  },
+  engagement: {
+    title: "Engagements",
+    subtitle: "Ongoing and completed client engagements",
+  },
+  announcement: {
+    title: "Announcements",
+    subtitle: "View and manage announcements for your project",
+  },
+};
+
+export const CASE_TYPES_CONFIG: Record<CaseType, { icon: LucideIcon; color: string }> = {
+  [CASE_TYPES.DEFAULT]: {
     icon: OctagonAlert,
     color: colors.red[500],
   },
-  chat: {
+
+  [CASE_TYPES.CHAT]: {
     icon: MessageSquare,
     color: colors.blue[500],
   },
-  service: {
+
+  [CASE_TYPES.SERVICE_REQUEST]: {
     icon: Settings,
     color: colors.purple[500],
   },
-  change: {
+
+  [CASE_TYPES.CHANGE_REQUEST]: {
     icon: RefreshCcw,
     color: colors.cyan[500],
   },
-  sra: {
+
+  [CASE_TYPES.SECURITY_REPORT_ANALYSIS]: {
     icon: Shield,
     color: colors.orange[500],
   },
-  engagement: {
+
+  [CASE_TYPES.ENGAGEMENT]: {
     icon: Briefcase,
     color: colors.grey[600],
   },
-  announcement: {
+
+  [CASE_TYPES.ANNOUNCEMENT]: {
     icon: Megaphone,
     color: colors.red[500],
   },
@@ -101,16 +118,4 @@ export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["
   "2": "error",
   "3": "success",
   "4": "default",
-};
-
-export const STRING_OVERRIDES = {
-  // Engagement Type Labels Overrides
-  "New Feature / Improvement": "Improvement",
-
-  // Severity Type Names
-  "Low (P4)": "S4",
-  "Medium (P3)": "S3",
-  "High (P2)": "S2",
-  "Critical (P1)": "S1",
-  "Catastrophic (P0)": "S0",
 };

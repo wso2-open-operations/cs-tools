@@ -14,5 +14,5 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export type { EntityReference, ModeType, OfStatusModeType, OfSeverityModeType } from "./common.types";
-export type { Pagination, PaginatedArray } from "./pagination.types";
+export * from "./common.types";
+export * from "./pagination.types";

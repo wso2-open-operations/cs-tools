@@ -15,6 +15,8 @@
 // under the License.
 import { useSuspenseQuery } from "@tanstack/react-query";
 
+import { useProject } from "@context/project";
+
 import { announcements } from "@features/announcements/api/announcements.queries";
 import { cases } from "@features/cases/api/cases.queries";
 import { changeRequests } from "@features/changes/api/changes.queries";
@@ -31,78 +33,92 @@ import {
 
 const LIMIT = 5;
 
-export function useOutstandingCases(projectId: string) {
+export function useOutstandingCases() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    cases.all(projectId, {
+    cases.all(projectId!, {
       filters: { statusIds: OUTSTANDING_CASE_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingChats(projectId: string) {
+export function useOutstandingChats() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    chats.all(projectId, {
+    chats.all(projectId!, {
       filters: { stateKeys: OUTSTANDING_CONVERSATIONS_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingChangeRequests(projectId: string) {
+export function useOutstandingChangeRequests() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    changeRequests.all(projectId, {
+    changeRequests.all(projectId!, {
       filters: { stateKeys: OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS },
       pagination: { offset: 0, limit: LIMIT },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingServiceRequests(projectId: string) {
+export function useOutstandingServiceRequests() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    serviceRequests.all(projectId, {
+    serviceRequests.all(projectId!, {
       filters: { statusIds: OUTSTANDING_CASE_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingSecurityReports(projectId: string) {
+export function useOutstandingSecurityReportAnalysis() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    securityReportAnalysis.all(projectId, {
+    securityReportAnalysis.all(projectId!, {
       filters: { statusIds: OUTSTANDING_CASE_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingEngagements(projectId: string) {
+export function useOutstandingEngagements() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    engagements.all(projectId, {
+    engagements.all(projectId!, {
       filters: { statusIds: OUTSTANDING_CASE_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
 
-export function useOutstandingAnnouncements(projectId: string) {
+export function useOutstandingAnnouncements() {
+  const { projectId } = useProject();
   const { data } = useSuspenseQuery(
-    announcements.all(projectId, {
+    announcements.all(projectId!, {
       filters: { statusIds: OUTSTANDING_CASE_STATUS_IDS },
       pagination: { limit: LIMIT },
       sortBy: { field: "createdOn", order: "desc" },
     }),
   );
+
   return { data };
 }
