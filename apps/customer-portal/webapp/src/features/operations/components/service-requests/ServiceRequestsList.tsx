@@ -22,7 +22,7 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Calendar, Layers, Package, Users } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, Layers, Package, User, Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
 import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
@@ -289,6 +289,25 @@ export default function ServiceRequestsList({
                       sx={{ lineHeight: 1 }}
                     >
                       {assignedLabel}
+                    </Typography>
+                  </Box>
+                )}
+                {sr.createdBy && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <User size={14} />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ lineHeight: 1 }}
+                    >
+                      Created by {sr.createdBy}
                     </Typography>
                   </Box>
                 )}
