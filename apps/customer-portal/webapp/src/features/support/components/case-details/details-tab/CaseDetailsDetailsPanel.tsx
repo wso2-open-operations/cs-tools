@@ -231,7 +231,7 @@ export default function CaseDetailsDetailsPanel({
               </Stack>
             </Box>
           )}
-          {isServiceRequest && data?.createdBy ? (
+          {data?.createdBy ? (
             <Box>
               <Typography {...labelSx}>Created by</Typography>
               <Typography {...valueSx}>

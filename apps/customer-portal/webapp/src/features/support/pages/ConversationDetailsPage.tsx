@@ -22,6 +22,7 @@ import {
   Paper,
   Skeleton,
   Stack,
+  Tooltip,
   Typography,
   Divider,
   alpha,
@@ -34,6 +35,7 @@ import {
   Flag,
   Clock,
   Hash,
+  User,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
@@ -712,6 +714,33 @@ export default function ConversationDetailsPage(): JSX.Element {
                 </Typography>
               </Box>
             </Box>
+            {summary.createdBy && (
+              <>
+                <Divider orientation="vertical" sx={{ height: 40 }} />
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                  <User size={16} style={{ flexShrink: 0 }} />
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Created by
+                    </Typography>
+                    <Tooltip title={summary.createdBy}>
+                      <Typography
+                        variant="body2"
+                        color="text.primary"
+                        sx={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 180,
+                        }}
+                      >
+                        {summary.createdBy}
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                </Box>
+              </>
+            )}
           </Box>
         </Paper>
       )}

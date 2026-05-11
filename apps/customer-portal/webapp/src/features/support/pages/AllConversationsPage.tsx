@@ -193,6 +193,7 @@ export default function AllConversationsPage(): JSX.Element {
           messages: conv.messageCount,
           kbArticles: 0,
           status: conv.state?.label ?? "Open",
+          createdBy: conv.createdBy ?? undefined,
         },
       },
     });

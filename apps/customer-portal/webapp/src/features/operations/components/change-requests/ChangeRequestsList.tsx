@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Chip, Form, Typography, alpha, colors } from "@wso2/oxygen-ui";
-import { Calendar, Server, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, Server, TriangleAlert, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import ChangeRequestsListSkeleton from "@features/operations/components/change-requests/ChangeRequestsListSkeleton";
 import error500Svg from "@assets/error/error-500.svg";
@@ -305,6 +305,20 @@ export default function ChangeRequestsList({
                   flexWrap: "wrap",
                 }}
               >
+                {item.createdBy && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                    }}
+                  >
+                    <User size={14} />
+                    <Typography variant="body2" color="text.secondary">
+                      Created by {item.createdBy}
+                    </Typography>
+                  </Box>
+                )}
                 {item.createdOn && (
                   <Box
                     sx={{

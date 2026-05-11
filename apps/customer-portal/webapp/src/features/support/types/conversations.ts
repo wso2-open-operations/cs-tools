@@ -32,6 +32,7 @@ export type ChatHistoryItem = {
   messages: number;
   kbArticles: number;
   status: string;
+  createdBy?: string | null;
 };
 
 // Response type for project chat history list.

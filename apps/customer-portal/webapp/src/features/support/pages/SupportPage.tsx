@@ -129,6 +129,7 @@ export default function SupportPage(): JSX.Element {
     messages: c.messageCount,
     kbArticles: 0,
     status: c.state?.label ?? "Open",
+    createdBy: c.createdBy ?? undefined,
   }));
 
   const isActuallyLoading = isAuthLoading || isLoading || (!stats && !isError);

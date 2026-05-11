@@ -23,6 +23,7 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
+import { User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
 import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
@@ -209,6 +210,32 @@ export default function OutstandingCasesList({
                   maxWidth: "100%",
                 }}
               >
+                {c.createdBy && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      minWidth: 0,
+                    }}
+                  >
+                    <User size={12} />
+                    <Tooltip title={c.createdBy}>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Created by {c.createdBy}
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                )}
                 {(() => {
                   const label = getAssignedEngineerLabel(c.assignedEngineer);
                   return label ? (
