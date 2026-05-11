@@ -5545,7 +5545,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + payload - Instance usage stats search payload containing filter criteria
     # + return - List of instance usage stats matching the criteria or an error response
-    resource function post projects/[entity:IdString id]/instances/stats/usages(http:RequestContext ctx,
+    resource function post projects/[entity:IdString id]/instances/stats/usages/search(http:RequestContext ctx,
             types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -5608,7 +5608,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the deployment
     # + payload - Instance usage stats search payload containing filter criteria
     # + return - List of instance usage stats matching the criteria or an error response
-    resource function post deployments/[entity:IdString id]/instances/stats/usages(http:RequestContext ctx,
+    resource function post deployments/[entity:IdString id]/instances/stats/usages/search(http:RequestContext ctx,
             types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -5671,8 +5671,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the deployed product
     # + payload - Instance usage stats search payload containing filter criteria
     # + return - List of instance usage stats matching the criteria or an error response
-    resource function post deployments/products/[entity:IdString id]/instances/stats/usages(http:RequestContext ctx,
-            types:InstanceMetricStatsPayload payload)
+    resource function post deployments/products/[entity:IdString id]/instances/stats/usages/search(
+            http:RequestContext ctx, types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
@@ -5734,7 +5734,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the project
     # + payload - Instance metrics stats search payload containing filter criteria
     # + return - List of instance metrics stats matching the criteria or an error response
-    resource function post projects/[entity:IdString id]/instances/stats/metrics(http:RequestContext ctx,
+    resource function post projects/[entity:IdString id]/instances/stats/metrics/search(http:RequestContext ctx,
             types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -5797,7 +5797,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the deployment
     # + payload - Instance metrics stats search payload containing filter criteria
     # + return - List of instance metrics stats matching the criteria or an error response
-    resource function post deployments/[entity:IdString id]/instances/stats/metrics(http:RequestContext ctx,
+    resource function post deployments/[entity:IdString id]/instances/stats/metrics/search(http:RequestContext ctx,
             types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
@@ -5860,7 +5860,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the deployed product
     # + payload - Instance metrics stats search payload containing filter criteria
     # + return - List of instance metrics stats matching the criteria or an error response
-    resource function post deployments/products/[entity:IdString id]/instances/stats/metrics(http:RequestContext ctx,
+    resource function post deployments/products/[entity:IdString id]/instances/stats/metrics/search(http:RequestContext ctx,
             types:InstanceMetricStatsPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
 
