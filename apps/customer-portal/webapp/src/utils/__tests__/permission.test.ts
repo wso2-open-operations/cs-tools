@@ -57,8 +57,14 @@ describe("getProjectPermissions", () => {
         hasChangeRequestReadAccess: true,
       }),
     };
-    const cloudSupport = getProjectPermissions(ProjectType.CLOUD_SUPPORT, options);
-    const subscription = getProjectPermissions(ProjectType.SUBSCRIPTION, options);
+    const cloudSupport = getProjectPermissions(
+      ProjectType.CLOUD_SUPPORT,
+      options,
+    );
+    const subscription = getProjectPermissions(
+      ProjectType.SUBSCRIPTION,
+      options,
+    );
     expect(cloudSupport).toEqual(subscription);
   });
 
@@ -82,7 +88,7 @@ describe("getProjectPermissions", () => {
   });
 
   it("enables deployment and time-log cards based on feature access", () => {
-    const perms = getProjectPermissions(ProjectType.CLOUD_SUBSCRIPTION, {
+    const perms = getProjectPermissions(ProjectType.CLOUD_SUPPORT, {
       projectFeatures: buildProjectFeatures({
         hasDeploymentReadAccess: true,
         hasTimeLogsReadAccess: true,
@@ -94,20 +100,26 @@ describe("getProjectPermissions", () => {
   });
 
   it("includes S0 only when catastrophic severity is accepted", () => {
-    const withoutS0 = getProjectPermissions(ProjectType.MANAGED_CLOUD_SUBSCRIPTION, {
-      projectFeatures: buildProjectFeatures(),
-    });
-    const withS0 = getProjectPermissions(ProjectType.MANAGED_CLOUD_SUBSCRIPTION, {
-      projectFeatures: buildProjectFeatures({
-        acceptedSeverityValues: [
-          { id: "14", label: "Catastrophic (P0)" },
-          { id: "10", label: "Critical (P1)" },
-          { id: "11", label: "High (P2)" },
-          { id: "12", label: "Medium (P3)" },
-          { id: "13", label: "Low (P4)" },
-        ],
-      }),
-    });
+    const withoutS0 = getProjectPermissions(
+      ProjectType.MANAGED_CLOUD_SUBSCRIPTION,
+      {
+        projectFeatures: buildProjectFeatures(),
+      },
+    );
+    const withS0 = getProjectPermissions(
+      ProjectType.MANAGED_CLOUD_SUBSCRIPTION,
+      {
+        projectFeatures: buildProjectFeatures({
+          acceptedSeverityValues: [
+            { id: "14", label: "Catastrophic (P0)" },
+            { id: "10", label: "Critical (P1)" },
+            { id: "11", label: "High (P2)" },
+            { id: "12", label: "Medium (P3)" },
+            { id: "13", label: "Low (P4)" },
+          ],
+        }),
+      },
+    );
     expect(withoutS0.includeS0InSupportMetrics).toBe(false);
     expect(withS0.includeS0InSupportMetrics).toBe(true);
   });

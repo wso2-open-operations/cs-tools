@@ -23,6 +23,7 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
+import { User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
 import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
@@ -36,6 +37,7 @@ import {
   resolveColorFromTheme,
   stripHtml,
 } from "@features/support/utils/support";
+import { getChangeRequestStateColor } from "@features/operations/utils/changeRequestUi";
 
 /**
  * Renders a list of outstanding case rows for the support overview card.
@@ -48,6 +50,7 @@ export default function OutstandingCasesList({
   isLoading,
   isError,
   onCaseClick,
+  useChangeRequestColors = false,
 }: OutstandingCasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -100,8 +103,9 @@ export default function OutstandingCasesList({
   return (
     <Box sx={listShellSx}>
       {cases.map((c) => {
-        const colorPath = getStatusColor(c.status?.label);
-        const resolvedColor = resolveColorFromTheme(colorPath, theme);
+        const resolvedColor = useChangeRequestColors
+          ? getChangeRequestStateColor(c.status)
+          : resolveColorFromTheme(getStatusColor(c.status?.label), theme);
 
         return (
           <Form.CardButton
@@ -127,6 +131,20 @@ export default function OutstandingCasesList({
                   alignItems="center"
                   flexWrap="wrap"
                 >
+                  {c.internalId && (
+                    <>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        color="text.secondary"
+                      >
+                        {c.internalId}
+                      </Typography>
+                      <Typography variant="body2" color="text.disabled">
+                        |
+                      </Typography>
+                    </>
+                  )}
                   <Typography
                     variant="body2"
                     fontWeight={500}
@@ -192,6 +210,32 @@ export default function OutstandingCasesList({
                   maxWidth: "100%",
                 }}
               >
+                {c.createdBy && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      minWidth: 0,
+                    }}
+                  >
+                    <User size={12} />
+                    <Tooltip title={c.createdBy}>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Created by {c.createdBy}
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                )}
                 {(() => {
                   const label = getAssignedEngineerLabel(c.assignedEngineer);
                   return label ? (

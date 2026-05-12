@@ -36,6 +36,7 @@ export default function EngagementsStatCards({
   stats,
   isLoading,
   isError,
+  onStatClick,
 }: EngagementsStatCardsProps): JSX.Element {
   const flattened = useMemo(() => computeEngagementsStatValues(stats), [stats]);
 
@@ -47,6 +48,7 @@ export default function EngagementsStatCards({
       isError={isError}
       entityName={ENGAGEMENTS_STAT_GRID_ENTITY_NAME}
       itemSize={{ xs: 12, sm: 4, md: 4 }}
+      onStatClick={onStatClick}
     />
   );
 }

@@ -20,8 +20,8 @@ export const PROJECT_HUB_SEARCH_DEBOUNCE_MS = 300;
 /** Page size for infinite project list (must match `useInfiniteProjects`). */
 export const PROJECT_HUB_PROJECTS_PAGE_SIZE = 20;
 
-/** When total projects exceed this, require search before listing all cards. */
-export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 4;
+/** Show the search bar when the user has more than this many projects. */
+export const PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH = 5;
 
 /** Skeleton cards shown while loading the hub grid. */
 export const PROJECT_HUB_SKELETON_CARD_COUNT = 3;
@@ -46,31 +46,19 @@ export const PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE =
 
 export const PROJECT_HUB_SEARCH_PLACEHOLDER = "Search projects...";
 
-export const PROJECT_HUB_TITLE_SELECT = "Select Your Project";
-
 export const PROJECT_HUB_SUBTITLE_SELECT =
   "Choose a project to access your support cases, chat history, and dashboard";
 
-export const PROJECT_HUB_SUBTITLE_MANY_PROJECTS =
-  "Please use the search bar below to find your project";
-
-/**
- * @param totalRecords - Total project count from API.
- * @returns Hub title when the user has more than `PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH` projects.
- */
-export function formatProjectHubManyProjectsTitle(totalRecords: number): string {
-  return `You have ${totalRecords} projects`;
+export function formatProjectHubTitle(totalRecords: number): string {
+  return `Your Projects (${totalRecords})`;
 }
-
-/** Prefix for formatted created-on line on project cards (`formatProjectDate`). */
-export const PROJECT_CARD_DATE_CREATED_PREFIX = "Created ";
 
 export const PROJECT_CARD_DATE_LOCALE = "en-US";
 
 export const PROJECT_CARD_STATS_NULL_PLACEHOLDER = "--";
 
-export const PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL =
-  "Outstanding support cases";
+export const PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL =
+  "Outstanding Items";
 
 export const PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL = "Active Chats";
 
@@ -88,4 +76,4 @@ export const SERVICENOW_REDIRECT_NO_CASE_ID =
   "No case ID provided in the URL.";
 
 export const SERVICENOW_REDIRECT_RESOLVE_ERROR =
-  "Unable to resolve the case. Please try again.";
+  "Something went wrong";

@@ -38,6 +38,7 @@ export type EngagementsStatCardsProps = {
   stats?: ProjectCasesStats;
   isLoading: boolean;
   isError: boolean;
+  onStatClick?: (key: EngagementsStatKey) => void;
 };
 
 export type EngagementsSortOption = {
@@ -54,8 +55,9 @@ export type EngagementsListSectionProps = {
   filterMetadata: CaseMetadataResponse | undefined;
   onFilterChange: (field: string, value: string) => void;
   onClearFilters: () => void;
-  excludeS0: boolean;
-  restrictSeverityToLow: boolean;
+  hideFiltersButton?: boolean;
+  isStatFiltered?: boolean;
+  engagementTypeOptions?: { value: string; label: string }[];
   isProjectContextLoading: boolean;
   sortField: EngagementsSortField;
   onSortFieldChange: (value: string) => void;

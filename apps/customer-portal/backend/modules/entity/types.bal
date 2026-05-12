@@ -42,8 +42,7 @@ public type Pagination record {|
     int offset = DEFAULT_OFFSET;
     # Limit for pagination
     @constraint:Int {
-        minValue: 1,
-        maxValue: 50
+        minValue: 1
     }
     int 'limit = DEFAULT_LIMIT;
     json...;
@@ -126,6 +125,10 @@ public type Project record {|
     int activeCasesCount;
     # Active chats/conversations count
     int activeChatsCount;
+    # Action Required count
+    int actionRequiredCount;
+    # Outstanding count (default case, SR, SRA, engagement, and CR count that are not in closed state)
+    int outstandingCount;
     # SLA status (e.g., "Needs Attention")
     string slaStatus;
     json...;
@@ -346,7 +349,7 @@ public type UpdatedCase record {|
     # Updated state information
     ChoiceListItem state;
     # Case type information
-    ReferenceTableItem 'type;
+    ReferenceTableItem? 'type;
     json...;
 |};
 
@@ -406,6 +409,8 @@ public type ReferenceTableItem record {|
     string name;
     # Number
     string? number?;
+    # Internal ID
+    string? internalId?;
     # Count value
     int count?;
     # Abbreviation
@@ -431,6 +436,12 @@ public type CaseSearchFilters record {|
     int[] stateKeys?;
     # Severity key
     int severityKey?;
+    # Engagement type keys (required for engagement type cases)
+    int[] engagementTypeKeys?;
+    # Start date for closed date
+    UtcDateTimeString closedStartDate?;
+    # End date for closed date
+    UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
     # Case created by the logged in user
@@ -585,6 +596,10 @@ public type ProjectFeatures record {|
     boolean hasDeploymentWriteAccess;
     # Indicates if deployment read access is enabled
     boolean hasDeploymentReadAccess;
+    # Allowed categories for default case creation in deployed product search
+    ProductCategory[]? defaultCaseProductCategories;
+    # Allowed categories for service request creation in deployed product search
+    ProductCategory[]? srProductCategories;
     json...;
 |};
 
@@ -635,6 +650,22 @@ public type ProjectStatsResponse record {|
     int deployedProductCount;
     # Instance count associated with the project
     int instanceCount;
+    # Outstanding count breakdown
+    record {|
+        # Outstanding case count
+        int caseCount;
+        # Outstanding service request count
+        int serviceRequestCount;
+        # Outstanding engagement count
+        int engagementCount;
+        # Outstanding SRA count
+        int sraCount;
+        # Outstanding change request count
+        int changeRequestCount;
+        # Outstanding announcement count
+        int announcementCount;
+        json...;
+    |} outstandingCount;
     json...;
 |};
 
@@ -681,6 +712,8 @@ public type ProjectCaseStatsResponse record {|
     int activeCount;
     # Outstanding case count (cases that are not solution proposed or closed)
     int outstandingCount;
+    # Action required from customer case count
+    int actionRequiredCount;
     # Average response time
     decimal averageResponseTime;
     # Resolved case count breakdown
@@ -1399,6 +1432,10 @@ public type ProductVulnerabilitySearchPayload record {|
         int statusId?;
         # Severity ID
         int severityId?;
+        # Product name filter
+        string productName?;
+        # Product version filter
+        string productVersion?;
     } filters?;
     # Sort configuration
     SortBy sortBy?; // TODO: Check the correct sort by fields for vulnerabilities
@@ -1416,12 +1453,20 @@ public type ProductVulnerability record {|
     string vulnerabilityId;
     # Severity level
     ChoiceListItem severity;
+    # Name of the product
+    string productName?;
+    # Version of the product
+    string productVersion?;
     # Name of the component
     string componentName;
     # Version of the component
     string version;
     # Type
     string 'type;
+    # Type of the component
+    string componentType?;
+    # Update level for the vulnerability
+    string updateLevel?;
     # Use case description
     string? useCase;
     # Justification for the vulnerability
@@ -1434,10 +1479,6 @@ public type ProductVulnerability record {|
 # Product vulnerability information.
 public type ProductVulnerabilityResponse record {|
     *ProductVulnerability;
-    # Type of the component
-    string componentType?;
-    # Update level for the vulnerability
-    string updateLevel;
     json...;
 |};
 
@@ -1986,6 +2027,10 @@ public type ChangeRequestSearchPayload record {|
         int[] stateKeys?;
         # Change request impact key
         int impactKey?;
+        # Start date for closed date filter
+        UtcDateTimeString closedStartDate?;
+        # End date for closed date filter
+        UtcDateTimeString closedEndDate?;
     |} filters?;
     # Pagination details
     Pagination pagination?;
@@ -1999,6 +2044,8 @@ public type ChangeRequest record {|
     string number;
     # Change request title
     string? title;
+    # Change request description
+    string? description;
     # Associated project information
     ReferenceTableItem? project;
     # Service request information (case)
@@ -2093,8 +2140,6 @@ public type CatalogItemVariablesResponse record {|
 # Change request details information.
 public type ChangeRequestResponse record {|
     *ChangeRequest;
-    # Change request description
-    string? description;
     # User who created the change request
     string createdBy;
     # Justification for the change request
@@ -2128,8 +2173,20 @@ public type ProjectChangeRequestStatsResponse record {|
     int activeCount;
     # Outstanding change request count
     int outstandingCount;
+    # Action required from customer change request count
+    int actionRequiredCount;
     # Count of change requests by state
     ChoiceListItem[] stateCount;
+    # Resolved change request count breakdown
+    record {|
+        # Total resolved count
+        int total;
+        # Current month resolved count
+        int currentMonth;
+        # Past thirty days resolved count
+        int pastThirtyDays;
+        json...;
+    |} resolvedCount;
     json...;
 |};
 
@@ -2138,6 +2195,12 @@ public type ProjectChangeRequestStatsResponse record {|
     pattern: re `^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$`
 }
 public type DateTimeWithoutTimezone string;
+
+# UTC DateTime string type with YYYY-MM-DDTHH:MM:SSZ format constraint.
+@constraint:String {
+    pattern: re `^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ$`
+}
+public type UtcDateTimeString string;
 
 # Request payload for updating a change request.
 public type ChangeRequestUpdatePayload record {|
@@ -2212,4 +2275,79 @@ public type CaseActivitySearchResponse record {|
     # Total records count
     int totalRecords;
     *Pagination;
+|};
+
+# Request payload for fetching instance usage statistics.
+public type InstanceUsageStatsPayload record {|
+    # Filter criteria
+    record {|
+        # Start date filter, required (format: YYYY-MM-DD)
+        Date startDate;
+        # End date filter, required (format: YYYY-MM-DD)
+        Date endDate;
+        # List of project IDs (mutually exclusive with deploymentIds and deployedProductIds)
+        IdString[] projectIds?;
+        # List of deployment IDs (mutually exclusive with projectIds and deployedProductIds)
+        IdString[] deploymentIds?;
+        # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
+        IdString[] deployedProductIds?;
+    |} filters;
+|};
+
+# Request payload for fetching instance metrics statistics.
+public type InstanceMetricStatsPayload record {|
+    # Filter criteria
+    record {|
+        # Start date filter, required (format: YYYY-MM-DD)
+        Date startDate;
+        # End date filter, required (format: YYYY-MM-DD)
+        Date endDate;
+        # List of project IDs (mutually exclusive with deploymentIds and deployedProductIds)
+        IdString[] projectIds?;
+        # List of deployment IDs (mutually exclusive with projectIds and deployedProductIds)
+        IdString[] deploymentIds?;
+        # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
+        IdString[] deployedProductIds?;
+    |} filters;
+|};
+
+# Instance usage statistics response.
+public type InstanceUsageStatsResponse record {|
+    # Statistics grouped by date; each date maps to metric key → value (e.g. "TRANSACTION_COUNT": 30)
+    map<map<int>> stats;
+    # Total number of data points
+    int totalRecords;
+    # Start date of the queried range
+    string startDate;
+    # End date of the queried range
+    string endDate;
+    json...;
+|};
+
+# Aggregated statistics for a metric over a time range.
+public type MetricSummary record {|
+    # Current (latest) value
+    int curr;
+    # Minimum value across the range
+    int min;
+    # Maximum value across the range
+    int max;
+    # Average value across the range
+    decimal avg;
+    json...;
+|};
+
+# Instance metrics statistics response from ServiceNow.
+public type InstanceMetricStatsResponse record {|
+    # Statistics grouped by date; each date maps to metric key → value (e.g. "TOTAL_CORES": 123)
+    map<map<int>> stats;
+    # Summary statistics across the queried date range
+    MetricSummary summary;
+    # Total number of data points
+    int totalRecords;
+    # Start date of the queried range
+    string startDate;
+    # End date of the queried range
+    string endDate;
+    json...;
 |};

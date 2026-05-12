@@ -18,7 +18,7 @@ import type { RelatedCaseSummaryProps } from "@features/support/types/supportCom
 import { Box, Divider, Paper, Typography } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { stripHtml } from "@features/support/utils/support";
+import DOMPurify from "dompurify";
 
 /**
  * Sidebar component showing related case details when creating a case from "Open Related Case".
@@ -31,6 +31,8 @@ export function RelatedCaseSummary({
   title,
   description,
 }: RelatedCaseSummaryProps): JSX.Element {
+  const sanitizedDescription = DOMPurify.sanitize(description ?? "");
+
   return (
     <Paper sx={{ p: 3, position: "sticky", top: 3 }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 3 }}>
@@ -83,12 +85,20 @@ export function RelatedCaseSummary({
               mt: 0.5,
             }}
           >
-            <Typography
-              variant="body2"
-              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-            >
-              {description.trim() ? stripHtml(description) : "--"}
-            </Typography>
+            {description.trim() ? (
+              <Box
+                sx={{
+                  typography: "body2",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  "& p": { my: 0 },
+                  "& a": { color: "primary.main", textDecoration: "underline" },
+                }}
+                dangerouslySetInnerHTML={{ __html: sanitizedDescription }}
+              />
+            ) : (
+              <Typography variant="body2">--</Typography>
+            )}
           </Box>
         </Box>
       </Box>

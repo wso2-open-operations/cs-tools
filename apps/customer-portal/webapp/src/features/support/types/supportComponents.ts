@@ -43,10 +43,12 @@ export type CaseDetailsHeaderVariant =
   | "serviceRequest";
 
 export type CaseDetailsHeaderProps = {
+  wso2CaseId?: string | null;
   caseNumber: string | null | undefined;
   title: string | null | undefined;
   severityLabel: string | null | undefined;
   statusLabel: string | null | undefined;
+  assignedEngineerLabel?: string | null;
   statusChipIcon: ReactNode;
   statusChipSx: Record<string, unknown>;
   isLoading?: boolean;
@@ -60,6 +62,7 @@ export type OutstandingCasesListProps = {
   isLoading?: boolean;
   isError?: boolean;
   onCaseClick?: (caseItem: CaseListItem) => void;
+  useChangeRequestColors?: boolean;
 };
 
 export type CaseDetailsDetailsPanelProps = {
@@ -94,6 +97,10 @@ export type CaseDetailsSectionProps = {
   isSecurityReport?: boolean;
   excludeS0?: boolean;
   isSeverityDisabled?: boolean;
+  isIssueTypeAutoDetected?: boolean;
+  isSeverityAutoDetected?: boolean;
+  isTitleFromChat?: boolean;
+  isDescriptionFromConversation?: boolean;
 };
 
 export type ChatMessageCardProps = {
@@ -183,6 +190,7 @@ export type CommentBubbleProps = {
   comment: CaseComment;
   isCurrentUser: boolean;
   primaryBg: string;
+  hideAvatar?: boolean;
   onImageClick?: (src: string) => void;
   userDetails?: {
     email?: string;
@@ -210,6 +218,7 @@ export type ActivityContentProps = {
   caseCreatedOn?: string | null;
   currentUserEmail: string;
   primaryBg: string;
+  hideAvatar?: boolean;
   userDetails?: {
     email?: string;
     firstName?: string;
@@ -365,7 +374,6 @@ export type CaseDetailsContentProps = {
   onOpenRelatedCase?: () => void;
   projectId?: string;
   hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
   isServiceRequest?: boolean;
 };
 
@@ -391,6 +399,7 @@ export type CaseDetailsTabsProps = {
   hideKnowledgeBaseTab?: boolean;
   knowledgeBaseCount?: number;
   knowledgeBaseCountLoading?: boolean;
+  hideRelatedChangeRequestsTab?: boolean;
 };
 
 export type CaseDetailsTabPanelsProps = {
@@ -407,7 +416,6 @@ export type CaseDetailsTabPanelsProps = {
 
 export type CaseDetailsSkeletonProps = {
   hideActionRow?: boolean;
-  showEngineerOnly?: boolean;
   hideAssignedEngineer?: boolean;
   headerVariant?: CaseDetailsHeaderVariant;
 };
@@ -426,7 +434,6 @@ export type CaseDetailsActionRowProps = {
   projectId?: string;
   caseId?: string;
   isLoading?: boolean;
-  showOnlyEngineer?: boolean;
   hideAssignedEngineer?: boolean;
   restrictToCloseOnly?: boolean;
 };
@@ -435,6 +442,7 @@ export type CasesOverviewStatCardProps = {
   isLoading: boolean;
   isError?: boolean;
   stats: ProjectSupportStats | undefined;
+  onStatClick?: (key: keyof ProjectSupportStats) => void;
 };
 
 export type ChatHistoryListProps = {
@@ -454,6 +462,7 @@ export type ChatInputProps = {
   resetTrigger?: number;
   forceRichText?: boolean;
   disabled?: boolean;
+  typingDisabled?: boolean;
 };
 
 export type ChatHeaderProps = {

@@ -14,32 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  PROJECT_CARD_DATE_CREATED_PREFIX,
-  PROJECT_CARD_DATE_LOCALE,
-} from "@features/project-hub/constants/projectHubConstants";
-import { formatBackendTimestampForDisplay } from "@utils/dateTime";
-
-/**
- * Formats a date string into "Created DD MMM YYYY" format.
- * Example: "2026-01-17 09:06:14" -> "Created 17 Jan 2026"
- *
- * @param {string} dateString - The date string to format.
- * @returns {string} The formatted date string.
- */
-export const formatProjectDate = (dateString: string): string => {
-  if (!dateString) return "";
-
-  const formatted = formatBackendTimestampForDisplay(
-    dateString,
-    { day: "numeric", month: "short", year: "numeric" },
-    undefined,
-    PROJECT_CARD_DATE_LOCALE,
-  );
-  if (!formatted) return dateString;
-  return `${PROJECT_CARD_DATE_CREATED_PREFIX}${formatted}`;
-};
-
 /**
  * Returns the theme color for a given project status.
  *

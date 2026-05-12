@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, CardActionArea, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { PieChart } from "@wso2/oxygen-ui-charts-react";
 import { Circle } from "@mui/icons-material";
 import { WidgetBox } from "@components/ui";
@@ -29,53 +29,103 @@ export interface PieDataItem {
 
 interface PieChartWidgetProps {
   title: string;
-  data: PieDataItem[];
+  data?: (PieDataItem & { id: string | number })[];
+  onClick?: (id: string | number, type: string) => void;
 }
 
-export function PieChartWidget({ title, data }: PieChartWidgetProps) {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
+export function PieChartWidget({ title, data, ...props }: PieChartWidgetProps) {
+  const loading = !data;
+  const total = data?.reduce((sum, item) => sum + item.value, 0);
+  const isEmpty = !loading && total === 0;
 
   return (
     <WidgetBox title={title}>
-      <Box position="relative" display="flex" alignItems="center" width="100%">
-        <PieChart
-          height={150}
-          data={data}
-          colors={data.map((item) => item.color)}
-          pies={[{ nameKey: "label", dataKey: "value", innerRadius: "50%", paddingAngle: 5 }]}
-          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-          legend={{ show: false }}
-          tooltip={{ show: false }}
-        />
-        <Typography
-          variant="h5"
-          sx={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            height: "100%",
-            width: "100%",
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          {total}
-        </Typography>
+      <Box position="relative" display="flex" alignItems="center" justifyContent="center" width="100%">
+        {loading ? (
+          <Box display="flex" justifyContent="center" width="100%" py={1}>
+            <Skeleton variant="circular" width={130} height={130} animation="wave" />
+          </Box>
+        ) : isEmpty ? (
+          <Box
+            sx={{
+              width: 130,
+              height: 130,
+              borderRadius: "50%",
+              border: "3px dashed",
+              borderColor: "divider",
+              my: 2,
+            }}
+          />
+        ) : (
+          <PieChart
+            height={150}
+            data={data}
+            colors={data.map((item) => item.color)}
+            pies={[
+              {
+                nameKey: "label",
+                dataKey: "value",
+                innerRadius: "50%",
+                paddingAngle: 0,
+                onClick: (data: PieDataItem & { id: string | number }) => props.onClick?.(data.id, data.label),
+              },
+            ]}
+            margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+            legend={{ show: false }}
+            tooltip={{ show: false }}
+            isAnimationActive={false}
+          />
+        )}
+
+        {!isEmpty && (
+          <Typography
+            variant="h5"
+            sx={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              height: "100%",
+              width: "100%",
+              display: "grid",
+              placeItems: "center",
+              pointerEvents: "none",
+            }}
+          >
+            {total}
+          </Typography>
+        )}
       </Box>
+
       <Stack gap={0.5} mt={1}>
-        {data.map((item, index) => (
-          <Stack key={index} direction="row" justifyContent="space-between">
-            <Stack direction="row" alignItems="center" gap={1}>
-              <Circle sx={{ fontSize: 12, color: item.color }} />
-              <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
-                {item.label}
-              </Typography>
-            </Stack>
-            <Typography variant="subtitle2" color="text.secondary">
-              {item.value}
-            </Typography>
-          </Stack>
-        ))}
+        {loading
+          ? [...Array(5)].map((_, i) => (
+              <Stack key={i} direction="row" justifyContent="space-between">
+                <Stack direction="row" alignItems="center" gap={1}>
+                  <Skeleton variant="circular" width={12} height={12} />
+                  <Skeleton width={80} height={20} />
+                </Stack>
+                <Skeleton width={20} height={20} />
+              </Stack>
+            ))
+          : data.map((item, index) => (
+              <Stack key={index}>
+                <CardActionArea
+                  disabled={!props?.onClick}
+                  sx={{ display: "flex", direction: "row", justifyContent: "space-between" }}
+                  onClick={() => props.onClick?.(item.id, item.label)}
+                >
+                  <Stack direction="row" alignItems="center" gap={1}>
+                    <Circle sx={{ fontSize: 12, color: item.color }} />
+                    <Typography variant="subtitle2" fontWeight="regular" color="text.secondary">
+                      {item.label}
+                    </Typography>
+                  </Stack>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    {item.value}
+                  </Typography>
+                </CardActionArea>
+              </Stack>
+            ))}
       </Stack>
     </WidgetBox>
   );

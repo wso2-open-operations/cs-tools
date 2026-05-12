@@ -22,7 +22,7 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Calendar, Layers, Package, Users } from "@wso2/oxygen-ui-icons-react";
+import { Calendar, Layers, Package, User, Users } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { NULL_PLACEHOLDER } from "@constants/common";
 import CaseCardDescriptionClamp from "@components/list-view/CaseCardDescriptionClamp";
@@ -124,6 +124,8 @@ export default function ServiceRequestsList({
               alignItems: "stretch",
               gap: 1,
               minHeight: 172,
+              minWidth: 0,
+              overflow: "hidden",
             }}
           >
             <Form.CardHeader
@@ -135,6 +137,20 @@ export default function ServiceRequestsList({
                   alignItems="center"
                   sx={{ mb: 1, flexWrap: "wrap" }}
                 >
+                  {sr.internalId && (
+                    <>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        color="text.secondary"
+                      >
+                        {sr.internalId}
+                      </Typography>
+                      <Typography variant="body2" color="text.disabled">
+                        |
+                      </Typography>
+                    </>
+                  )}
                   <Typography
                     variant="body2"
                     fontWeight={500}
@@ -175,7 +191,7 @@ export default function ServiceRequestsList({
               <Typography
                 variant="h6"
                 color="text.primary"
-                sx={{ mb: 1, fontWeight: 500 }}
+                sx={{ mb: 1, fontWeight: 500, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}
               >
                 {sr.title || NULL_PLACEHOLDER}
               </Typography>
@@ -273,6 +289,25 @@ export default function ServiceRequestsList({
                       sx={{ lineHeight: 1 }}
                     >
                       {assignedLabel}
+                    </Typography>
+                  </Box>
+                )}
+                {sr.createdBy && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <User size={14} />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ lineHeight: 1 }}
+                    >
+                      Created by {sr.createdBy}
                     </Typography>
                   </Box>
                 )}

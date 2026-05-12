@@ -17,6 +17,7 @@
 import type { ReactNode } from "react";
 import { pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
+import { Link } from "react-router-dom";
 
 export function SettingListItem({
   name,
@@ -26,14 +27,18 @@ export function SettingListItem({
   iconBackgroundColor,
   description,
   suffix,
+  to,
+  onClick,
 }: {
   name: string;
   icon: LucideIcon;
   iconColor?: string;
   iconBackgroundColor?: string;
-  value?: string;
+  value?: string | ReactNode;
   description?: string;
   suffix?: "chevron" | ReactNode;
+  to?: string;
+  onClick?: () => void;
 }) {
   const theme = useTheme();
   const Icon = icon;
@@ -44,10 +49,12 @@ export function SettingListItem({
       justifyContent="space-between"
       alignItems="center"
       bgcolor="background.paper"
-      sx={{ cursor: "pointer" }}
+      sx={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}
       p={1.5}
+      onClick={onClick}
+      {...(to && { component: Link, to })}
     >
-      <Stack direction="row" alignItems="center" gap={1.5}>
+      <Stack direction="row" alignItems="center" gap={1.5} width="100%">
         <Stack
           width={40}
           height={40}
@@ -58,14 +65,16 @@ export function SettingListItem({
         >
           <Icon size={pxToRem(18)} color={iconColor} />
         </Stack>
-        <Stack>
+        <Stack width="100%">
           {value && (
             <Typography variant="caption" color="text.secondary">
               {name}
             </Typography>
           )}
 
-          <Typography variant="body1">{value ?? name}</Typography>
+          <Typography variant="body1" sx={{ flex: 1 }}>
+            {value ?? name}
+          </Typography>
 
           {description && (
             <Typography variant="caption" fontWeight="regular" color="text.secondary">
@@ -75,7 +84,7 @@ export function SettingListItem({
         </Stack>
       </Stack>
       {suffix && suffix === "chevron" ? (
-        <ChevronRight size={pxToRem(16)} color={theme.palette.text.secondary} />
+        <ChevronRight size={pxToRem(16)} color={theme.palette.text.secondary} style={{ flexShrink: 0 }} />
       ) : (
         suffix
       )}

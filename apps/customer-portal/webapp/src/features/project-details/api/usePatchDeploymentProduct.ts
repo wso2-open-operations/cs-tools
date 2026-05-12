@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchDeploymentProductVariables } from "@features/project-details/types/projectDetailsApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Patches a product in a deployment (PATCH /deployments/:deploymentId/products/:productId).
@@ -81,9 +82,7 @@ export function usePatchDeploymentProduct(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error updating deployment product: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
       } catch (error) {
         logger.error("[usePatchDeploymentProduct] Error:", error);

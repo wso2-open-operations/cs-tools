@@ -44,7 +44,10 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             caseTypes: payload.filters?.caseTypes,
             stateKeys: payload.filters?.statusIds,
             deploymentId: payload.filters?.deploymentId,
-            createdByMe: payload.filters?.createdByMe
+            createdByMe: payload.filters?.createdByMe,
+            engagementTypeKeys: payload.filters?.engagementTypeKeys,
+            closedStartDate: payload.filters?.closedStartDate,
+            closedEndDate: payload.filters?.closedEndDate
         },
         pagination: payload.pagination,
         sortBy: payload.sortBy
@@ -102,11 +105,11 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
     };
 }
 
-# Get project features for a given project.
+# Map project features for a given project.
 #
 # + projectMetadata - Project metadata response
 # + return - Project features or error
-public isolated function getProjectFeatures(entity:ProjectMetadataResponse projectMetadata)
+public isolated function mapProjectFeatures(entity:ProjectMetadataResponse projectMetadata)
     returns types:ProjectFeatures {
 
     types:ReferenceItem[] acceptedSeverityValues =
@@ -123,7 +126,9 @@ public isolated function getProjectFeatures(entity:ProjectMetadataResponse proje
         hasUpdatesReadAccess: projectMetadata.features.hasUpdatesReadAccess,
         hasTimeLogsReadAccess: projectMetadata.features.hasTimeLogsReadAccess,
         hasDeploymentWriteAccess: projectMetadata.features.hasDeploymentWriteAccess,
-        hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess
+        hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess,
+        defaultCaseProductCategories: projectMetadata.features.defaultCaseProductCategories,
+        srProductCategories: projectMetadata.features.srProductCategories
     };
 }
 
@@ -251,6 +256,14 @@ public isolated function mapCommentsResponse(entity:CommentsResponse response) r
 public isolated function isInvalidLimitOffset(int? 'limit, int? offset) returns boolean =>
     ('limit != () && ('limit < 1 || 'limit > 50)) || (offset != () && offset < 0);
 
+# Validate that startDate is not after endDate.
+#
+# + startDate - Start date string
+# + endDate - End date string
+# + return - True if invalid, else false
+public isolated function isInvalidDateRange(string? startDate, string? endDate) returns boolean =>
+    startDate != () && endDate != () && startDate > endDate;
+
 # Map attachments response to map to desired structure.
 #
 # + response - Attachments response from the entity service
@@ -372,9 +385,13 @@ public isolated function mapProductVulnerabilitySearchResponse(entity:ProductVul
         cveId: vulnerability.cveId,
         vulnerabilityId: vulnerability.vulnerabilityId,
         severity: {id: vulnerability.severity.id.toString(), label: vulnerability.severity.label},
+        productName: vulnerability.productName,
+        productVersion: vulnerability.productVersion,
         componentName: vulnerability.componentName,
         version: vulnerability.version,
         'type: vulnerability.'type,
+        componentType: vulnerability.componentType,
+        updateLevel: vulnerability.updateLevel,
         useCase: vulnerability.useCase,
         justification: vulnerability.justification,
         resolution: vulnerability.resolution
@@ -399,6 +416,8 @@ public isolated function mapProductVulnerabilityResponse(entity:ProductVulnerabi
         cveId: response.cveId,
         vulnerabilityId: response.vulnerabilityId,
         severity: {id: response.severity.id.toString(), label: response.severity.label},
+        productName: response.productName,
+        productVersion: response.productVersion,
         componentName: response.componentName,
         version: response.version,
         'type: response.'type,
@@ -449,6 +468,7 @@ public isolated function mapCaseStats(entity:ProjectCaseStatsResponse response) 
         changeRate: response.changeRate,
         activeCount: response.activeCount,
         outstandingCount: response.outstandingCount,
+        actionRequiredCount: response.actionRequiredCount,
         stateCount,
         severityCount,
         outstandingSeverityCount,
@@ -652,7 +672,7 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
                 count: response?.closedBy?.count
             } : (),
         changeRequests: changeRequests != () ? from entity:ReferenceTableItem item in changeRequests
-                select {id: item.id, label: item.name} : (),
+                select {id: item.id, label: item.name, number: item?.number} : (),
         engagementPaymentType: engagementPaymentType != () ? {
                 id: engagementPaymentType.id.toString(),
                 label: engagementPaymentType.label
@@ -753,11 +773,12 @@ public isolated function mapChangeRequestSearchResponse(entity:ChangeRequestSear
             startDate: changeRequest.plannedStartOn,
             endDate: changeRequest.plannedEndOn,
             duration: changeRequest.duration,
+            description: changeRequest.description,
             hasServiceOutage: changeRequest.hasServiceOutage,
             createdOn: changeRequest.createdOn,
             updatedOn: changeRequest.updatedOn,
             project: project != () ? {id: project.id, label: project.name, number: project?.number} : (),
-            case: case != () ? {id: case.id, label: case.name, number: case?.number} : (),
+            case: case != () ? {id: case.id, label: case.name, number: case?.number, internalId: case?.internalId} : (),
             deployment: deployment != () ? {id: deployment.id, label: deployment.name, number: deployment?.number} : (),
             deployedProduct: deployedProduct != () ?
                 {id: deployedProduct.id, label: deployedProduct.name, number: deployedProduct?.number} : (),
@@ -826,7 +847,7 @@ public isolated function mapChangeRequestResponse(entity:ChangeRequestResponse r
         createdOn: response.createdOn,
         updatedOn: response.updatedOn,
         project: project != () ? {id: project.id, label: project.name, number: project?.number} : (),
-        case: case != () ? {id: case.id, label: case.name, number: case?.number} : (),
+        case: case != () ? {id: case.id, label: case.name, number: case?.number, internalId: case?.internalId} : (),
         deployment: deployment != () ? {id: deployment.id, label: deployment.name, number: deployment?.number} : (),
         deployedProduct: deployedProduct != () ?
             {id: deployedProduct.id, label: deployedProduct.name, number: deployedProduct?.number} : (),
@@ -865,7 +886,13 @@ public isolated function mapProjectChangeRequestStatsResponse(entity:ProjectChan
         totalCount: response.totalCount,
         activeCount: response.activeCount,
         outstandingCount: response.outstandingCount,
-        stateCount
+        actionRequiredCount: response.actionRequiredCount,
+        stateCount,
+        resolvedCount: {
+            total: response.resolvedCount.total,
+            currentMonth: response.resolvedCount.currentMonth,
+            pastThirtyDays: response.resolvedCount.pastThirtyDays
+        }
     };
 }
 
@@ -884,6 +911,8 @@ public isolated function mapProjectsResponse(entity:ProjectsResponse response) r
             closureState: project.closureState,
             'type: {id: project.'type.id, label: project.'type.name},
             hasPdpSubscription: project.hasPdpSubscription,
+            actionRequiredCount: project.actionRequiredCount,
+            outstandingCount: project.outstandingCount,
             hasAgent: project.hasAgent,
             hasKbReferences: project.hasKbReferences,
             activeCasesCount: project.activeCasesCount,
@@ -1073,18 +1102,18 @@ public isolated function mapTimeCardSearchResponseGroupedByCases(entity:CaseTime
 # + return - Mapped updated case response
 public isolated function mapUpdatedCaseResponse(entity:UpdatedCase updatedCase) returns types:UpdatedCase {
     entity:ChoiceListItem state = updatedCase.state;
-    entity:ReferenceTableItem 'type = updatedCase.'type;
+    entity:ReferenceTableItem? 'type = updatedCase.'type;
     return {
         id: updatedCase.id,
         updatedOn: updatedCase.updatedOn,
         state: {id: state.id.toString(), label: state.label},
-        'type: {id: 'type.id, label: 'type.name},
+        'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
         updatedBy: updatedCase.updatedBy
     };
 }
 
 # Map case activity search response to the desired structure.
-# 
+#
 # + response - Case activity search response from the entity service
 # + return - Mapped case activity search response
 public isolated function mapCaseActivitySummaryResponse(entity:CaseActivitySearchResponse response)
@@ -1108,3 +1137,33 @@ public isolated function mapCaseActivitySummaryResponse(entity:CaseActivitySearc
         };
     return {activities, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
 }
+
+# Map instance usage stats response to the desired structure.
+#
+# + response - Instance usage stats response from the entity service
+# + return - Mapped instance usage stats response
+public isolated function mapInstanceUsageStats(entity:InstanceUsageStatsResponse response)
+    returns types:InstanceUsageStatsResponse => {
+    stats: response.stats,
+    totalRecords: response.totalRecords,
+    startDate: response.startDate,
+    endDate: response.endDate
+};
+
+# Map instance metric stats response to the desired structure.
+#
+# + response - Instance metric stats response from the entity service
+# + return - Mapped instance metric stats response
+public isolated function mapInstanceMetricStats(entity:InstanceMetricStatsResponse response)
+    returns types:InstanceMetricStatsResponse => {
+    stats: response.stats,
+    summary: {
+        curr: response.summary.curr,
+        avg: response.summary.avg,
+        min: response.summary.min,
+        max: response.summary.max
+    },
+    totalRecords: response.totalRecords,
+    startDate: response.startDate,
+    endDate: response.endDate
+};

@@ -235,7 +235,7 @@ export const SETTINGS_AI_HEADER_BODY =
 export const SETTINGS_AI_CAPABILITIES_SECTION_TITLE = "Support Capabilities";
 
 export const SETTINGS_AI_ADMIN_ONLY_HINT =
-  "Only customer admins can update AI assistant settings.";
+  "Users with Admin role can only update this setting";
 
 export const SETTINGS_AI_NOVERA_LABEL = "AI Chat Assistant (Novera)";
 

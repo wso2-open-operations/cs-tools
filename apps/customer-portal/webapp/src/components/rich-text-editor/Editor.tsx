@@ -31,7 +31,11 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
-import { getFileIcon, scrollElement } from "@features/support/utils/richTextEditor";
+import {
+  getFileIcon,
+  scrollElement,
+  INSERT_IMAGE_COMMAND,
+} from "@features/support/utils/richTextEditor";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {
@@ -130,12 +134,10 @@ const EnterSubmitPlugin = ({
   onSubmit,
   disabled,
   enterToSubmit = false,
-  shiftEnterToSubmit = false,
 }: {
   onSubmit?: () => void;
   disabled?: boolean;
   enterToSubmit?: boolean;
-  shiftEnterToSubmit?: boolean;
 }) => {
   const [editor] = useLexicalComposerContext();
 
@@ -170,13 +172,6 @@ const EnterSubmitPlugin = ({
           return true;
         }
 
-        if (shiftEnterToSubmit && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-          if (event.isComposing) return false;
-          event.preventDefault();
-          onSubmit();
-          return true;
-        }
-
         if (!event.ctrlKey && !event.metaKey) return false;
         event.preventDefault?.();
         onSubmit();
@@ -186,7 +181,7 @@ const EnterSubmitPlugin = ({
     );
 
     return unregEnter;
-  }, [editor, onSubmit, disabled, enterToSubmit, shiftEnterToSubmit]);
+  }, [editor, onSubmit, disabled, enterToSubmit]);
 
   return null;
 };
@@ -205,6 +200,61 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
       });
     }
   }, [editor, resetTrigger]);
+
+  return null;
+};
+
+/**
+ * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
+ * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
+ */
+const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): null => {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+
+      const MAX_PASTE_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          event.preventDefault();
+
+          if (file.size > MAX_PASTE_IMAGE_SIZE) {
+            onPasteError?.();
+            break;
+          }
+
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const src = e.target?.result;
+            if (typeof src === "string") {
+              editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
+                src,
+                altText: "Pasted Image",
+              });
+            }
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    };
+
+    return editor.registerRootListener(
+      (
+        rootElement: HTMLElement | null,
+        prevRootElement: HTMLElement | null,
+      ) => {
+        prevRootElement?.removeEventListener("paste", handlePaste);
+        rootElement?.addEventListener("paste", handlePaste);
+      },
+    );
+  }, [editor]);
 
   return null;
 };
@@ -251,7 +301,6 @@ const Editor = ({
   toolbarVariant = "full",
   onSubmitKeyDown,
   enterToSubmit = false,
-  shiftEnterToSubmit = false,
   placeholder = "Enter description...",
   id,
   showKeyboardHint = false,
@@ -259,6 +308,7 @@ const Editor = ({
   onFocus,
   onBlur,
   overlayElement,
+  onPasteError,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -272,7 +322,6 @@ const Editor = ({
   toolbarVariant?: ToolbarVariant;
   onSubmitKeyDown?: () => void;
   enterToSubmit?: boolean;
-  shiftEnterToSubmit?: boolean;
   placeholder?: string;
   id?: string;
   showKeyboardHint?: boolean;
@@ -281,6 +330,7 @@ const Editor = ({
   onBlur?: () => void;
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
+  onPasteError?: () => void;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -456,28 +506,25 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
+          <ClipboardImagePlugin onPasteError={onPasteError} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />
           <OnChangeHTMLPlugin onChange={onChange} />
           <ResetPlugin resetTrigger={resetTrigger} />
-          <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} shiftEnterToSubmit={shiftEnterToSubmit} />
-          {overlayElement && (
-            <Box
-              sx={{
-                position: "absolute",
-                bottom: 8,
-                right: 8,
-                zIndex: 10,
-                display: "flex",
-                gap: 1,
-                pointerEvents: "auto",
-              }}
-            >
-              {overlayElement}
-            </Box>
-          )}
+          <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
+        {overlayElement && (
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              mt: 1,
+            }}
+          >
+            {overlayElement}
+          </Box>
+        )}
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />

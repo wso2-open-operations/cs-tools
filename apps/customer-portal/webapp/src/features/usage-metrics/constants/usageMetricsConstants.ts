@@ -31,12 +31,14 @@ export const USAGE_METRICS_TAB_OVERVIEW_LABEL = "Overview";
 
 /** Fixed preset buttons (3 / 6 / 12 months) on the time-range toolbar. */
 export const USAGE_METRICS_PRESET_TIME_RANGES: readonly UsageTimeRange[] = [
+  UsageTimeRange.ONE_MONTH,
   UsageTimeRange.THREE_MONTHS,
   UsageTimeRange.SIX_MONTHS,
   UsageTimeRange.TWELVE_MONTHS,
 ];
 
 export const USAGE_TIME_RANGE_LABELS: Record<UsageTimeRange, string> = {
+  [UsageTimeRange.ONE_MONTH]: "Last 1 month",
   [UsageTimeRange.THREE_MONTHS]: "Last 3 months",
   [UsageTimeRange.SIX_MONTHS]: "Last 6 months",
   [UsageTimeRange.TWELVE_MONTHS]: "Last 12 months",

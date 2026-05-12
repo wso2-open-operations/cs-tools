@@ -25,6 +25,18 @@ function getBackendBaseUrl(): string {
   return baseUrl.replace(/\/$/, "");
 }
 
+const SAFE_IMAGE_SUBTYPES = /^(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/i;
+
+function toSafeMimeType(raw: string): string {
+  const lower = raw.trim().toLowerCase();
+  // Already a full image MIME type (e.g. "image/png")
+  const fullMatch = lower.match(/^image\/(.+)$/);
+  if (fullMatch && SAFE_IMAGE_SUBTYPES.test(fullMatch[1])) return lower;
+  // Bare subtype (e.g. "png")
+  if (SAFE_IMAGE_SUBTYPES.test(lower)) return `image/${lower}`;
+  return "image/png";
+}
+
 async function fetchAttachmentDataUrl(
   authFetch: (
     input: RequestInfo | URL,
@@ -40,16 +52,24 @@ async function fetchAttachmentDataUrl(
   if (!response.ok) return null;
   const data = (await response.json()) as AttachmentDownloadResponse;
   if (!data.content || typeof data.content !== "string") return null;
-  // Reject pre-built data URLs; require raw base64.
-  if (data.content.startsWith("data:")) return null;
+
+  // Backend may return a data URI directly (e.g. "data:@file/image/png;base64,..." or "data:image/png;base64,...").
+  // Parse it and re-emit with a validated safe MIME type.
+  if (data.content.startsWith("data:")) {
+    // Matches both "data:image/png;base64,..." and "data:@file/image/png;base64,..."
+    const match = data.content.match(/^data:(?:@file\/)?(image\/[^;]+|[^;/]+);base64,(.+)$/s);
+    if (!match) return null;
+    const mimeType = toSafeMimeType(match[1]);
+    const stripped = match[2].replace(/\s/g, "");
+    if (!stripped || !/^[A-Za-z0-9+/]+=*$/.test(stripped)) return null;
+    return `data:${mimeType};base64,${stripped}`;
+  }
+
+  // Raw base64 content — construct data URL using the type field.
   const stripped = data.content.replace(/\s/g, "");
   if (!stripped || !/^[A-Za-z0-9+/]+=*$/.test(stripped)) return null;
-  // Validate MIME type against safe image subtypes only.
-  const rawType = typeof data.type === "string" ? data.type.trim().toLowerCase() : "";
-  const safeType = /^image\/(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/.test(rawType)
-    ? rawType
-    : "image/png";
-  return `data:${safeType};base64,${stripped}`;
+  const mimeType = toSafeMimeType(typeof data.type === "string" ? data.type : "");
+  return `data:${mimeType};base64,${stripped}`;
 }
 
 /**

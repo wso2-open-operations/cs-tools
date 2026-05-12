@@ -21,13 +21,14 @@ import { type JSX } from "react";
  * CUSTOMER_PORTAL_TOP_BANNER_HTML in config.js.
  */
 export default function TopBanner(): JSX.Element | null {
+  const enabled = window.config?.CUSTOMER_PORTAL_TOP_BANNER_ENABLED;
   const html = window.config?.CUSTOMER_PORTAL_TOP_BANNER_HTML;
 
-  if (!html) return null;
+  if (!enabled || !html) return null;
 
   return (
     <div
-      // eslint-disable-next-line react/no-danger
+      style={{ display: "block", lineHeight: 0, fontSize: 0, overflow: "hidden" }}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

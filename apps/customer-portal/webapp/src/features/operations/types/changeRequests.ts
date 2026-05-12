@@ -25,6 +25,7 @@ import type {
 // Item type for a change request.
 export type ChangeRequestItem = AuditMetadata & {
   id: string;
+  internalId?: string | null;
   number: string;
   title: string;
   description?: string | null;
@@ -81,7 +82,13 @@ export type ChangeRequestStatsResponse = {
   totalCount: number;
   activeCount?: number;
   outstandingCount?: number;
+  actionRequiredCount?: number;
   stateCount: ChangeRequestStateCount[];
+  resolvedCount: {
+    total: number;
+    currentMonth: number;
+    pastThirtyDays: number;
+  };
 };
 
 // Response type for patching a change request.
@@ -100,6 +107,8 @@ export type ChangeRequestSearchFilters = {
   impactKey?: number;
   searchQuery?: string;
   stateKeys?: number[];
+  closedStartDate?: string;
+  closedEndDate?: string;
 };
 
 // Request type for searching change requests.
@@ -160,6 +169,7 @@ export type ChangeRequestsCalendarViewProps = {
   isLoading: boolean;
   isError?: boolean;
   onChangeRequestClick?: (item: ChangeRequestItem) => void;
+  legendStates?: { label: string }[];
 };
 
 export type ChangeRequestFilterOption = {

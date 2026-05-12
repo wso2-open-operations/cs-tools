@@ -86,6 +86,6 @@ export function useConversationRecommendationsSearch(
       payload.chatHistory.length > 0 &&
       isSignedIn &&
       !isAuthLoading,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
   });
 }

@@ -32,16 +32,27 @@ export interface TabBarProps {
   className?: string;
   /** Optional sx to merge with default styles (e.g. reduce margin) */
   sx?: SxProps<Theme>;
+  /** Keep tab buttons at intrinsic width for horizontal scrolling containers */
+  keepButtonWidth?: boolean;
+  /** Reduces horizontal padding for compact tab rows */
+  compact?: boolean;
 }
 
-const TabBar = ({ tabs, activeTab, onTabChange, sx }: TabBarProps): JSX.Element => {
+const TabBar = ({
+  tabs,
+  activeTab,
+  onTabChange,
+  sx,
+  keepButtonWidth = false,
+  compact = false,
+}: TabBarProps): JSX.Element => {
   return (
     <Card
       role="tablist"
       sx={{
         display: "inline-flex",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: keepButtonWidth ? "flex-start" : "center",
         p: 0.5,
         mb: 2,
         minHeight: 36,
@@ -64,13 +75,13 @@ const TabBar = ({ tabs, activeTab, onTabChange, sx }: TabBarProps): JSX.Element 
             startIcon={Icon ? <Icon size={16} /> : undefined}
             sx={{
               position: "relative",
-              flex: 1,
+              flex: keepButtonWidth ? "0 0 auto" : 1,
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
               whiteSpace: "nowrap",
               border: "1px solid",
-              px: 2,
+              px: compact ? 1.25 : 2,
               py: 0.5,
               lineHeight: "normal",
               textTransform: "none",

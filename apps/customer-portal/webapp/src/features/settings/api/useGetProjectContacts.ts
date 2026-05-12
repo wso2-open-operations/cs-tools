@@ -20,6 +20,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { ProjectContact } from "@features/settings/types/users";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to fetch project contacts (GET /projects/:projectId/contacts).
@@ -58,9 +59,7 @@ export default function useGetProjectContacts(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error fetching project contacts: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: ProjectContact[] = await response.json();

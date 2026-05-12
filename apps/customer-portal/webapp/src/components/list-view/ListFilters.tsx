@@ -50,7 +50,9 @@ export interface ListFiltersProps {
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
+  hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
+  hideCategoryFilter?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
@@ -70,7 +72,9 @@ export default function ListFilters({
   excludeS0 = false,
   restrictSeverityToLow = false,
   hideSeverityFilter = false,
+  hideStatusFilter = false,
   hideDeploymentFilter = false,
+  hideCategoryFilter = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
@@ -89,7 +93,13 @@ export default function ListFilters({
         if (hideSeverityFilter && def.id === "severity") {
           return null;
         }
+        if (hideStatusFilter && def.id === "status") {
+          return null;
+        }
         if (hideDeploymentFilter && def.id === "deployment") {
+          return null;
+        }
+        if (hideCategoryFilter && def.id === "category") {
           return null;
         }
         if (def.metadataKey === "severities" && restrictSeverityToLow) {

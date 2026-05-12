@@ -39,6 +39,9 @@ export type ProjectStatisticsCardProps = {
   isError?: boolean;
   isSidebarOpen?: boolean;
   showDeploymentsStat?: boolean;
+  showServiceRequestStat?: boolean;
+  showChangeRequestStat?: boolean;
+  showSecurityReportStat?: boolean;
 };
 
 export type ProjectNameProps = {
@@ -119,6 +122,7 @@ export type ServiceHoursStatCardsProps = {
 
 export type ProjectDeploymentsProps = {
   projectId: string;
+  showServiceRequest?: boolean;
 };
 
 export type DeploymentCardProps = {
@@ -261,6 +265,7 @@ export type UpdateHistoryFormData = {
 export type UpdateHistoryTimelineItemProps = {
   update: ProductUpdate;
   isEditing: boolean;
+  isLatest: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onSave: (edited: ProductUpdate) => void;
@@ -268,6 +273,7 @@ export type UpdateHistoryTimelineItemProps = {
   formatDate: (dateStr: string) => string;
   isSaving: boolean;
   availableUpdateLevels: number[];
+  editAvailableUpdateLevels: number[];
   showUpdateLevelSkeleton: boolean;
   showEditFormSkeleton: boolean;
 };

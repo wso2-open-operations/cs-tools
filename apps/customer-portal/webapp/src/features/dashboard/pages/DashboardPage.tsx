@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Grid } from "@wso2/oxygen-ui";
-import { useParams } from "react-router";
-import { useEffect, useRef, useMemo, type JSX } from "react";
+import { Box } from "@wso2/oxygen-ui";
+import { useParams, useLocation } from "react-router";
+import { useCallback, useEffect, useRef, useMemo, type JSX } from "react";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
@@ -30,25 +31,23 @@ import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCa
 import { useGetProjectChangeRequestsStats } from "@features/dashboard/api/useGetProjectChangeRequestsStats";
 import {
   DASHBOARD_STATS,
+  OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA,
   SEVERITY_API_LABELS,
 } from "@/features/dashboard/constants/dashboard";
 import { OperationsChartMode } from "@/features/dashboard/types/charts";
-import { TrendDirection, TrendColor } from "@features/dashboard/types/stats";
 import { CaseType } from "@features/support/constants/supportConstants";
 import {
   calculateProjectStats,
   getProjectPermissions,
   getProjectSeverityPolicy,
 } from "@utils/permission";
-import { StatCard } from "@features/dashboard/components/stats/StatCard";
 import ChartLayout from "@features/dashboard/components/charts/ChartLayout";
 import CasesTable from "@features/dashboard/components/cases-table/CasesTable";
+import SupportStatGrid from "@components/stat-grid/SupportStatGrid";
+import type { SupportStatConfig } from "@features/support/constants/supportConstants";
 import {
-  computeCrCardIsCardError,
-  computeCrCardIsCardLoading,
   getAllCoreFailedState,
   getDashboardChartsLoadingState,
-  normalizeEngagementLabel,
 } from "@features/dashboard/utils/dashboard";
 
 /**
@@ -57,10 +56,67 @@ import {
  * @returns {JSX.Element} The rendered Dashboard page.
  */
 export default function DashboardPage(): JSX.Element {
+  type DashboardStatKey =
+    | "totalCases"
+    | "openCases"
+    | "resolvedCases"
+    | "avgResponseTime";
+
   // logger
   const logger = useLogger();
   // project id
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useModifierAwareNavigate();
+  const location = useLocation();
+
+  type ChartNavAction =
+    | { chart: "outstanding"; severityId: string }
+    | { chart: "operations"; key: string }
+    | { chart: "engagements"; id: string; label?: string };
+
+  const handleChartNavigation = useCallback(
+    (action: ChartNavAction) => {
+      switch (action.chart) {
+        case "outstanding":
+          navigate(
+            `/projects/${projectId}/support/cases?severityId=${action.severityId}`,
+            { state: { returnTo: location.pathname } },
+          );
+          break;
+        case "operations": {
+          const segment =
+            action.key === "serviceRequests"
+              ? "service-requests"
+              : "change-requests";
+          navigate(`/projects/${projectId}/operations/${segment}`, {
+            state: { returnTo: location.pathname, outstandingOnly: true },
+          });
+          break;
+        }
+        case "engagements":
+          navigate(`/projects/${projectId}/engagements`, {
+            state: {
+              returnTo: location.pathname,
+              engagementTypeId: action.id,
+              engagementTypeLabel: action.label,
+            },
+          });
+          break;
+      }
+    },
+    [navigate, projectId, location.pathname],
+  );
+
+  const handleSeverityClick = useCallback(
+    (severityId: string) =>
+      handleChartNavigation({ chart: "outstanding", severityId }),
+    [handleChartNavigation],
+  );
+
+  const handleOperationsClick = useCallback(
+    (key: string) => handleChartNavigation({ chart: "operations", key }),
+    [handleChartNavigation],
+  );
 
   // loader
   const { showLoader, hideLoader } = useLoader();
@@ -93,10 +149,8 @@ export default function DashboardPage(): JSX.Element {
     isFetching: isProjectDetailsFetching,
     error: projectDetailsError,
   } = useGetProjectDetails(projectId || "");
-  const {
-    data: projectFeatures,
-    isFetching: isProjectFeaturesFetching,
-  } = useGetProjectFeatures(projectId || "");
+  const { data: projectFeatures, isFetching: isProjectFeaturesFetching } =
+    useGetProjectFeatures(projectId || "");
 
   // forbidden
   const isForbidden =
@@ -115,7 +169,9 @@ export default function DashboardPage(): JSX.Element {
     !!projectId &&
     (resolvedProject === undefined ||
       (resolvedProject !== undefined && isProjectFeaturesFetching)) &&
-    (isProjectsLoading || isProjectDetailsFetching || isProjectFeaturesFetching);
+    (isProjectsLoading ||
+      isProjectDetailsFetching ||
+      isProjectFeaturesFetching);
 
   // permissions
   const permissions = useMemo(
@@ -133,7 +189,8 @@ export default function DashboardPage(): JSX.Element {
   );
 
   // has agent
-  const hasAgent = resolvedProject?.hasAgent ?? false;
+  const hasAgent =
+    projectDetails?.hasAgent ?? projectDetails?.account?.hasAgent ?? false;
 
   // include CR stats
   const includeCrStats = permissions.includeChangeRequestsInDashboardTotals;
@@ -147,18 +204,30 @@ export default function DashboardPage(): JSX.Element {
       ? OperationsChartMode.SrOnly
       : OperationsChartMode.SrAndCr;
 
-  // combined cases stats
+  // Combined stats scoped to only the case types the user has permission to see.
+  // This ensures the Action Required / Outstanding card counts match what is visible on the page.
+  // Note: chart-specific queries (defaultCaseStats, serviceRequestStats, engagementStats) remain
+  // separate because stateCount here is aggregated and cannot be split back per type.
+  const combinedCaseTypes = useMemo(() => {
+    const types: string[] = [CaseType.DEFAULT_CASE];
+    if (permissions.hasSR) types.push(CaseType.SERVICE_REQUEST);
+    if (permissions.hasEngagements) types.push(CaseType.ENGAGEMENT);
+    if (permissions.hasSecurityReportAnalysis)
+      types.push(CaseType.SECURITY_REPORT_ANALYSIS);
+    return types;
+  }, [
+    permissions.hasSR,
+    permissions.hasEngagements,
+    permissions.hasSecurityReportAnalysis,
+  ]);
+
   const {
     data: combinedCasesStats,
     isLoading: isCombinedCasesLoading,
     isError: isErrorCombinedCases,
   } = useGetProjectCasesStats(projectId || "", {
-    caseTypes: [
-      CaseType.DEFAULT_CASE,
-      CaseType.SERVICE_REQUEST,
-      CaseType.ENGAGEMENT,
-    ],
-    enabled: !!projectId,
+    caseTypes: combinedCaseTypes,
+    enabled: !!projectId && !awaitingProjectContext,
   });
 
   // default case stats
@@ -178,7 +247,7 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorServiceRequest,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.SERVICE_REQUEST],
-    enabled: !!projectId && showOpsChart,
+    enabled: !!projectId && !awaitingProjectContext && permissions.hasSR,
   });
 
   // engagement stats
@@ -188,7 +257,8 @@ export default function DashboardPage(): JSX.Element {
     isError: isErrorEngagement,
   } = useGetProjectCasesStats(projectId || "", {
     caseTypes: [CaseType.ENGAGEMENT],
-    enabled: !!projectId && permissions.hasEngagements,
+    enabled:
+      !!projectId && !awaitingProjectContext && permissions.hasEngagements,
   });
 
   // change request stats
@@ -197,7 +267,7 @@ export default function DashboardPage(): JSX.Element {
     isLoading: isChangeRequestStatsLoading,
     isError: isErrorChangeRequestStats,
   } = useGetProjectChangeRequestsStats(projectId || "", {
-    enabled: !!projectId && includeCrStats,
+    enabled: !!projectId && !awaitingProjectContext && includeCrStats,
   });
 
   // is dashboard loading
@@ -306,12 +376,10 @@ export default function DashboardPage(): JSX.Element {
       includeCrStats && !!changeRequestStats && !isErrorChangeRequestStats;
 
     const serviceRequestsCount = hasServiceRequests
-      ? (serviceRequestStats?.totalCount ??
-        serviceRequestStats?.totalCases ??
-        0)
+      ? (serviceRequestStats?.outstandingCount ?? 0)
       : 0;
     const changeRequestsCount = hasChangeRequests
-      ? (changeRequestStats?.totalCount ?? 0)
+      ? (changeRequestStats?.outstandingCount ?? 0)
       : 0;
 
     return calculateProjectStats(
@@ -328,22 +396,46 @@ export default function DashboardPage(): JSX.Element {
     permissions,
   ]);
 
-  // outstanding engagements
+  // outstanding engagements — grouped into 4 display categories, Services = Follow Up + Consultancy
   const outstandingEngagements = useMemo(() => {
-    const source = engagementStats;
-    const outstanding = source?.outstandingEngagementTypeCount ?? [];
+    const outstanding = engagementStats?.outstandingEngagementTypeCount ?? [];
 
-    const categories = outstanding.map((item) => ({
-      name: normalizeEngagementLabel(item.label),
-      value: item.count ?? 0,
-    }));
+    const categories = OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA.map(
+      (chartEntry) => {
+        const matching = outstanding.filter(
+          (item) => item.label.toLowerCase() === chartEntry.name.toLowerCase(),
+        );
+        const value = matching.reduce(
+          (sum, item) => sum + (item.count ?? 0),
+          0,
+        );
+        const matchingIds = matching.map((item) => item.id);
+        return {
+          name: chartEntry.name,
+          value,
+          ...(matchingIds.length === 1 ? { id: matchingIds[0] } : {}),
+          ...(matchingIds.length > 1 ? { ids: matchingIds } : {}),
+        };
+      },
+    );
+
     const total = categories.reduce((sum, item) => sum + item.value, 0);
-
-    return {
-      categories,
-      total,
-    };
+    return { categories, total };
   }, [engagementStats]);
+
+  const handleEngagementsClick = useCallback(
+    (id: string) => {
+      const category = outstandingEngagements.categories.find(
+        (c) => (c.ids?.join(",") ?? c.id ?? c.name) === id,
+      );
+      handleChartNavigation({
+        chart: "engagements",
+        id,
+        label: category?.name,
+      });
+    },
+    [handleChartNavigation, outstandingEngagements],
+  );
 
   // is charts loading
   const isChartsLoading = getDashboardChartsLoadingState({
@@ -357,37 +449,64 @@ export default function DashboardPage(): JSX.Element {
     includeEngagementStats: permissions.hasEngagements,
   });
 
-  // cr branch state
-  const crBranchState = useMemo(() => {
-    const hasCombined = !!combinedCasesStats && !isErrorCombinedCases;
-    const hasChange = !!changeRequestStats && !isErrorChangeRequestStats;
-    const isCardLoading = computeCrCardIsCardLoading(
-      includeCrStats,
-      combinedCasesStats,
-      changeRequestStats,
-      isCombinedCasesLoading,
-      isChangeRequestStatsLoading,
-      isErrorCombinedCases,
-      isErrorChangeRequestStats,
-    );
-    const isCardError = computeCrCardIsCardError(
-      includeCrStats,
-      isCardLoading,
-      combinedCasesStats,
-      changeRequestStats,
-      isErrorCombinedCases,
-      isErrorChangeRequestStats,
-    );
-    return { hasCombined, hasChange, isCardLoading, isCardError };
-  }, [
-    changeRequestStats,
-    combinedCasesStats,
-    includeCrStats,
-    isChangeRequestStatsLoading,
-    isCombinedCasesLoading,
-    isErrorChangeRequestStats,
-    isErrorCombinedCases,
-  ]);
+  const dashboardStatConfigs = useMemo<SupportStatConfig<DashboardStatKey>[]>(
+    () =>
+      DASHBOARD_STATS.map((stat) => ({
+        key: stat.id as DashboardStatKey,
+        label: stat.label,
+        icon: stat.icon,
+        iconColor: stat.iconColor,
+        tooltipText: stat.tooltipText,
+      })),
+    [],
+  );
+
+  const dashboardStatValues = useMemo<
+    Partial<Record<DashboardStatKey, number | string>>
+  >(() => {
+    // Action Required: sum actionRequiredCount from cases + CR (based on permissions)
+    const casesActionRequired = combinedCasesStats?.actionRequiredCount ?? 0;
+    const crActionRequired = includeCrStats
+      ? (changeRequestStats?.actionRequiredCount ?? 0)
+      : 0;
+
+    // Outstanding: sum outstandingCount from cases + CR (based on permissions)
+    const casesOutstanding = combinedCasesStats?.outstandingCount ?? 0;
+    const crOutstanding = includeCrStats
+      ? (changeRequestStats?.outstandingCount ?? 0)
+      : 0;
+
+    // Closed Last 30 days: sum resolvedCases.pastThirtyDays from cases + resolvedCount.pastThirtyDays from CR
+    const casesResolved =
+      combinedCasesStats?.resolvedCases?.pastThirtyDays ?? 0;
+    const crResolved = includeCrStats
+      ? (changeRequestStats?.resolvedCount?.pastThirtyDays ?? 0)
+      : 0;
+
+    // Average Response Time: cases only (CR does not have averageResponseTime)
+    const avgHours = (combinedCasesStats?.averageResponseTime ?? 0) * 60;
+    const totalMinutes = Math.round(avgHours);
+    const hrs = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    const avgResponseTime =
+      hrs > 0 && mins > 0
+        ? `${hrs} hr${hrs !== 1 ? "s" : ""} ${mins} min`
+        : hrs > 0
+          ? `${hrs} hr${hrs !== 1 ? "s" : ""}`
+          : `${mins} min`;
+
+    return {
+      totalCases: casesActionRequired + crActionRequired,
+      openCases: casesOutstanding + crOutstanding,
+      resolvedCases: casesResolved + crResolved,
+      avgResponseTime,
+    };
+  }, [combinedCasesStats, changeRequestStats, includeCrStats]);
+
+  const isDashboardStatsLoading =
+    isCombinedCasesLoading || (includeCrStats && isChangeRequestStatsLoading);
+  const isDashboardStatsError =
+    isErrorCombinedCases || (includeCrStats && isErrorChangeRequestStats);
 
   // render
   if (isForbidden) {
@@ -396,150 +515,38 @@ export default function DashboardPage(): JSX.Element {
 
   return (
     <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
-      {/* Dashboard stats grid */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        {DASHBOARD_STATS.map((stat) => {
-          let value: string | number = 0;
-          let trend:
-            | {
-                value: string;
-                direction: TrendDirection;
-                color: TrendColor;
-              }
-            | undefined;
-          let isCardLoading = false;
-          let isCardError = false;
-
-          switch (stat.id) {
-            case "totalCases": {
-              isCardLoading = crBranchState.isCardLoading;
-              isCardError = crBranchState.isCardError;
-
-              const combinedTotal = crBranchState.hasCombined
-                ? (combinedCasesStats?.totalCount ??
-                  combinedCasesStats?.totalCases ??
-                  0)
-                : 0;
-              const changeTotal = crBranchState.hasChange
-                ? (changeRequestStats?.totalCount ?? 0)
-                : 0;
-
-              value = includeCrStats
-                ? !isCardError &&
-                  crBranchState.hasCombined &&
-                  crBranchState.hasChange
-                  ? combinedTotal + changeTotal
-                  : 0
-                : combinedTotal;
-              break;
-            }
-            case "openCases": {
-              isCardLoading = crBranchState.isCardLoading;
-              isCardError = crBranchState.isCardError;
-
-              const combinedActive = crBranchState.hasCombined
-                ? (combinedCasesStats?.activeCount ??
-                  combinedCasesStats?.stateCount
-                    ?.filter((state) => state.label !== "Closed")
-                    .reduce((sum, state) => sum + state.count, 0) ??
-                  0)
-                : 0;
-
-              const changeActive = crBranchState.hasChange
-                ? (changeRequestStats?.activeCount ??
-                  changeRequestStats?.stateCount
-                    ?.filter(
-                      (state) =>
-                        state.label !== "Closed" && state.label !== "Canceled",
-                    )
-                    .reduce((sum, state) => sum + state.count, 0) ??
-                  0)
-                : 0;
-
-              value = includeCrStats
-                ? !isCardError &&
-                  crBranchState.hasCombined &&
-                  crBranchState.hasChange
-                  ? combinedActive + changeActive
-                  : 0
-                : combinedActive;
-              break;
-            }
-            case "resolvedCases": {
-              const hasDefault = !!defaultCaseStats && !isErrorDefaultCase;
-              const resolved =
-                hasDefault && defaultCaseStats
-                  ? (defaultCaseStats.resolvedCases.pastThirtyDays ??
-                    defaultCaseStats.resolvedCases.currentMonth ??
-                    0)
-                  : 0;
-
-              value = resolved;
-              isCardError = isErrorDefaultCase;
-              isCardLoading =
-                !isCardError && isDefaultCaseLoading && !defaultCaseStats;
-
-              const changeRate = defaultCaseStats?.changeRate;
-              if (typeof changeRate?.resolvedEngagements === "number") {
-                const rate = changeRate.resolvedEngagements;
-                trend = {
-                  value: `${rate >= 0 ? "+" : ""}${rate}%`,
-                  direction:
-                    rate >= 0 ? TrendDirection.UP : TrendDirection.DOWN,
-                  color: rate >= 0 ? TrendColor.SUCCESS : TrendColor.ERROR,
-                };
-              }
-              break;
-            }
-            case "avgResponseTime": {
-              const hasCombined = !!combinedCasesStats && !isErrorCombinedCases;
-              const avg =
-                hasCombined && combinedCasesStats
-                  ? combinedCasesStats.averageResponseTime
-                  : 0;
-
-              value = `${avg} hrs`;
-              isCardError = isErrorCombinedCases;
-              isCardLoading =
-                !isCardError && isCombinedCasesLoading && !combinedCasesStats;
-
-              const changeRate = combinedCasesStats?.changeRate;
-              if (typeof changeRate?.averageResponseTime === "number") {
-                const rate = changeRate.averageResponseTime;
-                trend = {
-                  value: `${rate >= 0 ? "+" : ""}${rate}%`,
-                  direction:
-                    rate >= 0 ? TrendDirection.UP : TrendDirection.DOWN,
-                  color: TrendColor.SUCCESS,
-                };
-              }
-
-              break;
-            }
-            default:
-              break;
+      <Box sx={{ mb: 3 }}>
+        <SupportStatGrid<DashboardStatKey>
+          isLoading={isDashboardStatsLoading}
+          isError={isDashboardStatsError}
+          entityName="dashboard statistics"
+          configs={dashboardStatConfigs}
+          stats={
+            dashboardStatValues as Partial<Record<DashboardStatKey, number>>
           }
-
-          const showTrend = stat.id !== "totalCases" && stat.id !== "openCases";
-
-          return (
-            <Grid key={stat.id} size={{ xs: 12, sm: 6, md: 3 }}>
-              <StatCard
-                label={stat.label}
-                value={value}
-                icon={<stat.icon size={20} />}
-                iconColor={stat.iconColor}
-                tooltipText={stat.tooltipText}
-                trend={trend}
-                showTrend={showTrend}
-                isLoading={isCardLoading}
-                isError={isCardError}
-                isTrendError={false}
-              />
-            </Grid>
-          );
-        })}
-      </Grid>
+          valueFormatter={(value) => String(value)}
+          nonClickableKeys={["avgResponseTime"]}
+          onStatClick={(key) => {
+            if (key === "totalCases") {
+              navigate("action-required", {
+                state: { returnTo: location.pathname },
+              });
+              return;
+            }
+            if (key === "openCases") {
+              navigate("outstanding-interactions", {
+                state: { returnTo: location.pathname },
+              });
+              return;
+            }
+            if (key === "resolvedCases") {
+              navigate("closed-last-30d", {
+                state: { returnTo: location.pathname },
+              });
+            }
+          }}
+        />
+      </Box>
       {/* Charts row */}
       <ChartLayout
         outstandingCases={outstandingCases}
@@ -560,6 +567,9 @@ export default function DashboardPage(): JSX.Element {
         showOperationsChart={showOpsChart}
         operationsChartMode={operationsChartMode}
         showEngagementsChart={permissions.hasEngagements}
+        onSeverityClick={handleSeverityClick}
+        onOperationsClick={handleOperationsClick}
+        onEngagementsClick={handleEngagementsClick}
       />
       {/* Cases Table */}
       {projectId && (

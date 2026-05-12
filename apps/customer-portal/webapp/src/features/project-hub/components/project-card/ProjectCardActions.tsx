@@ -42,6 +42,14 @@ export default function ProjectCardActions({
             e.stopPropagation();
             onViewDashboard?.();
           }}
+          sx={{
+            transition: "color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease",
+            "&:hover": {
+              color: "primary.contrastText",
+              backgroundColor: "primary.main",
+              borderColor: "primary.main",
+            },
+          }}
         >
           {PROJECT_CARD_VIEW_DASHBOARD_LABEL}
         </Button>

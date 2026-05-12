@@ -28,4 +28,6 @@ export type RelatedCaseState = {
   description: string;
   deploymentId?: string;
   deploymentLabel?: string;
+  deployedProductId?: string;
+  deployedProductLabel?: string;
 };

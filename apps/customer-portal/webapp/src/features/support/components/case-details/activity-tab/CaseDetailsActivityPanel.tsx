@@ -25,8 +25,8 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { ChevronUp } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useRef, useState, type JSX } from "react";
-import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
@@ -41,6 +41,7 @@ import type {
 } from "@features/support/types/supportComponents";
 import type { CaseComment } from "@features/support/types/cases";
 import ApiErrorState from "@components/error/ApiErrorState";
+import { ApiError } from "@utils/ApiError";
 
 // TODO : DUE TO URGENCY THIS COMPONENT BREAKS THE BEST PRACTICES , NEED FULL REFACTOR
 /**
@@ -57,15 +58,23 @@ export default function CaseDetailsActivityPanel({
 }: CaseDetailsActivityPanelProps): JSX.Element {
   const theme = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  const { data: userDetails } = useGetUserDetails();
+  const {
+    data: userDetails,
+    isError: isUserDetailsError,
+    error: userDetailsError,
+  } = useGetUserDetails();
   const {
     data: commentsData,
     isLoading: isCommentsLoading,
     isError: isCommentsError,
     error: commentsError,
-  } = useGetCaseComments(projectId, caseId, { offset: 0, limit: 50 });
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useGetCaseCommentsInfinite(projectId, caseId);
   const {
     data: conversationData,
     isLoading: isConversationLoading,
@@ -74,20 +83,46 @@ export default function CaseDetailsActivityPanel({
   } = useGetConversationMessages(conversationId ?? "", { pageSize: 50 });
 
   const currentUserEmail = userDetails?.email?.toLowerCase() ?? "";
+  const hideAvatar =
+    isUserDetailsError &&
+    userDetailsError instanceof ApiError &&
+    (userDetailsError.status === 401 || userDetailsError.status === 403);
+
+  // Intersection observer: load next page when sentinel scrolls into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasNextPage || isFetchingNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void fetchNextPage();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const allCaseCommentsLoaded = !hasNextPage && !isFetchingNextPage && !isCommentsLoading;
 
   const mergedTimeline = useMemo(() => {
-    const caseComments = commentsData?.comments ?? [];
-    const conversationComments: CaseComment[] = (
-      conversationData?.pages?.flatMap((page) => page.comments) ?? []
-    ).map((comment) => ({
-      ...comment,
-      type: comment.type ?? "comments",
-      isEscalated: comment.isEscalated ?? false,
-    }));
+    const caseComments =
+      commentsData?.pages?.flatMap((p) => p.comments) ?? [];
+    const conversationComments: CaseComment[] = allCaseCommentsLoaded
+      ? (conversationData?.pages?.flatMap((page) => page.comments) ?? []).map(
+          (comment) => ({
+            ...comment,
+            type: comment.type ?? "comments",
+            isEscalated: comment.isEscalated ?? false,
+          }),
+        )
+      : [];
+
     return [...caseComments, ...conversationComments].sort(
       (a, b) => -compareByCreatedOnThenId(a, b),
     );
-  }, [commentsData?.comments, conversationData?.pages]);
+  }, [commentsData?.pages, conversationData?.pages, allCaseCommentsLoaded]);
 
   const commentsToShow = useMemo(
     () => mergedTimeline.filter(hasDisplayableContent),
@@ -97,7 +132,8 @@ export default function CaseDetailsActivityPanel({
   const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
   const primaryBg = alpha(primaryLight, 0.1);
 
-  const isLoading = isCommentsLoading || (!!conversationId && isConversationLoading);
+  const isLoading =
+    isCommentsLoading || (!!conversationId && isConversationLoading);
   const isError = isCommentsError || (!!conversationId && isConversationError);
   const resolvedError = commentsError ?? conversationError;
 
@@ -119,7 +155,7 @@ export default function CaseDetailsActivityPanel({
         {[1, 2, 3].map((i) => (
           <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
             <Skeleton variant="circular" width={32} height={32} />
-            <Box sx={{ flex: 1 }}>
+            <Box sx={{ flex: 1, width: "100%" }}>
               <Skeleton variant="text" width="40%" height={20} />
               <Skeleton variant="rectangular" height={60} sx={{ mt: 1 }} />
             </Box>
@@ -143,6 +179,7 @@ export default function CaseDetailsActivityPanel({
         caseCreatedOn={undefined}
         currentUserEmail={currentUserEmail}
         primaryBg={primaryBg}
+        hideAvatar={hideAvatar}
         userDetails={userDetails}
       />
     );
@@ -174,6 +211,22 @@ export default function CaseDetailsActivityPanel({
           <ActivityCommentInput caseId={caseId} caseStatus={caseStatus} />
         </Box>
         {commentsContent}
+        {/* Sentinel triggers fetchNextPage when scrolled into view */}
+        <Box ref={sentinelRef} sx={{ py: 1, display: "flex", justifyContent: "center" }}>
+          {isFetchingNextPage && (
+            <Stack spacing={2} sx={{ px: 2, width: "100%" }}>
+              {[1, 2].map((i) => (
+                <Stack key={i} direction="row" spacing={1.5} alignItems="flex-start">
+                  <Skeleton variant="circular" width={32} height={32} />
+                  <Box sx={{ flex: 1 }}>
+                    <Skeleton variant="text" width="40%" height={20} />
+                    <Skeleton variant="rectangular" height={48} sx={{ mt: 1 }} />
+                  </Box>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+        </Box>
       </Box>
 
       {/* Floating scroll-to-top button */}
@@ -205,7 +258,9 @@ export default function CaseDetailsActivityPanel({
 function ActivityContentWithImageModal(
   props: ActivityContentProps,
 ): JSX.Element {
-  const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(null);
+  const [fullscreenImageSrc, setFullscreenImageSrc] = useState<string | null>(
+    null,
+  );
   return (
     <>
       <ActivityContent
@@ -225,6 +280,7 @@ function ActivityContent({
   commentsToShow,
   currentUserEmail,
   primaryBg,
+  hideAvatar = false,
   userDetails,
   onImageClick,
 }: ActivityContentProps): JSX.Element {
@@ -263,6 +319,7 @@ function ActivityContent({
                 comment={comment}
                 isCurrentUser={isCurrentUser}
                 primaryBg={primaryBg}
+                hideAvatar={hideAvatar}
                 userDetails={userDetails}
                 onImageClick={onImageClick}
               />

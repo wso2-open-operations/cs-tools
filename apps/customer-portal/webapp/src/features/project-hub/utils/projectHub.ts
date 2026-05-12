@@ -16,10 +16,8 @@
 
 import {
   PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH,
-  PROJECT_HUB_SUBTITLE_MANY_PROJECTS,
   PROJECT_HUB_SUBTITLE_SELECT,
-  PROJECT_HUB_TITLE_SELECT,
-  formatProjectHubManyProjectsTitle,
+  formatProjectHubTitle,
 } from "@features/project-hub/constants/projectHubConstants";
 import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
 
@@ -30,9 +28,8 @@ import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
  * @param isAuthLoading - Asgardeo still loading.
  * @param isLoading - Projects query loading.
  * @param isError - Projects query failed.
- * @param totalRecords - Total projects from API metadata.
- * @param searchQuery - Current search input.
- * @param projectsLength - Projects on the current flattened list.
+ * @param projectsLength - Length of the current flattened projects list.
+ * @param isCheckingAllSuspended - Background-paginating to confirm all projects are suspended.
  * @returns {ProjectHubContentView} View id for the hub body.
  */
 export function resolveProjectHubContentView(
@@ -40,9 +37,8 @@ export function resolveProjectHubContentView(
   isAuthLoading: boolean,
   isLoading: boolean,
   isError: boolean,
-  totalRecords: number,
-  searchQuery: string,
   projectsLength: number,
+  isCheckingAllSuspended: boolean = false,
 ): ProjectHubContentView {
   if (isRedirectingToSingleProject) {
     return ProjectHubContentView.REDIRECT_LOADER;
@@ -50,17 +46,11 @@ export function resolveProjectHubContentView(
   if (isAuthLoading) {
     return ProjectHubContentView.AUTH_PENDING;
   }
-  if (isLoading) {
+  if (isLoading || isCheckingAllSuspended) {
     return ProjectHubContentView.LOADING_SKELETONS;
   }
   if (isError) {
     return ProjectHubContentView.ERROR;
-  }
-  if (
-    totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH &&
-    !searchQuery.trim()
-  ) {
-    return ProjectHubContentView.NO_GRID;
   }
   if (projectsLength === 0) {
     return ProjectHubContentView.EMPTY_STATE;
@@ -68,93 +58,26 @@ export function resolveProjectHubContentView(
   return ProjectHubContentView.PROJECT_LIST;
 }
 
-/**
- * Hub page title next to the folder icon.
- *
- * @param totalRecords - Total project count.
- * @param hasSearchQuery - Whether the user typed a search.
- * @returns Title string.
- */
-export function resolveProjectHubHeaderTitle(
-  totalRecords: number,
-  hasSearchQuery: boolean,
-): string {
-  switch (true) {
-    case totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && !hasSearchQuery:
-      return formatProjectHubManyProjectsTitle(totalRecords);
-    default:
-      return PROJECT_HUB_TITLE_SELECT;
-  }
+/** Hub page title — always shows the project count. */
+export function resolveProjectHubHeaderTitle(totalRecords: number): string {
+  return formatProjectHubTitle(totalRecords);
 }
 
-/**
- * Hub subtitle under the title.
- *
- * @param totalRecords - Total project count.
- * @param hasSearchQuery - Whether the user typed a search.
- * @returns Subtitle string.
- */
-export function resolveProjectHubHeaderSubtitle(
-  totalRecords: number,
-  hasSearchQuery: boolean,
-): string {
-  switch (true) {
-    case totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && !hasSearchQuery:
-      return PROJECT_HUB_SUBTITLE_MANY_PROJECTS;
-    default:
-      return PROJECT_HUB_SUBTITLE_SELECT;
-  }
+/** Hub subtitle — always the standard select prompt. */
+export function resolveProjectHubHeaderSubtitle(): string {
+  return PROJECT_HUB_SUBTITLE_SELECT;
 }
 
-/**
- * Whether to show the search field (many projects or active search).
- *
- * @param totalRecords - Total project count.
- * @param searchQuery - Raw search input.
- */
+/** Show the search bar when the user has more than one project or has an active search query. */
 export function shouldShowProjectHubSearchBar(
   totalRecords: number,
   searchQuery: string,
 ): boolean {
-  return (
-    totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH ||
-    searchQuery.trim().length > 0
-  );
+  return totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH || searchQuery.trim().length > 0;
 }
 
 /**
- * Search-only layout: many projects and user has not searched yet.
- *
- * @param totalRecords - Total project count.
- * @param searchQuery - Raw search input.
- * @param isLoading - Projects loading.
- * @param isAuthLoading - Auth loading.
- * @param isError - Query error.
- */
-export function shouldShowProjectHubSearchOnlyLayout(
-  totalRecords: number,
-  searchQuery: string,
-  isLoading: boolean,
-  isAuthLoading: boolean,
-  isError: boolean,
-): boolean {
-  return (
-    totalRecords > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH &&
-    !searchQuery.trim() &&
-    !isLoading &&
-    !isAuthLoading &&
-    !isError
-  );
-}
-
-/**
- * Whether to hide the title/search header block (error empty state without search).
- *
- * @param isError - Query error.
- * @param isLoading - Projects loading.
- * @param isAuthLoading - Auth loading.
- * @param projectsLength - Current list length.
- * @param searchQuery - Raw search input.
+ * Whether to hide the title/search header block (error or empty state without search).
  */
 export function shouldHideProjectHubHeaderBlock(
   isError: boolean,
@@ -163,11 +86,10 @@ export function shouldHideProjectHubHeaderBlock(
   projectsLength: number,
   searchQuery: string,
 ): boolean {
+  const trimmedSearch = searchQuery.trim();
   return (
     isError ||
-    (!isLoading &&
-      !isAuthLoading &&
-      projectsLength === 0 &&
-      !searchQuery.trim())
+    (isLoading && !trimmedSearch) ||
+    (!isAuthLoading && projectsLength === 0 && !trimmedSearch)
   );
 }

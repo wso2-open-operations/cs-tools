@@ -15,10 +15,11 @@
 // under the License.
 
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vitest/config";
+import { defineConfig, mergeConfig } from "vite";
+import { defineConfig as defineVitestConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+const viteConfig = defineConfig({
   plugins: [
     react({
       babel: {
@@ -98,6 +99,9 @@ export default defineConfig({
   server: {
     port: 3000,
   },
+});
+
+const vitestConfig = defineVitestConfig({
   test: {
     globals: true,
     environment: "jsdom",
@@ -117,3 +121,5 @@ export default defineConfig({
     },
   },
 });
+
+export default mergeConfig(viteConfig, vitestConfig);

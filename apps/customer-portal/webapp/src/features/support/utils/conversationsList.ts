@@ -25,7 +25,7 @@ function normalizeConversationStateCategory(
   stateLabel?: string | null,
 ): ConversationStateCategory {
   const label = stateLabel?.toLowerCase() ?? "";
-  return label.includes("open") || label.includes("active")
+  return label.includes("open") || label.includes("active") || label.includes("abandoned")
     ? ConversationStateCategory.OpenLike
     : ConversationStateCategory.Other;
 }

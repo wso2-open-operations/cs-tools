@@ -43,6 +43,7 @@ import {
   Search,
   Shield,
   Trash2,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import { usePostProjectContact } from "@features/settings/api/usePostProjectContact";
@@ -62,7 +63,6 @@ import {
   SETTINGS_USER_ROLE_PERMISSIONS_TITLE,
   SETTINGS_USER_SEARCH_PLACEHOLDER,
   SETTINGS_USER_SECURITY_UPDATE_SUCCESS,
-  SETTINGS_USER_SYSTEM_NOT_SECURITY_ERROR,
   SETTINGS_USER_TABLE_HEADERS,
   SETTINGS_USER_UPDATE_ERROR,
 } from "@features/settings/constants/settingsConstants";
@@ -132,8 +132,8 @@ export default function SettingsUserManagement({
     (data: CreateProjectContactRequest) => {
       postContact.mutate(data, {
         onSuccess: () => {
-          setIsAddModalOpen(false);
           showSuccess(SETTINGS_USER_INVITE_SUCCESS);
+          window.location.reload();
         },
         onError: (err) => {
           showError(err?.message ?? SETTINGS_USER_ADD_ERROR);
@@ -148,8 +148,8 @@ export default function SettingsUserManagement({
 
     deleteContact.mutate(removeTarget.email, {
       onSuccess: () => {
-        setRemoveTarget(null);
         showSuccess(SETTINGS_USER_REMOVE_SUCCESS);
+        window.location.reload();
       },
       onError: (err) => {
         showError(err?.message ?? SETTINGS_USER_REMOVE_ERROR);
@@ -158,18 +158,19 @@ export default function SettingsUserManagement({
   }, [removeTarget, deleteContact, showSuccess, showError]);
 
   const handleEditUser = useCallback(
-    (next: { isSecurityContact: boolean }) => {
+    (next: { isCsAdmin: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => {
       if (!editTarget?.email) return;
-      if (editTarget.isCsIntegrationUser) {
-        showError(SETTINGS_USER_SYSTEM_NOT_SECURITY_ERROR);
-        return;
-      }
       patchContact.mutate(
-        { email: editTarget.email, isSecurityContact: next.isSecurityContact },
+        {
+          email: editTarget.email,
+          isCsAdmin: next.isCsAdmin,
+          isPortalUser: next.isPortalUser,
+          isSecurityContact: next.isSecurityContact,
+        },
         {
           onSuccess: () => {
-            setEditTarget(null);
             showSuccess(SETTINGS_USER_SECURITY_UPDATE_SUCCESS);
+            window.location.reload();
           },
           onError: (err) => {
             showError(err?.message ?? SETTINGS_USER_UPDATE_ERROR);
@@ -204,6 +205,13 @@ export default function SettingsUserManagement({
                 <Search size={18} color={theme.palette.text.secondary} />
               </InputAdornment>
             ),
+            endAdornment: searchQuery ? (
+              <InputAdornment position="end">
+                <IconButton size="small" edge="end" onClick={() => setSearchQuery("")}>
+                  <X size={16} />
+                </IconButton>
+              </InputAdornment>
+            ) : undefined,
           }}
         />
         {canAddOrRemoveUsers && (
@@ -368,19 +376,17 @@ export default function SettingsUserManagement({
                           justifyContent: "flex-end",
                         }}
                       >
-                        {!contact.isCsIntegrationUser && (
-                          <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Edit user"
-                                onClick={() => setEditTarget(contact)}
-                              >
-                                <PencilLine size={16} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
+                        <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              aria-label="Edit user"
+                              onClick={() => setEditTarget(contact)}
+                            >
+                              <PencilLine size={16} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                         <Tooltip title={SETTINGS_USER_REMOVE_TOOLTIP}>
                           <span>
                             <IconButton

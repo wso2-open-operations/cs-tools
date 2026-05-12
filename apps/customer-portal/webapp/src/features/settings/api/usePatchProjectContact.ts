@@ -23,14 +23,17 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export interface PatchProjectContactVariables {
   email: string;
+  isCsAdmin: boolean;
+  isPortalUser: boolean;
   isSecurityContact: boolean;
 }
 
 /**
- * Hook to update a project contact's security flag
+ * Hook to update a project contact's membership roles
  * (PATCH /projects/:projectId/contacts/:email).
  *
  * @param {string} projectId - The ID of the project.
@@ -45,9 +48,9 @@ export function usePatchProjectContact(
   const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, PatchProjectContactVariables>({
-    mutationFn: async ({ email, isSecurityContact }): Promise<void> => {
+    mutationFn: async ({ email, isCsAdmin, isPortalUser, isSecurityContact }): Promise<void> => {
       logger.debug(
-        `[usePatchProjectContact] Patching ${email} isSecurityContact=${isSecurityContact}`,
+        `[usePatchProjectContact] Patching ${email} isCsAdmin=${isCsAdmin} isPortalUser=${isPortalUser} isSecurityContact=${isSecurityContact}`,
       );
 
       try {
@@ -63,31 +66,20 @@ export function usePatchProjectContact(
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts/${encodeURIComponent(email)}`;
         const response = await authFetch(requestUrl, {
           method: "PATCH",
-          body: JSON.stringify({ isSecurityContact }),
+          body: JSON.stringify({ isCsAdmin, isPortalUser, isSecurityContact }),
         });
 
         if (!response.ok) {
           const text = await response.text();
-          let errorMessage = `Error updating project contact: ${response.status} ${response.statusText}`;
-          try {
-            const json = JSON.parse(text) as { message?: string };
-            if (typeof json.message === "string") {
-              errorMessage = json.message;
-            } else if (text) {
-              errorMessage += ` - ${text}`;
-            }
-          } catch {
-            if (text) errorMessage += ` - ${text}`;
-          }
-          throw new Error(errorMessage);
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
       } catch (error) {
         logger.error("[usePatchProjectContact] Error:", error);
         throw error;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.PROJECT_CONTACTS, projectId],
       });
     },

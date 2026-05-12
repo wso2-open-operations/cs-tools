@@ -20,6 +20,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { RegistryToken } from "@features/settings/types/registryTokens";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Hook to search registry tokens for a project (POST /projects/:projectId/registry-tokens/search).
@@ -60,9 +61,7 @@ export function useSearchRegistryTokens(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error searching registry tokens: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: RegistryToken[] = await response.json();

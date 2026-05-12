@@ -40,11 +40,15 @@ export interface ListSearchPanelProps {
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
+  hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
+  hideCategoryFilter?: boolean;
+  hideFiltersButton?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
+  excludeFromCount?: string[];
 }
 
 /**
@@ -67,16 +71,24 @@ export default function ListSearchPanel({
   excludeS0 = false,
   restrictSeverityToLow = false,
   hideSeverityFilter = false,
+  hideStatusFilter = false,
   hideDeploymentFilter = false,
+  hideCategoryFilter = false,
+  hideFiltersButton = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
+  excludeFromCount = [],
 }: ListSearchPanelProps): JSX.Element {
+  const excluded = Object.fromEntries(excludeFromCount.map((k) => [k, undefined]));
   const filtersForCount = {
     ...filters,
     ...(hideSeverityFilter ? { severityId: undefined } : {}),
+    ...(hideStatusFilter ? { statusId: undefined } : {}),
     ...(hideDeploymentFilter ? { deploymentId: undefined } : {}),
+    ...(hideCategoryFilter ? { issueTypes: undefined } : {}),
+    ...excluded,
   };
   return (
     <ListSearchBar
@@ -86,10 +98,11 @@ export default function ListSearchPanel({
       isFiltersOpen={isFiltersOpen}
       onFiltersToggle={onFiltersToggle}
       activeFiltersCount={countListSearchAndFilters(
-        searchTerm,
+        "",
         filtersForCount,
       )}
       onClearFilters={onClearFilters}
+      hideFiltersButton={hideFiltersButton}
       isLoading={isProjectContextLoading}
       filtersContent={
         <ListFilters
@@ -100,7 +113,9 @@ export default function ListSearchPanel({
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter={hideSeverityFilter}
+          hideStatusFilter={hideStatusFilter}
           hideDeploymentFilter={hideDeploymentFilter}
+          hideCategoryFilter={hideCategoryFilter}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}
           isFetchingMoreDeployments={isFetchingMoreDeployments}

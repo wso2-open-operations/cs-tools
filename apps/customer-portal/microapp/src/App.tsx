@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import React from "react";
+import React, { useLayoutEffect } from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import SelectProjectPage from "@pages/SelectProjectPage";
 import MainLayout from "@components/layout/MainLayout";
@@ -25,20 +25,40 @@ import HomePage from "@pages/HomePage";
 import SupportPage from "@pages/SupportPage";
 import UsersPage from "@pages/UsersPage";
 import ProfilePage from "@pages/ProfilePage";
-import NotificationsPage from "@pages/NotificationsPage";
 import ChatPage from "@pages/ChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
-import AllItemsPage from "@root/src/pages/AllItemsPage";
+import AllItemsPage from "@pages/AllItemsPage";
 import CaseDetailPage from "@pages/CaseDetailPage";
 import ChatDetailPage from "@pages/ChatDetailPage";
 import ServiceDetailPage from "@pages/ServiceDetailPage";
 import ChangeDetailPage from "@pages/ChangeDetailPage";
 import EditUserPage from "@pages/EditUserPage";
+import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
+import UpdateProfileSettingsPage from "./pages/UpdateProfileSettingsPage";
+import { useScrollControl } from "./utils/others";
+import SecurityReportAnalysisDetailPage from "./pages/SecurityReportAnalysisDetailPage";
+import EngagementDetailPage from "./pages/EngagementDetailPage";
+import AnnouncementDetailPage from "./pages/AnnouncementDetailPage";
 
 const App: React.FC = () => {
+  useLayoutEffect(() => {
+    requestDeviceSafeAreaInsets((data) => {
+      if (data?.insets) {
+        const { top, right, bottom, left } = data.insets;
+
+        const root = document.documentElement;
+        root.style.setProperty("--safe-top", `${top}px`);
+        root.style.setProperty("--safe-right", `${right}px`);
+        root.style.setProperty("--safe-bottom", `${bottom}px`);
+        root.style.setProperty("--safe-left", `${left}px`);
+      }
+    });
+  }, []);
+
   return (
     <Router>
       <AppProvider>
+        <ScrollHandler />
         <Routes>
           <Route path="/select" element={<SelectProjectPage />} />
 
@@ -51,8 +71,10 @@ const App: React.FC = () => {
                 <Route path="invite" element={<EditUserPage mode="invite" />} />
                 <Route path="edit" element={<EditUserPage mode="edit" />} />
               </Route>
-              <Route path="/profile" element={<ProfilePage />} />
-              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/profile">
+                <Route element={<ProfilePage />} index />
+                <Route path="update" element={<UpdateProfileSettingsPage />} />
+              </Route>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/create" element={<CreateCasePage />} />
               <Route path="/cases">
@@ -71,6 +93,21 @@ const App: React.FC = () => {
                 <Route path="all" element={<AllItemsPage type="change" />} />
                 <Route path=":id" element={<ChangeDetailPage />} />
               </Route>
+              <Route path="/sras">
+                <Route path="all" element={<AllItemsPage type="sra" />} />
+                <Route path=":id" element={<SecurityReportAnalysisDetailPage />} />
+              </Route>
+              <Route path="/engagements">
+                <Route path="all" element={<AllItemsPage type="engagement" />} />
+                <Route path=":id" element={<EngagementDetailPage />} />
+              </Route>
+              <Route path="announcements">
+                <Route path="all" element={<AllItemsPage type="announcement" />} />
+                <Route path=":id" element={<AnnouncementDetailPage />} />
+              </Route>
+              <Route path="/multiple">
+                <Route path="all" element={<AllItemsPage type="multiple" />} />
+              </Route>
             </Route>
           </Route>
         </Routes>
@@ -80,3 +117,8 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+const ScrollHandler: React.FC = () => {
+  useScrollControl();
+  return null;
+};

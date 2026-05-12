@@ -610,3 +610,25 @@ public isolated function searchCaseActivities(string idToken, IdString caseId, C
 
     return csEntityClient->/cases/[caseId]/activities/search.post(payload, generateHeaders(idToken));
 }
+
+# Search instance usage statistics by criteria.
+#
+# + idToken - ID token for authorization
+# + payload - Instance usage statistics search payload containing search criteria for instance usage statistics
+# + return - Instance usage statistics response containing matching instance usage statistics or error
+public isolated function searchInstanceUsageStats(string idToken, InstanceUsageStatsPayload payload)
+    returns InstanceUsageStatsResponse|error {
+
+    return csEntityClient->/instances/usages/stats/search.post(payload, generateHeaders(idToken));
+}
+
+# Search instance metrics statistics by criteria.
+#
+# + idToken - ID token for authorization
+# + payload - Instance metrics statistics search payload containing search criteria for instance metrics statistics
+# + return - Instance metrics statistics response containing matching instance metrics statistics or error
+public isolated function searchInstanceMetricsStats(string idToken, InstanceMetricStatsPayload payload)
+    returns InstanceMetricStatsResponse|error {
+
+    return csEntityClient->/instances/metrics/stats/search.post(payload, generateHeaders(idToken));
+}

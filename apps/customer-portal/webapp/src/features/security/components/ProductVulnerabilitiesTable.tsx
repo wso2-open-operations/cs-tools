@@ -23,18 +23,31 @@ import ProductVulnerabilitiesTableHeader from "@features/security/components/Pro
 import ProductVulnerabilitiesFilters from "@features/security/components/ProductVulnerabilitiesFilters";
 import ProductVulnerabilitiesList from "@features/security/components/ProductVulnerabilitiesList";
 import {
+  PRODUCT_VULNERABILITIES_ALL_FETCH_LIMIT,
   PRODUCT_VULNERABILITIES_DEFAULT_ROWS_PER_PAGE,
   PRODUCT_VULNERABILITIES_SEARCH_DEBOUNCE_MS,
 } from "@features/security/constants/securityConstants";
-import type { ProductVulnerabilitiesTableProps } from "@features/security/types/security";
-import {
-  countProductVulnerabilityTableActiveFilters,
-} from "@features/security/utils/productVulnerabilitiesTable";
+import type {
+  ProductVulnerabilitiesTableProps,
+  ProductVulnerability,
+} from "@features/security/types/security";
+import { countProductVulnerabilityTableActiveFilters } from "@features/security/utils/productVulnerabilitiesTable";
+
+// Stable request object — fetches the full dataset once.
+// The BFF transparently paginates through the entity service in batches of 50.
+// Kept at module level so the React Query cache key is stable across re-renders.
+const FETCH_ALL_REQUEST = {
+  filters: {},
+  pagination: { offset: 0, limit: PRODUCT_VULNERABILITIES_ALL_FETCH_LIMIT },
+};
 
 /**
- * Product Vulnerabilities table using the same structure as the dashboard outstanding cases table.
- * Fetches data via POST /products/vulnerabilities/search.
- * @returns {JSX.Element}
+ * Product Vulnerabilities table.
+ *
+ * Architecture note:
+ * - All ~1500 records are fetched once via a single "fetch all" request.
+ * - The BFF handles batching to the entity service (which is capped at 50/request).
+ * - All filtering, sorting, and pagination are performed client-side for instant response.
  */
 const ProductVulnerabilitiesTable = ({
   onTotalRecordsChange,
@@ -53,6 +66,7 @@ const ProductVulnerabilitiesTable = ({
     PRODUCT_VULNERABILITIES_DEFAULT_ROWS_PER_PAGE,
   );
 
+  // ── Severity dropdown metadata ──────────────────────────────────────────────
   const { data: metaData } = useGetVulnerabilitiesMetaData();
   const severityOptions = useMemo(
     () =>
@@ -60,45 +74,111 @@ const ProductVulnerabilitiesTable = ({
     [metaData?.severities],
   );
 
-  const searchRequest = useMemo(
-    () => ({
-      filters: {
-        searchQuery: (debouncedSearch?.trim() || undefined) as
-          | string
-          | undefined,
-        severityId: filters.severityId ? Number(filters.severityId) : undefined,
-      },
-      pagination: {
-        offset: page * rowsPerPage,
-        limit: rowsPerPage,
-      },
-    }),
-    [debouncedSearch, filters, page, rowsPerPage],
+  // ── Full dataset (fetched once, all filtering/pagination done client-side) ───
+  const {
+    data: allData,
+    isLoading,
+    isError,
+  } = usePostProductVulnerabilitiesSearch(FETCH_ALL_REQUEST);
+
+  const allVulnerabilities = useMemo(
+    (): ProductVulnerability[] => allData?.productVulnerabilities ?? [],
+    [allData],
   );
 
-  const { data, isLoading, isError } =
-    usePostProductVulnerabilitiesSearch(searchRequest);
+  // ── Dropdown options ─────────────────────────────────────────────────────────
+  const productOptions = useMemo(() => {
+    const names = new Set<string>();
+    allVulnerabilities.forEach((v) => {
+      if (v.productName) names.add(v.productName);
+    });
+    return Array.from(names)
+      .sort()
+      .map((name) => ({ value: name, label: name }));
+  }, [allVulnerabilities]);
 
-  useEffect(() => {
-    if (data?.totalRecords !== undefined) {
-      onTotalRecordsChange?.(data.totalRecords);
+  const productVersionOptions = useMemo(() => {
+    if (!filters.productName) return [];
+    const versions = new Set<string>();
+    allVulnerabilities
+      .filter((v) => v.productName === filters.productName)
+      .forEach((v) => {
+        if (v.productVersion) versions.add(v.productVersion);
+      });
+    return Array.from(versions)
+      .sort()
+      .map((v) => ({ value: v, label: v }));
+  }, [allVulnerabilities, filters.productName]);
+
+  // ── Client-side filtering ────────────────────────────────────────────────────
+  const filteredVulnerabilities = useMemo((): ProductVulnerability[] => {
+    let items = allVulnerabilities;
+
+    if (filters.severityId) {
+      items = items.filter(
+        (v) => String(v.severity?.id) === String(filters.severityId),
+      );
     }
-  }, [data?.totalRecords, onTotalRecordsChange]);
+    if (filters.productName) {
+      items = items.filter(
+        (v) => v.productName === (filters.productName as string),
+      );
+    }
+    if (filters.productVersion) {
+      items = items.filter(
+        (v) => v.productVersion === (filters.productVersion as string),
+      );
+    }
+    if (debouncedSearch?.trim()) {
+      const q = debouncedSearch.trim().toLowerCase();
+      items = items.filter(
+        (v) =>
+          v.cveId?.toLowerCase().includes(q) ||
+          v.componentName?.toLowerCase().includes(q) ||
+          v.vulnerabilityId?.toLowerCase().includes(q),
+      );
+    }
+
+    return items;
+  }, [allVulnerabilities, filters, debouncedSearch]);
+
+  // ── Client-side pagination ───────────────────────────────────────────────────
+  const paginatedData = useMemo(() => {
+    const total = filteredVulnerabilities.length;
+    const offset = page * rowsPerPage;
+    return {
+      vulnerabilities: filteredVulnerabilities.slice(offset, offset + rowsPerPage),
+      totalRecords: total,
+    };
+  }, [filteredVulnerabilities, page, rowsPerPage]);
+
+  // Clamp the current page when the filtered dataset shrinks (e.g. after a
+  // filter change) so the table never shows an empty page while valid rows exist.
+  useEffect(() => {
+    const maxPage = Math.max(
+      Math.ceil(filteredVulnerabilities.length / rowsPerPage) - 1,
+      0,
+    );
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [filteredVulnerabilities.length, rowsPerPage, page]);
 
   useEffect(() => {
-    if (isError) onError?.(true);
+    onTotalRecordsChange?.(paginatedData.totalRecords);
+  }, [paginatedData.totalRecords, onTotalRecordsChange]);
+
+  useEffect(() => {
+    onError?.(isError);
   }, [isError, onError]);
 
-  const paginatedData = useMemo(() => {
-    if (!data) return undefined;
-    return {
-      vulnerabilities: data.productVulnerabilities,
-      totalRecords: data.totalRecords,
-    };
-  }, [data]);
-
+  // ── Handlers ────────────────────────────────────────────────────────────────
   const handleUpdateFilter = (field: string, value: string | number) => {
-    setFilters((prev) => ({ ...prev, [field]: value }));
+    setFilters((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(field === "productName" ? { productVersion: "" } : {}),
+    }));
     setPage(0);
   };
 
@@ -120,11 +200,11 @@ const ProductVulnerabilitiesTable = ({
   };
 
   const activeFilterCount = useMemo(
-    () =>
-      countProductVulnerabilityTableActiveFilters(searchInput, filters),
-    [filters, searchInput],
+    () => countProductVulnerabilityTableActiveFilters("", filters),
+    [filters],
   );
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
       <ProductVulnerabilitiesTableHeader
@@ -144,22 +224,24 @@ const ProductVulnerabilitiesTable = ({
         activeFiltersCount={activeFilterCount}
       />
 
-      {/* Filter dropdowns section */}
-      {isFilterOpen && (
+      {!isLoading && isFilterOpen && (
         <>
           <Divider sx={{ my: 2 }} />
           <Box sx={{ mb: 3 }}>
             <ProductVulnerabilitiesFilters
               filters={filters}
               severityOptions={severityOptions}
+              productOptions={productOptions}
+              productVersionOptions={productVersionOptions}
               onFilterChange={handleUpdateFilter}
+              onClearFilters={handleClearFilters}
             />
           </Box>
         </>
       )}
 
       <ProductVulnerabilitiesList
-        isLoading={isLoading || (!data && !isError)}
+        isLoading={isLoading}
         isError={isError}
         data={paginatedData}
         page={page}

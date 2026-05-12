@@ -14,51 +14,89 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Card, Grid, Stack, Typography, Button, Divider, useTheme, SearchBar } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { MetricWidget } from "@components/features/dashboard";
-import { UserListItem } from "@components/features/users";
+import { UserListItem, UserListItemSkeleton } from "@components/features/users";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { users } from "@src/services/users";
+import { useProject } from "@context/project";
+import { ErrorBoundary } from "@components/core";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { MOCK_METRICS, MOCK_ROLES, MOCK_USERS } from "@src/mocks/data/users";
+import { MOCK_ROLES } from "@src/mocks/data/users";
+import type { Role } from "@src/types";
+import EmptyState from "../components/shared/EmptyState";
+import { useNotify } from "../context/snackbar";
+
+type UserActionFeedbackState = {
+  action?: "invite" | "edit" | "delete";
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  roles?: Role[];
+};
 
 export default function UsersPage() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const notify = useNotify();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { projectId } = useProject();
+  const { data } = useQuery(users.all(projectId!));
+  const [highlightedUserEmail, setHighlightedUserEmail] = useState<string>();
 
-  const baseRoute = location.pathname;
-  const searchValue = searchParams.get("search") ?? "";
-  const users = MOCK_USERS.filter((item) => item.name.toLowerCase().includes(searchValue));
+  const total = data?.length;
+  const registered = data?.filter((user) => user.status === "registered").length;
+  const invited = data?.filter((user) => user.status === "invited").length;
+  const admins = data?.filter((user) => user.roles.includes("Admin User")).length;
 
-  const updateParams = (updates: Record<string, string | null>) => {
-    const next = new URLSearchParams(searchParams);
+  const [search, setSearch] = useState("");
 
-    Object.entries(updates).forEach(([key, value]) => {
-      if (!value) {
-        next.delete(key);
-      } else {
-        next.set(key, value);
-      }
-    });
+  useEffect(() => {
+    const feedback = (location.state ?? {}) as UserActionFeedbackState;
+    if (!feedback.action || !feedback.email) return;
 
-    navigate(`${baseRoute}?${next.toString()}`, { replace: true });
-  };
+    const userDisplayName =
+      feedback.firstName && feedback.lastName ? `${feedback.firstName} ${feedback.lastName}` : feedback.email;
+
+    if (feedback.action === "invite") {
+      notify.success(`Invitation sent to ${feedback.email}.`);
+    } else if (feedback.action === "edit") {
+      const rolesMessage = feedback.roles?.length ? ` Roles: ${feedback.roles.join(", ")}.` : "";
+      notify.success(`Updated ${userDisplayName}.${rolesMessage}`);
+    } else if (feedback.action === "delete") {
+      notify.success(`Removed ${userDisplayName} from project.`);
+    }
+
+    setHighlightedUserEmail(feedback.email);
+    const timeoutId = window.setTimeout(() => setHighlightedUserEmail(undefined), 4000);
+
+    navigate(location.pathname, { replace: true, state: null });
+    return () => window.clearTimeout(timeoutId);
+  }, [location.pathname, location.state, navigate, notify]);
 
   return (
     <>
       <Grid spacing={1.5} container>
-        {MOCK_METRICS.map((props, index) => (
-          <Grid size={4}>
-            <MetricWidget key={index} {...props} size="small" base />
-          </Grid>
-        ))}
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Total" value={total} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Registered" value={registered} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Invited" value={invited} />
+        </Grid>
+        <Grid size={3}>
+          <MetricWidget base size="small" label="Admins" value={admins} />
+        </Grid>
         <Grid size={12}>
           <SearchBar
             size="small"
             placeholder="Search Users"
-            value={searchValue}
-            onChange={(e) => updateParams({ ["search"]: e.target.value || null })}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             sx={{ mt: 1, bgcolor: "background.paper" }}
             fullWidth
           />
@@ -71,12 +109,54 @@ export default function UsersPage() {
         </Stack>
         <Divider />
         <Stack gap={2} pt={1}>
-          {users.map((props, index) => (
-            <UserListItem key={index} {...props} />
-          ))}
+          <ErrorBoundary
+            fallback={<UsersListContentSkeleton />}
+            onError={() => notify.error("Failed to load users. Try again later.")}
+          >
+            <Suspense fallback={<UsersListContentSkeleton />}>
+              <UsersListContent search={search} highlightedUserEmail={highlightedUserEmail} />
+            </Suspense>
+          </ErrorBoundary>
         </Stack>
       </Card>
       <UserRolesInfo />
+    </>
+  );
+}
+
+function UsersListContent({ search, highlightedUserEmail }: { search: string; highlightedUserEmail?: string }) {
+  const { projectId } = useProject();
+  const { data: usersData } = useSuspenseQuery(users.all(projectId!));
+
+  const data = useMemo(() => {
+    if (!search) return usersData;
+
+    const normalizedSearch = search.toLowerCase();
+
+    return usersData.filter(
+      (user) =>
+        user.firstName.toLowerCase().includes(normalizedSearch) ||
+        user.lastName.toLowerCase().includes(normalizedSearch),
+    );
+  }, [usersData, search]);
+
+  if (data.length === 0) return <EmptyState title="No users found" />;
+
+  return (
+    <>
+      {data.map((props) => (
+        <UserListItem key={props.id} isHighlighted={props.email === highlightedUserEmail} {...props} />
+      ))}
+    </>
+  );
+}
+
+function UsersListContentSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 10 }).map((_, index) => (
+        <UserListItemSkeleton key={index} />
+      ))}
     </>
   );
 }
@@ -102,7 +182,7 @@ function UserRolesInfo() {
       <Typography variant="subtitle1" fontWeight="medium">
         User Roles
       </Typography>
-      <Stack gap={0.3} mt={0.5}>
+      <Stack gap={1} mt={0.5}>
         {MOCK_ROLES.map((role) => (
           <Typography variant="subtitle2" fontWeight="medium">
             {role.name}:&nbsp;

@@ -14,14 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Card, Typography, Box, Skeleton, colors } from "@wso2/oxygen-ui";
+import { Card, Typography, Box, Skeleton, colors, alpha } from "@wso2/oxygen-ui";
+import { Inbox } from "@wso2/oxygen-ui-icons-react";
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
-import { useMemo, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import { OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA } from "@/features/dashboard/constants/dashboard";
 import {
@@ -60,8 +61,10 @@ export const CasesTrendChart = ({
   isLoading,
   isError,
   centerContent = false,
+  onSliceClick,
 }: CasesTrendChartProps): JSX.Element => {
   const isDarkMode = useDarkMode();
+  const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
   // safe data
   const safeData = data ?? EMPTY_CASES_TREND_DATA;
   // error grey
@@ -80,6 +83,12 @@ export const CasesTrendChart = ({
     () =>
       new Map<string, string>([
         [
+          normalizeCategory("consultancy"),
+          colors.green?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
+            colors.green?.[300] ??
+            "#86EFAC",
+        ],
+        [
           normalizeCategory("onboarding"),
           colors.blue?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
             colors.blue?.[300] ??
@@ -92,22 +101,10 @@ export const CasesTrendChart = ({
             "#FDBA74",
         ],
         [
-          normalizeCategory("services"),
-          colors.green?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-            colors.green?.[300] ??
-            "#86EFAC",
-        ],
-        [
-          normalizeCategory("follow-up"),
+          normalizeCategory("follow up"),
           colors.purple?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
             colors.purple?.[300] ??
-            "#D8B4FE",
-        ],
-        [
-          normalizeCategory("improvements"),
-          colors.brown?.[DASHBOARD_CHART_DARK_MODE_SHADE] ??
-            colors.brown?.[300] ??
-            "#D6BFA8",
+            "#C4B5FD",
         ],
       ]),
     [],
@@ -134,6 +131,8 @@ export const CasesTrendChart = ({
     chartData.length,
     total,
   );
+
+  const isEmpty = !isLoading && !isError && !!data && safeData.total === 0;
 
   return (
     <Card sx={{ p: 2, height: "100%" }}>
@@ -178,55 +177,74 @@ export const CasesTrendChart = ({
             ))}
           </Box>
         </>
+      ) : isEmpty ? (
+        <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX + 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
+          <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.08), display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Inbox size={24} color={colors.grey?.[400] ?? "#9CA3AF"} />
+          </Box>
+          <Typography variant="body2" color="text.disabled">No {DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS} found</Typography>
+        </Box>
       ) : (
         <>
           <Box
             sx={{
               height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
               position: "relative",
+              opacity: isError ? 0.3 : 1,
+              filter: isError ? "grayscale(1)" : "none",
+              "& *:focus": { outline: "none" },
+              ...(onSliceClick && !isError && {
+                "& .recharts-pie-sector": { cursor: "pointer" },
+              }),
             }}
           >
-            <Box
-              sx={{
-                height: "100%",
-                opacity: isError ? 0.3 : 1,
-                filter: isError ? "grayscale(1)" : "none",
-                "& *:focus": { outline: "none" },
-                position: "relative",
-              }}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart
-                  legend={{ show: false }}
-                  tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart
+                legend={{ show: false }}
+                tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
+              >
+                <Pie
+                  data={displayChartData.filter((d) => d.value > 0)}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={0}
+                  minAngle={15}
+                  dataKey="value"
+                  nameKey="name"
+                  startAngle={90}
+                  endAngle={-270}
+                  label={false}
+                  labelLine={false}
+                  onMouseEnter={
+                    onSliceClick && !isError
+                      ? (_data: unknown, index: number) => setActivePieIndex(index)
+                      : undefined
+                  }
+                  onMouseLeave={onSliceClick && !isError ? () => setActivePieIndex(undefined) : undefined}
+                  onClick={
+                    onSliceClick && !isError
+                      ? (data: { name?: string; ids?: string[]; id?: string } | unknown) => {
+                          const entry = data as { name?: string; ids?: string[]; id?: string };
+                          const id = entry?.ids?.join(",") ?? entry?.id ?? entry?.name;
+                          if (id) onSliceClick(String(id));
+                        }
+                      : undefined
+                  }
                 >
-                  <Pie
-                    data={displayChartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={0}
-                    minAngle={15}
-                    dataKey="value"
-                    nameKey="name"
-                    startAngle={90}
-                    endAngle={-270}
-                    label={false}
-                    labelLine={false}
-                  >
-                    {displayChartData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={entry.color}
-                        stroke="none"
-                        opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1}
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </Box>
+                  {displayChartData.filter((d) => d.value > 0).map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color}
+                      stroke={activePieIndex === index ? entry.color : "none"}
+                      strokeWidth={activePieIndex === index ? 3 : 0}
+                      opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
             <Box
               sx={{
                 position: "absolute",
@@ -239,19 +257,13 @@ export const CasesTrendChart = ({
             >
               {isError ? (
                 <>
-                  <Typography variant="h4" color="text.disabled">
-                    {centerValue}
-                  </Typography>
-                  <Typography variant="caption" color="text.disabled">
-                    {DASHBOARD_CHART_CAPTION_TOTAL}
-                  </Typography>
+                  <Typography variant="h4" color="text.disabled">{centerValue}</Typography>
+                  <Typography variant="caption" color="text.disabled">{DASHBOARD_CHART_CAPTION_TOTAL}</Typography>
                 </>
               ) : (
                 <>
                   <Typography variant="h4">{centerValue}</Typography>
-                  <Typography variant="caption">
-                    {DASHBOARD_CHART_CAPTION_TOTAL}
-                  </Typography>
+                  <Typography variant="caption">{DASHBOARD_CHART_CAPTION_TOTAL}</Typography>
                 </>
               )}
             </Box>
@@ -268,9 +280,11 @@ export const CasesTrendChart = ({
                 name: item.name,
                 value: item.value,
                 color: item.color,
+                id: item.ids?.join(",") ?? item.id ?? item.name,
               }))}
               isError={isError}
               showValues
+              onItemClick={onSliceClick && !isError ? onSliceClick : undefined}
             />
           </Box>
         </>

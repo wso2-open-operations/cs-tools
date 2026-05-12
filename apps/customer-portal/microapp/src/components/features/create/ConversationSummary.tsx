@@ -14,18 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-  Box,
-  Card,
-  colors,
-  pxToRem,
-  Stack,
-  Typography,
-} from "@wso2/oxygen-ui";
-import { BookOpen, ChevronDown, CircleCheck, MessagesSquare } from "@wso2/oxygen-ui-icons-react";
+import { Accordion, AccordionDetails, AccordionSummary, Box, Card, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { ChevronDown, MessagesSquare } from "@wso2/oxygen-ui-icons-react";
 import { MessageBubble, type ChatMessage } from "../chat";
 
 export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
@@ -47,38 +37,6 @@ export function ConversationSummary({ messages }: { messages: ChatMessage[] }) {
           <Typography variant="h6" fontWeight="medium">
             {messages.length}
           </Typography>
-        </Stack>
-
-        {/* TODO: Integrate real data for troubleshooting and articles.
-            Currently hardcoded to N/A as these metrics are not yet 
-            available in the parent data source.
-        */}
-        <Stack>
-          <Typography variant="caption" color="text.secondary">
-            Troubleshooting attempts
-          </Typography>
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Box color="success.main">
-              <CircleCheck size={pxToRem(16)} />
-            </Box>
-
-            <Typography variant="body2" fontWeight="medium">
-              N/A Steps Completed
-            </Typography>
-          </Stack>
-        </Stack>
-        <Stack>
-          <Typography variant="caption" color="text.secondary">
-            Articles Reviewed
-          </Typography>
-          <Stack direction="row" alignItems="center" gap={1}>
-            <Box color={colors.blue[500]}>
-              <BookOpen size={pxToRem(16)} />
-            </Box>
-            <Typography variant="body2" fontWeight="medium">
-              N/A Articles Suggested
-            </Typography>
-          </Stack>
         </Stack>
         {messages.length > 0 && (
           <Accordion

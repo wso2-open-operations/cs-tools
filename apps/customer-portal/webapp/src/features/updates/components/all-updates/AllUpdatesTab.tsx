@@ -19,18 +19,20 @@ import {
   Button,
   Card,
   CardContent,
+  CircularProgress,
   FormControl,
   Grid,
   InputLabel,
   MenuItem,
-  Paper,
   Select,
+  Skeleton,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText } from "@wso2/oxygen-ui-icons-react";
+import { Download } from "@wso2/oxygen-ui-icons-react";
+import searchingSvg from "@assets/search/searching.svg";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { useGetProductUpdateLevels } from "@features/updates/api/useGetProductUpdateLevels";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
@@ -38,12 +40,12 @@ import { PendingUpdatesList } from "@features/updates/components/pending-updates
 import PendingUpdatesListSkeleton from "@features/updates/components/pending-updates/PendingUpdatesListSkeleton";
 import EmptyState from "@components/empty-state/EmptyState";
 import error500Svg from "@assets/error/error-500.svg";
-import UpdateLevelsReportModal from "@features/updates/components/all-updates/UpdateLevelsReportModal";
 import type {
   AllUpdatesTabFilterState,
   AllUpdatesTabSearchParams,
 } from "@features/updates/types/updates";
 import {
+  ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL,
   ALL_UPDATES_END_LEVEL_LABEL,
   ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE,
   ALL_UPDATES_IDLE_HINT,
@@ -57,11 +59,13 @@ import {
   ALL_UPDATES_START_LEVEL_LABEL,
   ALL_UPDATES_TAB_INITIAL_FILTER,
   ALL_UPDATES_VERSION_LABEL,
-  ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL,
   ALL_UPDATES_EMPTY_SEARCH_MESSAGE,
 } from "@features/updates/constants/updatesConstants";
 import { EMPTY_DROPDOWN_PLACEHOLDER } from "@constants/common";
-import { getUpdateLevelsReportData } from "@features/updates/utils/updateLevelsReportPdf";
+import {
+  generateUpdateLevelsReportPdf,
+  getUpdateLevelsReportData,
+} from "@features/updates/utils/updateLevelsReportPdf";
 import {
   getNextAllUpdatesFilterAfterChange,
   getProductNamesFromProductLevels,
@@ -80,13 +84,32 @@ import {
 export default function AllUpdatesTab(): JSX.Element {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const [urlParams, setUrlParams] = useSearchParams();
 
-  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(
-    ALL_UPDATES_TAB_INITIAL_FILTER,
-  );
-  const [reportModalOpen, setReportModalOpen] = useState(false);
-  const [searchParams, setSearchParams] =
-    useState<AllUpdatesTabSearchParams | null>(null);
+  const [filter, setFilter] = useState<AllUpdatesTabFilterState>(() => {
+    const pn = urlParams.get("pn") ?? "";
+    const pv = urlParams.get("pv") ?? "";
+    const sl = urlParams.get("sl") ?? "";
+    const el = urlParams.get("el") ?? "";
+    return pn || pv || sl || el
+      ? { productName: pn, productVersion: pv, startLevel: sl, endLevel: el }
+      : ALL_UPDATES_TAB_INITIAL_FILTER;
+  });
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [searchParams, setSearchParams] = useState<AllUpdatesTabSearchParams | null>(() => {
+    const pn = urlParams.get("pn");
+    const pv = urlParams.get("pv");
+    const sl = urlParams.get("sl");
+    const el = urlParams.get("el");
+    if (pn && pv && sl && el) {
+      const start = Number(sl);
+      const end = Number(el);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        return { productName: pn, productVersion: pv, startingUpdateLevel: start, endingUpdateLevel: end };
+      }
+    }
+    return null;
+  });
 
   const {
     data: productLevelsData,
@@ -124,7 +147,7 @@ export default function AllUpdatesTab(): JSX.Element {
     if (!filter.startLevel || startLevelOptions.length === 0) return [];
     const start = Number(filter.startLevel);
     if (!Number.isFinite(start)) return [];
-    return startLevelOptions.filter((level) => level >= start);
+    return startLevelOptions.filter((level) => level > start);
   }, [startLevelOptions, filter.startLevel]);
 
   useEffect(() => {
@@ -156,7 +179,17 @@ export default function AllUpdatesTab(): JSX.Element {
       startingUpdateLevel: result.start,
       endingUpdateLevel: result.end,
     });
-  }, [filter]);
+    setUrlParams(
+      { pn: filter.productName, pv: filter.productVersion, sl: String(result.start), el: String(result.end) },
+      { replace: true },
+    );
+  }, [filter, setUrlParams]);
+
+  const handleClearFilters = useCallback(() => {
+    setFilter(ALL_UPDATES_TAB_INITIAL_FILTER);
+    setSearchParams(null);
+    setUrlParams({}, { replace: true });
+  }, [setUrlParams]);
 
   const handleView = useCallback(
     (levelKey: string) => {
@@ -190,14 +223,51 @@ export default function AllUpdatesTab(): JSX.Element {
     }
   }, [searchData, searchParams]);
 
-  const handleViewReport = useCallback(() => {
+  const handleDownloadReport = useCallback(async () => {
     if (!reportData) return;
-    setReportModalOpen(true);
+    setIsGeneratingPdf(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    try {
+      generateUpdateLevelsReportPdf(reportData);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   }, [reportData]);
 
   const canSearch = validateAllUpdatesFilter(filter).valid;
 
-  const canViewReport = !!reportData;
+  const hasActiveFilter =
+    filter.productName !== "" ||
+    filter.productVersion !== "" ||
+    filter.startLevel !== "" ||
+    filter.endLevel !== "";
+  const canClear = hasActiveFilter || searchParams !== null;
+
+  if (isProductLevelsLoading) {
+    return (
+      <Stack spacing={3} sx={{ width: "100%" }}>
+        <Card variant="outlined">
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="subtitle1" sx={{ mb: 2 }}>
+              {ALL_UPDATES_SECTION_TITLE}
+            </Typography>
+            <Grid container spacing={2}>
+              {[1, 2, 3, 4].map((i) => (
+                <Grid key={i} size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Skeleton variant="rounded" height={40} />
+                </Grid>
+              ))}
+            </Grid>
+            <Box sx={{ mt: 3, display: "flex", gap: 2 }}>
+              <Skeleton variant="rounded" width={120} height={36} />
+              <Skeleton variant="rounded" width={160} height={36} />
+            </Box>
+          </CardContent>
+        </Card>
+        <Skeleton variant="rounded" height={240} />
+      </Stack>
+    );
+  }
 
   if (isProductLevelsError) {
     return (
@@ -210,7 +280,12 @@ export default function AllUpdatesTab(): JSX.Element {
           py: 5,
         }}
       >
-        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
+        <img
+          src={error500Svg}
+          alt=""
+          aria-hidden="true"
+          style={{ width: 200, height: "auto" }}
+        />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {ALL_UPDATES_FILTER_OPTIONS_ERROR_MESSAGE}
         </Typography>
@@ -220,9 +295,9 @@ export default function AllUpdatesTab(): JSX.Element {
 
   return (
     <Stack spacing={3} sx={{ width: "100%" }}>
-      <Card variant="outlined" sx={{ borderRadius: 0 }}>
+      <Card variant="outlined">
         <CardContent sx={{ p: 3 }}>
-          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 2 }}>
             {ALL_UPDATES_SECTION_TITLE}
           </Typography>
           <Grid container spacing={2}>
@@ -362,7 +437,7 @@ export default function AllUpdatesTab(): JSX.Element {
               </FormControl>
             </Grid>
           </Grid>
-          <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+          <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
             <Button
               variant="contained"
               color="warning"
@@ -372,24 +447,49 @@ export default function AllUpdatesTab(): JSX.Element {
               {ALL_UPDATES_SEARCH_BUTTON_LABEL}
             </Button>
             <Button
+              variant="text"
+              onClick={handleClearFilters}
+              disabled={!canClear}
+            >
+              {ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL}
+            </Button>
+            <Button
               variant="outlined"
               color="warning"
-              startIcon={<FileText size={18} />}
-              onClick={handleViewReport}
-              disabled={!canViewReport}
+              startIcon={
+                isGeneratingPdf ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <Download size={18} />
+                )
+              }
+              onClick={handleDownloadReport}
+              disabled={!reportData || isGeneratingPdf}
             >
-              {ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL}
+              {isGeneratingPdf ? "Generating..." : "Download Report"}
             </Button>
           </Stack>
         </CardContent>
       </Card>
 
       {!searchParams ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
-          <Typography variant="body2" color="text.secondary">
+        <Box sx={{ textAlign: "center", py: 8 }}>
+          <img
+            src={searchingSvg}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 180, height: "auto", opacity: 0.85 }}
+          />
+          <Typography
+            variant="body1"
+            sx={{ mt: 2.5, fontWeight: 500, color: "text.secondary" }}
+          >
+            Search for updates
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "nowrap" }}>
             {ALL_UPDATES_IDLE_HINT}
           </Typography>
-        </Paper>
+        </Box>
       ) : isSearchLoading ? (
         <PendingUpdatesListSkeleton />
       ) : isSearchError ? (
@@ -402,7 +502,12 @@ export default function AllUpdatesTab(): JSX.Element {
             py: 5,
           }}
         >
-          <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 200, height: "auto" }} />
+          <img
+            src={error500Svg}
+            alt=""
+            aria-hidden="true"
+            style={{ width: 200, height: "auto" }}
+          />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {ALL_UPDATES_SEARCH_ERROR_MESSAGE}
           </Typography>
@@ -417,11 +522,6 @@ export default function AllUpdatesTab(): JSX.Element {
         />
       )}
 
-      <UpdateLevelsReportModal
-        open={reportModalOpen}
-        reportData={reportData}
-        onClose={() => setReportModalOpen(false)}
-      />
     </Stack>
   );
 }

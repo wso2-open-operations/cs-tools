@@ -15,101 +15,238 @@
 // under the License.
 
 import {
-  FilterSlotBuilder,
-  ItemCardExtended,
-  type FilterSlotBuilderProps,
+  CaseListContent,
+  ChangeRequestListContent,
+  ChatListContent,
+  FilterSlotBuilderSkeleton,
+  FilterSlotContent,
+  ItemCardExtendedSkeleton,
+  ServiceRequestListContent,
   type ItemCardProps,
 } from "@components/features/support";
-import { Stack } from "@wso2/oxygen-ui";
-import { useSearchParams } from "react-router-dom";
+import { Box, Skeleton, Stack } from "@wso2/oxygen-ui";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useLayout } from "@context/layout";
-import { useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { ErrorBoundary } from "../components/core";
+import { SecurityReportAnalysisListContent } from "../components/features/support/SecurityReportAnalysisListContent";
+import { EngagementListContent } from "../components/features/support/EngagementListContent";
+import ErrorState from "../components/shared/ErrorState";
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
+import { STATUS_MODE_TYPES } from "../utils/filters";
+import EmptyState from "../components/shared/EmptyState";
+import { AnnouncementListContent } from "../components/features/support/AnnouncementListContent";
 
-import { MOCK_EXTENDED_ITEMS } from "@src/mocks/data/support";
+export type ModeType = (OfStatusModeType | OfSeverityModeType) & {
+  title: string;
+};
 
-export default function AllItemsPage({ type }: { type: ItemCardProps["type"] }) {
+export interface OfStatusModeType {
+  type: "status";
+  status: "action_required" | "outstanding" | "resolved";
+}
+
+export interface OfSeverityModeType {
+  type: "severity";
+  id: string | number;
+}
+
+export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "multiple" }) {
   const [searchParams] = useSearchParams();
-  const layout = useLayout();
-
+  const location = useLocation();
   const filter = searchParams.get("filter") ?? "all";
   const search = (searchParams.get("search") ?? "").toLowerCase();
+  const { reset } = useQueryErrorResetBoundary();
 
-  const items = MOCK_EXTENDED_ITEMS[type].filter((item) => {
-    const matchesFilter = !filter || filter === "all" ? true : item.status === filter;
+  const mode: ModeType | undefined = location.state?.mode;
 
-    const matchesSearch =
-      !search ||
-      item.id.toLowerCase().includes(search) ||
-      item.title.toLowerCase().includes(search) ||
-      item.description.toLowerCase().includes(search);
+  const { setTitleOverride } = useLayout();
 
-    return matchesFilter && matchesSearch;
-  });
+  useEffect(() => {
+    if (!mode) return;
 
-  useLayoutEffect(() => {
-    layout.setSubtitleSlotOverride(`${items.length} of ${MOCK_EXTENDED_ITEMS[type].length}`);
+    setTitleOverride(mode.title);
 
     return () => {
-      layout.setSubtitleSlotOverride(null);
+      setTitleOverride(undefined);
     };
-  });
+  }, [mode]);
+
+  const resolvedTypes =
+    type === "multiple" ? (mode?.type === "status" ? (STATUS_MODE_TYPES[mode.status] ?? []) : []) : type;
 
   return (
     <Stack gap={2}>
-      {items.map((item, index) => (
-        <ItemCardExtended key={index} {...item} />
-      ))}
+      <ErrorBoundary
+        fallback={(_error, resetErrorBoundary) => (
+          <ErrorState
+            onRetry={() => {
+              reset();
+              resetErrorBoundary();
+            }}
+          />
+        )}
+      >
+        <ItemsListContent type={resolvedTypes} filter={filter} search={search} />
+      </ErrorBoundary>
     </Stack>
   );
 }
 
-const config: Record<ItemCardProps["type"] | "notifications", FilterSlotBuilderProps> = {
-  case: {
-    searchPlaceholder: "Search cases by ID, title, or description...",
-    tabs: [
-      { label: "Open", value: "open" },
-      { label: "In Progress", value: "in progress" },
-      { label: "Waiting", value: "waiting" },
-      { label: "Resolved", value: "resolved" },
-      { label: "Closed", value: "closed" },
-    ],
-  },
-  chat: {
-    searchPlaceholder: "Search chats by ID, title, or message...",
-    tabs: [
-      { label: "Active", value: "active" },
-      { label: "Resolved", value: "resolved" },
-    ],
-  },
-  service: {
-    searchPlaceholder: "Search requests by ID, title, or category...",
-    tabs: [
-      { label: "In Progress", value: "in progress" },
-      { label: "Approved", value: "approved" },
-      { label: "Open", value: "open" },
-      { label: "Closed", value: "closed" },
-    ],
-  },
-  change: {
-    searchPlaceholder: "Search requests by ID, title, or category...",
-    tabs: [
-      { label: "In Progress", value: "in progress" },
-      { label: "Scheduled", value: "scheduled" },
-      { label: "Approved", value: "approved" },
-      { label: "Draft", value: "draft" },
-    ],
-  },
-  notifications: {
-    searchPlaceholder: "Search Notifications",
-    tabs: [
-      { label: "Unread", value: "unread" },
-      { label: "Cases", value: "case" },
-      { label: "Service Requests", value: "service" },
-      { label: "Change Requests", value: "change" },
-    ],
-  },
-};
+function ItemsListContentSingle({
+  type,
+  filter,
+  search,
+  mode,
+  grouped,
+  onCountChange,
+}: {
+  type: ItemCardProps["type"];
+  filter: string;
+  search: string;
+  mode?: ModeType;
+  grouped?: boolean;
+  onCountChange?: (count: number | undefined) => void;
+}) {
+  switch (type) {
+    case "case":
+      return (
+        <CaseListContent filter={filter} search={search} mode={mode} grouped={grouped} onCountChange={onCountChange} />
+      );
+    case "chat":
+      return <ChatListContent filter={filter} search={search} />;
+    case "service":
+      return (
+        <ServiceRequestListContent
+          filter={filter}
+          search={search}
+          mode={mode}
+          grouped={grouped}
+          onCountChange={onCountChange}
+        />
+      );
+    case "change":
+      return (
+        <ChangeRequestListContent
+          filter={filter}
+          search={search}
+          mode={mode}
+          grouped={grouped}
+          onCountChange={onCountChange}
+        />
+      );
+    case "sra":
+      return (
+        <SecurityReportAnalysisListContent
+          filter={filter}
+          search={search}
+          mode={mode}
+          grouped={grouped}
+          onCountChange={onCountChange}
+        />
+      );
+    case "engagement":
+      return (
+        <EngagementListContent
+          filter={filter}
+          search={search}
+          mode={mode}
+          grouped={grouped}
+          onCountChange={onCountChange}
+        />
+      );
+    case "announcement":
+      return <AnnouncementListContent filter={filter} search={search} />;
+    default:
+      return null;
+  }
+}
 
-export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] | "notifications" }) {
-  return <FilterSlotBuilder {...config[type]} />;
+function ItemsListContent({
+  type,
+  filter,
+  search,
+}: {
+  type: ItemCardProps["type"] | ItemCardProps["type"][];
+  filter: string;
+  search: string;
+}) {
+  const location = useLocation();
+  const mode: ModeType | undefined = location.state?.mode;
+
+  const types = Array.isArray(type) ? type : [type];
+  const grouped = Array.isArray(type);
+
+  const [counts, setCounts] = useState<Record<number, number | undefined>>({});
+
+  const handleCountChange = useCallback((index: number, count: number | undefined) => {
+    setCounts((prev) => ({ ...prev, [index]: count }));
+  }, []);
+
+  const allSettled = types.every((_, i) => counts[i] !== undefined);
+  const allEmpty = allSettled && types.every((_, i) => counts[i] === 0);
+
+  return (
+    <>
+      {allEmpty && <EmptyState />}
+      <Box sx={{ display: allEmpty ? "none" : "contents" }}>
+        {types.map((type, index) => (
+          <ItemsListContentSingle
+            key={index}
+            type={type}
+            filter={filter}
+            search={search}
+            mode={mode}
+            grouped={grouped}
+            onCountChange={(count) => handleCountChange(index, count)}
+          />
+        ))}
+      </Box>
+    </>
+  );
+}
+
+export function FilterAppBarSlot({ type }: { type: ItemCardProps["type"] }) {
+  const location = useLocation();
+  const mode: ModeType | undefined = location.state?.mode;
+
+  const showTabs = useMemo(() => {
+    if (mode) {
+      return false;
+    }
+    return true;
+  }, [mode]);
+
+  return (
+    <ErrorBoundary fallback={<FilterSlotBuilderSkeleton />}>
+      <FilterSlotContent type={type} state={location.state} showTabs={showTabs} />
+    </ErrorBoundary>
+  );
+}
+
+export function ItemsListContentSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 10 }).map((_, index) => (
+        <ItemCardExtendedSkeleton key={index} />
+      ))}
+    </>
+  );
+}
+
+export function usePaginationSubtitleOverride(count?: number | null, total?: number | null) {
+  const layout = useLayout();
+  const disabled = count === null && total === null;
+  const data = count !== undefined && total !== undefined;
+
+  useLayoutEffect(() => {
+    if (!disabled)
+      layout.setSubtitleSlotOverride(
+        data ? `${count} of ${total}` : <Skeleton variant="text" width={50} height={20} />,
+      );
+
+    return () => layout.setSubtitleSlotOverride(null);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count, total]);
 }

@@ -16,10 +16,11 @@
 
 import type { ChatMessageCardProps } from "@features/support/types/supportComponents";
 import { Box, Paper } from "@wso2/oxygen-ui";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { JSX } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linkifyBareUrls } from "@features/support/utils/support";
 
 const SAFE_PROTOCOLS = ["http:", "https:"];
 
@@ -125,6 +126,7 @@ export default function ChatMessageCard({
   onImageClick,
 }: ChatMessageCardProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null);
+  const linkedHtml = useMemo(() => linkifyBareUrls(htmlContent), [htmlContent]);
 
   const setImageA11yAttributes = useCallback((root: HTMLDivElement) => {
     const images = root.querySelectorAll("img");
@@ -132,6 +134,18 @@ export default function ChatMessageCard({
       image.setAttribute("tabindex", "0");
       image.setAttribute("role", "button");
       image.setAttribute("aria-label", "Open image preview");
+    });
+  }, []);
+
+  const setAnchorAttributes = useCallback((root: HTMLDivElement) => {
+    const anchors = root.querySelectorAll("a");
+    anchors.forEach((anchor) => {
+      const href = anchor.getAttribute("href") ?? "";
+      if (!isSafeHref(href)) {
+        return;
+      }
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
     });
   }, []);
 
@@ -170,6 +184,7 @@ export default function ChatMessageCard({
     const el = contentRef.current;
     if (!el) return;
     setImageA11yAttributes(el);
+    setAnchorAttributes(el);
     el.addEventListener("click", handleClick);
     el.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -180,6 +195,7 @@ export default function ChatMessageCard({
     handleClick,
     handleKeyDown,
     setImageA11yAttributes,
+    setAnchorAttributes,
     htmlContent,
     markdownContent,
     renderAsMarkdown,
@@ -198,6 +214,7 @@ export default function ChatMessageCard({
         minHeight: "auto",
         bgcolor: isCurrentUser ? primaryBg : "background.paper",
         minWidth: 0,
+        overflow: "hidden",
       }}
     >
       <Box
@@ -205,7 +222,10 @@ export default function ChatMessageCard({
           fontSize: "0.875rem",
           lineHeight: 1.6,
           overflowX: "auto",
-          maxWidth: "100%",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
+          width: "100%",
+          minWidth: 0,
           "& h1": {
             fontSize: "1.125rem",
             fontWeight: 600,
@@ -235,7 +255,7 @@ export default function ChatMessageCard({
           "& p": {
             margin: "0 0 0.25em 0",
             whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
+            overflowWrap: "anywhere",
           },
           "& p:last-child": { marginBottom: 0 },
           "& a": {
@@ -279,23 +299,17 @@ export default function ChatMessageCard({
             fontSize: "inherit",
             backgroundColor: "action.hover",
             px: 1,
-            py: 0.75,
+            py: 0.25,
             whiteSpace: "pre",
-            wordBreak: "normal",
-            display: "block",
-            width: "max-content",
-            minWidth: "100%",
-            boxSizing: "border-box",
           },
           "& pre": {
             overflowX: "auto",
-            maxWidth: "100%",
             whiteSpace: "pre",
-            width: "max-content",
-            minWidth: "100%",
             backgroundColor: "action.disabledBackground",
-            boxSizing: "border-box",
             m: 0,
+            p: 1,
+            minWidth: 0,
+            maxWidth: "100%",
           },
           "& pre code": {
             backgroundColor: "transparent",
@@ -304,11 +318,16 @@ export default function ChatMessageCard({
         ref={contentRef}
       >
         {renderAsMarkdown ? (
-          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-            {markdownContent ?? ""}
-          </ReactMarkdown>
+          <Box sx={{ minWidth: 0 }}>
+            <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+              {markdownContent ?? ""}
+            </ReactMarkdown>
+          </Box>
         ) : (
-          <Box dangerouslySetInnerHTML={{ __html: htmlContent }} />
+          <Box
+            dangerouslySetInnerHTML={{ __html: linkedHtml }}
+            sx={{ minWidth: 0 }}
+          />
         )}
       </Box>
     </Paper>

@@ -24,7 +24,7 @@ import {
   alpha,
 } from "@wso2/oxygen-ui";
 import { Info } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
+import { type JSX, type KeyboardEvent } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { TrendIndicator } from "@features/dashboard/components/stats/TrendIndicator";
 import { type StatCardColor } from "@features/dashboard/types/dashboard";
@@ -47,17 +47,46 @@ export const StatCard = ({
   isLoading,
   isError,
   isTrendError,
+  onClick,
 }: StatCardProps): JSX.Element => {
   const theme = useTheme();
 
+  const handleKeyDown = onClick
+    ? (e: KeyboardEvent<HTMLDivElement>) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }
+    : undefined;
+
   return (
     <Card
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+      {...(onClick && {
+        role: "button",
+        tabIndex: 0,
+        "aria-label": label,
+      })}
       sx={{
         display: "flex",
         flexDirection: "column",
         gap: 3,
         p: 2.5,
         height: "100%",
+        ...(onClick && {
+          cursor: "pointer",
+          transition: "box-shadow 0.2s ease, transform 0.15s ease",
+          "&:hover": {
+            boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
+            transform: "translateY(-2px)",
+          },
+          "&:focus-visible": {
+            outline: `2px solid ${theme.palette.primary.main}`,
+            outlineOffset: 2,
+          },
+        }),
       }}
     >
       {/* Icon and trend indicator */}
@@ -109,14 +138,16 @@ export const StatCard = ({
           )}
         </Typography>
 
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
           {/* Label */}
           <Typography variant="body2">{label}</Typography>
 
           {/* Tooltip */}
-          <Tooltip title={tooltipText} arrow placement="bottom">
-            <Info size={14} />
-          </Tooltip>
+          {tooltipText && (
+            <Tooltip title={tooltipText} arrow placement="bottom">
+              <Info size={14} />
+            </Tooltip>
+          )}
         </Box>
       </Box>
     </Card>

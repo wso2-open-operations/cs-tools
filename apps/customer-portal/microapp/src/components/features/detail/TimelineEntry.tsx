@@ -14,9 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Stack, Typography, useTheme, pxToRem, colors, Divider } from "@wso2/oxygen-ui";
-import { ArrowUpRight, Circle, CircleCheck, CircleDot, Clock4, Paperclip } from "@wso2/oxygen-ui-icons-react";
+import { Box, Card, Stack, Typography, useTheme, pxToRem, colors, Divider, Skeleton } from "@wso2/oxygen-ui";
+import { ArrowUpRight, Circle, CircleCheck, CircleDot, Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } from "@mui/lab";
+import type { Attachment } from "@root/src/types";
+import type { ReactNode } from "react";
 
 interface TimelineEntryBaseProps {
   timestamp?: string;
@@ -25,10 +27,10 @@ interface TimelineEntryBaseProps {
 export interface ActivityTimelineEntryProps extends TimelineEntryBaseProps {
   variant: "activity";
   author?: string;
-  title?: string;
+  title?: string | ReactNode;
   description?: string;
   comment?: string;
-  attachment?: string;
+  attachments?: Attachment[];
 }
 
 export interface ProgressTimelineEntryProps extends TimelineEntryBaseProps {
@@ -36,6 +38,8 @@ export interface ProgressTimelineEntryProps extends TimelineEntryBaseProps {
   title: string;
   description: string;
   status?: "completed" | "active" | "pending";
+  fill?: string;
+  end?: boolean;
 }
 
 export interface StepTimelineEntryProps extends TimelineEntryBaseProps {
@@ -58,14 +62,14 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
       case "progress":
         if (props.status === "completed")
           return (
-            <Box color="primary.contrastText" sx={{ fill: "primary.main" }}>
-              <CircleCheck size={pxToRem(24)} fill={theme.palette.primary.main} />
+            <Box color="primary.contrastText" sx={{ fill: props.fill ?? "primary.main" }}>
+              <CircleCheck size={pxToRem(24)} fill={props.fill ?? theme.palette.primary.main} />
             </Box>
           );
         if (props.status === "active")
           return (
-            <Box color="primary.contrastText" sx={{ fill: "primary.main" }}>
-              <CircleDot size={pxToRem(24)} fill={theme.palette.primary.main} />
+            <Box color="primary.contrastText" sx={{ fill: props.fill ?? "primary.main" }}>
+              <CircleDot size={pxToRem(24)} fill={props.fill ?? theme.palette.primary.main} />
             </Box>
           );
         return (
@@ -110,16 +114,22 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
           <TimelineConnector
             sx={{
               bgcolor:
-                progress && props.status !== "pending" && props.status !== undefined ? "primary.main" : undefined,
+                progress && props.status !== "pending" && !(props.end ?? false) && props.status !== undefined
+                  ? "primary.main"
+                  : undefined,
             }}
           />
         )}
       </TimelineSeparator>
       <TimelineContent sx={{ p: 0, pb: last ? 0 : 3 }} ml={1.5}>
-        <Stack gap={1.5}>
-          <Stack direction={progress ? "column" : "row"} justifyContent="space-between" gap={1}>
+        <Stack gap={1.5} alignItems="flex-start" sx={{ width: "100%" }}>
+          <Stack direction={progress ? "column" : "row"} justifyContent="space-between" gap={5}>
             <Stack direction="row" gap={0.5}>
-              <Typography variant="body2" fontWeight={step || progress || !props.author ? "medium" : undefined}>
+              <Typography
+                variant="body2"
+                fontWeight={step || progress || !props.author ? "medium" : undefined}
+                sx={{ wordBreak: "break-word" }}
+              >
                 {activity && (
                   <Box component="span" fontWeight="bold" mr={0.5}>
                     {props.author}
@@ -135,44 +145,85 @@ export function TimelineEntry({ timestamp, last = false, ...props }: TimelineEnt
               </Typography>
               <Typography variant="body2" color="text.secondary"></Typography>
             </Stack>
-            <Stack direction="row" alignItems="center" gap={1}>
-              {progress && timestamp && (
-                <Box color="text.secondary">
-                  <Clock4 size={pxToRem(14)} />
-                </Box>
-              )}
-              <Typography variant="subtitle2" fontWeight="regular" color="text.disabled" flexShrink={0}>
-                {timestamp}
-              </Typography>
-            </Stack>
           </Stack>
-          {activity && props.comment && <Comment attachment={props.attachment}>{props.comment}</Comment>}
+          <Typography variant="subtitle2" fontWeight="regular" color="text.disabled" flexShrink={0} mt={-1}>
+            {timestamp}
+          </Typography>
+          {activity && props.comment && <Comment attachments={props.attachments}>{props.comment}</Comment>}
         </Stack>
       </TimelineContent>
     </TimelineItem>
   );
 }
 
-function Comment({ children, attachment }: { children: string; attachment?: string }) {
+function Comment({ children, attachments = [] }: { children: string; attachments?: Attachment[] }) {
   return (
     <Card sx={{ p: 1.5, bgcolor: "action.hover" }}>
       <Typography variant="body2">{children}</Typography>
-      {attachment && (
+      {attachments.map((attachment) => (
         <>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+          <Stack key={attachment.id} direction="row" alignItems="center" justifyContent="space-between" gap={1}>
             <Stack direction="row" alignItems="center" pt={1} gap={1}>
               <Box color="text.secondary">
                 <Paperclip size={pxToRem(14)} />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                {attachment}
+                {attachment.fileName}
               </Typography>
             </Stack>
             <ArrowUpRight size={pxToRem(17)} color={colors.grey[500]} />
           </Stack>
           <Divider />
         </>
-      )}
+      ))}
     </Card>
+  );
+}
+
+export function ActivityTimelineEntrySkeleton({ last = false }: { last?: boolean }) {
+  return (
+    <TimelineItem sx={{ minHeight: "auto" }}>
+      <TimelineSeparator>
+        <Box color="text.disabled">
+          <Skeleton variant="circular" width={pxToRem(18)} height={pxToRem(18)} />
+        </Box>
+      </TimelineSeparator>
+
+      <TimelineContent sx={{ p: 0, pb: last ? 0 : 3 }} ml={1.5}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Typography variant="body2" sx={{ width: "60%" }}>
+            <Skeleton variant="text" width="100%" height={25} />
+          </Typography>
+
+          <Typography variant="subtitle2" sx={{ minWidth: pxToRem(60) }}>
+            <Skeleton variant="text" width="100%" height={20} />
+          </Typography>
+        </Stack>
+      </TimelineContent>
+    </TimelineItem>
+  );
+}
+
+export function ProgressTimelineEntrySkeleton({ last = false }: { last?: boolean }) {
+  return (
+    <TimelineItem sx={{ minHeight: "auto" }}>
+      <TimelineSeparator>
+        <Box sx={{ py: 0.5 }}>
+          <Skeleton variant="circular" width={24} height={24} animation="wave" />
+        </Box>
+
+        {!last && <TimelineConnector sx={{ width: 2, bgcolor: "action.hover" }} />}
+      </TimelineSeparator>
+
+      <TimelineContent sx={{ p: 0, pb: last ? 0 : 3 }} ml={1.5}>
+        <Stack gap={1} alignItems="flex-start" sx={{ width: "100%" }}>
+          <Stack direction="column" sx={{ width: "100%" }}>
+            <Skeleton variant="text" width="40%" height={24} />
+
+            <Skeleton variant="text" width="85%" height={20} />
+          </Stack>
+        </Stack>
+      </TimelineContent>
+    </TimelineItem>
   );
 }

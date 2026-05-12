@@ -22,7 +22,7 @@ import { Logger } from "@root/src/utils/logger";
 
 export default function LayoutProvider({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const [titleOverride, setTitleOverride] = useState<string | undefined>(undefined);
+  const [titleOverride, setTitleOverride] = useState<string | ReactNode | undefined>(undefined);
   const [overlineSlotOverride, setOverlineSlotOverride] = useState<ReactNode | string | undefined>(undefined);
   const [subtitleSlotOverride, setSubtitleSlotOverride] = useState<ReactNode | string | undefined>(undefined);
   const [startSlotOverride, setStartSlotOverride] = useState<ReactNode | undefined>(undefined);

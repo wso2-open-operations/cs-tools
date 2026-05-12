@@ -80,6 +80,8 @@ export type ProductVulnerability = {
   cveId: string;
   vulnerabilityId: string;
   severity: MetadataItem;
+  productName?: string;
+  productVersion?: string;
   componentName: string;
   version: string;
   type: string;
@@ -100,7 +102,10 @@ export type ProductVulnerabilitiesTableProps = {
 export type ProductVulnerabilitiesFiltersProps = {
   filters: Record<string, string | number>;
   severityOptions?: VulnerabilitySelectOption[];
+  productOptions?: VulnerabilitySelectOption[];
+  productVersionOptions?: VulnerabilitySelectOption[];
   onFilterChange: (field: string, value: string | number) => void;
+  onClearFilters: () => void;
 };
 
 export type ProductVulnerabilitiesListData = {
@@ -149,6 +154,8 @@ export type ProductVulnerabilitiesSearchFilters = {
   searchQuery?: string;
   severityId?: number;
   statusId?: number;
+  productName?: string;
+  productVersion?: string;
 };
 
 // Request type for searching product vulnerabilities.

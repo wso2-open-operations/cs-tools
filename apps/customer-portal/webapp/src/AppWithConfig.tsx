@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { JSX } from "react";
+import { type JSX } from "react";
 import { BrowserRouter } from "react-router";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -41,7 +41,11 @@ function shouldRetry(failureCount: number, error: Error): boolean {
   }
 
   // Check if error has a status code property
-  const statusCode = (error as any)?.response?.status || (error as any)?.status;
+  const errorWithStatus = error as Error & {
+    response?: { status?: number };
+    status?: number;
+  };
+  const statusCode = errorWithStatus.response?.status || errorWithStatus.status;
 
   // Only retry on 502 (Bad Gateway) and 503 (Service Unavailable)
   return statusCode === 502 || statusCode === 503;
@@ -54,7 +58,7 @@ const queryClient: QueryClient = new QueryClient({
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      refetchOnMount: false,
+      refetchOnMount: true,
     },
     mutations: {
       retry: shouldRetry,

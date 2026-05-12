@@ -168,7 +168,7 @@ export default function DeploymentProductList({
     return products.find((p) => p.id === editingProduct.id) ?? editingProduct;
   }, [products, editingProduct]);
   const isLoading = productsQuery.isLoading;
-    const isError = productsQuery.isError;
+  const isError = productsQuery.isError;
   const patchProduct = usePatchDeploymentProduct();
 
   const handleDeleteClick = (item: DeploymentProductItem) => {
@@ -337,7 +337,16 @@ function ProductItemRow({
     typeof item.tps === "number"
       ? item.tps.toLocaleString()
       : displayValue(null, emptyVal);
-  const versionRef = typeof item.version === "object" && item.version !== null ? item.version : null;
+  const versionRef =
+    typeof item.version === "object" && item.version !== null
+      ? item.version
+      : null;
+  const versionLabel =
+    item.version == null
+      ? null
+      : typeof item.version === "string"
+        ? item.version || null
+        : (item.version as { label?: string })?.label || null;
   const releasedStr = versionRef?.releasedOn
     ? formatProjectDate(versionRef.releasedOn)
     : displayValue(null, emptyVal);
@@ -423,6 +432,14 @@ function ProductItemRow({
               >
                 {name}
               </Typography>
+              {versionLabel && (
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 600, color: "text.primary" }}
+                >
+                  {versionLabel}
+                </Typography>
+              )}
             </Box>
             <Typography
               variant="caption"

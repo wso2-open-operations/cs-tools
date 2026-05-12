@@ -32,6 +32,7 @@ import {
   ANNOUNCEMENTS_CLEAR_FILTERS_LABEL,
 } from "@features/announcements/constants/announcementsConstants";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { stripLightModeInlineStyles } from "@/utils/common";
 
 /**
  * Builds the case search payload for the announcements list (announcement case type only).
@@ -169,14 +170,19 @@ export function formatAnnouncementsClearFiltersButtonLabel(
 
 /**
  * Normalizes announcement HTML:
+ * - Strips pure-white inline backgrounds in dark mode so containers don't clash.
  * - Converts empty `<code>` blocks to a newline (`<br />`) so we do not render useless whitespace.
  * - Converts `<code><n/><code/>`-style placeholders (and bare `<n/>`) into newlines.
  *
  * @param html - Raw HTML from backend.
+ * @param isDarkMode - When true, strips pure-white inline backgrounds.
  * @returns Normalized HTML.
  */
-export function normalizeAnnouncementDescriptionHtml(html: string): string {
-  let normalized = html;
+export function normalizeAnnouncementDescriptionHtml(
+  html: string,
+  isDarkMode = false,
+): string {
+  let normalized = isDarkMode ? stripLightModeInlineStyles(html) : html;
 
   normalized = normalized.replace(
     /<p>\s*<code>\s*(?:&nbsp;|\s|<br\s*\/?>)*<\/code>\s*<\/p>/gi,

@@ -29,6 +29,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type JSX,
@@ -36,8 +37,7 @@ import {
 import type { ProductUpdate } from "@features/project-details/types/products";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import { useGetRecommendedUpdateLevels } from "@features/updates/api/useGetRecommendedUpdateLevels";
-import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
+import { useGetProductUpdateLevels } from "@features/updates/api/useGetProductUpdateLevels";
 import UpdateHistoryAddSectionSkeleton from "@features/project-details/components/deployments/update-history/UpdateHistoryAddSectionSkeleton";
 import {
   getUpdateHistoryEntryBackground,
@@ -51,10 +51,7 @@ import type {
   UpdateHistoryTabProps,
   UpdateHistoryTimelineItemProps,
 } from "@features/project-details/types/projectDetailsComponents";
-import {
-  formatBackendTimestampForDisplay,
-  parseBackendTimestamp,
-} from "@utils/dateTime";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 /**
  * Displays update history timeline and allows adding/editing/deleting updates.
@@ -82,85 +79,55 @@ export default function UpdateHistoryTab({
   const { showError } = useErrorBanner();
 
   const {
-    data: recommendedUpdateLevels = [],
-    isLoading: isLoadingRecommended,
-  } = useGetRecommendedUpdateLevels();
+    data: productUpdateLevels = [],
+    isLoading: isLoadingProductUpdateLevels,
+  } = useGetProductUpdateLevels();
 
-  const matchedRecommendation = useMemo(() => {
-    if (
-      !productName ||
-      !productVersion ||
-      recommendedUpdateLevels.length === 0
-    ) {
-      return null;
-    }
-
-    return recommendedUpdateLevels.find(
-      (item) =>
-        item.productName === productName &&
-        item.productBaseVersion === productVersion,
-    );
-  }, [productName, productVersion, recommendedUpdateLevels]);
-
-  const searchParams = useMemo(() => {
-    if (!productName || !productVersion || !matchedRecommendation) {
-      return null;
-    }
-
-    return {
-      productName,
-      productVersion,
-      startingUpdateLevel: matchedRecommendation.startingUpdateLevel,
-      endingUpdateLevel: matchedRecommendation.endingUpdateLevel,
-    };
-  }, [productName, productVersion, matchedRecommendation]);
-
-  const {
-    data: updateLevelsData,
-    isLoading: isLoadingUpdateLevels,
-    isFetching: isFetchingUpdateLevels,
-  } = usePostUpdateLevelsSearch(searchParams);
-
-  const showUpdateLevelDropdownSkeleton =
-    isLoadingUpdateLevels ||
-    (isFetchingUpdateLevels && updateLevelsData == null);
-
-  const isAddUpdateSectionLoading =
-    isLoadingRecommended ||
-    (searchParams != null && showUpdateLevelDropdownSkeleton);
-
-  const isEditInlineLoading =
-    isLoadingRecommended || showUpdateLevelDropdownSkeleton;
+  const showUpdateLevelDropdownSkeleton = isLoadingProductUpdateLevels;
+  const isAddUpdateSectionLoading = isLoadingProductUpdateLevels;
+  const isEditInlineLoading = isLoadingProductUpdateLevels;
 
   const availableUpdateLevels = useMemo(() => {
-    if (!updateLevelsData) return [];
+    if (!productName || !productVersion || productUpdateLevels.length === 0) {
+      return [];
+    }
 
-    const levels = Object.keys(updateLevelsData)
-      .map((key) => parseInt(key, 10))
-      .filter((level) => !isNaN(level))
-      .sort((a, b) => b - a);
+    const productItem = productUpdateLevels.find(
+      (item) => item.productName === productName,
+    );
+    if (!productItem) return [];
 
-    return levels;
-  }, [updateLevelsData]);
+    const allLevels = productItem.productUpdateLevels
+      .filter((entry) => entry.productBaseVersion === productVersion)
+      .flatMap((entry) => entry.updateLevels);
+
+    return [...new Set(allLevels)].sort((a, b) => b - a);
+  }, [productName, productVersion, productUpdateLevels]);
 
   const sortedUpdates = useMemo(() => {
-    return [...updates].sort((a, b) => {
-      const dateA = parseBackendTimestamp(a.date)?.getTime() ?? 0;
-      const dateB = parseBackendTimestamp(b.date)?.getTime() ?? 0;
-      return dateB - dateA;
-    });
+    return [...updates].sort(
+      (a, b) => (b.updateLevel ?? 0) - (a.updateLevel ?? 0),
+    );
   }, [updates]);
 
-  const currentUpdateLevel = useMemo(() => {
-    if (sortedUpdates.length === 0) return null;
-    const levels = sortedUpdates
+  const sortedLevels = useMemo(() => {
+    return sortedUpdates
       .map((u) => u.updateLevel)
-      .filter((l): l is number => typeof l === "number");
-    return levels.length > 0 ? Math.max(...levels) : null;
+      .filter((l): l is number => typeof l === "number")
+      .sort((a, b) => b - a);
   }, [sortedUpdates]);
 
+  const currentUpdateLevel = useMemo(() => {
+    return sortedLevels.length > 0 ? sortedLevels[0] : null;
+  }, [sortedLevels]);
+
+  const secondHighestUpdateLevel = useMemo(() => {
+    return sortedLevels.length > 1 ? sortedLevels[1] : null;
+  }, [sortedLevels]);
+
   const handleFormChange =
-    (field: keyof UpdateHistoryFormData) => (e: ChangeEvent<HTMLInputElement>) => {
+    (field: keyof UpdateHistoryFormData) =>
+    (e: ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setForm((prev) => ({ ...prev, [field]: value }));
     };
@@ -191,6 +158,9 @@ export default function UpdateHistoryTab({
 
   const isFormValid = !!form.updateLevel && !!form.date;
 
+  const handleAddUpdateRef = useRef(handleAddUpdate);
+  handleAddUpdateRef.current = handleAddUpdate;
+
   // Notify parent of form state changes
   useEffect(() => {
     if (onFormStateChange) {
@@ -198,18 +168,22 @@ export default function UpdateHistoryTab({
         canAdd: isFormValid && !isSaving && !isAddUpdateSectionLoading,
         isSaving,
         saveAction: saveInFlight,
-        handleAdd: handleAddUpdate,
+        handleAdd: () => handleAddUpdateRef.current(),
       });
-      return () => onFormStateChange(null);
     }
   }, [
     isFormValid,
     isSaving,
     saveInFlight,
     isAddUpdateSectionLoading,
-    handleAddUpdate,
     onFormStateChange,
   ]);
+
+  // Clear parent form state on unmount only
+  useEffect(() => {
+    return () => onFormStateChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleEditClick = useCallback(
     (update: ProductUpdate) => {
@@ -357,11 +331,18 @@ export default function UpdateHistoryTab({
                     u.updateLevel === update.updateLevel &&
                     u.date === update.date,
                 );
+                const isLatest = update.updateLevel === currentUpdateLevel;
+                const editAvailableUpdateLevels = availableUpdateLevels.filter(
+                  (level) =>
+                    secondHighestUpdateLevel === null ||
+                    level > secondHighestUpdateLevel,
+                );
                 return (
                   <TimelineItem
                     key={`${update.updateLevel}-${update.date}`}
                     update={update}
                     isEditing={editingIndex === originalIndex}
+                    isLatest={isLatest}
                     onEdit={() => handleEditClick(update)}
                     onDelete={() => handleDeleteUpdate(update)}
                     onSave={(edited) => handleSaveEdit(update, edited)}
@@ -369,6 +350,7 @@ export default function UpdateHistoryTab({
                     formatDate={formatDate}
                     isSaving={isSaving}
                     availableUpdateLevels={availableUpdateLevels}
+                    editAvailableUpdateLevels={editAvailableUpdateLevels}
                     showUpdateLevelSkeleton={showUpdateLevelDropdownSkeleton}
                     showEditFormSkeleton={isEditInlineLoading}
                   />
@@ -422,11 +404,16 @@ export default function UpdateHistoryTab({
                 }}
               >
                 <MenuItem value="">Select Update Level</MenuItem>
-                {availableUpdateLevels.map((level) => (
-                  <MenuItem key={level} value={level}>
-                    {level}
-                  </MenuItem>
-                ))}
+                {availableUpdateLevels
+                  .filter(
+                    (level) =>
+                      currentUpdateLevel === null || level > currentUpdateLevel,
+                  )
+                  .map((level) => (
+                    <MenuItem key={level} value={level}>
+                      {level}
+                    </MenuItem>
+                  ))}
               </TextField>
               <TextField
                 id="new-applied-on"
@@ -437,7 +424,12 @@ export default function UpdateHistoryTab({
                 fullWidth
                 size="small"
                 disabled={isSaving}
-                slotProps={{ inputLabel: { shrink: true } }}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  input: {
+                    inputProps: { max: new Date().toISOString().split("T")[0] },
+                  },
+                }}
               />
             </Box>
             <TextField
@@ -487,31 +479,36 @@ export default function UpdateHistoryTab({
 function TimelineItem({
   update,
   isEditing,
+  isLatest,
   onEdit,
   onDelete,
   onSave,
   onCancelEdit,
   formatDate,
   isSaving,
-  availableUpdateLevels,
+  editAvailableUpdateLevels,
   showUpdateLevelSkeleton,
   showEditFormSkeleton,
 }: UpdateHistoryTimelineItemProps): JSX.Element {
   const [editForm, setEditForm] = useState<ProductUpdate>(update);
 
   useEffect(() => {
-    setEditForm(update);
-  }, [update, isEditing]);
+    if (isEditing) {
+      setEditForm(update);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing]);
 
   const handleEditChange =
     (field: keyof ProductUpdate) => (e: ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setEditForm((prev) => {
         if (field === "updateLevel") {
-          if (value === "" || value.trim() === "") {
+          const strValue = String(value);
+          if (strValue === "" || strValue.trim() === "") {
             return prev;
           }
-          const parsed = parseInt(value, 10);
+          const parsed = parseInt(strValue, 10);
           return {
             ...prev,
             updateLevel: Number.isNaN(parsed) ? prev.updateLevel : parsed,
@@ -638,7 +635,7 @@ function TimelineItem({
                       "& .MuiInputBase-root": { bgcolor: "background.paper" },
                     }}
                   >
-                    {availableUpdateLevels.map((level) => (
+                    {editAvailableUpdateLevels.map((level) => (
                       <MenuItem key={level} value={level}>
                         {level}
                       </MenuItem>
@@ -653,7 +650,14 @@ function TimelineItem({
                   size="small"
                   fullWidth
                   disabled={isSaving}
-                  slotProps={{ inputLabel: { shrink: true } }}
+                  slotProps={{
+                    inputLabel: { shrink: true },
+                    input: {
+                      inputProps: {
+                        max: new Date().toISOString().split("T")[0],
+                      },
+                    },
+                  }}
                   sx={{
                     "& .MuiInputBase-root": { bgcolor: "background.paper" },
                   }}
@@ -722,22 +726,24 @@ function TimelineItem({
                   >
                     U{update.updateLevel}
                   </Typography>
-                  <IconButton
-                    size="small"
-                    onClick={onEdit}
-                    disabled={isSaving}
-                    aria-label={`Edit update U${update.updateLevel}`}
-                    sx={{
-                      color: "text.secondary",
-                      "&:hover": {
-                        color: "primary.main",
-                        bgcolor: (theme) =>
-                          alpha(theme.palette.text.secondary, 0.12),
-                      },
-                    }}
-                  >
-                    <SquarePen size={12} aria-hidden />
-                  </IconButton>
+                  {isLatest && (
+                    <IconButton
+                      size="small"
+                      onClick={onEdit}
+                      disabled={isSaving}
+                      aria-label={`Edit update U${update.updateLevel}`}
+                      sx={{
+                        color: "text.secondary",
+                        "&:hover": {
+                          color: "primary.main",
+                          bgcolor: (theme) =>
+                            alpha(theme.palette.text.secondary, 0.12),
+                        },
+                      }}
+                    >
+                      <SquarePen size={12} aria-hidden />
+                    </IconButton>
+                  )}
                 </Box>
                 <Typography
                   variant="body2"

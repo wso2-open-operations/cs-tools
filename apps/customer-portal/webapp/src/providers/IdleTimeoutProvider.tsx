@@ -15,8 +15,7 @@
 // under the License.
 
 import { useIdleTimer } from "react-idle-timer";
-import { useEffect, useState, type JSX, type ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { useState, type JSX, type ReactNode } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import SessionWarningDialog from "@components/SessionWarningDialog";
 import {
@@ -25,6 +24,7 @@ import {
   IDLE_THROTTLE_MS,
 } from "@constants/authConstants";
 import { clearUserPreferredTimeZone } from "@utils/dateTime";
+import { useLogger } from "@/hooks/useLogger";
 
 interface IdleTimeoutProviderProps {
   children: ReactNode;
@@ -41,8 +41,8 @@ export default function IdleTimeoutProvider({
   children,
 }: IdleTimeoutProviderProps): JSX.Element {
   const [sessionWarningOpen, setSessionWarningOpen] = useState(false);
-  const navigate = useNavigate();
   const { signOut, isSignedIn, isLoading } = useAsgardeo();
+  const logger = useLogger();
 
   const onPrompt = () => {
     if (isSignedIn && !isLoading) {
@@ -64,19 +64,14 @@ export default function IdleTimeoutProvider({
 
   const handleLogout = async () => {
     setSessionWarningOpen(false);
+    clearUserPreferredTimeZone();
+    window.dispatchEvent(new CustomEvent("app:signing-out"));
     try {
       await signOut();
-    } finally {
-      clearUserPreferredTimeZone();
-      navigate("/home");
+    } catch {
+      logger.error("Error signing out");
     }
   };
-
-  useEffect(() => {
-    if (!isSignedIn) {
-      setSessionWarningOpen(false);
-    }
-  }, [isSignedIn]);
 
   return (
     <>

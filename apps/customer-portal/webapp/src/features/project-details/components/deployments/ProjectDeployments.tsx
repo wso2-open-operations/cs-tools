@@ -51,6 +51,7 @@ import { isProjectRestricted } from "@utils/permission";
  */
 export default function ProjectDeployments({
   projectId,
+  showServiceRequest = true,
 }: ProjectDeploymentsProps): JSX.Element {
   const navigate = useNavigate();
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -198,7 +199,7 @@ export default function ProjectDeployments({
           </>
         ) : (
           <>
-            {!isRestricted && (
+            {!isRestricted && showServiceRequest && (
               <Button
                 variant="contained"
                 color="warning"

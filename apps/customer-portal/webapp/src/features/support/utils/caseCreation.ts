@@ -148,22 +148,28 @@ export function resolveDeploymentMatch(
 
   const labelLower = label.toLowerCase();
 
-  const fromProjectExact = projectDeployments?.find((d) => {
-    const typeLabel = d.type?.label?.trim();
-    const depName = d.name?.trim();
-    return typeLabel === label || depName === label;
-  });
-  if (fromProjectExact) return { id: fromProjectExact.id };
+  const fromProjectByNameExact = projectDeployments?.find(
+    (d) => d.name?.trim() === label,
+  );
+  if (fromProjectByNameExact) return { id: fromProjectByNameExact.id };
 
-  const fromProjectCaseInsensitive = projectDeployments?.find((d) => {
-    const typeLabel = d.type?.label?.trim();
-    const depName = d.name?.trim();
-    return (
-      typeLabel?.toLowerCase() === labelLower ||
-      depName?.toLowerCase() === labelLower
-    );
-  });
-  if (fromProjectCaseInsensitive) return { id: fromProjectCaseInsensitive.id };
+  const fromProjectByTypeLabelExact = projectDeployments?.find(
+    (d) => d.type?.label?.trim() === label,
+  );
+  if (fromProjectByTypeLabelExact)
+    return { id: fromProjectByTypeLabelExact.id };
+
+  const fromProjectByNameInsensitive = projectDeployments?.find(
+    (d) => d.name?.trim().toLowerCase() === labelLower,
+  );
+  if (fromProjectByNameInsensitive)
+    return { id: fromProjectByNameInsensitive.id };
+
+  const fromProjectByTypeLabelInsensitive = projectDeployments?.find(
+    (d) => d.type?.label?.trim().toLowerCase() === labelLower,
+  );
+  if (fromProjectByTypeLabelInsensitive)
+    return { id: fromProjectByTypeLabelInsensitive.id };
 
   const fromFiltersExact = filterDeployments?.find(
     (d) => d.id === label || d.label === label,
@@ -256,10 +262,36 @@ export function findMatchingProductId(
   if (!productLabel?.trim() || !baseProductOptions?.length) return undefined;
   const normalized = normalizeProductLabel(productLabel);
   if (!normalized) return undefined;
-  const opt = baseProductOptions.find(
+
+  const exact = baseProductOptions.find(
     (o) => normalizeProductLabel(o.label) === normalized,
   );
-  return opt?.id;
+  if (exact) return exact.id;
+
+  const prefixMatches = baseProductOptions.filter((o) => {
+    const optNorm = normalizeProductLabel(o.label);
+    if (!optNorm || !normalized.startsWith(optNorm)) return false;
+    const remainder = normalized.slice(optNorm.length);
+    return remainder === "" || remainder.startsWith(" ");
+  });
+  if (prefixMatches.length > 0) {
+    return prefixMatches.reduce((a, b) =>
+      normalizeProductLabel(a.label).length >=
+      normalizeProductLabel(b.label).length
+        ? a
+        : b,
+    ).id;
+  }
+
+  const suffixMatches = baseProductOptions.filter((o) => {
+    const optNorm = normalizeProductLabel(o.label);
+    if (!optNorm || !optNorm.startsWith(normalized)) return false;
+    const remainder = optNorm.slice(normalized.length);
+    return remainder === "" || remainder.startsWith(" ");
+  });
+  if (suffixMatches.length === 1) return suffixMatches[0]!.id;
+
+  return undefined;
 }
 
 /**

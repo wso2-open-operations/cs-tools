@@ -76,7 +76,13 @@ export function useGetProjectChangeRequestsStats(
           totalCount: raw?.totalCount ?? 0,
           activeCount: raw?.activeCount,
           outstandingCount: raw?.outstandingCount,
+          actionRequiredCount: raw?.actionRequiredCount,
           stateCount: raw?.stateCount ?? [],
+          resolvedCount: {
+            total: raw?.resolvedCount?.total ?? 0,
+            currentMonth: raw?.resolvedCount?.currentMonth ?? 0,
+            pastThirtyDays: raw?.resolvedCount?.pastThirtyDays ?? 0,
+          },
         };
 
         logger.debug("[useGetProjectChangeRequestsStats] Data received:", data);

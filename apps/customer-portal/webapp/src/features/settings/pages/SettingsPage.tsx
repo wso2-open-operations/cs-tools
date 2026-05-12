@@ -16,7 +16,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { useParams } from "react-router";
-import { useState, useMemo, type JSX } from "react";
+import { useState, useMemo, useEffect, type JSX } from "react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import TabBar from "@components/tab-bar/TabBar";
@@ -30,6 +30,7 @@ import {
 } from "@features/settings/constants/settingsConstants";
 import { SettingsPageTabId } from "@features/settings/types/settings";
 import { resolveSettingsPageTabId } from "@features/settings/utils/settingsPage";
+import { consumePendingSettingsTab } from "@features/settings/utils/settingsStorage";
 import { ProjectType } from "@/types/permission";
 import { isProjectRestricted } from "@utils/permission";
 
@@ -42,6 +43,11 @@ export default function SettingsPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState<string>(SettingsPageTabId.USERS);
   const { data: userDetails } = useGetUserDetails();
+
+  useEffect(() => {
+    const pending = consumePendingSettingsTab();
+    if (pending) setActiveTab(pending);
+  }, []);
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
 
   const isCustomerAdmin = useMemo(
@@ -98,7 +104,7 @@ export default function SettingsPage(): JSX.Element {
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <TabBar
         tabs={tabs.map((t) => ({
           id: t.id,

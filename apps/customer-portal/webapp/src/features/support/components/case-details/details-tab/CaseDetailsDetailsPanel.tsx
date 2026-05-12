@@ -162,9 +162,9 @@ export default function CaseDetailsDetailsPanel({
             <Typography {...labelSx}>{overviewIdLabel}</Typography>
             <Typography {...valueSx}>{formatValue(data?.number)}</Typography>
           </Box>
-          {isServiceRequest && data?.internalId ? (
+          {data?.internalId ? (
             <Box>
-              <Typography {...labelSx}>WSO2 Case Id</Typography>
+              <Typography {...labelSx}>WSO2 Case ID</Typography>
               <Typography {...valueSx}>
                 {formatValue(data.internalId)}
               </Typography>
@@ -187,7 +187,7 @@ export default function CaseDetailsDetailsPanel({
               </Typography>
             </Stack>
           </Box>
-          {!isEngagement && !isSecurityReportAnalysis && (
+          {!isEngagement && !isSecurityReportAnalysis && !isServiceRequest && (
             <Box>
               <Typography {...labelSx}>Severity</Typography>
               <Chip
@@ -231,7 +231,7 @@ export default function CaseDetailsDetailsPanel({
               </Stack>
             </Box>
           )}
-          {isServiceRequest && data?.createdBy ? (
+          {data?.createdBy ? (
             <Box>
               <Typography {...labelSx}>Created by</Typography>
               <Typography {...valueSx}>
@@ -269,14 +269,6 @@ export default function CaseDetailsDetailsPanel({
             <Box>
               <Typography {...labelSx}>Duration</Typography>
               <Typography {...valueSx}>{formatValue(data.duration)}</Typography>
-            </Box>
-          ) : null}
-          {isServiceRequest ? (
-            <Box>
-              <Typography {...labelSx}>Assigned team</Typography>
-              <Typography {...valueSx}>
-                {formatValue(data?.assignedTeam ?? null)}
-              </Typography>
             </Box>
           ) : null}
           {/* Related change request action is rendered in the card header (top-right) */}
@@ -437,12 +429,14 @@ export default function CaseDetailsDetailsPanel({
                 {formatValue(productDisplayName)}
               </Typography>
             </Box>
-            <Box>
-              <Typography {...labelSx}>Product Version</Typography>
-              <Typography {...valueSx}>
-                {formatValue(data?.deployedProduct?.version ?? null)}
-              </Typography>
-            </Box>
+            {data?.deployedProduct?.version ? (
+              <Box>
+                <Typography {...labelSx}>Production Version</Typography>
+                <Typography {...valueSx}>
+                  {data.deployedProduct.version}
+                </Typography>
+              </Box>
+            ) : null}
             <Box>
               <Typography {...labelSx}>Environment Type</Typography>
               <Typography {...valueSx}>

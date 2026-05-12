@@ -14,16 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Grid, Stack, Typography, alpha, pxToRem } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { ArrowRight, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
 
-import { PROJECT_METRIC_META, PROJECT_STATUS_META } from "@root/src/config/constants";
-
-export type ProjectStatus = "All Good" | "Needs Attention";
-export type ProjectType = "Managed Cloud" | "Regular";
-export type ProjectMetricKey = "cases" | "chats" | "service" | "change" | "users" | "date";
-export type ProjectMetricValue = number | string;
-export type ProjectMetrics = Partial<Record<ProjectMetricKey, ProjectMetricValue>>;
+import { PROJECT_METRIC_META } from "@root/src/config/constants";
+import type { Project, ProjectMetricKey, ProjectMetricValue } from "@src/types";
 
 export interface ProjectMetricMeta {
   label: string;
@@ -31,47 +26,29 @@ export interface ProjectMetricMeta {
   color?: string;
 }
 
-export interface ProjectCardProps {
-  id: string;
-  name: string;
-  description: string;
-  type: ProjectType;
-  status: ProjectStatus;
-  numberOfOpenCases: number;
-  metrics: ProjectMetrics;
-
-  onClick?: () => void;
-}
-
-export function ProjectCard({ id, name, description, type, status, metrics, onClick }: ProjectCardProps) {
-  const statusChipColorVariant = PROJECT_STATUS_META[status].color;
-
+export function ProjectCard({
+  projectKey,
+  name,
+  description,
+  type,
+  status,
+  metrics,
+  onClick,
+}: Project & { onClick?: () => void }) {
   return (
     <Card sx={{ bgcolor: "background.paper" }}>
       <Stack p={2} gap={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
-          <Typography variant="subtitle2">{id}</Typography>
-          <Chip
-            label={status}
-            size="small"
-            sx={(theme) => ({
-              bgcolor: alpha(theme.palette[statusChipColorVariant].light, 0.1),
-              color: theme.palette[statusChipColorVariant].light,
-            })}
-          />
+          <Typography variant="subtitle2">{projectKey}</Typography>
         </Stack>
         <Typography variant="h6" mt={-0.8}>
           {name}
         </Typography>
-        <Chip label={type} size="small" sx={{ alignSelf: "start" }} />
-        <Typography variant="body2">{description}</Typography>
       </Stack>
       <Grid p={2} spacing={1.5} sx={{ bgcolor: "background.default" }} container>
         {Object.keys(metrics).map((key, index) => {
           const meta = PROJECT_METRIC_META[key as ProjectMetricKey];
           const value = metrics[key as ProjectMetricKey];
-
-          if (value === undefined) return null;
 
           return (
             <Grid key={index} size={{ xs: 6 }}>
@@ -94,7 +71,7 @@ export function ProjectCard({ id, name, description, type, status, metrics, onCl
   );
 }
 
-function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value: ProjectMetricValue }) {
+function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value?: ProjectMetricValue }) {
   return (
     <Stack direction="row" alignItems="center" spacing={1}>
       <Box color="text.secondary">
@@ -104,8 +81,45 @@ function MetricItem({ meta, value }: { meta: ProjectMetricMeta; value: ProjectMe
         {meta.label}
       </Typography>
       <Typography variant="body2" fontWeight="regular" color={meta.color}>
-        {value}
+        {value ?? <Skeleton width={30} height={20} />}
       </Typography>
     </Stack>
+  );
+}
+
+export function ProjectCardSkeleton() {
+  return (
+    <Card sx={{ bgcolor: "background.paper" }}>
+      <Stack p={2} gap={1}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
+          <Skeleton variant="text" width="30%" sx={{ fontSize: "subtitle2.fontSize" }} />
+          <Skeleton variant="rounded" width={80} height={22} />
+        </Stack>
+
+        <Skeleton variant="text" width="100%" height={32} sx={{ mt: -0.8 }} />
+
+        <Skeleton variant="rounded" width={60} height={22} sx={{ alignSelf: "start" }} />
+
+        <Box>
+          <Skeleton variant="text" width="100%" />
+          <Skeleton variant="text" width="80%" />
+        </Box>
+      </Stack>
+
+      <Grid p={2} spacing={1.5} sx={{ bgcolor: "background.default" }} container>
+        {[...Array(2)].map((_, index) => (
+          <Grid key={index} size={{ xs: 6 }}>
+            <Stack gap={0.5}>
+              <Skeleton variant="text" width="40%" height={14} />
+              <Skeleton variant="text" width="60%" height={24} />
+            </Stack>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Box p={2} pt={3}>
+        <Skeleton variant="rounded" width="100%" height={36} />
+      </Box>
+    </Card>
   );
 }

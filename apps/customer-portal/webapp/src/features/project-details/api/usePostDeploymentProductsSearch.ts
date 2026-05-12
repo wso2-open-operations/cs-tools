@@ -25,7 +25,6 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { addApiHeaders } from "@utils/apiUtils";
 import type {
   UsePostDeploymentProductsSearchAllOptions,
   UsePostDeploymentProductsSearchInfiniteOptions,
@@ -47,8 +46,10 @@ function mergeAuthHeadersIntoFetchInit(
   initHeaders?: HeadersInit,
 ): Headers {
   const merged = new Headers(initHeaders ?? undefined);
-  for (const [key, value] of Object.entries(addApiHeaders(idToken))) {
-    merged.set(key, value as string);
+  merged.set("Authorization", `Bearer ${idToken}`);
+  merged.set("x-user-id-token", idToken);
+  if (!merged.has("Accept")) {
+    merged.set("Accept", "application/json");
   }
   return merged;
 }

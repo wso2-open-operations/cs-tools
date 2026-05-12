@@ -21,26 +21,35 @@ interface InvitationSummaryProps {
   projectName?: string;
   email: string;
   name: string;
-  role: RoleName;
+  roles: RoleName[];
 }
 
-export function InvitationSummaryContent({ projectName, email, name, role }: InvitationSummaryProps) {
+export function InvitationSummaryContent({ projectName, email, name, roles }: InvitationSummaryProps) {
   const summary = [
     { label: "Project", value: projectName || "-" },
     { label: "User Email", value: email || "-" },
     { label: "User Name", value: name || "-" },
-    { label: "Role", value: <Chip size="small" label={role} color={role === "Admin" ? "primary" : "default"} /> },
+    {
+      label: "Roles",
+      value: (
+        <Stack direction="row" spacing={0.5} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
+          {roles.map((role) => (
+            <Chip key={role} size="small" label={role} color={role === "Admin User" ? "primary" : "default"} />
+          ))}
+        </Stack>
+      ),
+    },
     { label: "Delivery Method", value: "Email" },
   ];
 
   return (
     <Stack gap={1}>
       {summary.map((item) => (
-        <Stack direction="row" justifyContent="space-between">
+        <Stack direction="row" justifyContent="space-between" gap={5}>
           <Typography variant="body2" color="text.secondary">
             {item.label}
           </Typography>
-          <Typography component="span" variant="body2">
+          <Typography component="span" variant="body2" textAlign="right">
             {item.value}
           </Typography>
         </Stack>

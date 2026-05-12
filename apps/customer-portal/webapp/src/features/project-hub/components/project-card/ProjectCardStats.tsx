@@ -22,20 +22,15 @@ import {
   Typography,
   colors,
 } from "@wso2/oxygen-ui";
-import {
-  Calendar,
-  CircleAlert,
-  MessageSquare,
-} from "@wso2/oxygen-ui-icons-react";
+import { AlertTriangle, CircleAlert, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
-import { formatProjectDate } from "@features/project-hub/utils/projectCard";
 import {
   PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS,
   PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES,
   PROJECT_CARD_STATS_ACTIVE_CHATS_LABEL,
   PROJECT_CARD_STATS_NULL_PLACEHOLDER,
-  PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL,
+  PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL,
 } from "@features/project-hub/constants/projectHubConstants";
 import type { ProjectCardStatsProps } from "@features/project-hub/types/projectHub";
 
@@ -46,9 +41,9 @@ import type { ProjectCardStatsProps } from "@features/project-hub/types/projectH
  * @returns {JSX.Element} The rendered stats section.
  */
 export default function ProjectCardStats({
-  activeCasesCount,
+  outstandingCount,
   activeChatsCount,
-  date,
+  actionRequiredCount,
   isError,
   isLoading,
 }: ProjectCardStatsProps): JSX.Element {
@@ -61,7 +56,31 @@ export default function ProjectCardStats({
           gap: 1.5,
         }}
       >
-        {/* Outstanding support cases */}
+        {/* Action Required cases */}
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box
+            display="flex"
+            alignItems="center"
+            gap={1}
+            color="text.secondary"
+          >
+            <AlertTriangle size={16} />
+            <Typography variant="body2" color="inherit">
+              Action Required
+            </Typography>
+          </Box>
+          {isLoading ? (
+            <Skeleton variant="text" width={20} />
+          ) : isError ? (
+            <ErrorIndicator entityName="action required" />
+          ) : (
+            <Typography variant="body2" color="warning.main">
+              {actionRequiredCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
+            </Typography>
+          )}
+        </Box>
+
+        {/* Outstanding items */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box
             display="flex"
@@ -71,16 +90,18 @@ export default function ProjectCardStats({
           >
             <CircleAlert size={16} />
             <Typography variant="body2" color="inherit">
-              {PROJECT_CARD_STATS_OUTSTANDING_CASES_LABEL}
+              {PROJECT_CARD_STATS_OUTSTANDING_ITEMS_LABEL}
             </Typography>
           </Box>
           {isLoading ? (
             <Skeleton variant="text" width={20} />
           ) : isError ? (
-            <ErrorIndicator entityName={PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES} />
+            <ErrorIndicator
+              entityName={PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES}
+            />
           ) : (
             <Typography variant="body2" color="primary">
-              {activeCasesCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
+              {outstandingCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
             </Typography>
           )}
         </Box>
@@ -101,7 +122,9 @@ export default function ProjectCardStats({
           {isLoading ? (
             <Skeleton variant="text" width={20} />
           ) : isError ? (
-            <ErrorIndicator entityName={PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS} />
+            <ErrorIndicator
+              entityName={PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS}
+            />
           ) : (
             <Typography variant="body2" color={colors.blue[500]}>
               {activeChatsCount ?? PROJECT_CARD_STATS_NULL_PLACEHOLDER}
@@ -109,13 +132,6 @@ export default function ProjectCardStats({
           )}
         </Box>
 
-        {/* Date */}
-        <Box display="flex" alignItems="center" gap={1} color="text.secondary">
-          <Calendar size={16} />
-          <Typography variant="body2" color="inherit">
-            {formatProjectDate(date) || PROJECT_CARD_STATS_NULL_PLACEHOLDER}
-          </Typography>
-        </Box>
         <Divider sx={{ width: "100%" }} />
       </Box>
     </Form.CardContent>

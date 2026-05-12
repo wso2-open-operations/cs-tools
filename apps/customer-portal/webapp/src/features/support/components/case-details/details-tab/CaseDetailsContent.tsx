@@ -21,17 +21,18 @@ import type {
 import { Box, Paper, Typography, alpha, useTheme } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import { useLocation } from "react-router";
+import { consumePendingCaseDetailsTab } from "@features/settings/utils/settingsStorage";
 import { useGetCaseAttachments } from "@features/support/api/useGetCaseAttachments";
 import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
-import useGetCaseComments from "@features/support/api/useGetCaseComments";
+import useGetAIChatHistory from "@features/support/api/useGetAIChatHistory";
 import { useConversationRecommendationsSearch } from "@features/support/api/useConversationRecommendationsSearch";
 import { buildRecommendationRequestFromCase } from "@features/support/utils/recommendations";
 import {
   getStatusColor,
   resolveColorFromTheme,
   getStatusIconElement,
-  getInitials,
+  getAssignedEngineerLabel,
   hasSeverityLabelForChip,
   isSecurityReportAnalysisType,
 } from "@features/support/utils/support";
@@ -64,12 +65,14 @@ export default function CaseDetailsContent({
   onOpenRelatedCase,
   projectId = "",
   hideActionRow = false,
-  showEngineerOnly = false,
   isServiceRequest = false,
 }: CaseDetailsContentProps): JSX.Element {
   const theme = useTheme();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(() => {
+    const pending = consumePendingCaseDetailsTab();
+    return pending !== null ? parseInt(pending, 10) : 0;
+  });
   const [focusMode, setFocusMode] = useState(false);
 
   const isEngagementRoute = location.pathname.includes("/engagements/");
@@ -128,7 +131,7 @@ export default function CaseDetailsContent({
     undefined;
 
   const assignedEngineer = data?.assignedEngineer;
-  const engineerInitials = getInitials(assignedEngineer);
+  const assignedEngineerLabel = getAssignedEngineerLabel(assignedEngineer);
 
   const isSecurityReportAnalysis = isSecurityReportAnalysisType(data?.type);
 
@@ -150,24 +153,34 @@ export default function CaseDetailsContent({
   const hideCallsTab = isSecurityReportAnalysis || !isCallSchedulingAllowed;
   const hideKnowledgeBaseTab =
     isSecurityReportAnalysis || isEngagementRoute || isServiceRequest;
+  const hideRelatedChangeRequestsTab =
+    !isServiceRequest || !data?.changeRequests?.length;
 
   // Eagerly fetch KB recommendations so the tab count is available on page load.
   // React Query deduplicates the network call when the KB tab component mounts later.
-  const { data: kbCommentsData, isLoading: isKbCommentsLoading } = useGetCaseComments(
-    hideKnowledgeBaseTab ? "" : resolvedProjectId,
-    hideKnowledgeBaseTab ? "" : caseId,
-    { offset: 0 },
-  );
+  const { comments: kbComments, isLoading: isKbCommentsLoading } =
+    useGetAIChatHistory(
+      hideKnowledgeBaseTab ? "" : resolvedProjectId,
+      hideKnowledgeBaseTab ? "" : caseId,
+    );
   const kbPayload = useMemo(
-    () => (hideKnowledgeBaseTab ? null : buildRecommendationRequestFromCase(data, kbCommentsData?.comments ?? [])),
-    [hideKnowledgeBaseTab, data, kbCommentsData],
+    () =>
+      hideKnowledgeBaseTab
+        ? null
+        : buildRecommendationRequestFromCase(data, kbComments),
+    [hideKnowledgeBaseTab, data, kbComments],
   );
-  const { data: kbRecData, isLoading: isKbRecLoading } = useConversationRecommendationsSearch(
-    kbPayload,
-    !hideKnowledgeBaseTab && !isKbCommentsLoading && !!kbPayload,
-  );
-  const knowledgeBaseCount = kbRecData ? (kbRecData.recommendations?.length ?? 0) : undefined;
-  const knowledgeBaseCountLoading = !hideKnowledgeBaseTab && (isKbCommentsLoading || (!!kbPayload && isKbRecLoading && !kbRecData));
+  const { data: kbRecData, isLoading: isKbRecLoading } =
+    useConversationRecommendationsSearch(
+      kbPayload,
+      !hideKnowledgeBaseTab && !isKbCommentsLoading && !!kbPayload,
+    );
+  const knowledgeBaseCount = kbRecData
+    ? (kbRecData.recommendations?.length ?? 0)
+    : undefined;
+  const knowledgeBaseCountLoading =
+    !hideKnowledgeBaseTab &&
+    (isKbCommentsLoading || (!!kbPayload && isKbRecLoading && !kbRecData));
 
   const visibleTabs = useMemo(
     () => [
@@ -176,8 +189,9 @@ export default function CaseDetailsContent({
       2,
       ...(hideCallsTab ? [] : [3]),
       ...(hideKnowledgeBaseTab ? [] : [4]),
+      ...(hideRelatedChangeRequestsTab ? [] : [5]),
     ],
-    [hideCallsTab, hideKnowledgeBaseTab],
+    [hideCallsTab, hideKnowledgeBaseTab, hideRelatedChangeRequestsTab],
   );
   const clampedActiveTab = Math.min(
     activeTab,
@@ -211,7 +225,6 @@ export default function CaseDetailsContent({
           />
           <CaseDetailsSkeleton
             hideActionRow={hideActionRow}
-            showEngineerOnly={showEngineerOnly}
             hideAssignedEngineer={hideAssignedEngineer}
             headerVariant={headerVariant}
           />
@@ -280,37 +293,52 @@ export default function CaseDetailsContent({
         ) : (
           !focusMode && (
             <>
-              <CaseDetailsHeader
-                caseNumber={data?.number}
-                title={data?.title}
-                severityLabel={severityLabel ?? undefined}
-                statusLabel={statusLabel}
-                statusChipIcon={statusChipIcon}
-                statusChipSx={statusChipSx}
-                isLoading={isLoading}
-                showSeverityChip={
-                  headerVariant === "default" &&
-                  !isSecurityReportAnalysis &&
-                  hasSeverityLabelForChip(severityLabel)
-                }
-                showStatusChip={headerVariant !== "engagement"}
-                variant={headerVariant}
-              />
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <CaseDetailsHeader
+                    wso2CaseId={data?.internalId}
+                    caseNumber={data?.number}
+                    title={data?.title}
+                    severityLabel={severityLabel ?? undefined}
+                    statusLabel={statusLabel}
+                    assignedEngineerLabel={
+                      hideAssignedEngineer ? null : assignedEngineerLabel
+                    }
+                    statusChipIcon={statusChipIcon}
+                    statusChipSx={statusChipSx}
+                    isLoading={isLoading}
+                    showSeverityChip={
+                      headerVariant === "default" &&
+                      !isSecurityReportAnalysis &&
+                      hasSeverityLabelForChip(severityLabel)
+                    }
+                    showStatusChip={headerVariant !== "engagement"}
+                    variant={headerVariant}
+                  />
+                </Box>
 
-              {!isEngagementRoute && (!hideActionRow || showEngineerOnly) && (
-                <CaseDetailsActionRow
-                  assignedEngineer={assignedEngineer}
-                  engineerInitials={engineerInitials}
-                  statusLabel={statusLabel}
-                  closedOn={data?.closedOn}
-                  onOpenRelatedCase={onOpenRelatedCase}
-                  projectId={resolvedProjectId}
-                  caseId={caseId}
-                  isLoading={isLoading}
-                  showOnlyEngineer={showEngineerOnly}
-                  hideAssignedEngineer={hideAssignedEngineer}
-                />
-              )}
+                {!hideActionRow && (
+                  <CaseDetailsActionRow
+                    assignedEngineer={assignedEngineer}
+                    engineerInitials=""
+                    statusLabel={statusLabel}
+                    closedOn={data?.closedOn}
+                    onOpenRelatedCase={onOpenRelatedCase}
+                    projectId={resolvedProjectId}
+                    caseId={caseId}
+                    isLoading={isLoading}
+                    hideAssignedEngineer={hideAssignedEngineer}
+                  />
+                )}
+              </Box>
             </>
           )
         )}
@@ -326,6 +354,7 @@ export default function CaseDetailsContent({
           hideKnowledgeBaseTab={hideKnowledgeBaseTab}
           knowledgeBaseCount={knowledgeBaseCount}
           knowledgeBaseCountLoading={knowledgeBaseCountLoading}
+          hideRelatedChangeRequestsTab={hideRelatedChangeRequestsTab}
         />
       </Paper>
 

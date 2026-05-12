@@ -32,6 +32,7 @@ export const ChartLegend = ({
   data,
   isError,
   showValues = false,
+  onItemClick,
 }: ChartLegendProps): JSX.Element => {
   const isDarkMode = useDarkMode();
   return (
@@ -43,13 +44,24 @@ export const ChartLegend = ({
       gap: 1,
     }}
   >
-    {data.map((entry) => (
+    {data.map((entry) => {
+      const isClickable = !!onItemClick && !!entry.id && !isError;
+      return (
       <Box
         key={entry.name}
+        onClick={isClickable ? () => onItemClick!(entry.id!) : undefined}
         sx={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          cursor: isClickable ? "pointer" : "default",
+          borderRadius: 0.5,
+          px: 0.5,
+          mx: -0.5,
+          transition: "background-color 0.15s ease",
+          ...(isClickable && {
+            "&:hover": { bgcolor: "action.hover" },
+          }),
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -78,7 +90,8 @@ export const ChartLegend = ({
           </Typography>
         )}
       </Box>
-    ))}
+      );
+    })}
   </Box>
   );
 };

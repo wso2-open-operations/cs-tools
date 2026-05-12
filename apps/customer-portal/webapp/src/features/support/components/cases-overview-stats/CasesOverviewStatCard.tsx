@@ -30,6 +30,7 @@ export default function CasesOverviewStatCard({
   isLoading,
   isError,
   stats,
+  onStatClick,
 }: CasesOverviewStatCardProps): JSX.Element {
   return (
     <Box>
@@ -39,6 +40,7 @@ export default function CasesOverviewStatCard({
         entityName="support"
         stats={stats}
         configs={SUPPORT_STAT_CONFIGS}
+        onStatClick={onStatClick}
       />
     </Box>
   );

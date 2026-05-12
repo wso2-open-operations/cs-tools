@@ -112,6 +112,25 @@ function isHiddenField(questionText: string): boolean {
   return HIDDEN_FIELD_PATTERNS.some((p) => p.test(normalized));
 }
 
+const DATE_TIME_FIELD_PATTERNS: RegExp[] = [
+  /start\s*(date|time)/i,
+  /end\s*(date|time)/i,
+  /scheduled\s*(date|time|start|end)/i,
+  /implementation\s*(date|time|start|end)/i,
+  /planned\s*(start|end|date|time)/i,
+  /actual\s*(start|end|date|time)/i,
+  /date\s*(and\s*)?\/?\s*time/i,
+  /time\s*(and\s*)?\/?\s*date/i,
+];
+
+/** True if variable should render a date/time picker (by type or questionText). */
+export function isDateTimeField(variable: CatalogItemVariable): boolean {
+  const t = (variable.type ?? "").trim();
+  if (/date.*time|datetime/i.test(t) || /^date$/i.test(t)) return true;
+  const q = (variable.questionText ?? "").trim();
+  return DATE_TIME_FIELD_PATTERNS.some((p) => p.test(q));
+}
+
 /**
  * Returns user-editable variables (excludes context and hidden).
  * Hot fix: all typable fields are mandatory.

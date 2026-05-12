@@ -54,9 +54,9 @@ describe("BasicInformationSection", () => {
     expect(screen.getByDisplayValue("Test Project")).toBeInTheDocument();
   });
 
-  it("should render Deployment Type and Product Version labels", () => {
+  it("should render Deployment and Product Version labels", () => {
     renderSection();
-    expect(screen.getByText("Deployment Type")).toBeInTheDocument();
+    expect(screen.getByText("Deployment")).toBeInTheDocument();
     expect(screen.getByText("Product Version")).toBeInTheDocument();
   });
 

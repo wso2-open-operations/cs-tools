@@ -27,6 +27,7 @@ import {
 } from "react";
 
 import { ERROR_BANNER_TIMEOUT_MS } from "@constants/common";
+import { consumePendingSuccessMessage } from "@features/settings/utils/settingsStorage";
 
 interface SuccessBannerContextType {
   /** Show the success banner with the given message. */
@@ -53,6 +54,14 @@ export function SuccessBannerProvider({
 }: SuccessBannerProviderProps): JSX.Element {
   const [message, setMessage] = useState<string | null>(null);
   const [key, setKey] = useState(0);
+
+  useEffect(() => {
+    const pending = consumePendingSuccessMessage();
+    if (pending) {
+      setMessage(pending);
+      setKey((prev) => prev + 1);
+    }
+  }, []);
 
   const showSuccess = useCallback((msg: string) => {
     setMessage(msg);

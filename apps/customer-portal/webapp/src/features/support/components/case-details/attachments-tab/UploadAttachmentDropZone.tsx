@@ -70,7 +70,7 @@ export default function UploadAttachmentDropZone({
         Choose file
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
-        Maximum file size: 15 MB.
+        Maximum file size: 10 MB.
       </Typography>
     </Box>
   );

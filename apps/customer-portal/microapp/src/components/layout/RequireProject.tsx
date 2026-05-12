@@ -15,6 +15,7 @@
 // under the License.
 
 import { useProject } from "@context/project";
+import ProjectScopeProvider from "@root/src/context/ProjectScopeProvider";
 import { Navigate, Outlet } from "react-router-dom";
 
 const RequireProject = () => {
@@ -24,7 +25,11 @@ const RequireProject = () => {
     return <Navigate to="/select" replace />;
   }
 
-  return <Outlet />;
+  return (
+    <ProjectScopeProvider>
+      <Outlet />
+    </ProjectScopeProvider>
+  );
 };
 
 export default RequireProject;

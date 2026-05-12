@@ -74,7 +74,6 @@ import {
 import { SecurityTabId } from "@features/security/types/security";
 import {
   filterDeploymentsForCaseCreation,
-  getProductCategoriesForCaseCreation,
   getProjectSeverityPolicy,
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
@@ -83,12 +82,11 @@ import {
   htmlToPlainText,
 } from "@features/support/utils/richTextEditor";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
-import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
-import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import type {
-  RelatedCaseState,
-} from "@features/support/types/createCasePage";
-import { ChatSender, type Message } from "@features/support/types/conversations";
+  ProductCategory,
+  ProjectDeploymentItem,
+} from "@features/project-details/types/deployments";
+import type { RelatedCaseState } from "@features/support/types/createCasePage";
 
 const DEFAULT_CASE_TITLE = "Support case";
 const DEFAULT_CASE_DESCRIPTION = "Please describe your issue here.";
@@ -140,8 +138,10 @@ export default function CreateCasePage(): JSX.Element {
     useGetProjectFeatures(projectId || "");
   const severityPolicy =
     projectDetails && !isProjectFeaturesLoading && projectFeatures
-    ? getProjectSeverityPolicy(projectDetails.type?.label, { projectFeatures })
-    : { excludeS0: true, restrictSeverityToLow: true };
+      ? getProjectSeverityPolicy(projectDetails.type?.label, {
+          projectFeatures,
+        })
+      : { excludeS0: true, restrictSeverityToLow: true };
   const { excludeS0, restrictSeverityToLow: forceSeverityS4 } = severityPolicy;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
@@ -198,7 +198,12 @@ export default function CreateCasePage(): JSX.Element {
     {
       pageSize: 10,
       enabled: !!selectedDeploymentId,
-      request: { filters: { productCategories: getProductCategoriesForCaseCreation() } },
+      request: {
+        filters: {
+          productCategories: (projectFeatures?.defaultCaseProductCategories ??
+            undefined) as ProductCategory[] | undefined,
+        },
+      },
     },
   );
   const deploymentProductsLoading = deploymentProductsQuery.isLoading;
@@ -242,13 +247,28 @@ export default function CreateCasePage(): JSX.Element {
 
   const hasInitializedRef = useRef(false);
   const hasClassificationAppliedRef = useRef(false);
+  const skipDescriptionOnChangeRef = useRef(false);
+  const classificationDescriptionRef = useRef<string>("");
+  const [isDeploymentManuallySet, setIsDeploymentManuallySet] = useState(false);
+  const [isProductManuallySet, setIsProductManuallySet] = useState(false);
+  const [isIssueTypeFromClassification, setIsIssueTypeFromClassification] =
+    useState(false);
+  const [isSeverityFromClassification, setIsSeverityFromClassification] =
+    useState(false);
+  const [classificationDeploymentLabel, setClassificationDeploymentLabel] =
+    useState("");
+  const [isDeploymentFromClassification, setIsDeploymentFromClassification] =
+    useState(false);
+  const [isTitleFromClassification, setIsTitleFromClassification] =
+    useState(false);
+  const [isDescriptionFromClassification, setIsDescriptionFromClassification] =
+    useState(false);
 
   const skipChatMode = skipChat;
   const noAiMode = !!relatedCase || skipChatMode;
   const queryClient = useQueryClient();
 
   const locationState = location.state as {
-    messages?: Message[];
     classificationResponse?: {
       issueType?: string;
       severityLevel?: string;
@@ -265,7 +285,6 @@ export default function CreateCasePage(): JSX.Element {
 
   const STORAGE_KEY = `case_classification_data_${projectId}`;
   const CONVERSATION_ID_STORAGE_KEY = `case_conversation_id_${projectId}`;
-  const CHAT_MESSAGES_STORAGE_KEY = `case_chat_messages_${projectId}`;
 
   const [classificationResponse, setClassificationResponse] = useState<
     | {
@@ -294,32 +313,6 @@ export default function CreateCasePage(): JSX.Element {
     }
   });
 
-  const [chatMessages, setChatMessages] = useState<Message[]>(() => {
-    const stateMessages = (locationState as { messages?: Message[] } | null)?.messages;
-    if (stateMessages?.length) {
-      return stateMessages;
-    }
-    try {
-      const stored = sessionStorage.getItem(CHAT_MESSAGES_STORAGE_KEY);
-      if (!stored) return [];
-      const parsed = JSON.parse(stored) as Message[];
-      return parsed.map((message) => {
-        const parsedTimestamp = new Date(message.timestamp);
-        return {
-          id: message.id || `restored-${crypto.randomUUID()}`,
-          text: message.text,
-          sender:
-            message.sender === ChatSender.BOT ? ChatSender.BOT : ChatSender.USER,
-          timestamp: Number.isNaN(parsedTimestamp.getTime())
-            ? new Date()
-            : parsedTimestamp,
-        };
-      });
-    } catch {
-      return [];
-    }
-  });
-
   useEffect(() => {
     if (locationState?.classificationResponse) {
       try {
@@ -336,18 +329,6 @@ export default function CreateCasePage(): JSX.Element {
       setClassificationResponse(locationState.classificationResponse);
     }
   }, [locationState?.classificationResponse, STORAGE_KEY, logger]);
-
-  useEffect(() => {
-    const stateMessages = (locationState as { messages?: Message[] } | null)?.messages;
-    if (stateMessages?.length) {
-      setChatMessages(stateMessages);
-      try {
-        sessionStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(stateMessages));
-      } catch {
-        // ignore storage write errors
-      }
-    }
-  }, [locationState, CHAT_MESSAGES_STORAGE_KEY]);
 
   // Persist conversationId to survive page refresh
   const [conversationId, setConversationId] = useState<string | undefined>(
@@ -397,14 +378,14 @@ export default function CreateCasePage(): JSX.Element {
 
   const projectDisplay = projectDetails?.name ?? "";
 
-  const issueTypesList = (filters?.issueTypes || []) as {
-    id: string;
-    label: string;
-  }[];
-  const severityLevelsList = (filters?.severities || []) as {
-    id: string;
-    label: string;
-  }[];
+  const issueTypesList = useMemo(
+    () => (filters?.issueTypes ?? []) as { id: string; label: string }[],
+    [filters?.issueTypes],
+  );
+  const severityLevelsList = useMemo(
+    () => (filters?.severities ?? []) as { id: string; label: string }[],
+    [filters?.severities],
+  );
 
   useEffect(() => {
     if (isProjectLoading || isProjectFeaturesLoading || isFiltersLoading) {
@@ -424,6 +405,10 @@ export default function CreateCasePage(): JSX.Element {
   const handleDeploymentChange = useCallback((value: string) => {
     setDeployment(value);
     setProduct("");
+    setIsDeploymentManuallySet(true);
+    setIsDeploymentFromClassification(false);
+    setClassificationDeploymentLabel("");
+    setIsProductManuallySet(true);
   }, []);
 
   // For Cloud Support / Cloud Evaluation Support: auto-pick the first primary
@@ -440,6 +425,35 @@ export default function CreateCasePage(): JSX.Element {
 
   const handleProductChange = useCallback((value: string) => {
     setProduct(value);
+    setIsProductManuallySet(true);
+  }, []);
+
+  const handleIssueTypeChange = useCallback((value: string) => {
+    setIssueType(value);
+    setIsIssueTypeFromClassification(false);
+  }, []);
+
+  const handleSeverityChange = useCallback((value: string) => {
+    setSeverity(value);
+    setIsSeverityFromClassification(false);
+  }, []);
+
+  const handleTitleChange = useCallback((value: string) => {
+    setTitle(value);
+    setIsTitleFromClassification(false);
+  }, []);
+
+  const handleDescriptionChange = useCallback((value: string) => {
+    if (skipDescriptionOnChangeRef.current) {
+      skipDescriptionOnChangeRef.current = false;
+      classificationDescriptionRef.current = value;
+      setDescription(value);
+      return;
+    }
+    setDescription(value);
+    if (value !== classificationDescriptionRef.current) {
+      setIsDescriptionFromClassification(false);
+    }
   }, []);
 
   // Auto-fill title for security reports when deployment and product are selected
@@ -505,7 +519,7 @@ export default function CreateCasePage(): JSX.Element {
         }
         setProduct("");
         setIssueType("");
-        setSeverity("");
+        if (!forceSeverityS4) setSeverity("");
       } else if (!classificationResponse) {
         setDeployment(initialDeployment);
         setProduct("");
@@ -519,6 +533,7 @@ export default function CreateCasePage(): JSX.Element {
   }, [
     baseDeploymentOptions,
     classificationResponse,
+    forceSeverityS4,
     isDeploymentsLoading,
     issueTypesList,
     isFiltersLoading,
@@ -557,38 +572,52 @@ export default function CreateCasePage(): JSX.Element {
     if (!projectDeployments?.length) return;
     if (hasRelatedCaseDeploymentInitializedRef.current) return;
 
-    const dep = relatedCase.deploymentId
-      ? projectDeployments.find(
-          (d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId,
+    const deploymentOptionFromId = relatedCase.deploymentId
+      ? projectDeployments
+          .find((d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId)
+          ?.name?.trim() ||
+        projectDeployments
+          .find((d: ProjectDeploymentItem) => d.id === relatedCase.deploymentId)
+          ?.type?.label?.trim()
+      : undefined;
+    const deploymentOptionFromLabel = relatedCase.deploymentLabel
+      ? findMatchingDeploymentLabel(
+          relatedCase.deploymentLabel,
+          baseDeploymentOptions,
         )
-      : null;
-    const displayLabel = dep
-      ? (dep.name ?? dep.type?.label ?? relatedCase.deploymentLabel)
-      : relatedCase.deploymentLabel;
-    if (displayLabel) {
-      setDeployment(displayLabel);
+      : undefined;
+    const resolvedDeploymentOption =
+      deploymentOptionFromId || deploymentOptionFromLabel;
+
+    if (resolvedDeploymentOption) {
+      setDeployment(resolvedDeploymentOption);
       hasRelatedCaseDeploymentInitializedRef.current = true;
     }
-  }, [relatedCase, projectDeployments]);
+  }, [relatedCase, projectDeployments, baseDeploymentOptions]);
 
   useEffect(() => {
     if (noAiMode) return;
     if (!classificationResponse?.caseInfo) return;
     const info = classificationResponse.caseInfo;
-    if (info.shortDescription?.trim()) setTitle(info.shortDescription);
+    if (info.shortDescription?.trim()) {
+      setTitle(info.shortDescription);
+      setIsTitleFromClassification(true);
+    }
     if (info.description?.trim()) {
       const text = info.description.trim();
       const isLikelyHtml =
         /<[a-zA-Z][^>]*>[\s\S]*<\/[a-zA-Z][^>]*>|<[a-zA-Z][^>]*\/>/.test(text);
       const html = isLikelyHtml ? text : `<p>${escapeHtml(text)}</p>`;
+      skipDescriptionOnChangeRef.current = true;
       setDescription(html);
+      setIsDescriptionFromClassification(true);
     }
   }, [classificationResponse, noAiMode]);
 
   useEffect(() => {
     if (noAiMode) return;
     if (hasClassificationAppliedRef.current || !classificationResponse) return;
-    if (isFiltersLoading || isDeploymentsLoading) return;
+    if (isFiltersLoading) return;
 
     if (!severityLevelsList.length) return;
 
@@ -600,26 +629,17 @@ export default function CreateCasePage(): JSX.Element {
 
     hasClassificationAppliedRef.current = true;
 
-    setDeployment((prev) => {
-      if (!deploymentLabel) return prev;
-      const matched =
-        getDeploymentDisplayLabelForEnvironment(
-          deploymentLabel,
-          projectDeployments,
-        ) ??
-        findMatchingDeploymentLabel(deploymentLabel, baseDeploymentOptions);
-      return matched ?? prev;
-    });
+    if (deploymentLabel) setClassificationDeploymentLabel(deploymentLabel);
     if (productLabel) setClassificationProductLabel(productLabel);
     // Product is auto-selected in the sync effect when products for the matched deployment load
-    setIssueType((prev) =>
+    const issueTypeMatched = !!(
       issueTypeLabel &&
       issueTypesList.some(
         (t) => t.label === issueTypeLabel || t.id === issueTypeLabel,
       )
-        ? issueTypeLabel
-        : prev,
     );
+    setIssueType((prev) => (issueTypeMatched ? issueTypeLabel! : prev));
+    if (issueTypeMatched) setIsIssueTypeFromClassification(true);
 
     const severityMapping: Record<string, string> = {
       [CaseSeverityLevel.S0]: CaseSeverity.CATASTROPHIC,
@@ -627,6 +647,7 @@ export default function CreateCasePage(): JSX.Element {
       [CaseSeverityLevel.S2]: CaseSeverity.HIGH,
       [CaseSeverityLevel.S3]: CaseSeverity.MEDIUM,
       [CaseSeverityLevel.S4]: CaseSeverity.LOW,
+      S4: CaseSeverity.LOW,
     };
 
     const mappedLabel = severityMapping[severityLabel ?? ""] ?? severityLabel;
@@ -638,21 +659,101 @@ export default function CreateCasePage(): JSX.Element {
         s.label === mappedLabel,
     );
     setSeverity((prev) => (matchedSeverity ? matchedSeverity.id : prev));
+    if (matchedSeverity) setIsSeverityFromClassification(true);
   }, [
     classificationResponse,
     isFiltersLoading,
     noAiMode,
-    isDeploymentsLoading,
-    baseDeploymentOptions,
     issueTypesList,
-    projectDeployments,
     severityLevelsList,
+  ]);
+
+  // Reactively match deployment from classification as pages load.
+  useEffect(() => {
+    if (
+      noAiMode ||
+      !classificationDeploymentLabel?.trim() ||
+      isDeploymentManuallySet
+    )
+      return;
+    if (isDeploymentFromClassification) return;
+    const matched =
+      getDeploymentDisplayLabelForEnvironment(
+        classificationDeploymentLabel,
+        projectDeployments,
+      ) ??
+      findMatchingDeploymentLabel(
+        classificationDeploymentLabel,
+        baseDeploymentOptions,
+      );
+    if (matched) {
+      setDeployment(matched);
+      setIsDeploymentFromClassification(true);
+    }
+  }, [
+    classificationDeploymentLabel,
+    projectDeployments,
+    baseDeploymentOptions,
+    noAiMode,
+    isDeploymentManuallySet,
+    isDeploymentFromClassification,
+  ]);
+
+  // Auto-fetch more deployment pages when classification suggests a deployment not yet loaded.
+  useEffect(() => {
+    if (
+      noAiMode ||
+      !classificationDeploymentLabel?.trim() ||
+      isDeploymentManuallySet
+    )
+      return;
+    if (isDeploymentFromClassification) return;
+    if (deploymentsQuery.isFetchingNextPage || !deploymentsQuery.hasNextPage)
+      return;
+    const alreadyFound =
+      getDeploymentDisplayLabelForEnvironment(
+        classificationDeploymentLabel,
+        projectDeployments,
+      ) ??
+      findMatchingDeploymentLabel(
+        classificationDeploymentLabel,
+        baseDeploymentOptions,
+      );
+    if (alreadyFound) return;
+    void deploymentsQuery.fetchNextPage();
+  }, [
+    noAiMode,
+    classificationDeploymentLabel,
+    isDeploymentManuallySet,
+    isDeploymentFromClassification,
+    projectDeployments,
+    baseDeploymentOptions,
+    deploymentsQuery,
   ]);
 
   useEffect(() => {
     if (!selectedDeploymentId || !sortedBaseProductOptions.length) return;
-    // In related-case / no-AI mode, keep Product Version unselected by default.
-    if (noAiMode && relatedCase) return;
+    if (noAiMode && relatedCase) {
+      // Pre-select the deployed product from the related case, but only once.
+      setProduct((current) => {
+        if (current?.trim()) return current;
+        if (relatedCase.deployedProductId) {
+          const found = sortedBaseProductOptions.some(
+            (o) => o.id === relatedCase.deployedProductId,
+          );
+          if (found) return relatedCase.deployedProductId;
+        }
+        if (relatedCase.deployedProductLabel) {
+          const fromLabel = findMatchingProductId(
+            relatedCase.deployedProductLabel,
+            sortedBaseProductOptions,
+          );
+          if (fromLabel) return fromLabel;
+        }
+        return current;
+      });
+      return;
+    }
     setProduct((current) => {
       if (!current?.trim()) {
         const fromClassification = findMatchingProductId(
@@ -680,22 +781,35 @@ export default function CreateCasePage(): JSX.Element {
     selectedDeploymentId,
   ]);
 
+  // Auto-fetch more product pages when classification suggests a product not yet loaded.
+  useEffect(() => {
+    if (!classificationProductLabel?.trim()) return;
+    if (!selectedDeploymentId) return;
+    if (
+      deploymentProductsQuery.isFetchingNextPage ||
+      !deploymentProductsQuery.hasNextPage
+    )
+      return;
+    const alreadyFound = findMatchingProductId(
+      classificationProductLabel,
+      sortedBaseProductOptions,
+    );
+    if (alreadyFound) return;
+    void deploymentProductsQuery.fetchNextPage();
+  }, [
+    classificationProductLabel,
+    sortedBaseProductOptions,
+    selectedDeploymentId,
+    deploymentProductsQuery,
+  ]);
+
   const handleBack = () => {
-    if (projectId && conversationId) {
-      navigate(`/projects/${projectId}/support/chat/${conversationId}`, {
-        state: {
-          messages: chatMessages,
-        },
-      });
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    if (returnTo) {
+      navigate(returnTo);
       return;
     }
-    if (window.history.length > 1) {
-      navigate(ROUTE_PREVIOUS_PAGE);
-    } else if (projectId) {
-      navigate(`/projects/${projectId}/support/cases`);
-    } else {
-      navigate("/");
-    }
+    navigate(-1);
   };
 
   const handleAttachmentClick = () => {
@@ -750,6 +864,9 @@ export default function CreateCasePage(): JSX.Element {
     const descriptionPlain = htmlToPlainText(description).trim();
     if (!titlePlain) {
       showError("Please enter a case title.");
+      return;
+    }
+    if (titlePlain.length > 160) {
       return;
     }
     if (!descriptionPlain) {
@@ -857,8 +974,6 @@ export default function CreateCasePage(): JSX.Element {
           isSecurityReport,
         );
 
-        showSuccess("Case created successfully");
-
         if (projectId) {
           await triggerPostCreationApiCalls(
             authFetch,
@@ -876,7 +991,6 @@ export default function CreateCasePage(): JSX.Element {
         try {
           sessionStorage.removeItem(STORAGE_KEY);
           sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY);
-          sessionStorage.removeItem(CHAT_MESSAGES_STORAGE_KEY);
         } catch (e) {
           logger.error(
             "Failed to cleanup sessionStorage after case creation",
@@ -886,12 +1000,15 @@ export default function CreateCasePage(): JSX.Element {
 
         // Refetch security vulnerabilities if this was a security report
         if (isCreatedSecurityReport) {
-          navigate(
+          window.location.assign(
             `/projects/${projectId}/security-center/security-report-analysis/${caseId}?tab=${SecurityTabId.VULNERABILITIES}`,
           );
         } else {
-          navigate(`/projects/${projectId}/support/cases/${caseId}`);
+          window.location.assign(
+            `/projects/${projectId}/support/cases/${caseId}`,
+          );
         }
+        showSuccess("Case created successfully");
       },
       onError: (error) => {
         setIsNavigatingAfterCreate(false);
@@ -920,12 +1037,32 @@ export default function CreateCasePage(): JSX.Element {
   }, [classificationProductLabel, sortedBaseProductOptions]);
 
   const isProductAutoDetected =
-    !noAiMode && !!classificationProductLabel?.trim() && !!product?.trim();
+    !noAiMode &&
+    !!classificationProductLabel?.trim() &&
+    !!product?.trim() &&
+    !isProductManuallySet;
 
   const isDeploymentAutoDetected =
+    !noAiMode && isDeploymentFromClassification && !isDeploymentManuallySet;
+
+  const isIssueTypeAutoDetected = !noAiMode && isIssueTypeFromClassification;
+  const isSeverityAutoDetected = !noAiMode && isSeverityFromClassification;
+
+  const isDeploymentClassificationPending =
     !noAiMode &&
-    !!classificationResponse?.caseInfo?.environment?.trim() &&
-    !!deployment?.trim();
+    !!classificationDeploymentLabel?.trim() &&
+    !deployment?.trim() &&
+    !isDeploymentManuallySet &&
+    (deploymentsQuery.isLoading ||
+      deploymentsQuery.isFetchingNextPage ||
+      !!deploymentsQuery.hasNextPage);
+
+  const isProductClassificationPending =
+    !noAiMode &&
+    !!classificationProductLabel?.trim() &&
+    !product?.trim() &&
+    !!selectedDeploymentId &&
+    (deploymentProductsLoading || !!deploymentProductsQuery.hasNextPage);
 
   const sectionMetadata = {
     deploymentTypes: baseDeploymentOptions,
@@ -935,8 +1072,13 @@ export default function CreateCasePage(): JSX.Element {
 
   const renderContent = () => (
     <Grid container spacing={3}>
-      {/* left column - form content (full width when skipChat) */}
-      <Grid size={{ xs: 12, md: skipChatMode ? 12 : 8 }}>
+      {/* left column - form content (full width when skipChat or no sidebar content) */}
+      <Grid
+        size={{
+          xs: 12,
+          md: skipChatMode || (!relatedCase && !conversationId) ? 12 : 8,
+        }}
+      >
         {/* case creation form */}
         <Box
           component="form"
@@ -953,14 +1095,19 @@ export default function CreateCasePage(): JSX.Element {
             isProductAutoDetected={isProductAutoDetected}
             isDeploymentAutoDetected={isDeploymentAutoDetected}
             metadata={sectionMetadata}
-            isDeploymentLoading={isProjectLoading || isDeploymentsLoading}
+            isDeploymentLoading={
+              isProjectLoading ||
+              isDeploymentsLoading ||
+              isDeploymentClassificationPending
+            }
             isProductDropdownDisabled={isProductDropdownDisabled}
             isProductLoading={
-              !!selectedDeploymentId && deploymentProductsLoading
+              (!!selectedDeploymentId && deploymentProductsLoading) ||
+              isProductClassificationPending
             }
             isRelatedCaseMode={noAiMode}
             extraProductOptions={extraProductOptions}
-            isDeploymentDisabled={!!relatedCase}
+            isDeploymentDisabled={false}
             hideDeploymentField={isPrimaryProductionOnly}
             onLoadMoreDeployments={() => {
               if (
@@ -987,13 +1134,17 @@ export default function CreateCasePage(): JSX.Element {
 
           <CaseDetailsSection
             title={title}
-            setTitle={setTitle}
+            setTitle={handleTitleChange}
             description={description}
-            setDescription={setDescription}
+            setDescription={handleDescriptionChange}
             issueType={issueType}
-            setIssueType={setIssueType}
+            setIssueType={handleIssueTypeChange}
             severity={severity}
-            setSeverity={setSeverity}
+            setSeverity={handleSeverityChange}
+            isIssueTypeAutoDetected={isIssueTypeAutoDetected}
+            isSeverityAutoDetected={isSeverityAutoDetected}
+            isTitleFromChat={isTitleFromClassification}
+            isDescriptionFromConversation={isDescriptionFromClassification}
             metadata={undefined}
             filters={filters}
             isLoading={isFiltersLoading}
@@ -1006,7 +1157,7 @@ export default function CreateCasePage(): JSX.Element {
                 : undefined
             }
             isRelatedCaseMode={noAiMode}
-            isTitleDisabled={!!relatedCase}
+            isTitleDisabled={false}
             relatedCaseNumber={relatedCase?.number ?? ""}
             isSecurityReport={isSecurityReport}
             excludeS0={excludeS0}
@@ -1052,8 +1203,8 @@ export default function CreateCasePage(): JSX.Element {
         </Box>
       </Grid>
 
-      {/* right column - sidebar (hidden when skipChat) */}
-      {!skipChatMode && (
+      {/* right column - sidebar (hidden when skipChat or no sidebar content) */}
+      {!skipChatMode && (relatedCase || conversationId) && (
         <Grid size={{ xs: 12, md: 4 }}>
           {relatedCase ? (
             <RelatedCaseSummary

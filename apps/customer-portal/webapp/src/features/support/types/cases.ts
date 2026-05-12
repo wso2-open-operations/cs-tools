@@ -102,6 +102,7 @@ export type ProjectCasesStats = {
   totalCount?: number;
   activeCount?: number;
   outstandingCount?: number;
+  actionRequiredCount?: number;
   averageResponseTime: number;
   resolvedCases: ResolvedCasesStats;
   changeRate?: CasesChangeRate;
@@ -147,7 +148,7 @@ export type DashboardMockStats = {
 // Item type for case list items.
 export type CaseListItem = AuditMetadata & {
   id: string;
-  internalId: string;
+  internalId?: string;
   number: string;
   title: string;
   description: string;
@@ -243,8 +244,13 @@ export type CaseComment = AuditMetadata & {
   id: string;
   content: string;
   type: string;
+  fileName?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  downloadUrl?: string;
   createdByFirstName?: string | null;
   createdByLastName?: string | null;
+  createdByFullName?: string | null;
   isEscalated: boolean;
   hasInlineAttachments?: boolean;
   inlineAttachments?: CaseCommentInlineAttachment[];
@@ -253,6 +259,28 @@ export type CaseComment = AuditMetadata & {
 // Response type for case comments list.
 export type CaseCommentsResponse = PaginationResponse & {
   comments: CaseComment[];
+};
+
+// Item type for case activity (comments/attachments timeline entries).
+export type CaseActivity = {
+  id: string;
+  content: string;
+  createdOn: string;
+  createdBy: string;
+  createdByFirstName?: string | null;
+  createdByLastName?: string | null;
+  createdByFullName?: string | null;
+  type: string;
+  commentType?: string;
+  fileName?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  downloadUrl?: string;
+};
+
+// Response type for case activities search.
+export type CaseActivitiesResponse = PaginationResponse & {
+  activities: CaseActivity[];
 };
 
 // Response type for case metadata (fetching possible statuses, severities, types).
@@ -278,6 +306,7 @@ export type AllCasesFilterValues = {
   severityId?: string;
   issueTypes?: string;
   deploymentId?: string;
+  engagementTypeKey?: string;
 };
 
 // Item type for a case attachment.
@@ -335,6 +364,9 @@ export type CaseSearchFilters = {
   searchQuery?: string;
   caseTypes?: string[];
   createdByMe?: boolean;
+  closedStartDate?: string;
+  closedEndDate?: string;
+  engagementTypeKeys?: number[];
 };
 
 // Request type for searching cases.

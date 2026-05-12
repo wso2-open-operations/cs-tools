@@ -46,6 +46,7 @@ export default function RegenerateTokenModal({
   token,
 }: RegenerateTokenModalProps): JSX.Element {
   const [secret, setSecret] = useState<string | null>(null);
+  const [fullTokenName, setFullTokenName] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [copiedName, setCopiedName] = useState(false);
@@ -57,12 +58,14 @@ export default function RegenerateTokenModal({
     regenerateMutation.mutate(token.id, {
       onSuccess: (data) => {
         setSecret(data.secret);
+        setFullTokenName(data.name ?? null);
       },
     });
   }
 
   function handleClose() {
     setSecret(null);
+    setFullTokenName(null);
     setShowSecret(false);
     setCopiedSecret(false);
     setCopiedName(false);
@@ -115,7 +118,7 @@ export default function RegenerateTokenModal({
             <TextField
               label="Token Name"
               fullWidth
-              value={token?.displayName ?? token?.name}
+              value={fullTokenName ?? token?.name}
               InputProps={{
                 readOnly: true,
                 endAdornment: (
@@ -124,7 +127,7 @@ export default function RegenerateTokenModal({
                       size="small"
                       onClick={() =>
                         handleCopy(
-                          token?.displayName ?? token?.name ?? "",
+                          fullTokenName ?? token?.name ?? "",
                           "name",
                         )
                       }

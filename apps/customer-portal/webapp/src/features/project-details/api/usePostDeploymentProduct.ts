@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PostDeploymentProductVariables } from "@features/project-details/types/projectDetailsApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /**
  * Posts a product to a deployment (POST /deployments/:deploymentId/products).
@@ -78,9 +79,7 @@ export function usePostDeploymentProduct(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error adding product to deployment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
       } catch (error) {
         logger.error("[usePostDeploymentProduct] Error:", error);

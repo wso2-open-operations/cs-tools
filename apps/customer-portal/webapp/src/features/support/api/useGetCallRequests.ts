@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
 import type { CallRequestsResponse } from "@features/support/types/calls";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 /** Page size for POST .../call-requests/search (must match backend max). */
 export const CALL_REQUESTS_PAGE_SIZE = 10;
@@ -97,9 +98,7 @@ export function useGetCallRequests(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error fetching call requests: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
 
         const data: CallRequestsResponse = await response.json();

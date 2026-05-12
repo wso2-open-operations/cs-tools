@@ -54,8 +54,9 @@ vi.mock("@components/error-indicator/ErrorIndicator", () => ({
 describe("ProjectCardStats", () => {
   it("should render counts and formatted date", () => {
     const props = {
-      activeCasesCount: 10,
+      outstandingCount: 10,
       activeChatsCount: 5,
+      actionRequiredCount: 0,
       date: "2025-07-17",
     };
 
@@ -68,8 +69,9 @@ describe("ProjectCardStats", () => {
 
   it("should render icons", () => {
     const props = {
-      activeCasesCount: 0,
+      outstandingCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
     };
 
@@ -82,8 +84,9 @@ describe("ProjectCardStats", () => {
 
   it("should render error indicators when isError is true", () => {
     const props = {
-      activeCasesCount: 0,
+      outstandingCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
       isError: true,
     };
@@ -99,8 +102,9 @@ describe("ProjectCardStats", () => {
 
   it("should render skeletons when isLoading is true", () => {
     const props = {
-      activeCasesCount: 0,
+      outstandingCount: 0,
       activeChatsCount: 0,
+      actionRequiredCount: 0,
       date: "2025-07-17",
       isLoading: true,
     };

@@ -30,8 +30,7 @@ import {
 import { File, Sparkles, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
-import { isS0SeverityLabel } from "@features/dashboard/utils/dashboard";
-import { getSeverityColor } from "@features/support/utils/support";
+import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
 
 /**
@@ -62,8 +61,14 @@ export function CaseDetailsSection({
   isSecurityReport = false,
   excludeS0 = false,
   isSeverityDisabled = false,
+  isIssueTypeAutoDetected = false,
+  isSeverityAutoDetected = false,
+  isTitleFromChat = false,
+  isDescriptionFromConversation = false,
 }: CaseDetailsSectionProps): JSX.Element {
   const titleReadOnly = isTitleDisabled;
+  const titleLength = title.trim().length;
+  const isTitleTooLong = titleLength > 160;
   const meta = metadata as
     | {
         issueTypes?: unknown[];
@@ -114,6 +119,7 @@ export function CaseDetailsSection({
   );
   const severityLevels = [...restrictedBase, ...filteredExtra].map((level) => ({
     ...level,
+    color: getSeverityLegendColor(level.label),
     label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
   }));
 
@@ -161,7 +167,7 @@ export function CaseDetailsSection({
                 </Box>
               )}
             </Typography>
-            {!isRelatedCaseMode && (
+            {!isRelatedCaseMode && isTitleFromChat && (
               <Chip
                 label="Generated from chat"
                 size="small"
@@ -185,7 +191,19 @@ export function CaseDetailsSection({
                   : "Enter issue title"
               }
               disabled={isLoading || titleReadOnly}
+              error={isTitleTooLong}
+              helperText={
+                isTitleTooLong ? "Title must be 160 characters or fewer." : undefined
+              }
             />
+            <Typography
+              variant="caption"
+              color={isTitleTooLong ? "error.main" : "text.secondary"}
+              align="right"
+              sx={{ mt: 0.5, display: "block" }}
+            >
+              {titleLength}/160
+            </Typography>
           </Box>
         </Box>
 
@@ -198,7 +216,7 @@ export function CaseDetailsSection({
                 *
               </Box>
             </Typography>
-            {!isRelatedCaseMode && (
+            {!isRelatedCaseMode && isDescriptionFromConversation && (
               <Chip
                 label="From conversation"
                 size="small"
@@ -208,27 +226,25 @@ export function CaseDetailsSection({
               />
             )}
           </Box>
-          
-            <Editor
-              key={
-                isRelatedCaseMode
-                  ? `related-${relatedCaseNumber ?? "new"}`
-                  : "default"
-              }
-              onAttachmentClick={
-                isSecurityReport ? undefined : onAttachmentClick
-              }
-              attachments={isSecurityReport ? [] : attachments}
-              onAttachmentRemove={
-                isSecurityReport ? undefined : onAttachmentRemove
-              }
-              disabled={false}
-              value={description}
-              onChange={setDescription}
-              maxHeight="210px"
-            />
-          
-          {!isRelatedCaseMode && (
+
+          <Editor
+            key={
+              isRelatedCaseMode
+                ? `related-${relatedCaseNumber ?? "new"}`
+                : "default"
+            }
+            onAttachmentClick={isSecurityReport ? undefined : onAttachmentClick}
+            attachments={isSecurityReport ? [] : attachments}
+            onAttachmentRemove={
+              isSecurityReport ? undefined : onAttachmentRemove
+            }
+            disabled={false}
+            value={description}
+            onChange={setDescription}
+            maxHeight="210px"
+          />
+
+          {!isRelatedCaseMode && isDescriptionFromConversation && (
             <Typography
               variant="caption"
               color="text.disabled"
@@ -316,7 +332,7 @@ export function CaseDetailsSection({
                     color="text.secondary"
                     sx={{ mt: 1, display: "block" }}
                   >
-                    PDF, DOCX, TXT, CSV or other formats • Max 15MB per file
+                    PDF, DOCX, TXT, CSV or other formats • Max 10MB per file
                   </Typography>
                 </Box>
               </Box>
@@ -379,7 +395,7 @@ export function CaseDetailsSection({
                     *
                   </Box>
                 </Typography>
-                {!isRelatedCaseMode && (
+                {!isRelatedCaseMode && isIssueTypeAutoDetected && (
                   <Chip
                     label="AI classified"
                     size="small"
@@ -434,7 +450,7 @@ export function CaseDetailsSection({
                     *
                   </Box>
                 </Typography>
-                {!isRelatedCaseMode && (
+                {!isRelatedCaseMode && isSeverityAutoDetected && (
                   <Chip
                     label="AI assessed"
                     size="small"
@@ -469,9 +485,7 @@ export function CaseDetailsSection({
                           width: 10,
                           height: 10,
                           borderRadius: "50%",
-                          bgcolor: getSeverityColor(
-                            selectedLevel?.label ?? CaseSeverityLevel.S4,
-                          ),
+                          bgcolor: selectedLevel?.color ?? getSeverityLegendColor(CaseSeverityLevel.S4),
                           flexShrink: 0,
                         }}
                       />
@@ -507,7 +521,7 @@ export function CaseDetailsSection({
                               width: 10,
                               height: 10,
                               borderRadius: "50%",
-                              bgcolor: getSeverityColor(selectedLevel.label),
+                              bgcolor: selectedLevel.color,
                               flexShrink: 0,
                             }}
                           />
@@ -531,7 +545,7 @@ export function CaseDetailsSection({
                               width: 12,
                               height: 12,
                               borderRadius: "50%",
-                              bgcolor: getSeverityColor(lvl.label),
+                              bgcolor: lvl.color,
                             }}
                           />
                           <Box

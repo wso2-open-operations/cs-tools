@@ -16,58 +16,143 @@
 
 import {
   Box,
-  ComplexSelect,
   Header as HeaderUI,
+  MenuItem,
+  Paper,
+  Popover,
   Skeleton,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@wso2/oxygen-ui";
-import { FolderOpen } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
-import { useState } from "react";
-import type { ProjectListItem } from "@features/project-hub/types/projects";
+import { ChevronDown, ChevronUp, FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type JSX,
+  type MouseEvent,
+  type UIEvent,
+} from "react";
+import useInfiniteProjects, {
+  flattenProjectPages,
+  getTotalRecords,
+} from "@api/useGetProjects";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { SelectMenuLoadMoreRow } from "@components/select-menu-load-more-row/SelectMenuLoadMoreRow";
+import { PAGINATED_SELECT_MENU_MAX_HEIGHT_PX } from "@constants/common";
+import {
+  PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH,
+  PROJECT_HUB_PROJECTS_PAGE_SIZE,
+  PROJECT_HUB_SEARCH_DEBOUNCE_MS,
+  PROJECT_HUB_SEARCH_PLACEHOLDER,
+} from "@features/project-hub/constants/projectHubConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 
-// Props for the ProjectSwitcher component.
 interface ProjectSwitcherProps {
-  projects: ProjectListItem[];
-  selectedProject?: ProjectListItem;
+  projectId?: string;
   onProjectChange: (projectId: string) => void;
-  isLoading?: boolean;
-  isError?: boolean;
+  isAuthLoading?: boolean;
 }
 
-const INITIAL_DISPLAY_LIMIT = 10;
-const SCROLL_LOAD_THRESHOLD = 200;
+const LOAD_MORE_THRESHOLD_PX = 24;
+const DROPDOWN_SKELETON_COUNT = 5;
 
 /**
  * Project switcher component for the header.
+ * Owns its own paginated + searchable projects query.
+ * Keeps the dropdown open while search results are loading.
  *
  * @param {ProjectSwitcherProps} props - The props for the component.
  * @returns {JSX.Element} The ProjectSwitcher component.
  */
 export default function ProjectSwitcher({
-  projects,
-  selectedProject,
+  projectId,
   onProjectChange,
-  isLoading,
-  isError,
+  isAuthLoading = false,
 }: ProjectSwitcherProps): JSX.Element {
-  const [displayLimit, setDisplayLimit] = useState(INITIAL_DISPLAY_LIMIT);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const isMenuOpen = Boolean(anchorEl);
 
-  const handleMenuScroll = (event: React.UIEvent<HTMLElement>) => {
-    const list = event.currentTarget;
-    const scrollTop = list.scrollTop;
-    const scrollHeight = list.scrollHeight;
-    const clientHeight = list.clientHeight;
+  const debouncedSearchQuery = useDebouncedValue(
+    searchQuery,
+    PROJECT_HUB_SEARCH_DEBOUNCE_MS,
+  );
 
-    if (
-      scrollHeight - (scrollTop + clientHeight) < SCROLL_LOAD_THRESHOLD &&
-      displayLimit < projects.length
-    ) {
-      setDisplayLimit((prev) => Math.min(prev + 10, projects.length));
+  const {
+    data,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteProjects({
+    searchQuery: debouncedSearchQuery || undefined,
+    pageSize: PROJECT_HUB_PROJECTS_PAGE_SIZE,
+  });
+
+  const projects = useMemo(() => flattenProjectPages(data), [data]);
+  const totalRecords = getTotalRecords(data);
+
+  // Track the true unfiltered total so the single-project check isn't misled by a search-filtered count.
+  const [unfilteredTotal, setUnfilteredTotal] = useState(0);
+  useEffect(() => {
+    if (!debouncedSearchQuery && !isLoading) {
+      setUnfilteredTotal(totalRecords);
     }
-  };
+  }, [debouncedSearchQuery, isLoading, totalRecords]);
 
-  if (isLoading) {
+  // Persist the last known selected project name across search queries (projects list empties while loading)
+  const [lastFound, setLastFound] = useState<{ id: string; name: string } | undefined>(undefined);
+  useEffect(() => {
+    const found = projects.find((p) => p.id === projectId);
+    if (found) setLastFound({ id: found.id, name: found.name });
+  }, [projects, projectId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId),
+    [projects, projectId],
+  );
+
+  // Project details from React Query cache — populated by the dashboard's useGetProjectDetails call
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
+
+  // Best display name: live list → last found while searching → project details API → fallback
+  const displayName =
+    selectedProject?.name ??
+    (lastFound?.id === projectId ? lastFound?.name : undefined) ??
+    projectDetails?.name ??
+    "Select Project";
+
+  const handleMenuScroll = useCallback(
+    (event: UIEvent<HTMLElement>) => {
+      const target = event.currentTarget;
+      const remaining =
+        target.scrollHeight - target.scrollTop - target.clientHeight;
+      if (
+        remaining < LOAD_MORE_THRESHOLD_PX &&
+        hasNextPage &&
+        !isFetchingNextPage
+      ) {
+        fetchNextPage();
+      }
+    },
+    [hasNextPage, isFetchingNextPage, fetchNextPage],
+  );
+
+  const handleOpen = useCallback((event: MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setAnchorEl(null);
+    setSearchQuery("");
+  }, []);
+
+  if (!isMenuOpen && (isAuthLoading || isLoading)) {
     return (
       <HeaderUI.Switchers showDivider={false}>
         <Box
@@ -79,17 +164,31 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "action.disabledBackground",
-            borderRadius: 0,
+            borderRadius: 1,
           }}
         >
           <FolderOpen size={16} />
-          <Skeleton variant="rounded" width={150} height={20} />
+          {displayName !== "Select Project" ? (
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{
+                maxWidth: 220,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {displayName}
+            </Typography>
+          ) : (
+            <Skeleton variant="rounded" width={150} height={20} />
+          )}
         </Box>
       </HeaderUI.Switchers>
     );
   }
 
-  if (isError) {
+  if (!isMenuOpen && isError) {
     return (
       <HeaderUI.Switchers showDivider={false}>
         <Box
@@ -103,7 +202,7 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "error.main",
-            borderRadius: 0,
+            borderRadius: 1,
             color: "error.main",
           }}
         >
@@ -113,8 +212,8 @@ export default function ProjectSwitcher({
     );
   }
 
-  if (projects.length <= 1) {
-    const project = selectedProject || projects[0];
+  if (!isMenuOpen && !isLoading && unfilteredTotal <= 1) {
+    const project = selectedProject ?? projects[0];
 
     return (
       <HeaderUI.Switchers showDivider={false}>
@@ -128,14 +227,24 @@ export default function ProjectSwitcher({
             px: 1.5,
             border: "1px solid",
             borderColor: "divider",
-            borderRadius: 0,
+            borderRadius: 1,
             backgroundColor: "background.paper",
           }}
         >
           <FolderOpen size={16} />
-          <ComplexSelect.MenuItem.Text
-            primary={project ? project.name : "Select Project"}
-          />
+          <Tooltip title={project ? project.name : "Select Project"}>
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{
+                maxWidth: 220,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {project ? project.name : "Select Project"}
+            </Typography>
+          </Tooltip>
         </Box>
       </HeaderUI.Switchers>
     );
@@ -143,80 +252,151 @@ export default function ProjectSwitcher({
 
   return (
     <HeaderUI.Switchers showDivider={false}>
-      {/* project switcher select */}
-      <ComplexSelect
-        value={selectedProject?.id || ""}
-        onChange={(event: any) => onProjectChange(event.target.value)}
-        size="small"
+      {/* Trigger button — styled to match the other switcher states */}
+      <Paper
+        onClick={handleOpen}
         sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          height: 40,
           minWidth: 200,
-          "& .MuiOutlinedInput-root": {
-            "& fieldset": {
-              borderColor: "divider",
-            },
-            "&:hover fieldset": {
-              borderColor: "action.active",
-            },
-            "&.Mui-focused fieldset": {
-              borderColor: "primary.main",
-            },
-          },
-        }}
-        MenuProps={{
-          PaperProps: {
-            sx: {
-              maxHeight: "320px",
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              "& .MuiList-root": {
-                flex: 1,
-                overflow: "auto",
-              },
-            },
-          },
-          MenuListProps: {
-            onScroll: handleMenuScroll,
-          },
-        }}
-        renderValue={(selected) => {
-          const project = projects.find((project) => project.id === selected);
-          return (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <FolderOpen size={16} />
-              <ComplexSelect.MenuItem.Text
-                primary={project ? project.name : "Select Project"}
-              />
-            </Box>
-          );
+          px: 1.5,
+          cursor: "pointer",
+          border: "1px solid",
+          borderColor: isMenuOpen ? "primary.main" : "divider",
+          userSelect: "none",
+          "&:hover": { borderColor: "action.active" },
         }}
       >
-        <ComplexSelect.ListHeader>Switch Project</ComplexSelect.ListHeader>
-        {/* project switcher list items - limited with scroll to load more */}
-        {projects.slice(0, displayLimit).map((project) => (
-          <ComplexSelect.MenuItem key={project.id} value={project.id}>
-            <ComplexSelect.MenuItem.Text
-              primary={project.name}
-              secondary={project.key}
-            />
-          </ComplexSelect.MenuItem>
-        ))}
-        {displayLimit < projects.length && (
-          <Box
+        <FolderOpen size={16} />
+        <Tooltip title={displayName}>
+          <Typography
+            variant="body2"
+            noWrap
             sx={{
-              py: 1,
-              px: 2,
-              textAlign: "center",
-              fontSize: "0.75rem",
-              color: "text.secondary",
-              borderTop: "1px solid",
-              borderColor: "divider",
+              flex: 1,
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
-            Scroll to load more ({displayLimit} of {projects.length})
+            {displayName}
+          </Typography>
+        </Tooltip>
+        {isMenuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </Paper>
+
+      {/* Dropdown — Popover gives us full layout control: fixed search bar + scrollable items */}
+      <Popover
+        open={isMenuOpen}
+        anchorEl={anchorEl}
+        onClose={handleClose}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "left" }}
+        disableAutoFocus
+        disableEnforceFocus
+        slotProps={{
+          paper: {
+            sx: {
+              minWidth: anchorEl ? anchorEl.offsetWidth : 200,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              mt: 0.5,
+            },
+          },
+        }}
+      >
+        {/* Fixed search bar — never scrolls */}
+        {unfilteredTotal > PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH && (
+          <Box
+            sx={{
+              flexShrink: 0,
+              px: 1,
+              pt: 1,
+              pb: 0.5,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+            }}
+          >
+            <TextField
+              size="small"
+              fullWidth
+              autoFocus
+              placeholder={PROJECT_HUB_SEARCH_PLACEHOLDER}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <Search size={16} style={{ marginRight: 8, flexShrink: 0 }} />
+                ),
+              }}
+              inputProps={{ autoComplete: "off" }}
+              sx={{
+                "& input:-webkit-autofill, & input:-webkit-autofill:hover, & input:-webkit-autofill:focus": {
+                  WebkitBoxShadow: "0 0 0 100px transparent inset",
+                  WebkitTextFillColor: "inherit",
+                  transition: "background-color 5000s ease-in-out 0s",
+                },
+              }}
+            />
           </Box>
         )}
-      </ComplexSelect>
+
+        {/* Scrollable items container — sits below the search bar */}
+        <Box
+          sx={{ maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX, overflowY: "auto" }}
+          onScroll={handleMenuScroll}
+        >
+          {/* Skeleton items shown while a new search query loads */}
+          {isLoading &&
+            [...Array(DROPDOWN_SKELETON_COUNT)].map((_, i) => (
+              <Box key={`skel-${i}`} sx={{ px: 2, py: 0.75, width: "100%" }}>
+                <Skeleton variant="rounded" width="100%" height={40} />
+              </Box>
+            ))}
+
+          {/* Project list items */}
+          {!isLoading &&
+            projects.map((project) => (
+              <MenuItem
+                key={project.id}
+                selected={project.id === projectId}
+                onClick={() => {
+                  onProjectChange(project.id);
+                  handleClose();
+                }}
+                sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+              >
+                <Typography variant="body2">{project.name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {project.key}
+                </Typography>
+              </MenuItem>
+            ))}
+
+          {/* Spinner row while the next page loads on scroll */}
+          {!isLoading && (
+            <SelectMenuLoadMoreRow
+              visible={Boolean(isFetchingNextPage && projects.length > 0)}
+            />
+          )}
+
+          {/* Empty search result */}
+          {!isLoading &&
+            !isFetchingNextPage &&
+            projects.length === 0 &&
+            Boolean(debouncedSearchQuery) && (
+              <Box sx={{ px: 2, py: 1.5, textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                  No projects found
+                </Typography>
+              </Box>
+            )}
+        </Box>
+      </Popover>
     </HeaderUI.Switchers>
   );
 }

@@ -14,27 +14,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useNavigate, useParams } from "react-router";
+import { useParams, useLocation } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import { useState, useMemo, useEffect, type ChangeEvent } from "react";
-import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
+import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import { CaseType } from "@features/support/constants/supportConstants";
 import { getProjectSeverityPolicy } from "@utils/permission";
-import { isS0Case } from "@features/support/utils/support";
 import { hasListSearchOrFilters } from "@features/support/utils/support";
+import { normalizeEngagementLabel } from "@features/dashboard/utils/dashboard";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
+import {
+  CaseStatus,
+  CaseType,
+} from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
 import { ENGAGEMENTS_PAGE_SIZE } from "@/features/engagements/constants/engagements";
-import { EngagementsSortField } from "@features/engagements/types/engagements";
+import {
+  EngagementsSortField,
+  type EngagementsStatKey,
+} from "@features/engagements/types/engagements";
 import {
   buildEngagementSearchRequest,
   buildEngagementDetailPath,
   computeEngagementsCasesAreaLoading,
-  computeEngagementsInitialPageLoading,
   computeEngagementsStatsLoading,
   computeEngagementsTotalItems,
   getEngagementsCurrentPageCases,
@@ -47,18 +53,39 @@ import {
  * @returns Navigation, filters, pagination, loading flags, and case rows for the engagements list.
  */
 export function useEngagementsPageState() {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const location = useLocation();
+
+  const initialEngagementTypeId = (
+    location.state as { engagementTypeId?: string } | null
+  )?.engagementTypeId;
+
+  const initialEngagementTypeLabel = (
+    location.state as { engagementTypeLabel?: string } | null
+  )?.engagementTypeLabel;
+
+  const initialEngagementTypeKeys = initialEngagementTypeId
+    ? initialEngagementTypeId.split(",").map(Number).filter(Boolean)
+    : undefined;
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<AllCasesFilterValues>({});
+  const [filters, setFilters] = useState<AllCasesFilterValues>(() => ({}));
+  const [isFiltersOpen, setIsFiltersOpen] = useState(() =>
+    hasListSearchOrFilters(searchTerm, filters),
+  );
   const [sortField, setSortField] = useState<EngagementsSortField>(
     EngagementsSortField.CreatedOn,
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(ENGAGEMENTS_PAGE_SIZE);
+  const [fixedStatusIds, setFixedStatusIds] = useState<number[] | undefined>(
+    undefined,
+  );
+  const [activeStatKey, setActiveStatKey] = useState<
+    EngagementsStatKey | undefined
+  >(undefined);
 
   const { data: project, isLoading: isProjectLoading } = useGetProjectDetails(
     projectId || "",
@@ -71,7 +98,7 @@ export function useEngagementsPageState() {
   const severityPolicy = areFeaturePermissionsReady
     ? getProjectSeverityPolicy(project?.type?.label, { projectFeatures })
     : { excludeS0: false, restrictSeverityToLow: false };
-  const { excludeS0, restrictSeverityToLow } = severityPolicy;
+  const { restrictSeverityToLow } = severityPolicy;
 
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
 
@@ -84,11 +111,85 @@ export function useEngagementsPageState() {
     enabled: !!projectId,
   });
 
-  const engagementSearchRequest = useMemo(
-    () =>
-      buildEngagementSearchRequest(filters, searchTerm, sortField, sortOrder),
-    [filters, searchTerm, sortField, sortOrder],
+  const hasStatsResponse = stats !== undefined;
+  const isStatsLoading = computeEngagementsStatsLoading(
+    isStatsQueryLoading,
+    hasStatsResponse,
+    projectId,
   );
+
+  const isChartNavigation = !!initialEngagementTypeId;
+
+  // Outstanding (non-closed) status IDs — applied when navigating from the engagements chart.
+  const chartNavStatusIds = useMemo(() => {
+    if (!isChartNavigation || !filterMetadata?.caseStates) return undefined;
+    const closedState = filterMetadata.caseStates.find(
+      (s) => s.label === CaseStatus.CLOSED,
+    );
+    const closedId = closedState != null ? Number(closedState.id) : null;
+    return filterMetadata.caseStates
+      .map((s) => Number(s.id))
+      .filter((id) => closedId === null || id !== closedId);
+  }, [isChartNavigation, filterMetadata]);
+
+  const chartNavEngagementLabel = useMemo(() => {
+    if (!initialEngagementTypeId) return undefined;
+    // Use label passed directly in navigation state (no loading wait).
+    if (initialEngagementTypeLabel) return initialEngagementTypeLabel;
+    // Fallback: derive from stats once loaded.
+    if (!stats?.engagementTypeCount) return undefined;
+    const ids = initialEngagementTypeId.split(",");
+    const found = stats.engagementTypeCount.find((t) => ids.includes(t.id));
+    return found ? normalizeEngagementLabel(found.label) : undefined;
+  }, [initialEngagementTypeId, initialEngagementTypeLabel, stats]);
+
+  const engagementSearchRequest = useMemo(() => {
+    const base = buildEngagementSearchRequest(
+      filters,
+      searchTerm,
+      sortField,
+      sortOrder,
+    );
+    const withEngagementType = initialEngagementTypeKeys
+      ? {
+          ...base,
+          filters: {
+            ...base.filters,
+            engagementTypeKeys: initialEngagementTypeKeys,
+          },
+        }
+      : base;
+    // Apply outstanding filter for chart navigation (non-closed states).
+    const withChartStatus =
+      isChartNavigation && chartNavStatusIds
+        ? {
+            ...withEngagementType,
+            filters: {
+              ...withEngagementType.filters,
+              statusIds: chartNavStatusIds,
+            },
+          }
+        : withEngagementType;
+    if (fixedStatusIds !== undefined) {
+      return {
+        ...withChartStatus,
+        filters: {
+          ...withChartStatus.filters,
+          statusIds: fixedStatusIds.length > 0 ? fixedStatusIds : undefined,
+        },
+      };
+    }
+    return withChartStatus;
+  }, [
+    filters,
+    searchTerm,
+    sortField,
+    sortOrder,
+    fixedStatusIds,
+    initialEngagementTypeKeys,
+    isChartNavigation,
+    chartNavStatusIds,
+  ]);
 
   const {
     data,
@@ -104,23 +205,14 @@ export function useEngagementsPageState() {
 
   const { showLoader, hideLoader } = useLoader();
 
-  const hasStatsResponse = stats !== undefined;
   const hasCasesResponse = data !== undefined;
-  const isStatsLoading = computeEngagementsStatsLoading(
-    isStatsQueryLoading,
-    hasStatsResponse,
-    projectId,
-  );
   const isCasesAreaLoading = computeEngagementsCasesAreaLoading(
     isCasesQueryLoading,
     hasCasesResponse,
     projectId,
   );
 
-  const isInitialPageLoading = computeEngagementsInitialPageLoading(
-    isStatsLoading,
-    isCasesAreaLoading,
-  );
+  const isInitialPageLoading = isCasesAreaLoading;
 
   useEffect(() => {
     if (isInitialPageLoading) {
@@ -145,19 +237,11 @@ export function useEngagementsPageState() {
 
   const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
-  const filteredCases = useMemo(
-    () =>
-      excludeS0
-        ? currentPageCases.filter((c) => !isS0Case(c))
-        : currentPageCases,
-    [currentPageCases, excludeS0],
-  );
-
   const totalItems = computeEngagementsTotalItems(
     apiTotalRecords,
-    filteredCases.length,
+    currentPageCases.length,
   );
-  const paginatedCases = filteredCases;
+  const paginatedCases = currentPageCases;
 
   const handlePageChange = (_e: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -179,6 +263,43 @@ export function useEngagementsPageState() {
   const handleClearFilters = () => {
     setFilters({});
     setSearchTerm("");
+    setFixedStatusIds(undefined);
+    setActiveStatKey(undefined);
+    setPage(1);
+  };
+
+  const handleStatCardClick = (key: EngagementsStatKey) => {
+    if (!filterMetadata?.caseStates) return;
+    const getStateId = (label: string): number | null => {
+      const s = filterMetadata.caseStates!.find((st) => st.label === label);
+      return s != null ? Number(s.id) : null;
+    };
+    let ids: number[] | undefined;
+    switch (key) {
+      case "active": {
+        const closedId = getStateId(CaseStatus.CLOSED);
+        ids = filterMetadata.caseStates
+          .map((s) => Number(s.id))
+          .filter((id) => id !== closedId);
+        break;
+      }
+      case "completed": {
+        const id = getStateId(CaseStatus.CLOSED);
+        ids = id != null ? [id] : undefined;
+        break;
+      }
+      case "onHold": {
+        const awaitingId = getStateId(CaseStatus.AWAITING_INFO);
+        const waitingId = getStateId(CaseStatus.WAITING_ON_WSO2);
+        ids = [awaitingId, waitingId].filter((id): id is number => id != null);
+        break;
+      }
+      default:
+        ids = undefined;
+    }
+    setFixedStatusIds(ids);
+    setActiveStatKey(key);
+    setFilters((prev) => ({ ...prev, statusId: undefined }));
     setPage(1);
   };
 
@@ -208,10 +329,33 @@ export function useEngagementsPageState() {
           navigate(buildEngagementDetailPath(projectId, caseItem.id))
       : undefined;
 
+  const engagementTypeOptions = useMemo(() => {
+    if (!stats?.engagementTypeCount) return [];
+    const DISPLAY_NAMES = [
+      "Consultancy",
+      "Onboarding",
+      "Migration",
+      "Follow Up",
+    ];
+    const DISPLAY_BY_LOWER = new Map(
+      DISPLAY_NAMES.map((n) => [n.toLowerCase(), n]),
+    );
+    const grouped = new Map<string, string[]>();
+    for (const t of stats.engagementTypeCount) {
+      const displayName = DISPLAY_BY_LOWER.get(t.label.toLowerCase());
+      if (!displayName) continue;
+      if (!grouped.has(displayName)) grouped.set(displayName, []);
+      grouped.get(displayName)!.push(t.id);
+    }
+    return DISPLAY_NAMES.filter((name) => grouped.has(name)).map((name) => ({
+      value: grouped.get(name)!.join(","),
+      label: name,
+    }));
+  }, [stats]);
+
   return {
     projectId,
     projectReady,
-    excludeS0,
     restrictSeverityToLow,
     filterMetadata,
     stats,
@@ -237,6 +381,17 @@ export function useEngagementsPageState() {
     handleSortChange,
     handleSortFieldUiChange,
     handleSearchChange,
+    handleStatCardClick,
+    isStatFiltered: fixedStatusIds !== undefined,
+    activeStatKey,
+    clearStatFilter: () => {
+      setFixedStatusIds(undefined);
+      setActiveStatKey(undefined);
+      setPage(1);
+    },
     onCaseClick,
+    isChartNavigation,
+    chartNavEngagementLabel,
+    engagementTypeOptions,
   };
 }

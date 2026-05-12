@@ -106,7 +106,16 @@ export function getVersionEntriesForProduct(
 ): ProductUpdateLevelEntry[] {
   if (!data?.length || !productName) return [];
   const item = data.find((d) => d.productName === productName);
-  return item?.productUpdateLevels ?? [];
+  const entries = item?.productUpdateLevels ?? [];
+  return [...entries].sort((a, b) => {
+    const aParts = a.productBaseVersion.split(".").map(Number);
+    const bParts = b.productBaseVersion.split(".").map(Number);
+    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+      const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  });
 }
 
 /**

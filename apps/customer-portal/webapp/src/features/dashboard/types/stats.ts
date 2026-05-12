@@ -57,4 +57,5 @@ export type StatCardProps = {
   isLoading?: boolean;
   isError?: boolean;
   isTrendError?: boolean;
+  onClick?: () => void;
 };

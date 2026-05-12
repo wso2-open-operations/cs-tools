@@ -22,9 +22,10 @@ import {
   CardContent,
   Form,
   Stack,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Bot, ExternalLink, Play } from "@wso2/oxygen-ui-icons-react";
+import { Bot, ExternalLink, Play, User } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { ChatAction } from "@features/support/constants/supportConstants";
 import {
@@ -64,10 +65,6 @@ export default function ChatHistoryCard({
         flexDirection: "column",
         alignItems: "stretch",
         gap: 1,
-        cursor: "pointer",
-        "&:hover": {
-          bgcolor: "action.hover",
-        },
       }}
     >
       <CardContent
@@ -93,6 +90,7 @@ export default function ChatHistoryCard({
                 display: "-webkit-box",
                 WebkitLineClamp: 1,
                 WebkitBoxOrient: "vertical",
+                wordBreak: "break-all",
               }}
             >
               {item.title}
@@ -123,6 +121,37 @@ export default function ChatHistoryCard({
               {item.kbArticles}{" "}
               {item.kbArticles === 1 ? "KB article" : "KB articles"}
             </Typography>
+            {item.createdBy && (
+              <>
+                <Typography variant="caption" color="text.secondary">
+                  •
+                </Typography>
+                <Tooltip title={item.createdBy}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      minWidth: 0,
+                      maxWidth: 160,
+                    }}
+                  >
+                    <User size={12} style={{ flexShrink: 0 }} />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {item.createdBy}
+                    </Typography>
+                  </Box>
+                </Tooltip>
+              </>
+            )}
           </Stack>
         </Box>
       </CardContent>
@@ -152,6 +181,7 @@ export default function ChatHistoryCard({
           </Typography>
         </Box>
         <Button
+          component="span"
           size="small"
           variant="text"
           color={getChatActionColor(action)}

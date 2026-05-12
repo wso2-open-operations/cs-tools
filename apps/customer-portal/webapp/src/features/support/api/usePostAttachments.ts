@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PostAttachmentsVariables } from "@features/support/types/supportApi";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export type { PostAttachmentsVariables };
 
@@ -76,9 +77,7 @@ export function usePostAttachments(): UseMutationResult<
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(
-            `Error uploading attachment: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`,
-          );
+          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
         }
       } catch (error) {
         logger.error("[usePostAttachments] Error:", error);

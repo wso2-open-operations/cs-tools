@@ -94,7 +94,7 @@ export default function EscalationBanner({
             disabled={isCreateCaseDisabled}
             startIcon={<FileText size={14} />}
           >
-            Create Case
+            {isLoading ? "Loading..." : "Create Case"}
           </Button>
           <Typography variant="caption" color="text.secondary">
             Skip the chat and create a support case now

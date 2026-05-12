@@ -17,10 +17,12 @@
 import {
   Box,
   Button,
+  ButtonGroup,
   Divider,
   Menu,
   MenuItem,
   Skeleton,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -35,6 +37,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import { getProjectPermissions, isProjectRestricted } from "@utils/permission";
 
 interface GetHelpMenuItem {
@@ -68,6 +71,7 @@ function GetHelpDropdownContent(): JSX.Element {
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
   const { data: projectFeatures, isLoading: isProjectFeaturesLoading } =
     useGetProjectFeatures(projectId || "");
   const areProjectFeaturesReady = !projectId || !!projectFeatures;
@@ -79,7 +83,7 @@ function GetHelpDropdownContent(): JSX.Element {
       })
     : undefined;
   const isServiceRequestVisible = permissions?.hasSR ?? false;
-  const isSecurityReportVisible = permissions?.hasSecurityReportAnalysis ?? false;
+  const isSecurityReportVisible = permissions?.hasSraWriteAccess ?? false;
   const isFeaturesBusy = !!projectId && isProjectFeaturesLoading;
   const isProjectsListBusy =
     isProjectsLoading ||
@@ -99,7 +103,8 @@ function GetHelpDropdownContent(): JSX.Element {
   const handleIssue = () => {
     handleClose();
     if (projectId) {
-      const noveraEnabled = selectedProject?.hasAgent ?? false;
+      const noveraEnabled =
+        projectDetails?.hasAgent ?? projectDetails?.account?.hasAgent ?? false;
       if (noveraEnabled) {
         navigate(`/projects/${projectId}/support/chat/describe-issue`);
       } else {
@@ -156,22 +161,46 @@ function GetHelpDropdownContent(): JSX.Element {
       : []),
   ];
 
+  if (isProjectsListBusy) {
+    return (
+      <Stack direction="row" alignItems="center" spacing={0.5}>
+        <Skeleton variant="rounded" width={96} height={36} />
+        <Skeleton variant="rounded" width={36} height={36} />
+        <Divider
+          orientation="vertical"
+          flexItem
+          sx={{ mx: 1, display: { xs: "none", sm: "block" } }}
+        />
+      </Stack>
+    );
+  }
+
   return (
     <Box sx={{ display: "flex", alignItems: "center" }}>
-      <Button
-        id="get-help-trigger"
-        aria-controls={open ? "get-help-menu" : undefined}
-        aria-haspopup="true"
-        aria-expanded={open ? "true" : undefined}
-        onClick={handleClick}
-        variant="contained"
-        color="primary"
-        startIcon={<CircleQuestionMark size={16} />}
-        endIcon={<ChevronDown size={16} />}
-        sx={{ px: 2 }}
-      >
-        Get Help
-      </Button>
+      <ButtonGroup variant="contained" color="primary">
+        {/* LEFT SIDE (main action) */}
+        <Button
+          startIcon={<CircleQuestionMark size={16} />}
+          onClick={handleIssue}
+          sx={{ px: 2 }}
+        >
+          Get Help
+        </Button>
+
+        {/* RIGHT SIDE (dropdown trigger) */}
+        <Button
+          id="get-help-trigger"
+          aria-controls={open ? "get-help-menu" : undefined}
+          aria-haspopup="true"
+          aria-expanded={open ? "true" : undefined}
+          onClick={handleClick}
+          sx={{ minWidth: 40, px: 1 }}
+        >
+          <ChevronDown size={16} />
+        </Button>
+      </ButtonGroup>
+
+      {/* MENU (unchanged) */}
       <Menu
         id="get-help-menu"
         anchorEl={anchorEl}
@@ -210,46 +239,26 @@ function GetHelpDropdownContent(): JSX.Element {
                   sx={{ listStyle: "none" }}
                 />
               )}
-              <MenuItem
-                onClick={item.onClick}
-                sx={{
-                  py: 1.5,
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 1.5,
-                }}
-              >
-                <Box
-                  component="span"
-                  sx={{ display: "flex", flexShrink: 0, alignItems: "center" }}
-                >
-                  {item.icon}
-                </Box>
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 0.25,
-                    minWidth: 0,
-                  }}
-                >
-                  <Typography fontWeight={500} variant="body2" component="div">
-                    {item.label}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    component="div"
-                  >
-                    {item.description}
-                  </Typography>
+              <MenuItem onClick={item.onClick}>
+                <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", mt: 0.5 }}>
+                    {item.icon}
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {item.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {item.description}
+                    </Typography>
+                  </Box>
                 </Box>
               </MenuItem>
             </Box>
           ))
         )}
       </Menu>
+
       <Divider
         orientation="vertical"
         flexItem
@@ -276,13 +285,16 @@ export default function GetHelpDropdown(): JSX.Element {
     () => flattenProjectPages(projectsData),
     [projectsData],
   );
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === projectId),
-    [projects, projectId],
-  );
+  const { data: projectDetails, isLoading: isProjectDetailsLoading } =
+    useGetProjectDetails(projectId || "");
   const isProjectsListBusy =
-    isProjectsLoading || (isProjectsFetching && projects.length === 0);
-  if (!isProjectsListBusy && isProjectRestricted(selectedProject?.closureState)) {
+    isProjectsLoading ||
+    (isProjectsFetching && projects.length === 0) ||
+    (!!projectId && isProjectDetailsLoading);
+  if (
+    !isProjectsListBusy &&
+    isProjectRestricted(projectDetails?.closureState)
+  ) {
     return <></>;
   }
   return <GetHelpDropdownContent />;

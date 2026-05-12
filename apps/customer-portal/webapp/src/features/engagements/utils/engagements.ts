@@ -80,6 +80,9 @@ export function buildEngagementSearchRequest(
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
       deploymentId: filters.deploymentId || undefined,
       searchQuery: searchTerm.trim() || undefined,
+      engagementTypeKeys: filters.engagementTypeKey
+        ? filters.engagementTypeKey.split(",").map(Number).filter(Boolean)
+        : undefined,
     },
     sortBy: {
       field: normalizedSortField,

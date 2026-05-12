@@ -21,6 +21,7 @@ import ProjectGuard from "@layouts/ProjectGuard";
 import ProjectHubPage from "@features/project-hub/pages/ProjectHub";
 import ProjectDetailsPage from "@features/project-details/pages/ProjectDetails";
 import DashboardPage from "@features/dashboard/pages/DashboardPage";
+import DashboardItemsPage from "@features/dashboard/pages/DashboardItemsPage";
 import SupportPage from "@features/support/pages/SupportPage";
 import AllCasesPage from "@features/support/pages/AllCasesPage";
 import CaseDetailsPage from "@features/support/pages/CaseDetailsPage";
@@ -78,7 +79,12 @@ export default function App(): JSX.Element {
               <Route path="projects/:projectId" element={<ProjectGuard />}>
                 {/* Dashboard */}
                 <Route index element={<Navigate to="dashboard" replace />} />
-                <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="dashboard">
+                  <Route index element={<DashboardPage />} />
+                  <Route path="action-required" element={<DashboardItemsPage mode="action-required" />} />
+                  <Route path="outstanding-interactions" element={<DashboardItemsPage mode="outstanding-interactions" />} />
+                  <Route path="closed-last-30d" element={<DashboardItemsPage mode="closed-last-30d" />} />
+                </Route>
                 {/* Project Details */}
                 <Route path="project-details" element={<ProjectDetailsPage />} />
                 {/* Operations */}

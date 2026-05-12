@@ -338,10 +338,12 @@ function DocumentRow({
           display: "flex",
           alignItems: "flex-start",
           justifyContent: "space-between",
+          gap: 1,
           p: 2,
           bgcolor: (theme) => alpha(theme.palette.grey[500], 0.05),
         }}
       >
+        {/* file icon + info + optional description */}
         <Box
           sx={{
             display: "flex",
@@ -420,74 +422,6 @@ function DocumentRow({
                 </Typography>
               </Box>
             </Box>
-            <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
-              {!isOwner ? (
-                <Tooltip
-                  title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER}
-                  arrow
-                >
-                  <span>
-                    <IconButton
-                      size="small"
-                      aria-label={`Edit ${name}`}
-                      sx={{ color: "text.secondary" }}
-                      disabled
-                    >
-                      <PencilLine size={16} aria-hidden />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              ) : (
-                <IconButton
-                  size="small"
-                  aria-label={`Edit ${name}`}
-                  sx={{ color: "text.secondary" }}
-                  onClick={() => setEditModalOpen(true)}
-                >
-                  <PencilLine size={16} aria-hidden />
-                </IconButton>
-              )}
-              {!isOwner ? (
-                <Tooltip
-                  title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER}
-                  arrow
-                >
-                  <span>
-                    <IconButton
-                      size="small"
-                      aria-label={`Delete ${name}`}
-                      sx={{ color: "text.secondary" }}
-                      disabled
-                    >
-                      <Trash2 size={16} aria-hidden />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              ) : (
-                <IconButton
-                  size="small"
-                  aria-label={`Delete ${name}`}
-                  sx={{ color: "text.secondary" }}
-                  onClick={() => setDeleteModalOpen(true)}
-                >
-                  <Trash2 size={16} aria-hidden />
-                </IconButton>
-              )}
-              <IconButton
-                size="small"
-                aria-label={`Download ${name}`}
-                aria-busy={isDownloadLoading || undefined}
-                sx={{ color: "text.secondary" }}
-                disabled={!doc.id || isDownloadLoading}
-                onClick={() => void handleDownloadClick()}
-              >
-                {isDownloadLoading ? (
-                  <CircularProgress color="inherit" size={16} aria-hidden />
-                ) : (
-                  <Download size={16} aria-hidden />
-                )}
-              </IconButton>
-            </Box>
           </Box>
           {doc.description && (
             <Box sx={{ pl: 4.5, pt: 0.5 }}>
@@ -503,6 +437,76 @@ function DocumentRow({
               </Typography>
             </Box>
           )}
+        </Box>
+
+        {/* action buttons — always in a single row beside the content */}
+        <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0, alignItems: "center" }}>
+          {!isOwner ? (
+            <Tooltip
+              title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER}
+              arrow
+            >
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label={`Edit ${name}`}
+                  sx={{ color: "text.secondary" }}
+                  disabled
+                >
+                  <PencilLine size={16} aria-hidden />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : (
+            <IconButton
+              size="small"
+              aria-label={`Edit ${name}`}
+              sx={{ color: "text.secondary" }}
+              onClick={() => setEditModalOpen(true)}
+            >
+              <PencilLine size={16} aria-hidden />
+            </IconButton>
+          )}
+          {!isOwner ? (
+            <Tooltip
+              title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER}
+              arrow
+            >
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label={`Delete ${name}`}
+                  sx={{ color: "text.secondary" }}
+                  disabled
+                >
+                  <Trash2 size={16} aria-hidden />
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : (
+            <IconButton
+              size="small"
+              aria-label={`Delete ${name}`}
+              sx={{ color: "text.secondary" }}
+              onClick={() => setDeleteModalOpen(true)}
+            >
+              <Trash2 size={16} aria-hidden />
+            </IconButton>
+          )}
+          <IconButton
+            size="small"
+            aria-label={`Download ${name}`}
+            aria-busy={isDownloadLoading || undefined}
+            sx={{ color: "text.secondary" }}
+            disabled={!doc.id || isDownloadLoading}
+            onClick={() => void handleDownloadClick()}
+          >
+            {isDownloadLoading ? (
+              <CircularProgress color="inherit" size={16} aria-hidden />
+            ) : (
+              <Download size={16} aria-hidden />
+            )}
+          </IconButton>
         </Box>
       </Box>
       <DeleteAttachmentModal

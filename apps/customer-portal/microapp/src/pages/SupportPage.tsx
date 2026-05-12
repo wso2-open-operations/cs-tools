@@ -14,73 +14,328 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Button, Card, Grid, pxToRem, Stack, Tab, Tabs, Typography, useTheme } from "@wso2/oxygen-ui";
-import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
-import { MetricWidget } from "@components/features/dashboard";
-import { ItemListView, ItemCard, type ItemCardProps } from "@components/features/support";
+import { Suspense, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Card, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
+import { ItemListView, ItemCard, type ItemCardProps, ItemCardSkeleton } from "@components/features/support";
 
-import { MOCK_METRICS, MOCK_ITEMS, TAB_TITLES } from "@src/mocks/data/support";
+import { useQueryErrorResetBoundary, useSuspenseQuery } from "@tanstack/react-query";
+import { cases } from "@src/services/cases";
+import { useProject } from "@context/project";
+import { ErrorBoundary, Fab } from "@components/core";
+import { chats } from "../services/chats";
+import { changeRequests } from "../services/changes";
+import { serviceRequests } from "../services/services";
+import EmptyState from "../components/shared/EmptyState";
+import { useNotify } from "../context/snackbar";
+import {
+  ITEM_DETAIL_PATHS,
+  OUTSTANDING_CASE_STATUS_IDS,
+  OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS,
+  OUTSTANDING_CONVERSATIONS_STATUS_IDS,
+  TAB_CONFIG,
+} from "../config/constants";
+import { securityReportAnalysis } from "../services/sra";
+import { engagements } from "../services/engagements";
+import ErrorState from "../components/shared/ErrorState";
+import { announcements } from "../services/announcements";
+
+type TabType = ItemCardProps["type"];
 
 export default function SupportPage() {
-  const theme = useTheme();
-  const [tab, setTab] = useState<ItemCardProps["type"]>("case");
+  const { features } = useProject();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const allowedTabs: TabType[] = ["case", "chat", "service", "change", "sra", "engagement", "announcement"];
+  const tabFromParams = allowedTabs.find((t) => t === rawTab) ?? "case";
+  const [tab, setTab] = useState<TabType>(tabFromParams);
+
+  const handleTabChange = (tab: TabType) => {
+    setTab(tab);
+    setSearchParams(
+      (prev) => {
+        prev.set("tab", tab);
+        return prev;
+      },
+      { replace: true },
+    );
+  };
 
   return (
     <>
-      <Grid spacing={1.5} container>
-        {MOCK_METRICS.map((props, index) => (
-          <Grid key={index} size={3}>
-            <MetricWidget {...props} size="small" base />
-          </Grid>
-        ))}
-        <Grid size={12}>
-          <Card
-            component={Stack}
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-            px={2}
-            py={1.5}
-            gap={2}
-            elevation={0}
-          >
-            <Stack direction="row" alignItems="center" gap={2}>
-              <MessageSquareQuote size={pxToRem(40)} color={theme.palette.primary.main} />
-              <Stack>
-                <Typography variant="body1" fontWeight="medium" color="primary">
-                  Create Support Ticket
-                </Typography>
-                <Typography variant="subtitle2" fontWeight="medium" color="text.tertiary">
-                  Chat with Novera or Create Support Case
-                </Typography>
-              </Stack>
-            </Stack>
-            <Button
-              component={Link}
-              to="/chat"
-              variant="contained"
-              sx={{ textTransform: "initial", flexShrink: 0, height: 40 }}
-            >
-              Get Help
-            </Button>
-          </Card>
-        </Grid>
-      </Grid>
-      <Tabs variant="fullWidth" sx={{ mt: 3 }} value={tab} onChange={(_, value) => setTab(value)}>
+      <Tabs variant="scrollable" value={tab} onChange={(_, value) => handleTabChange(value)}>
         <Tab label="Cases" value="case" disableRipple />
         <Tab label="Chats" value="chat" disableRipple />
-        <Tab label="Services" value="service" disableRipple />
-        <Tab label="Changes" value="change" disableRipple />
+        {features?.hasServiceRequestReadAccess && <Tab label="Service Requests" value="service" disableRipple />}
+        {features?.hasChangeRequestReadAccess && <Tab label="Change Requests" value="change" disableRipple />}
+        <Tab label="Security Report Analysis" value="sra" disableRipple />
+        {features?.hasEngagementsReadAccess && <Tab label="Engagements" value="engagement" disableRipple />}
+        <Tab label="Announcements" value="announcement" disableRipple />
       </Tabs>
-      <Card component={Stack} p={2} mt={2} gap={0.5} elevation={0}>
-        <ItemListView title={TAB_TITLES[tab]} viewAllPath={`/${tab}s/all`}>
-          {MOCK_ITEMS[tab].map((item, index) => (
-            <ItemCard key={index} {...item} />
-          ))}
+      <Card component={Stack} p={2} mt={2} gap={0.5}>
+        <ItemListView title={TAB_CONFIG[tab].title} subtitle={TAB_CONFIG[tab].subtitle} viewAllPath={`/${tab}s/all`}>
+          <ItemsListContent tab={tab} />
         </ItemListView>
       </Card>
+
+      {/* Floating Action Button */}
+      <Fab />
     </>
+  );
+}
+
+function ItemsListContent({ tab }: { tab: ItemCardProps["type"] }) {
+  switch (tab) {
+    case "case":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <CaseItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "chat":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <ChatItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "service":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <ServiceRequestItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "change":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <ChangeRequestItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "sra":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <SecurityReportAnalysisItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "engagement":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <EngagementItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+
+    case "announcement":
+      return (
+        <ItemsListErrorBoundary>
+          <Suspense fallback={<ItemsListContentSkeleton />}>
+            <AnnouncementItemListContent />
+          </Suspense>
+        </ItemsListErrorBoundary>
+      );
+  }
+}
+
+function CaseItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    cases.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="case" to={ITEM_DETAIL_PATHS["case"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ChatItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    chats.all(projectId!, {
+      filters: {
+        stateKeys: OUTSTANDING_CONVERSATIONS_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="chat" to={ITEM_DETAIL_PATHS["chat"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ChangeRequestItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    changeRequests.all(projectId!, {
+      filters: { stateKeys: OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS },
+      pagination: { offset: 0, limit: 5 },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="change" to={ITEM_DETAIL_PATHS["change"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ServiceRequestItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    serviceRequests.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="service" to={ITEM_DETAIL_PATHS["service"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function SecurityReportAnalysisItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    securityReportAnalysis.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="sra" to={ITEM_DETAIL_PATHS["sra"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function EngagementItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    engagements.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="engagement" to={ITEM_DETAIL_PATHS["engagement"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function AnnouncementItemListContent() {
+  const { projectId } = useProject();
+  const { data } = useSuspenseQuery(
+    announcements.all(projectId!, {
+      filters: {
+        statusIds: OUTSTANDING_CASE_STATUS_IDS,
+      },
+      pagination: { limit: 5 },
+      sortBy: { field: "createdOn", order: "desc" },
+    }),
+  );
+
+  if (data.length === 0) return <EmptyState />;
+
+  return (
+    <>
+      {data.map((item) => (
+        <ItemCard key={item.id} type="announcement" to={ITEM_DETAIL_PATHS["announcement"](item.id)} {...item} />
+      ))}
+    </>
+  );
+}
+
+function ItemsListContentSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <ItemCardSkeleton key={index} />
+      ))}
+    </>
+  );
+}
+
+function ItemsListErrorBoundary({ children }: { children: ReactNode }) {
+  const notify = useNotify();
+  const { reset } = useQueryErrorResetBoundary();
+
+  return (
+    <ErrorBoundary
+      fallback={(_error, resetErrorBoundary) => (
+        <ErrorState
+          onRetry={() => {
+            reset();
+            resetErrorBoundary();
+          }}
+        />
+      )}
+      onError={() => notify.error("Content failed to load. Please try again later.")}
+    >
+      {children}
+    </ErrorBoundary>
   );
 }

@@ -26,7 +26,7 @@ import {
 import { AlertCircle, Info } from "@wso2/oxygen-ui-icons-react";
 import suspensionIllustration from "@assets/access-control/project-suspended.svg";
 import type { ProjectDetails } from "@features/project-hub/types/projects";
-import { parseBackendTimestamp } from "@utils/dateTime";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 type ProjectSuspendedNoticePageProps = {
   project: ProjectDetails;
@@ -34,28 +34,7 @@ type ProjectSuspendedNoticePageProps = {
 
 function formatDateLabel(raw: string | null | undefined): string {
   if (!raw) return "—";
-  // date-only strings like "2023-10-03"
-  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
-  if (dateOnlyMatch) {
-    const [, yyyy, mm, dd] = dateOnlyMatch;
-    const date = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
-    if (!Number.isNaN(date.getTime())) {
-      return new Intl.DateTimeFormat("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }).format(date);
-    }
-  }
-  const parsed = parseBackendTimestamp(raw);
-  if (parsed) {
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }).format(parsed);
-  }
-  return raw;
+  return formatBackendTimestampForDisplay(raw, { year: "numeric", month: "short", day: "numeric" }) ?? raw;
 }
 
 type InfoRowProps = {

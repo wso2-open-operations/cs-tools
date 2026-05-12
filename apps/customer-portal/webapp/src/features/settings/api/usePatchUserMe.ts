@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import type { PatchUserMeRequest } from "@features/settings/types/users";
 import type { UserDetails } from "@features/settings/types/users";
+import { parseApiResponseMessage } from "@utils/ApiError";
 
 export interface PatchUserMeResponse {
   phoneNumber?: string;
@@ -69,18 +70,7 @@ export function usePatchUserMe(): UseMutationResult<
 
       if (!response.ok) {
         const text = await response.text();
-        let errorMessage = `Error updating profile: ${response.status} ${response.statusText}`;
-        try {
-          const json = JSON.parse(text) as { message?: string };
-          if (typeof json.message === "string") {
-            errorMessage = json.message;
-          } else if (text) {
-            errorMessage += ` - ${text}`;
-          }
-        } catch {
-          if (text) errorMessage += ` - ${text}`;
-        }
-        throw new Error(errorMessage);
+        throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
       return (await response.json()) as PatchUserMeResponse;
     },

@@ -24,6 +24,7 @@ export type SupportStatConfig<Key = keyof ProjectSupportStats> = {
   icon: ComponentType<{ size?: number; color?: string }>;
   key: Key;
   label: string;
+  tooltipText?: string;
   secondaryIcon?: ComponentType<{ size?: number; color?: string }>;
 };
 

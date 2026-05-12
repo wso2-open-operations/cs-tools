@@ -1,7 +1,7 @@
 openapi: 3.0.1
 info:
   title: Service Openapi Yaml
-  version: 1.0.0-rc.3
+  version: 1.0.0
 servers:
 - url: "{server}:{port}/"
   variables:
@@ -10,6 +10,13 @@ servers:
     port:
       default: "9090"
 paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Ok
   /metadata:
     get:
       summary: Fetch metadata information for the customer portal.
@@ -1827,7 +1834,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MembershipSecurityPayload'
+              $ref: '#/components/schemas/MembershipRolePayload'
         required: true
       responses:
         "200":
@@ -2747,6 +2754,210 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /projects/{id}/instances/stats/usages/search:
+    post:
+      summary: Search instance usage stats for a specific project based on provided
+        filters.
+      operationId: postProjectsIdInstancesStatsUsagesSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance usage stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/{id}/instances/stats/usages/search:
+    post:
+      summary: Search instance usage stats for a specific deployment based on provided
+        filters.
+      operationId: postDeploymentsIdInstancesStatsUsagesSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance usage stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/products/{id}/instances/stats/usages/search:
+    post:
+      summary: Search instance usage stats for a specific deployed product based on
+        provided filters.
+      operationId: postDeploymentsProductsIdInstancesStatsUsagesSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance usage stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /projects/{id}/instances/stats/metrics/search:
+    post:
+      summary: Search instance metrics stats for a specific project based on provided
+        filters.
+      operationId: postProjectsIdInstancesStatsMetricsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the project
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance metrics stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/{id}/instances/stats/metrics/search:
+    post:
+      summary: Search instance metrics stats for a specific deployment based on provided
+        filters.
+      operationId: postDeploymentsIdInstancesStatsMetricsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance metrics stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+  /deployments/products/{id}/instances/stats/metrics/search:
+    post:
+      summary: Search instance metrics stats for a specific deployed product based
+        on provided filters.
+      operationId: postDeploymentsProductsIdInstancesStatsMetricsSearch
+      parameters:
+      - name: id
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Instance metrics stats search payload containing filter criteria
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceMetricStatsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
   /cases/{id}/activities/search:
     post:
       summary: Search case activities for a specific case based on provided filters.
@@ -2780,6 +2991,34 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /users/groups:
+    post:
+      summary: Add users to a group via the SCIM operations service.
+      operationId: postUsersGroups
+      requestBody:
+        description: Request payload containing group name and user emails
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUsersToGroupRequest'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddUsersToGroupResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "404":
+          description: NotFound
 components:
   schemas:
     Account:
@@ -2795,15 +3034,50 @@ components:
           type: string
           description: Allowed domain list of the account
           nullable: true
+          default: ""
         classification:
           type: string
           description: Account classification
           nullable: true
+          default: ""
         isPartner:
           type: boolean
           description: Whether the account is a partner or not
           nullable: true
       description: Account details record
+    AddUsersToGroupRequest:
+      required:
+      - emails
+      - group
+      type: object
+      properties:
+        group:
+          type: string
+          description: Display name of the group
+        emails:
+          type: array
+          description: Array of user email addresses to add to the group
+          items:
+            type: string
+      additionalProperties: false
+      description: Request payload for adding users to a group.
+    AddUsersToGroupResponse:
+      type: object
+      properties:
+        addedUsers:
+          type: array
+          description: Users successfully added to the group
+          items:
+            type: string
+          default: []
+        failedUsers:
+          type: array
+          description: Users that failed to be added
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+      description: Response payload for add-users-to-group operation.
     Attachment:
       required:
       - createdBy
@@ -3364,6 +3638,16 @@ components:
           type: integer
           description: Severity ID
           format: int64
+        engagementTypeKeys:
+          type: array
+          description: Engagement type keys (required for engagement type cases)
+          items:
+            type: integer
+            format: int64
+        closedStartDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        closedEndDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
         deploymentId:
           type: string
           description: Deployment ID
@@ -3441,6 +3725,7 @@ components:
       - createdOn
       - deployedProduct
       - deployment
+      - description
       - duration
       - endDate
       - id
@@ -3463,6 +3748,10 @@ components:
         title:
           type: string
           description: Change request title
+          nullable: true
+        description:
+          type: string
+          description: Change request description
           nullable: true
         project:
           description: Project
@@ -3549,7 +3838,6 @@ components:
         - approvedOn
         - communicationPlan
         - createdBy
-        - description
         - hasCustomerApproved
         - hasCustomerReviewed
         - impactDescription
@@ -3559,10 +3847,6 @@ components:
         - testPlan
         type: object
         properties:
-          description:
-            type: string
-            description: Change request description
-            nullable: true
           createdBy:
             type: string
             description: User who created the change request
@@ -3624,6 +3908,10 @@ components:
               type: integer
               description: Change request impact key
               format: int64
+            closedStartDate:
+              $ref: '#/components/schemas/UtcDateTimeString'
+            closedEndDate:
+              $ref: '#/components/schemas/UtcDateTimeString'
           additionalProperties: false
           description: Filter criteria
         pagination:
@@ -3823,6 +4111,10 @@ components:
         isCsIntegrationUser:
           type: boolean
           description: Whether the contact is an Integration user or not
+        isPortalUser:
+          type: boolean
+          description: Whether the contact is a portal user or not
+          nullable: true
         isSecurityContact:
           type: boolean
           description: Whether the contact is a Security contact or not
@@ -3873,6 +4165,14 @@ components:
         isCsIntegrationUser:
           type: boolean
           description: Whether the contact is System User or not
+        isCsAdmin:
+          type: boolean
+          description: Whether the contact is a customer admin or not
+          default: false
+        isPortalUser:
+          type: boolean
+          description: Whether the contact is a portal user or not
+          default: false
         isSecurityContact:
           type: boolean
           description: Whether the contact is Security Contact or not
@@ -4398,6 +4698,25 @@ components:
           description: User who created
       additionalProperties: false
       description: Inline attachment.
+    InstanceMetricStatsPayload:
+      required:
+      - filters
+      type: object
+      properties:
+        filters:
+          required:
+          - endDate
+          - startDate
+          type: object
+          properties:
+            startDate:
+              $ref: '#/components/schemas/Date'
+            endDate:
+              $ref: '#/components/schemas/Date'
+          additionalProperties: false
+          description: Filter criteria
+      additionalProperties: false
+      description: Request payload for fetching instance metrics statistics.
     InstanceMetricsPayload:
       required:
       - filters
@@ -4462,6 +4781,8 @@ components:
     Membership:
       required:
       - id
+      - isCsAdmin
+      - isPortalUser
       - isSecurityContact
       - state
       type: object
@@ -4472,6 +4793,14 @@ components:
         state:
           type: string
           description: State of the Membership
+        isCsAdmin:
+          type: boolean
+          description: Whether the contact is a customer admin or not
+          nullable: true
+        isPortalUser:
+          type: boolean
+          description: Whether the contact is a portal user or not
+          nullable: true
         isSecurityContact:
           type: boolean
           description: Whether the contact is a Security contact or not
@@ -4479,16 +4808,23 @@ components:
         contact:
           $ref: '#/components/schemas/ContactMinimal'
       description: Membership details record.
-    MembershipSecurityPayload:
-      required:
-      - isSecurityContact
+    MembershipRolePayload:
       type: object
       properties:
+        isCsAdmin:
+          type: boolean
+          description: Whether the contact is a customer admin or not
+          default: false
+        isPortalUser:
+          type: boolean
+          description: Whether the contact is a portal user or not
+          default: false
         isSecurityContact:
           type: boolean
           description: Whether the contact is a security contact or not
+          default: false
       additionalProperties: false
-      description: Payload for updating membership security flag.
+      description: Payload for updating membership roles.
     Message:
       required:
       - content
@@ -4559,6 +4895,8 @@ components:
       type: string
       description: Valid product category values.
       enum:
+      - pc
+      - ms
       - cl
       - pdp
     ProductClass:
@@ -4631,6 +4969,12 @@ components:
           description: Vulnerability identifier
         severity:
           $ref: '#/components/schemas/ReferenceItem'
+        productName:
+          type: string
+          description: Name of the product
+        productVersion:
+          type: string
+          description: Version of the product
         componentName:
           type: string
           description: Name of the component
@@ -4640,6 +4984,12 @@ components:
         type:
           type: string
           description: Type
+        componentType:
+          type: string
+          description: Type of the component
+        updateLevel:
+          type: string
+          description: Update level for the vulnerability
         useCase:
           type: string
           description: Use case description
@@ -4670,13 +5020,7 @@ components:
       allOf:
       - $ref: '#/components/schemas/ProductVulnerability'
       - type: object
-        properties:
-          componentType:
-            type: string
-            description: Type of the component
-          updateLevel:
-            type: string
-            description: Update level for the vulnerability
+        properties: {}
     ProductVulnerabilitySearchPayload:
       type: object
       properties:
@@ -4695,6 +5039,12 @@ components:
               type: integer
               description: Severity ID
               format: int64
+            productName:
+              type: string
+              description: Product name filter
+            productVersion:
+              type: string
+              description: Product version filter
           description: Filter criteria
         sortBy:
           $ref: '#/components/schemas/SortBy'
@@ -4729,6 +5079,7 @@ components:
             format: int64
     ProjectCaseStats:
       required:
+      - actionRequiredCount
       - activeCount
       - averageResponseTime
       - caseTypeCount
@@ -4756,6 +5107,10 @@ components:
           type: integer
           description: Outstanding case count (cases that are not solution proposed
             or closed)
+          format: int64
+        actionRequiredCount:
+          type: integer
+          description: Action required from customer case count
           format: int64
         averageResponseTime:
           type: number
@@ -4835,8 +5190,10 @@ components:
       description: Case statistics for a project.
     ProjectChangeRequestStatsResponse:
       required:
+      - actionRequiredCount
       - activeCount
       - outstandingCount
+      - resolvedCount
       - stateCount
       - totalCount
       type: object
@@ -4854,16 +5211,42 @@ components:
           type: integer
           description: Outstanding change request count
           format: int64
+        actionRequiredCount:
+          type: integer
+          description: Action required from customer change request count
+          format: int64
         stateCount:
           type: array
           description: Count of change requests by state
           items:
             $ref: '#/components/schemas/ReferenceItem'
+        resolvedCount:
+          required:
+          - currentMonth
+          - pastThirtyDays
+          - total
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total resolved count
+              format: int64
+            currentMonth:
+              type: integer
+              description: Current month resolved count
+              format: int64
+            pastThirtyDays:
+              type: integer
+              description: Past thirty days resolved count
+              format: int64
+          additionalProperties: false
+          description: Resolved change request count breakdown
       additionalProperties: false
       description: Change request statistics.
     ProjectFeatures:
       required:
       - acceptedSeverityValues
+      - defaultCaseProductCategories
       - hasChangeRequestReadAccess
       - hasDeploymentReadAccess
       - hasDeploymentWriteAccess
@@ -4874,6 +5257,7 @@ components:
       - hasSraWriteAccess
       - hasTimeLogsReadAccess
       - hasUpdatesReadAccess
+      - srProductCategories
       type: object
       properties:
         acceptedSeverityValues:
@@ -4911,6 +5295,20 @@ components:
         hasDeploymentReadAccess:
           type: boolean
           description: Indicates if deployment read access is enabled
+        defaultCaseProductCategories:
+          type: array
+          description: Allowed categories for default case creation in deployed product
+            search.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductCategory'
+        srProductCategories:
+          type: array
+          description: Allowed categories for service request creation in deployed
+            product search.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ProductCategory'
       additionalProperties: false
       description: Project feature access configuration.
     ProjectFilterOptions:
@@ -5197,6 +5595,30 @@ components:
         slaStatus:
           type: string
           description: SLA status
+        outstandingCaseCount:
+          type: integer
+          description: Outstanding case count
+          format: int64
+        outstandingServiceRequestCount:
+          type: integer
+          description: Outstanding service request count
+          format: int64
+        outstandingEngagementCount:
+          type: integer
+          description: Outstanding engagement count
+          format: int64
+        outstandingSraCount:
+          type: integer
+          description: Outstanding SRA count
+          format: int64
+        outstandingChangeRequestCount:
+          type: integer
+          description: Outstanding change request count
+          format: int64
+        outstandingAnnouncementCount:
+          type: integer
+          description: Outstanding announcement count
+          format: int64
       additionalProperties: false
       description: Project statistics.
     ProjectStatsResponse:
@@ -5403,6 +5825,10 @@ components:
           type: integer
           description: Count
           format: int64
+        internalId:
+          type: string
+          description: WSO2 Internal ID
+          nullable: true
         number:
           type: string
           description: Number
@@ -5648,7 +6074,10 @@ components:
         state:
           $ref: '#/components/schemas/ReferenceItem'
         type:
-          $ref: '#/components/schemas/ReferenceItem'
+          description: Case type information
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
       additionalProperties: false
       description: Updated case details.
     UpdatedChangeRequest:
@@ -5804,6 +6233,11 @@ components:
           description: Timezone of the user
       additionalProperties: false
       description: Payload for updating user information.
+    UtcDateTimeString:
+      pattern: "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\\
+        d:[0-5]\\dZ$"
+      type: string
+      description: UTC DateTime string type with YYYY-MM-DDTHH:MM:SSZ format constraint.
     ValidationPayload:
       required:
       - contactEmail

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box } from "@wso2/oxygen-ui";
+import { Box, Grid } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import ProjectMetadataPrimaryRow from "@features/project-details/components/project-overview/project-information/ProjectMetadataPrimaryRow";
 import ProjectMetadataSecondaryRow from "@features/project-details/components/project-overview/project-information/ProjectMetadataSecondaryRow";
@@ -39,21 +39,23 @@ const ProjectMetadata = ({
 }: ProjectMetadataProps): JSX.Element => {
   return (
     <Box sx={{ pt: 3, borderTop: 1, borderColor: "divider" }}>
-      <ProjectMetadataPrimaryRow
-        createdDate={createdDate}
-        type={type}
-        supportTier={supportTier}
-        isLoading={isLoading}
-        isError={isError}
-      />
-      <ProjectMetadataSecondaryRow
-        slaStatus={slaStatus}
-        goLivePlanDate={goLivePlanDate}
-        onboardingStatus={onboardingStatus}
-        hideOnboardingStatus={hideOnboardingStatus}
-        isLoading={isLoading}
-        isError={isError}
-      />
+      <Grid container spacing={2} sx={{ alignItems: "center" }}>
+        <ProjectMetadataPrimaryRow
+          createdDate={createdDate}
+          type={type}
+          supportTier={supportTier}
+          isLoading={isLoading}
+          isError={isError}
+        />
+        <ProjectMetadataSecondaryRow
+          slaStatus={slaStatus}
+          goLivePlanDate={goLivePlanDate}
+          onboardingStatus={onboardingStatus}
+          hideOnboardingStatus={hideOnboardingStatus}
+          isLoading={isLoading}
+          isError={isError}
+        />
+      </Grid>
     </Box>
   );
 };

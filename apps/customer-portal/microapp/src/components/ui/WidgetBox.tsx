@@ -15,7 +15,7 @@
 // under the License.
 
 import type { ReactNode } from "react";
-import { Card, Stack, Typography, type CardProps } from "@wso2/oxygen-ui";
+import { Card, CardActionArea, Stack, Typography, type CardProps } from "@wso2/oxygen-ui";
 
 interface WidgetBoxProps extends Omit<CardProps, "variant"> {
   title?: string;
@@ -24,15 +24,19 @@ interface WidgetBoxProps extends Omit<CardProps, "variant"> {
 
 export function WidgetBox({ title, children, ...props }: WidgetBoxProps) {
   return (
-    <Card component={Stack} p={1.2} gap={0.5} sx={{ height: "100%", bgcolor: "background.paper" }} {...props}>
-      {title && (
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="body1" fontWeight="medium" color="text.primary">
-            {title}
-          </Typography>
+    <Card sx={{ height: "100%", bgcolor: "background.paper" }} {...props}>
+      <CardActionArea disableRipple={!props.onClick} sx={{ p: 1.2 }}>
+        <Stack gap={0.5}>
+          {title && (
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="body1" fontWeight="medium" color="text.primary">
+                {title}
+              </Typography>
+            </Stack>
+          )}
+          {children}
         </Stack>
-      )}
-      {children}
+      </CardActionArea>
     </Card>
   );
 }

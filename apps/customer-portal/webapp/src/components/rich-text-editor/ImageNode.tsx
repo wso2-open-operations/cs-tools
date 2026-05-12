@@ -46,7 +46,7 @@ function ImageComponent({
   };
 
   return (
-    <span style={{ position: "relative", display: "inline-block" }}>
+    <span style={{ position: "relative", display: "block" }}>
       <img
         src={sanitizeUrl(src)}
         alt={altText}
@@ -126,7 +126,9 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 
   createDOM(config: EditorConfig): HTMLElement {
     void config;
-    return document.createElement("span");
+    const span = document.createElement("span");
+    span.style.display = "block";
+    return span;
   }
 
   updateDOM(): false {

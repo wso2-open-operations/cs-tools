@@ -34,6 +34,7 @@ import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import DeploymentCardLicenseFooter from "@features/project-details/components/deployments/deployment-card/DeploymentCardLicenseFooter";
 import DeploymentCardToolbar from "@features/project-details/components/deployments/deployment-card/DeploymentCardToolbar";
 import { useState, type JSX } from "react";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import DeploymentDocumentList from "@deployments/DeploymentDocumentList";
 import DeploymentProductList from "@deployments/DeploymentProductList";
 import EditDeploymentModal from "@deployments/EditDeploymentModal";
@@ -60,6 +61,7 @@ export default function DeploymentCard({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const patchDeployment = usePatchDeployment();
   const downloadLicense = useDownloadDeploymentLicense();
+  const { showError } = useErrorBanner();
 
   const createdAtStr = formatProjectDateTime(createdOn ?? "");
   const updatedAtStr = formatProjectDateTime(updatedOn ?? "");
@@ -81,6 +83,7 @@ export default function DeploymentCard({
         onChange={(_, isExpanded) => setExpanded(isExpanded)}
         disableGutters
         elevation={0}
+        TransitionProps={{ unmountOnExit: true }}
         sx={{
           border: "1px solid",
           borderColor: "divider",
@@ -99,63 +102,69 @@ export default function DeploymentCard({
             "& .MuiAccordionSummary-content": { m: 0, minWidth: 0 },
           }}
         >
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Row 1: name + number badge */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5, minWidth: 0 }}>
-              <Tooltip title={name || ""} disableHoverListener={!name}>
+          <Box sx={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 1 }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              {/* Row 1: name + number badge */}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5, minWidth: 0 }}>
+                <Tooltip title={name || ""} disableHoverListener={!name}>
+                  <Typography
+                    variant="subtitle1"
+                    sx={{
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}
+                  >
+                    {displayValue(name, "Not Available")}
+                  </Typography>
+                </Tooltip>
+                <Chip
+                  label={displayValue(deployment.number, "Not Available")}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: "0.75rem", fontFamily: "monospace", flexShrink: 0 }}
+                />
+              </Box>
+              {/* Row 2: type + bullet + description, capped at 3 lines */}
+              {(typeLabel || description) && (
                 <Typography
-                  variant="subtitle1"
+                  variant="caption"
+                  color="text.secondary"
                   sx={{
-                    fontWeight: 600,
+                    display: "-webkit-box",
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: "vertical",
                     overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minWidth: 0,
+                    wordBreak: "break-word",
                   }}
                 >
-                  {displayValue(name, "Not Available")}
-                </Typography>
-              </Tooltip>
-              <Chip
-                label={displayValue(deployment.number, "Not Available")}
-                size="small"
-                variant="outlined"
-                sx={{ height: 20, fontSize: "0.75rem", fontFamily: "monospace", flexShrink: 0 }}
-              />
-            </Box>
-            {/* Row 2: type + bullet + description (wraps naturally) */}
-            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.75, flexWrap: "wrap" }}>
-              {typeLabel && (
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: "capitalize", flexShrink: 0 }}>
-                  {typeLabel}
-                </Typography>
-              )}
-              {typeLabel && description && (
-                <Typography variant="caption" color="text.disabled" sx={{ flexShrink: 0 }}>•</Typography>
-              )}
-              {description && (
-                <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-word" }}>
+                  {typeLabel && (
+                    <Box component="span" sx={{ textTransform: "capitalize" }}>
+                      {typeLabel}
+                    </Box>
+                  )}
+                  {typeLabel && description && (
+                    <Box component="span" sx={{ color: "text.disabled", mx: 0.5 }}>•</Box>
+                  )}
                   {description}
                 </Typography>
               )}
+            </Box>
+            {/* Edit / delete always visible, stop propagation so accordion doesn't toggle */}
+            <Box onClick={(e) => e.stopPropagation()} sx={{ flexShrink: 0 }}>
+              <DeploymentCardToolbar
+                onEdit={() => setIsEditModalOpen(true)}
+                onDelete={() => setIsDeleteModalOpen(true)}
+                isDeleteDisabled={patchDeployment.isPending}
+              />
             </Box>
           </Box>
         </AccordionSummary>
 
         <AccordionDetails sx={{ px: 3, pb: 3, display: "flex", flexDirection: "column", gap: 3 }}>
           <Divider />
-
-          {/* Toolbar: edit + delete */}
-          <Box
-            sx={{ display: "flex", justifyContent: "flex-end" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <DeploymentCardToolbar
-              onEdit={() => setIsEditModalOpen(true)}
-              onDelete={() => setIsDeleteModalOpen(true)}
-              isDeleteDisabled={patchDeployment.isPending}
-            />
-          </Box>
 
           <DeploymentProductList
             deploymentId={deployment.id}
@@ -184,6 +193,7 @@ export default function DeploymentCard({
         projectId={projectId}
         onClose={() => setIsEditModalOpen(false)}
         onSuccess={() => setIsEditModalOpen(false)}
+        onError={(message) => showError(message)}
       />
 
       <DeleteDeploymentModal
@@ -200,6 +210,10 @@ export default function DeploymentCard({
             },
             {
               onSuccess: () => setIsDeleteModalOpen(false),
+              onError: (error) => {
+                setIsDeleteModalOpen(false);
+                showError(error.message);
+              },
             },
           );
         }}

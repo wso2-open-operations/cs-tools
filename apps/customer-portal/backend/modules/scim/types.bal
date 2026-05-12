@@ -44,7 +44,7 @@ public type User record {|
     # User UUID
     string id;
     # Phone numbers
-    PhoneNumber[]? phoneNumbers;
+    PhoneNumber[]? phoneNumbers?;
     # Schema scope
     SchemaScope? urn\:scim\:wso2\:schema;
     json...;
@@ -78,4 +78,18 @@ public type UserUpdatePayload record {|
 public type Phone record {|
     # Mobile number
     string mobile?;
+|};
+
+# Payload for the SCIM add-users-to-group operation.
+public type AddUsersToGroupPayload record {|
+    # Array of user email addresses to add to the group
+    string[] emails;
+|};
+
+# Response payload for add-users-to-group operation.
+public type AddUsersToGroupResponse record {|
+    # Users successfully added to the group
+    string[] addedUsers = [];
+    # Users that failed to be added
+    string[] failedUsers = [];
 |};

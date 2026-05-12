@@ -31,6 +31,7 @@ export type RegistryToken = AuditMetadata & {
   name: string;
   displayName?: string;
   description: string;
+  creationTime?: string;
   tokenType?: RegistryTokenType;
   createdFor?: string;
   expiresAt?: number;
@@ -42,6 +43,7 @@ export type RegistryToken = AuditMetadata & {
 // Response type for creating a registry token.
 export type RegistryTokenCreationResponse = {
   secret: string;
+  name?: string;
 };
 
 // Request type for creating a registry token.

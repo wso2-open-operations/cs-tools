@@ -22,6 +22,7 @@ import {
   Paper,
   Skeleton,
   Stack,
+  Tooltip,
   Typography,
   Divider,
   alpha,
@@ -31,12 +32,20 @@ import {
   Bot,
   MessageSquare,
   FileText,
-  Play,
   Flag,
   Clock,
   Hash,
+  User,
 } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, type JSX } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  type JSX,
+} from "react";
+import { flushSync } from "react-dom";
 import { useGetConversationMessages } from "@features/support/api/useGetConversationMessages";
 import type {
   ConversationMessage,
@@ -57,10 +66,30 @@ import {
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
 import { ConversationListRowAction } from "@features/support/types/conversations";
 import { resolveConversationListRowAction } from "@features/support/utils/conversationsList";
-import { NOVERA_DISPLAY_NAME } from "@features/support/constants/chatConstants";
+import {
+  NOVERA_DISPLAY_NAME,
+  CHAT_TYPING_INTERVAL_MS,
+  CHAT_TYPING_CHARS_PER_TICK,
+  NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+} from "@features/support/constants/chatConstants";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { buildBotMarkdownComponents } from "@features/support/utils/markdown";
+import {
+  buildBotMarkdownComponents,
+  TextWithLinks,
+} from "@features/support/utils/markdown";
+import { useChatWebSocket } from "@features/support/api/useChatWebSocket";
+import useGetProjectDetails from "@api/useGetProjectDetails";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import {
+  getFinalMessageFromPayload,
+  sanitizeStreamToken,
+  splitTokenForTyping,
+} from "@features/support/utils/chat";
+import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
+import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
+import LoadingDotsBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/LoadingDotsBubble";
 
 function ConversationMsgBubble({
   message,
@@ -87,10 +116,7 @@ function ConversationMsgBubble({
 
   const markdownComponents: React.ComponentProps<
     typeof ReactMarkdown
-  >["components"] = useMemo(
-    () => buildBotMarkdownComponents(),
-    [],
-  );
+  >["components"] = useMemo(() => buildBotMarkdownComponents(), []);
 
   return (
     <Stack
@@ -199,16 +225,39 @@ function ConversationMsgBubble({
             },
           }}
         >
-          {isBot ? (
-            <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+          {message.isLoading ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ fontStyle: "italic" }}
+            >
+              ...
+            </Typography>
+          ) : message.isError ? (
+            <Typography
+              variant="body2"
+              color="error.main"
+              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+            >
+              {message.text}
+            </Typography>
+          ) : isBot ? (
+            <ReactMarkdown
+              components={markdownComponents}
+              remarkPlugins={[remarkGfm]}
+            >
               {message.text ?? ""}
             </ReactMarkdown>
           ) : (
             <Typography
               variant="body2"
-              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+              sx={{
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                overflowWrap: "anywhere",
+              }}
             >
-              {message.text}
+              <TextWithLinks text={message.text ?? ""} />
             </Typography>
           )}
         </Paper>
@@ -218,7 +267,8 @@ function ConversationMsgBubble({
 }
 
 /**
- * ConversationDetailsPage displays the message history for a single conversation.
+ * ConversationDetailsPage displays the message history for a single conversation
+ * and allows continuing the conversation inline via the AI chatbot.
  *
  * @returns {JSX.Element} The rendered Conversation Details page.
  */
@@ -244,6 +294,11 @@ export default function ConversationDetailsPage(): JSX.Element {
     hasNextPage,
     isFetchingNextPage,
   } = useGetConversationMessages(conversationId || "", { pageSize: 10 });
+
+  const { data: projectDetails } = useGetProjectDetails(projectId || "");
+  const { data: userDetails } = useGetUserDetails();
+  const accountId = projectDetails?.account?.id || projectId || "";
+  const currentUserDisplayName = userDetails?.email ?? "You";
 
   const messages: ConversationMessage[] = useMemo(() => {
     const raw = data?.pages?.flatMap((p) => p.comments) ?? [];
@@ -276,6 +331,268 @@ export default function ConversationDetailsPage(): JSX.Element {
     [messages],
   );
 
+  // Chat continuation state
+  const [inputValue, setInputValueState] = useState("");
+  const [resetTrigger, setResetTrigger] = useState(0);
+  const [isSending, setIsSending] = useState(false);
+  const [isInputDisabled, setIsInputDisabled] = useState(false);
+  const [newMessages, setNewMessages] = useState<Message[]>([]);
+  const inputValueRef = useRef("");
+  const activeBotMessageIdRef = useRef<string | null>(null);
+  const tokenQueueRef = useRef<string[]>([]);
+  const pendingFinalRef = useRef<{
+    payload: Record<string, unknown>;
+    finalMessage: string;
+  } | null>(null);
+
+  const setInputValueAndRef = useCallback((v: string) => {
+    inputValueRef.current = v;
+    setInputValueState(v);
+  }, []);
+
+  const upsertActiveBotMessage = useCallback(
+    (updater: (msg: Message) => Message, fallback?: () => Message) => {
+      setNewMessages((prev) => {
+        const activeId = activeBotMessageIdRef.current;
+        if (!activeId) return prev;
+        let found = false;
+        const next = prev.map((m) => {
+          if (m.id !== activeId) return m;
+          found = true;
+          return updater(m);
+        });
+        if (!found && fallback) next.push(fallback());
+        return next;
+      });
+    },
+    [],
+  );
+
+  const flushPendingFinalIfReady = useCallback(() => {
+    if (tokenQueueRef.current.length > 0) return;
+    const pending = pendingFinalRef.current;
+    if (!pending) return;
+    const activeId = activeBotMessageIdRef.current;
+    if (!activeId) return;
+
+    let appliedFinal = false;
+    flushSync(() => {
+      setNewMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === activeId);
+        if (idx === -1) return prev;
+        pendingFinalRef.current = null;
+        const { finalMessage } = pending;
+        const msg = prev[idx];
+        const next = [...prev];
+        next[idx] = {
+          ...msg,
+          isLoading: false,
+          isError: false,
+          text: finalMessage || msg.text,
+          isStreaming: false,
+          thinkingSteps: [],
+          thinkingLabel: null,
+        };
+        appliedFinal = true;
+        return next;
+      });
+    });
+    if (appliedFinal) {
+      setIsSending(false);
+      if (pending?.payload?.token_warning === "session_limit_reached") {
+        setIsInputDisabled(true);
+      }
+    }
+  }, []);
+
+  const dequeueOneTypedToken = useCallback(() => {
+    const token = tokenQueueRef.current.shift();
+    if (token === undefined) return;
+    upsertActiveBotMessage((msg) => {
+      const isPlaceholder =
+        msg.text === NOVERA_ANALYZING_PLACEHOLDER_TEXT || msg.text === "";
+      return {
+        ...msg,
+        isLoading: false,
+        text: isPlaceholder ? token : `${msg.text}${token}`,
+        isStreaming: true,
+      };
+    });
+  }, [upsertActiveBotMessage]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (tokenQueueRef.current.length > 0) dequeueOneTypedToken();
+      flushPendingFinalIfReady();
+    }, CHAT_TYPING_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [dequeueOneTypedToken, flushPendingFinalIfReady]);
+
+  const { connect, sendUserMessage } = useChatWebSocket({
+    onEvent: (event) => {
+      switch (event.type) {
+        case "thinking_start":
+          upsertActiveBotMessage(
+            (msg) => ({
+              ...msg,
+              isLoading: false,
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+            () => ({
+              id: activeBotMessageIdRef.current ?? `bot-${Date.now()}`,
+              sender: ChatSender.BOT,
+              timestamp: new Date(),
+              text: NOVERA_ANALYZING_PLACEHOLDER_TEXT,
+              thinkingSteps: [],
+              thinkingLabel: null,
+              isStreaming: false,
+            }),
+          );
+          break;
+        case "thinking_step": {
+          const label = String(event.label ?? event.step ?? "Working...");
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            thinkingSteps: [...(msg.thinkingSteps ?? []), label],
+            thinkingLabel: label,
+          }));
+          break;
+        }
+        case "thinking_end":
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            thinkingLabel: msg.thinkingLabel,
+          }));
+          break;
+        case "token": {
+          const token = String(event.content ?? "");
+          const cleaned = sanitizeStreamToken(token);
+          if (cleaned.length === 0) break;
+          for (const part of splitTokenForTyping(
+            cleaned,
+            CHAT_TYPING_CHARS_PER_TICK,
+          )) {
+            tokenQueueRef.current.push(part);
+          }
+          break;
+        }
+        case "final": {
+          const payload = (event.payload ?? {}) as Record<string, unknown>;
+          const finalMessage = getFinalMessageFromPayload(payload);
+          pendingFinalRef.current = { payload, finalMessage };
+          flushPendingFinalIfReady();
+          break;
+        }
+        case "error":
+          pendingFinalRef.current = null;
+          tokenQueueRef.current = [];
+          upsertActiveBotMessage((msg) => ({
+            ...msg,
+            isLoading: false,
+            isError: true,
+            text: String(event.message ?? "Something went wrong"),
+            thinkingSteps: [],
+            isStreaming: false,
+          }));
+          setIsSending(false);
+          break;
+        default:
+          break;
+      }
+    },
+    onError: () => {
+      pendingFinalRef.current = null;
+      tokenQueueRef.current = [];
+      upsertActiveBotMessage((msg) => ({
+        ...msg,
+        isLoading: false,
+        isError: true,
+        text: "WebSocket connection error.",
+        thinkingSteps: [],
+        isStreaming: false,
+      }));
+      setIsSending(false);
+    },
+  });
+
+  const sendViaWebSocket = useCallback(
+    async (text: string): Promise<void> => {
+      if (!projectId || !accountId) return;
+      const botMessageId = `bot-${Date.now()}`;
+      activeBotMessageIdRef.current = botMessageId;
+      pendingFinalRef.current = null;
+      tokenQueueRef.current = [];
+
+      setNewMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          text,
+          sender: ChatSender.USER,
+          isCurrentUser: true,
+          timestamp: new Date(),
+          createdBy: currentUserDisplayName,
+        },
+        {
+          id: botMessageId,
+          text: "",
+          sender: ChatSender.BOT,
+          timestamp: new Date(),
+          isLoading: true,
+        },
+      ]);
+      setIsSending(true);
+
+      try {
+        await connect(projectId);
+        await sendUserMessage({
+          type: "user_message",
+          accountId,
+          conversationId: conversationId ?? "",
+          message: text,
+          envProducts: {},
+        });
+      } catch {
+        tokenQueueRef.current = [];
+        setNewMessages((prev) =>
+          prev.map((m) =>
+            m.id === botMessageId
+              ? {
+                  ...m,
+                  isLoading: false,
+                  isError: true,
+                  text: "Could not connect to chatbot stream.",
+                }
+              : m,
+          ),
+        );
+        setIsSending(false);
+      }
+    },
+    [
+      accountId,
+      connect,
+      conversationId,
+      currentUserDisplayName,
+      projectId,
+      sendUserMessage,
+    ],
+  );
+
+  const handleSendMessage = useCallback(async (): Promise<boolean> => {
+    const text = htmlToPlainText(inputValueRef.current).trim();
+    if (!text || isSending || !projectId || !accountId) return false;
+    setInputValueAndRef("");
+    setResetTrigger((prev) => prev + 1);
+    await sendViaWebSocket(text);
+    return true;
+  }, [accountId, isSending, projectId, sendViaWebSocket, setInputValueAndRef]);
+
   const conversationStatus = summary?.status;
   const conversationStatusLabel = conversationStatus ?? "--";
   const startedTime = summary?.startedTime ?? "";
@@ -294,7 +611,9 @@ export default function ConversationDetailsPage(): JSX.Element {
     if (window.history.length > 1) {
       navigate(ROUTE_PREVIOUS_PAGE);
     } else if (projectId) {
-      navigate(`/projects/${projectId}/support/conversations`, { state: { fromBack: true } });
+      navigate(`/projects/${projectId}/support/conversations`, {
+        state: { fromBack: true },
+      });
     } else {
       navigate("/");
     }
@@ -322,27 +641,6 @@ export default function ConversationDetailsPage(): JSX.Element {
           <Typography variant="h4" color="text.primary">
             Chat Session
           </Typography>
-          {conversationAction === ConversationListRowAction.Resume &&
-            projectId &&
-            conversationId && (
-              <Button
-                size="small"
-                variant="outlined"
-                color="warning"
-                startIcon={<Play size={14} />}
-                onClick={() =>
-                  navigate(
-                    `/projects/${projectId}/support/chat/${conversationId}`,
-                    {
-                      state: { chatNumber: summary?.chatNumber },
-                    },
-                  )
-                }
-                sx={{ textTransform: "none", fontWeight: 500 }}
-              >
-                Resume
-              </Button>
-            )}
         </Box>
       </Box>
 
@@ -416,66 +714,130 @@ export default function ConversationDetailsPage(): JSX.Element {
                 </Typography>
               </Box>
             </Box>
+            {summary.createdBy && (
+              <>
+                <Divider orientation="vertical" sx={{ height: 40 }} />
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                  <User size={16} style={{ flexShrink: 0 }} />
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Created by
+                    </Typography>
+                    <Tooltip title={summary.createdBy}>
+                      <Typography
+                        variant="body2"
+                        color="text.primary"
+                        sx={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 180,
+                        }}
+                      >
+                        {summary.createdBy}
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                </Box>
+              </>
+            )}
           </Box>
         </Paper>
       )}
 
       <Paper
         variant="outlined"
-        sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2 }}
+        sx={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
       >
-        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1 }}>
-          <MessageSquare size={18} />
-          <Typography variant="h6" color="text.primary">
-            Conversation
-          </Typography>
-        </Stack>
+        <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{ mb: 1 }}
+          >
+            <MessageSquare size={18} />
+            <Typography variant="h6" color="text.primary">
+              Conversation
+            </Typography>
+          </Stack>
 
-        {isLoading ? (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {[1, 2, 3].map((i) => (
-              <Box key={i} sx={{ display: "flex", gap: 2 }}>
-                <Skeleton variant="circular" width={32} height={32} />
-                <Box sx={{ flex: 1 }}>
-                  <Skeleton width="25%" height={16} sx={{ mb: 0.5 }} />
-                  <Skeleton width="80%" height={20} />
+          {isLoading ? (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {[1, 2, 3].map((i) => (
+                <Box key={i} sx={{ display: "flex", gap: 2 }}>
+                  <Skeleton variant="circular" width={32} height={32} />
+                  <Box sx={{ flex: 1 }}>
+                    <Skeleton width="25%" height={16} sx={{ mb: 0.5 }} />
+                    <Skeleton width="80%" height={20} />
+                  </Box>
                 </Box>
-              </Box>
-            ))}
-          </Box>
-        ) : isError ? (
-          <ApiErrorState
-            error={error}
-            fallbackMessage="Could not load conversation messages."
-          />
-        ) : messages.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No messages found for this conversation.
-          </Typography>
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {chatMessages.map((m, index) => (
-              <Box key={m.id}>
-                <ConversationMsgBubble
-                  message={m}
-                  isCurrentUser={m.sender === ChatSender.USER}
-                />
-                {index < chatMessages.length - 1 && <Divider sx={{ my: 3 }} />}
-              </Box>
-            ))}
-            {hasNextPage && (
-              <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => fetchNextPage()}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? "Loading..." : "Load More Messages"}
-                </Button>
-              </Box>
-            )}
-          </Box>
-        )}
+              ))}
+            </Box>
+          ) : isError ? (
+            <ApiErrorState
+              error={error}
+              fallbackMessage="Could not load conversation messages."
+            />
+          ) : messages.length === 0 && newMessages.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No messages found for this conversation.
+            </Typography>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {chatMessages.map((m, index) => (
+                <Box key={m.id}>
+                  <ConversationMsgBubble
+                    message={m}
+                    isCurrentUser={m.sender === ChatSender.USER}
+                  />
+                  {index < chatMessages.length - 1 && (
+                    <Divider sx={{ my: 3 }} />
+                  )}
+                </Box>
+              ))}
+              {hasNextPage && (
+                <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                  >
+                    {isFetchingNextPage ? "Loading..." : "Load More Messages"}
+                  </Button>
+                </Box>
+              )}
+              {newMessages.length > 0 && (
+                <>
+                  {chatMessages.length > 0 && <Divider sx={{ my: 1 }} />}
+                  {newMessages.map((m) =>
+                    m.isLoading ? (
+                      <LoadingDotsBubble key={m.id} />
+                    ) : (
+                      <ChatMessageBubble key={m.id} message={m} />
+                    ),
+                  )}
+                </>
+              )}
+            </Box>
+          )}
+        </Box>
+
+        {conversationAction === ConversationListRowAction.Resume &&
+          projectId &&
+          conversationId && (
+            <>
+              <Divider />
+              <ChatInput
+                inputValue={inputValue}
+                setInputValue={setInputValueAndRef}
+                onSend={handleSendMessage}
+                isSending={isSending}
+                resetTrigger={resetTrigger}
+                disabled={isInputDisabled}
+              />
+            </>
+          )}
       </Paper>
 
       <ConversationKnowledgeRecommendations messages={messages} />

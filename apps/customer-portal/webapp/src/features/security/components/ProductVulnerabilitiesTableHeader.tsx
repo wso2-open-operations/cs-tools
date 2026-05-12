@@ -16,10 +16,11 @@
 
 import {
   Box,
-  Typography,
-  TextField,
-  InputAdornment,
   Button,
+  IconButton,
+  InputAdornment,
+  TextField,
+  Typography,
 } from "@wso2/oxygen-ui";
 import {
   Search,
@@ -105,6 +106,13 @@ const ProductVulnerabilitiesTableHeader = ({
                       <Search size={16} />
                     </InputAdornment>
                   ),
+                  endAdornment: searchValue ? (
+                    <InputAdornment position="end">
+                      <IconButton size="small" edge="end" onClick={() => onSearchChange("")}>
+                        <X size={16} />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : undefined,
                 },
               }}
             />

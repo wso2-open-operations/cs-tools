@@ -14,14 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Card, Typography, Box, Skeleton, colors } from "@wso2/oxygen-ui";
+import { Card, Typography, Box, Skeleton, colors, alpha } from "@wso2/oxygen-ui";
+import { Inbox } from "@wso2/oxygen-ui-icons-react";
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
 } from "@wso2/oxygen-ui-charts-react";
-import { useMemo, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ChartLegend } from "@features/dashboard/components/charts/ChartLegend";
 import {
@@ -60,8 +61,10 @@ export const ActiveCasesChart = ({
   isError,
   variant = OperationsChartMode.SrAndCr,
   centerContent = false,
+  onSliceClick,
 }: ActiveCasesChartProps): JSX.Element => {
   const isDarkMode = useDarkMode();
+  const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
   // safe data
   const safeData = data ?? EMPTY_ACTIVE_CASES_DATA;
   // series config
@@ -107,6 +110,8 @@ export const ActiveCasesChart = ({
       }))
     : buildActiveCasesLegendRows(seriesConfig, safeData);
 
+  const isEmpty = !isLoading && !isError && !!data && safeData.total === 0;
+
   return (
     <Card sx={{ height: "100%", p: 2 }}>
       <Typography
@@ -117,127 +122,103 @@ export const ActiveCasesChart = ({
         {DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS}
       </Typography>
       {isLoading ? (
-        <Box
-          sx={{
-            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Skeleton
-            variant="circular"
-            width={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
-            height={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX}
-          />
+        <>
+          <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Skeleton variant="circular" width={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX} height={DASHBOARD_CHART_PIE_SKELETON_SIZE_PX} />
+          </Box>
+          <Box sx={{ display: "flex", justifyContent: "center", gap: 2, mt: 2 }}>
+            {seriesConfig.map((_, i) => (
+              <Skeleton key={i} variant="rounded" width={DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX} height={20} />
+            ))}
+          </Box>
+        </>
+      ) : isEmpty ? (
+        <Box sx={{ height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX + 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1.5 }}>
+          <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.08), display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Inbox size={24} color={colors.grey?.[400] ?? "#9CA3AF"} />
+          </Box>
+          <Typography variant="body2" color="text.disabled">No {DASHBOARD_CHART_TITLE_OUTSTANDING_OPERATIONS} found</Typography>
         </Box>
       ) : (
-        <Box
-          sx={{
-            height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
-            position: "relative",
-            opacity: isError ? 0.3 : 1,
-            filter: isError ? "grayscale(1)" : "none",
-            "& *:focus": { outline: "none" },
-          }}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart
-              legend={{ show: false }}
-              tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}
-            >
-              <Pie
-                data={displayChartData}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={80}
-                paddingAngle={0}
-                minAngle={15}
-                dataKey="value"
-                nameKey="name"
-                startAngle={90}
-                endAngle={-270}
-                label={false}
-                labelLine={false}
-              >
-                {displayChartData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={entry.color}
-                    stroke="none"
-                    opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1}
-                  />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
+        <>
           <Box
             sx={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              textAlign: "center",
-              pointerEvents: "none",
+              height: DASHBOARD_CHART_PIE_AREA_HEIGHT_PX,
+              position: "relative",
+              opacity: isError ? 0.3 : 1,
+              filter: isError ? "grayscale(1)" : "none",
+              "& *:focus": { outline: "none" },
+              ...(onSliceClick && !isError && {
+                "& .recharts-pie-sector": { cursor: "pointer" },
+              }),
             }}
           >
-            {isError ? (
-              <Box
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                }}
-              >
-                <ErrorIndicator
-                  entityName={DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES}
-                />
-                <Typography variant="caption">
-                  {DASHBOARD_CHART_CAPTION_TOTAL}
-                </Typography>
-              </Box>
-            ) : (
-              <>
-                <Typography variant="h4">
-                  {formatActiveCasesCenterTotal(Boolean(data), safeData.total)}
-                </Typography>
-                <Typography variant="caption">
-                  {DASHBOARD_CHART_CAPTION_TOTAL}
-                </Typography>
-              </>
-            )}
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart legend={{ show: false }} tooltip={{ show: !isError, wrapperStyle: { zIndex: 1000 } }}>
+                <Pie
+                  data={displayChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={0}
+                  minAngle={15}
+                  dataKey="value"
+                  nameKey="name"
+                  startAngle={90}
+                  endAngle={-270}
+                  label={false}
+                  labelLine={false}
+                  onMouseEnter={
+                    onSliceClick && !isError
+                      ? (_data: unknown, index: number) => setActivePieIndex(index)
+                      : undefined
+                  }
+                  onMouseLeave={onSliceClick && !isError ? () => setActivePieIndex(undefined) : undefined}
+                  onClick={
+                    onSliceClick && !isError
+                      ? (_data, index) => {
+                          const key = seriesConfig[index]?.key;
+                          if (key) onSliceClick(key);
+                        }
+                      : undefined
+                  }
+                >
+                  {displayChartData.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color}
+                      stroke={activePieIndex === index ? entry.color : "none"}
+                      strokeWidth={activePieIndex === index ? 3 : 0}
+                      opacity={isDarkMode ? DASHBOARD_CHART_DARK_MODE_OPACITY : 1}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <Box sx={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
+              {isError ? (
+                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <ErrorIndicator entityName={DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES} />
+                  <Typography variant="caption">{DASHBOARD_CHART_CAPTION_TOTAL}</Typography>
+                </Box>
+              ) : (
+                <>
+                  <Typography variant="h4">{formatActiveCasesCenterTotal(Boolean(data), safeData.total)}</Typography>
+                  <Typography variant="caption">{DASHBOARD_CHART_CAPTION_TOTAL}</Typography>
+                </>
+              )}
+            </Box>
           </Box>
-        </Box>
-      )}
-      {isLoading ? (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 2,
-            mt: 2,
-          }}
-        >
-          {seriesConfig.map((_, i) => (
-            <Skeleton
-              key={i}
-              variant="rounded"
-              width={DASHBOARD_CHART_LEGEND_SKELETON_WIDTH_WIDE_PX}
-              height={20}
+          <Box sx={centerContent ? { maxWidth: 420, width: "100%", mx: "auto" } : undefined}>
+            <ChartLegend
+              data={displayLegendData}
+              isError={isError}
+              showValues
+              onItemClick={onSliceClick ? (id) => onSliceClick(id) : undefined}
             />
-          ))}
-        </Box>
-      ) : (
-        <Box
-          sx={
-            centerContent
-              ? { maxWidth: 420, width: "100%", mx: "auto" }
-              : undefined
-          }
-        >
-          <ChartLegend data={displayLegendData} isError={isError} showValues />
-        </Box>
+          </Box>
+        </>
       )}
     </Card>
   );

@@ -15,15 +15,12 @@
 // under the License.
 
 import { type JSX, useEffect } from "react";
-import { Box } from "@wso2/oxygen-ui";
+import { Box, LinearProgress } from "@wso2/oxygen-ui";
 import { Outlet, useParams } from "react-router";
 import useGetProjectDetails from "@api/useGetProjectDetails";
-import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import ApiErrorState from "@components/error/ApiErrorState";
-import AccountSuspendedPage from "@/components/access-control/AccountSuspendedPage";
 import ProjectSuspendedNoticePage from "@/components/access-control/ProjectSuspendedNoticePage";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
-import { PROJECT_HUB_PROJECTS_PAGE_SIZE } from "@features/project-hub/constants/projectHubConstants";
 import { ProjectClosureState } from "@/types/permission";
 
 /**
@@ -38,27 +35,14 @@ import { ProjectClosureState } from "@/types/permission";
  */
 function ProjectGuardContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
-  const { setIsErrorPageDisplayed, setIsProjectSuspended } = useErrorPageContext();
+  const { setIsErrorPageDisplayed, setIsProjectSuspended } =
+    useErrorPageContext();
 
   const { data, error, isLoading } = useGetProjectDetails(projectId ?? "");
-  const {
-    data: projectsData,
-    isLoading: isProjectsLoading,
-    isFetching: isProjectsFetching,
-    hasNextPage,
-  } = useInfiniteProjects({ pageSize: PROJECT_HUB_PROJECTS_PAGE_SIZE });
 
   const hasError = !isLoading && Boolean(error);
   const isProjectSuspended =
     !isLoading && data?.closureState === ProjectClosureState.SUSPENDED;
-
-  const allProjects = flattenProjectPages(projectsData);
-  const allPagesLoaded =
-    !isProjectsLoading && !isProjectsFetching && hasNextPage === false;
-  const allProjectsSuspended =
-    allPagesLoaded &&
-    allProjects.length > 0 &&
-    allProjects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
 
   const isErrorPageDisplayed = hasError || isProjectSuspended;
 
@@ -69,6 +53,21 @@ function ProjectGuardContent(): JSX.Element {
   useEffect(() => {
     setIsProjectSuspended(isProjectSuspended);
   }, [isProjectSuspended, setIsProjectSuspended]);
+
+  if (isLoading) {
+    return (
+      <Box
+        sx={{
+          flex: 1,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <LinearProgress sx={{ width: "60%", maxWidth: 400 }} />
+      </Box>
+    );
+  }
 
   if (hasError) {
     return (
@@ -82,12 +81,6 @@ function ProjectGuardContent(): JSX.Element {
   }
 
   if (isProjectSuspended) {
-    if (!allPagesLoaded) {
-      return <></>;
-    }
-    if (allProjectsSuspended) {
-      return <AccountSuspendedPage />;
-    }
     return <ProjectSuspendedNoticePage project={data!} />;
   }
 

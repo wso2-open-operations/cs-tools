@@ -64,6 +64,8 @@ export const ALL_UPDATES_SELECT_LEVEL_PLACEHOLDER = "Select Level";
 
 export const ALL_UPDATES_SEARCH_BUTTON_LABEL = "Search";
 
+export const ALL_UPDATES_CLEAR_FILTERS_BUTTON_LABEL = "Clear Filters";
+
 export const ALL_UPDATES_VIEW_REPORT_BUTTON_LABEL = "View Report";
 
 export const ALL_UPDATES_IDLE_HINT =

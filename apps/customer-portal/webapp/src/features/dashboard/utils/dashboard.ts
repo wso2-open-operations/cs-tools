@@ -230,14 +230,7 @@ export function computeCrCardIsCardError(
 }
 
 export function normalizeEngagementLabel(label: string): string {
-  switch (label) {
-    case "New Feature / Improvement":
-      return "Improvements";
-    case "Consultancy":
-      return "Services";
-    default:
-      return label;
-  }
+  return label;
 }
 
 export function getDashboardChartsLoadingState(params: {

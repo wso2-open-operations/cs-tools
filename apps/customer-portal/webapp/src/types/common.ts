@@ -21,6 +21,7 @@ export type IdLabelRef = {
   label: string;
   count?: number;
   number?: string | null;
+  internalId?: string | null;
   name?: string | null;
   abbreviation?: string | null;
   releasedOn?: string | null;

@@ -16,10 +16,10 @@
 
 import {
   useParams,
-  useNavigate,
   useSearchParams,
   useLocation,
 } from "react-router";
+import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
 import {
   useState,
   useMemo,
@@ -29,8 +29,7 @@ import {
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
 import { useLoader } from "@context/linear-loader/LoaderContext";
-import { Box, Stack } from "@wso2/oxygen-ui";
-import { useGetProjectCasesStats } from "@features/dashboard/api/useGetProjectCasesStats";
+import { Stack, Divider } from "@wso2/oxygen-ui";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -38,20 +37,20 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
 import {
   hasListSearchOrFilters,
-  isS0Case,
+  getLast30DaysUtcRange,
 } from "@features/support/utils/support";
 import {
-  CaseType,
-  ALL_CASES_STAT_CONFIGS,
-  getAllCasesFlattenedStats,
-} from "@features/support/constants/supportConstants";
+  buildDashboardCaseSearchFilters,
+  getDashboardOutstandingCasesDescription,
+  getDashboardOutstandingCasesTitle,
+} from "@features/dashboard/utils/dashboardNavigation";
+import { CaseStatus, CaseType } from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
 import {
   getProjectPermissions,
   getProjectSeverityPolicy,
 } from "@utils/permission";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
-import ListStatGrid from "@components/list-view/ListStatGrid";
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
@@ -64,17 +63,31 @@ import ListItems from "@components/list-view/ListItems";
  * @returns {JSX.Element} The rendered All Cases page.
  */
 export default function AllCasesPage(): JSX.Element {
-  const navigate = useNavigate();
+  const navigate = useModifierAwareNavigate();
   const location = useLocation();
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const createdByMe = searchParams.get("createdByMe") === "true";
+  const initialSeverityId = searchParams.get("severityId");
+  const rawStatusFilter = searchParams.get("statusFilter");
+  const statusFilter: "active" | "resolved" | null =
+    rawStatusFilter === "active" || rawStatusFilter === "resolved"
+      ? rawStatusFilter
+      : null;
+  const isDashboardSeverityNavigation = Boolean(initialSeverityId);
 
   const sessionPrefix = `${projectId ?? "unknown"}-cases`;
   const [searchTerm, setSearchTerm] = useSessionState(`${sessionPrefix}-search`, "", undefined, { popOnly: true });
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
-  const [filters, setFilters] = useSessionState<AllCasesFilterValues>(`${sessionPrefix}-filters`, {}, undefined, { popOnly: true });
+  const [filters, setFilters] = useSessionState<AllCasesFilterValues>(
+    `${sessionPrefix}-filters`,
+    initialSeverityId ? { severityId: initialSeverityId } : {},
+    undefined,
+    { popOnly: true },
+  );
+  const [isFiltersOpen, setIsFiltersOpen] = useState(
+    () => hasListSearchOrFilters(searchTerm, filters),
+  );
   const [sortField, setSortField] = useSessionState<"createdOn" | "updatedOn" | "severity" | "state">(`${sessionPrefix}-sortField`, "createdOn", undefined, { popOnly: true });
   const [sortOrder, setSortOrder] = useSessionState<SortOrder>(`${sessionPrefix}-sortOrder`, SortOrder.DESC, undefined, { popOnly: true });
   const [page, setPage] = useSessionState<number>(`${sessionPrefix}-page`, 1, undefined, { popOnly: true });
@@ -100,10 +113,21 @@ export default function AllCasesPage(): JSX.Element {
         : { excludeS0: false, restrictSeverityToLow: false },
     [projectDetailsReady, project, projectFeatures],
   );
-  const { excludeS0, restrictSeverityToLow } = severityPolicy;
+  const { restrictSeverityToLow } = severityPolicy;
 
   // Fetch filter metadata first to get Incident and Query IDs for stats API
   const { data: filterMetadata } = useGetProjectFilters(projectId || "");
+
+  // When navigating from Dashboard with ?statusFilter=resolved, force the Closed status into the filter
+  // so the list only shows resolved cases. We guard on "already equals closed id" rather than "any truthy
+  // statusId" to avoid skipping the update when a prior session filter is a different status.
+  useEffect(() => {
+    if (statusFilter !== "resolved" || !filterMetadata?.caseStates) return;
+    const closedState = filterMetadata.caseStates.find((s) => s.label === CaseStatus.CLOSED);
+    if (closedState && filters.statusId !== String(closedState.id)) {
+      setFilters((prev) => ({ ...prev, statusId: String(closedState.id) }));
+    }
+  }, [statusFilter, filterMetadata, filters.statusId, setFilters]);
 
   // Fetch deployments for the deployment filter (10 at a time)
   const deploymentsQuery = usePostProjectDeploymentsSearchInfinite(
@@ -116,28 +140,26 @@ export default function AllCasesPage(): JSX.Element {
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
-  const {
-    data: stats,
-    isLoading: isStatsQueryLoading,
-    isError: isStatsError,
-  } = useGetProjectCasesStats(projectId || "", {
-    caseTypes: [CaseType.DEFAULT_CASE],
-    createdByMe: createdByMe || undefined,
-    enabled: !!projectId,
-  });
-
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
         caseTypes: [CaseType.DEFAULT_CASE],
-        statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
-        severityId: filters.severityId ? Number(filters.severityId) : undefined,
-        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-        deploymentId: permissions.hasDeployments
-          ? filters.deploymentId || undefined
-          : undefined,
-        searchQuery: searchTerm.trim() || undefined,
-        createdByMe: createdByMe || undefined,
+        ...buildDashboardCaseSearchFilters({
+          statusId: filters.statusId,
+          severityId: filters.severityId,
+          issueTypes: filters.issueTypes,
+          deploymentId: permissions.hasDeployments
+            ? filters.deploymentId || undefined
+            : undefined,
+          searchQuery: searchTerm,
+          createdByMe: createdByMe || undefined,
+          caseStates: filterMetadata?.caseStates,
+          isDashboardSeverityNavigation:
+            (isDashboardSeverityNavigation &&
+              filters.severityId === initialSeverityId) ||
+            statusFilter === "active",
+        }),
+        ...(statusFilter === "resolved" ? getLast30DaysUtcRange() : {}),
       },
       sortBy: {
         field: sortField,
@@ -145,12 +167,16 @@ export default function AllCasesPage(): JSX.Element {
       },
     }),
     [
+      statusFilter,
       filters,
       searchTerm,
       sortField,
       sortOrder,
       createdByMe,
       permissions.hasDeployments,
+      filterMetadata?.caseStates,
+      isDashboardSeverityNavigation,
+      initialSeverityId,
     ],
   );
 
@@ -169,21 +195,15 @@ export default function AllCasesPage(): JSX.Element {
 
   const { showLoader, hideLoader } = useLoader();
 
-  // Show loader only for initial load (until first stats + cases response), not for background refetches or fetchNextPage.
-  const hasStatsResponse = stats !== undefined;
   const hasCasesResponse = data !== undefined;
   const isProjectContextLoading = isProjectLoading;
-  const isStatsLoading =
-    isProjectContextLoading ||
-    isStatsQueryLoading ||
-    (!!projectId && !hasStatsResponse && !isStatsError);
 
   const isCasesAreaLoading =
     isCasesQueryLoading ||
     (!!projectId && !hasCasesResponse) ||
     isFetchingNextPage;
 
-  const isInitialPageLoading = isStatsLoading || isCasesAreaLoading;
+  const isInitialPageLoading = isCasesAreaLoading;
 
   useEffect(() => {
     if (isInitialPageLoading) {
@@ -212,19 +232,9 @@ export default function AllCasesPage(): JSX.Element {
 
   const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? 0;
 
-  const filteredAndSearchedCases = useMemo(
-    () =>
-      excludeS0
-        ? currentPageCases.filter((c) => !isS0Case(c))
-        : currentPageCases,
-    [currentPageCases, excludeS0],
-  );
+  const totalItems = apiTotalRecords || currentPageCases.length;
 
-  const totalItems = excludeS0
-    ? filteredAndSearchedCases.length
-    : (apiTotalRecords || filteredAndSearchedCases.length);
-
-  const paginatedCases = filteredAndSearchedCases;
+  const paginatedCases = currentPageCases;
 
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -247,6 +257,13 @@ export default function AllCasesPage(): JSX.Element {
     setFilters({});
     setSearchTerm("");
     setPage(1);
+    if (statusFilter) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("statusFilter");
+        return next;
+      }, { replace: true });
+    }
   };
 
   const handleSortChange = (value: SortOrder) => {
@@ -273,56 +290,79 @@ export default function AllCasesPage(): JSX.Element {
   return (
     <Stack spacing={3} sx={{ minWidth: 0 }}>
       <ListPageHeader
-        title={createdByMe ? "My Cases" : "All Cases"}
+        title={(() => {
+          const dashboardTitle = getDashboardOutstandingCasesTitle(initialSeverityId);
+          if (dashboardTitle) return dashboardTitle;
+          if (createdByMe) return "My Cases";
+          if (statusFilter === "active") return "Outstanding Cases";
+          if (statusFilter === "resolved") return "Resolved Cases (Last 30d)";
+          return "All Cases";
+        })()}
         description={
-          createdByMe
-            ? "Manage and track your support cases"
-            : "Manage and track all your support cases"
+          (() => {
+            const dashboardDescription =
+              getDashboardOutstandingCasesDescription(initialSeverityId);
+            if (dashboardDescription) {
+              return dashboardDescription;
+            }
+            if (statusFilter === "active") return "Cases that are currently in progress";
+            if (statusFilter === "resolved") return "Cases that have been resolved during the last 30 days";
+            return createdByMe
+              ? "Manage and track your support cases"
+              : "Manage and track all your support cases";
+          })()
         }
-        backLabel="Back to Support Center"
-        onBack={() => (returnTo ? navigate(returnTo) : navigate(".."))}
-      />
-
-      {/* Stat cards */}
-      <Box sx={{ mb: 3 }}>
-        <ListStatGrid
-          isLoading={isStatsLoading}
-          isError={isStatsError}
-          entityName="case"
-          configs={ALL_CASES_STAT_CONFIGS}
-          stats={getAllCasesFlattenedStats(stats)}
-        />
-      </Box>
-
-      <ListSearchPanel
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        isFiltersOpen={isFiltersOpen}
-        onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
-        filters={filters}
-        filterMetadata={filterMetadata}
-        deployments={
-          projectDetailsReady && permissions.hasDeployments
-            ? deploymentsList
-            : []
+        backLabel={
+          returnTo?.endsWith("/support") ? "Back to Support Center" : "Back"
         }
-        onLoadMoreDeployments={() => {
-          if (
-            deploymentsQuery.hasNextPage &&
-            !deploymentsQuery.isFetchingNextPage
-          ) {
-            void deploymentsQuery.fetchNextPage();
+        onBack={() => {
+          if (returnTo) {
+            setFilters({});
+            navigate(returnTo);
+          } else {
+            navigate("..");
           }
         }}
-        hasMoreDeployments={!!deploymentsQuery.hasNextPage}
-        isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
-        onFilterChange={handleFilterChange}
-        onClearFilters={handleClearFilters}
-        excludeS0={excludeS0}
-        restrictSeverityToLow={restrictSeverityToLow}
-        hideDeploymentFilter={!permissions.hasDeployments}
-        isProjectContextLoading={isProjectContextLoading}
       />
+
+      {statusFilter || isDashboardSeverityNavigation ? (
+        <Divider />
+      ) : (
+        <ListSearchPanel
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          isFiltersOpen={isFiltersOpen}
+          onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
+          filters={filters}
+          filterMetadata={filterMetadata}
+          deployments={
+            projectDetailsReady && permissions.hasDeployments
+              ? deploymentsList
+              : []
+          }
+          onLoadMoreDeployments={() => {
+            if (
+              deploymentsQuery.hasNextPage &&
+              !deploymentsQuery.isFetchingNextPage
+            ) {
+              void deploymentsQuery.fetchNextPage();
+            }
+          }}
+          hasMoreDeployments={!!deploymentsQuery.hasNextPage}
+          isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
+          onFilterChange={handleFilterChange}
+          onClearFilters={handleClearFilters}
+          restrictSeverityToLow={restrictSeverityToLow}
+          hideSeverityFilter={isDashboardSeverityNavigation}
+          hideDeploymentFilter={!permissions.hasDeployments}
+          isProjectContextLoading={isProjectContextLoading}
+          excludeFromCount={
+            initialSeverityId && filters.severityId === initialSeverityId
+              ? ["severityId"]
+              : []
+          }
+        />
+      )}
 
       <ListResultsBar
         shownCount={paginatedCases.length}

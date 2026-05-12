@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { CircleAlert, Shield, FileCheck, Siren, Package } from "@wso2/oxygen-ui-icons-react";
+import { Shield, FileCheck, Siren, Package } from "@wso2/oxygen-ui-icons-react";
 import type { SupportStatConfig } from "@features/support/constants/supportConstants";
 import type { FilterDefinition } from "@components/list-view/ListFiltersPanel";
 import {
@@ -45,12 +45,6 @@ export const SECURITY_STAT_CONFIGS: SupportStatConfig<SecurityStatKey>[] = [
     key: SecurityStatKey.resolvedSecurityReports,
     label: "Resolved Security Reports (Last 30d)",
   },
-  {
-    icon: CircleAlert,
-    iconColor: "error",
-    key: SecurityStatKey.totalVulnerabilities,
-    label: "Total Vulnerabilities",
-  },
 ];
 
 export const SECURITY_STATS_ENTITY_NAME = "security";
@@ -72,7 +66,7 @@ export const PRODUCT_VULNERABILITIES_SEARCH_DEBOUNCE_MS = 350;
 
 export const PRODUCT_VULNERABILITIES_DEFAULT_ROWS_PER_PAGE = 10;
 
-export const PRODUCT_VULNERABILITIES_TABLE_COLUMN_COUNT = 6;
+export const PRODUCT_VULNERABILITIES_TABLE_COLUMN_COUNT = 12;
 
 export const PRODUCT_VULNERABILITIES_TABLE_PAGINATION_OPTIONS = [5, 10, 25, 50] as const;
 
@@ -95,6 +89,20 @@ export const PRODUCT_VULNERABILITIES_CLEAR_FILTERS_LABEL = "Clear Filters";
 export const PRODUCT_VULNERABILITIES_SEVERITY_LABEL = "Severity";
 
 export const PRODUCT_VULNERABILITIES_SEVERITY_ALL_LABEL = "All Severity";
+
+export const PRODUCT_VULNERABILITIES_PRODUCT_LABEL = "Product";
+
+export const PRODUCT_VULNERABILITIES_PRODUCT_PLACEHOLDER = "Select a Product";
+
+export const PRODUCT_VULNERABILITIES_PRODUCT_VERSION_LABEL = "Product Version";
+
+export const PRODUCT_VULNERABILITIES_PRODUCT_VERSION_PLACEHOLDER = "Select a Product Version";
+
+export const PRODUCT_VULNERABILITIES_ALL_PRODUCTS_LABEL = "All Products";
+
+export const PRODUCT_VULNERABILITIES_ALL_VERSIONS_LABEL = "All Versions";
+
+export const PRODUCT_VULNERABILITIES_ALL_FETCH_LIMIT = 5000;
 
 export const SECURITY_REPORT_ANALYSIS_PAGE_SIZE = 10;
 
@@ -131,12 +139,26 @@ export const SECURITY_REPORT_FILTER_DEFINITIONS: FilterDefinition[] = [
   },
 ];
 
+export const VULNERABILITY_DETAILS_CARD_TITLE = "Product Vulnerabilities";
+
+export const VULNERABILITY_DETAILS_CVE_LABEL = "CVE";
+
+export const VULNERABILITY_DETAILS_VULNERABILITY_ID_LABEL = "Vulnerability ID";
+
+export const VULNERABILITY_DETAILS_SEVERITY_LABEL = "Severity";
+
 export const VULNERABILITY_DETAILS_NVD_BASE_URL =
   "https://nvd.nist.gov/vuln/detail";
 
 export const VULNERABILITY_DETAILS_NVD_BUTTON_LABEL = "NVD";
 
 export const VULNERABILITY_DETAILS_HEADER_SUBTITLE = "Vulnerability details";
+
+export const VULNERABILITY_DETAILS_PRODUCT_NAME_LABEL = "Product Name";
+
+export const VULNERABILITY_DETAILS_PRODUCT_VERSION_LABEL = "Product Version";
+
+export const VULNERABILITY_DETAILS_WSO2_RESOLUTION_LABEL = "WSO2 Resolution";
 
 export const VULNERABILITY_DETAILS_COMPONENT_SECTION_TITLE = "Component Information";
 
