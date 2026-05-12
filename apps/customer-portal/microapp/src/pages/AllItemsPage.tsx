@@ -13,14 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { Box, Stack } from "@wso2/oxygen-ui";
 
-import { useLayout } from "@context/layout";
+import { useAppBar } from "@context/layout";
 
 import { AnnouncementListContent } from "@features/announcements/components/AnnouncementListContent";
 import { CaseListContent } from "@features/cases/components/CaseListContent";
@@ -42,6 +42,8 @@ import { ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
 
 type AllItemsModeType = ModeType & { title: string };
 
+const FILTERABLE_TYPES = new Set<ItemCardProps["type"]>(["case", "chat", "service", "change", "sra", "engagement"]);
+
 export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "multiple" }) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -51,17 +53,14 @@ export default function AllItemsPage({ type }: { type: ItemCardProps["type"] | "
 
   const mode: AllItemsModeType | undefined = location.state?.mode;
 
-  const { setLayoutOverrides } = useLayout();
-
-  useEffect(() => {
-    if (!mode) return;
-
-    setLayoutOverrides({ title: mode.title });
-
-    return () => {
-      setLayoutOverrides({ title: undefined });
-    };
-  }, [mode]);
+  useAppBar(
+    {
+      title: mode?.title,
+      appBarSlots:
+        type !== "multiple" && FILTERABLE_TYPES.has(type) ? <FilterAppBarSlot type={type} /> : undefined,
+    },
+    [mode?.title, type],
+  );
 
   const resolvedTypes =
     type === "multiple" ? (mode?.type === "status" ? (STATUS_MODE_TYPES[mode.status] ?? []) : []) : type;

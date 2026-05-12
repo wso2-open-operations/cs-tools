@@ -15,33 +15,34 @@
 // under the License.
 import { createContext, type ReactNode } from "react";
 
-export type AppBarVariant = "minimal" | "default" | "extended" | "notifications";
+import { DEFAULT_LAYOUT_CONFIG } from "@shared/constants";
 
-export type LayoutOverrides = {
-  title?: string | ReactNode;
-  overline?: ReactNode | string | null;
-  subtitle?: ReactNode | string | null;
-  startSlot?: ReactNode;
-  endSlot?: ReactNode;
-  appBarSlots?: ReactNode;
-};
+interface LayoutVisibility {
+  exitButton?: boolean;
+  projectSelector?: boolean;
+  backAction?: boolean;
+}
 
-export type LayoutContextType = {
-  /* AppBar Properties */
-  title: string | ReactNode;
-  showAppBar: boolean;
-  hasBackAction: boolean;
-  appBarVariant: AppBarVariant;
-  overlineSlot?: ReactNode | string | null;
-  subtitleSlot?: ReactNode | string | null;
-  startSlot?: ReactNode;
-  endSlot?: ReactNode;
-  appBarSlots?: ReactNode;
-  setLayoutOverrides: (overrides: LayoutOverrides) => void;
-  clearLayoutOverrides: () => void;
+interface LayoutSlots {
+  overline?: ReactNode | string;
+  subtitle?: ReactNode | string;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  bottom?: ReactNode;
+}
 
-  /* TabBar Properties */
-  activeTabIndex: number;
-};
+export interface LayoutDeclaration {
+  tabIndex: number;
+  title?: ReactNode | string;
+  visibility?: LayoutVisibility;
+  slots?: LayoutSlots;
+}
 
-export const LayoutContext = createContext<LayoutContextType | null>(null);
+export interface LayoutContextType extends LayoutDeclaration {
+  declareLayout: (config: Partial<LayoutDeclaration>) => void;
+}
+
+export const LayoutContext = createContext<LayoutContextType>({
+  ...DEFAULT_LAYOUT_CONFIG,
+  declareLayout: () => {},
+});

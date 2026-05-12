@@ -13,13 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useLayoutEffect } from "react";
 
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
 
-import { useLayout } from "@context/layout";
+import { useAppBar } from "@context/layout";
 
 import type { Case } from "@features/cases/types/case.model";
 
@@ -41,13 +40,12 @@ type SraDetailViewProps = {
 };
 
 export function SraDetailView({ data, isLoading, comments }: SraDetailViewProps) {
-  const layout = useLayout();
   const { fromNow, format } = useDateTime();
   const { ref, variant: overlineSlotVariant } = useOverlineVariant();
   const { comments: commentList, comment, setComment, handleSend, isSendingComment, bottomRef } = comments;
 
-  useLayoutEffect(() => {
-    layout.setLayoutOverrides({
+  useAppBar(
+    {
       title: (
         <OverlineSlot
           variant={overlineSlotVariant}
@@ -56,11 +54,9 @@ export function SraDetailView({ data, isLoading, comments }: SraDetailViewProps)
           title={data?.title}
         />
       ),
-    });
-    return () => {
-      layout.setLayoutOverrides({ title: undefined });
-    };
-  }, [data, overlineSlotVariant]);
+    },
+    [data, overlineSlotVariant],
+  );
 
   return (
     <>

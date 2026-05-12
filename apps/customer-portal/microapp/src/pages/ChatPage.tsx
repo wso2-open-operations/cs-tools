@@ -15,11 +15,12 @@
 // under the License.
 import { useEffect, useRef, useState } from "react";
 
-import { Backdrop, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
-import { Pin } from "@wso2/oxygen-ui-icons-react";
+import { Backdrop, Box, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { MessageSquareQuote, Pin } from "@wso2/oxygen-ui-icons-react";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 
+import { useAppBar } from "@context/layout";
 import { useProject } from "@context/project";
 
 import { type ChatMessage, MessageBubble } from "@features/chats/components";
@@ -31,6 +32,14 @@ import { StickyCommentBar } from "@components/detail";
 dayjs.extend(relativeTime);
 
 export default function ChatPage() {
+  useAppBar({
+    startSlot: (
+      <Box color="primary.main">
+        <MessageSquareQuote size={pxToRem(36)} />
+      </Box>
+    ),
+  });
+
   const { projectId } = useProject();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");

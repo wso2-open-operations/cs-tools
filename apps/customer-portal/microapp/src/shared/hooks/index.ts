@@ -20,5 +20,6 @@ export * from "./usePaginationSubtitle";
 export * from "./useResolvedDateRange";
 export * from "./useScrollControl";
 export * from "./useStatusFilters";
+export * from "./useAppBarHeight";
 export * from "./navigation";
 export * from "./support";

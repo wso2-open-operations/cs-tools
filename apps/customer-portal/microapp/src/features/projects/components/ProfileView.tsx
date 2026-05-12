@@ -13,12 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { type ReactNode, useLayoutEffect } from "react";
+import { type ReactNode } from "react";
 
 import { Card, colors, Divider, Skeleton, Stack, Switch, Typography } from "@wso2/oxygen-ui";
 import { BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-icons-react";
 
-import { useLayout } from "@context/layout";
+import { useAppBar } from "@context/layout";
 
 import { openUrl } from "@bridge/index";
 
@@ -41,24 +41,23 @@ export function ProfileView({
   version,
   projectEditMutation,
 }: ProfileViewProps) {
-  const layout = useLayout();
-
-  const AppBarSlot = () => (
-    <Stack direction="row" alignItems="center" gap={1.5} mt={-2}>
-      {name ? <Avatar>{name}</Avatar> : <Skeleton variant="circular" width={40} height={40} sx={{ flexShrink: 0 }} />}
-      <Typography variant="h6" fontWeight="medium" sx={{ flex: 1 }}>
-        {name ?? <Skeleton variant="text" width="100%" height={30} />}
-      </Typography>
-    </Stack>
+  useAppBar(
+    {
+      appBarSlots: (
+        <Stack direction="row" alignItems="center" gap={1.5} mt={-2}>
+          {name ? (
+            <Avatar>{name}</Avatar>
+          ) : (
+            <Skeleton variant="circular" width={40} height={40} sx={{ flexShrink: 0 }} />
+          )}
+          <Typography variant="h6" fontWeight="medium" sx={{ flex: 1 }}>
+            {name ?? <Skeleton variant="text" width="100%" height={30} />}
+          </Typography>
+        </Stack>
+      ),
+    },
+    [data],
   );
-
-  useLayoutEffect(() => {
-    layout.setLayoutOverrides({ appBarSlots: <AppBarSlot /> });
-    return () => {
-      layout.setLayoutOverrides({ appBarSlots: undefined });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
 
   return (
     <Stack gap={2.5}>

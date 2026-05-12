@@ -13,10 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { LayoutDeclaration } from "@context/layout";
 
-export * from "./app.constants";
-export * from "./status.constants";
-export * from "./routes.constants";
-export * from "./strings.constants";
-export * from "./support.constants";
-export * from "./layout.constants";
+export const NO_ACTIVE_TAB = -1;
+
+export const DEFAULT_LAYOUT_CONFIG: LayoutDeclaration = {
+  tabIndex: NO_ACTIVE_TAB,
+  title: undefined,
+  visibility: undefined,
+  slots: undefined,
+};

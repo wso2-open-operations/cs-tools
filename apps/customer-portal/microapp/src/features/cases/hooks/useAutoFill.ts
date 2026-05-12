@@ -15,7 +15,7 @@
 // under the License.
 import { useEffect, useState } from "react";
 
-import { useLayout } from "@context/layout";
+import { useAppBar } from "@context/layout";
 
 import type { CaseClassificationResponseDto } from "@features/cases/types/case.dto";
 import type { Case } from "@features/cases/types/case.model";
@@ -43,7 +43,6 @@ export function useAutoFill({
   deploymentsFieldDisabled,
   setFieldValue,
 }: UseAutoFillOptions) {
-  const layout = useLayout();
   const [classified, setClassified] = useState(new Set<string>());
 
   useEffect(() => {
@@ -90,10 +89,10 @@ export function useAutoFill({
     setClassified(autoFilledFields);
   }, [classifications, deploymentOptions]);
 
+  useAppBar({ title: relatedCase ? "Create Related Case" : undefined }, [relatedCase]);
+
   useEffect(() => {
     if (!relatedCase) return;
-
-    layout.setLayoutOverrides({ title: "Create Related Case" });
 
     setFieldValue("title", relatedCase.title);
 
@@ -106,8 +105,6 @@ export function useAutoFill({
     if (matchedProduct) {
       setFieldValue("product", matchedProduct.value);
     }
-
-    return () => layout.setLayoutOverrides({ title: undefined });
   }, [relatedCase, deploymentOptions]);
 
   useEffect(() => {

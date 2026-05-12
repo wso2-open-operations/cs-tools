@@ -13,66 +13,20 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useLayoutEffect, useRef, useState } from "react";
-
-import { useNavigate } from "react-router-dom";
-
-import { useQuery } from "@tanstack/react-query";
-import { Button, IconButton, AppBar as MuiAppBar, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
-import { ArrowLeft, ChevronDown, Folder, Grip } from "@wso2/oxygen-ui-icons-react";
+import { AppBar as MuiAppBar, Stack, Typography } from "@wso2/oxygen-ui";
 
 import { useLayout } from "@context/layout";
-import { useProject } from "@context/project";
 import { useThemeMode } from "@context/theme";
 
-import { goToMyAppsScreen } from "@bridge/index";
+import { BackButton, ExitButton, ProjectSelect } from "@shared/components/core";
 
-import { projects } from "@features/projects/api/projects.queries";
-import { ProjectSelector } from "@features/projects/components";
-
-import { APP_BAR_CONFIG } from "@components/layout/config";
-
-import { ConfirmDialog } from "../common/ConfirmDialog";
+import { useAppBarHeight, useNavigation } from "@shared/hooks";
 
 export function AppBar() {
-  const theme = useTheme();
-  const navigate = useNavigate();
-  const { title, appBarVariant, overlineSlot, subtitleSlot, startSlot, endSlot, appBarSlots, hasBackAction } =
-    useLayout();
-  const config = APP_BAR_CONFIG[appBarVariant];
-  const { projectId } = useProject();
-  const project = useQuery(projects.all()).data?.find((project) => project.id === projectId);
-
-  const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
-  const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
-
-  const ref = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    if (!ref.current) return;
-
-    const observer = new ResizeObserver(([entry]) => {
-      document.documentElement.style.setProperty("--app-bar-height", `${entry.contentRect.height}px`);
-    });
-
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
-
-  const navigateBack = () => navigate(-1);
-
-  const openProjectSelector = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    setProjectSelectorAnchor(event.currentTarget);
-  };
-
-  const closeProjectSelector = () => {
-    setProjectSelectorAnchor(null);
-  };
-
   const mode = useThemeMode();
-
-  if (!project) return null;
+  const { title, visibility, slots } = useLayout();
+  const { ref } = useAppBarHeight();
+  const { back } = useNavigation();
 
   return (
     <>
@@ -89,7 +43,7 @@ export function AppBar() {
           pt: 7,
         }}
       >
-        {config.showNotifications && (
+        {visibility?.exitButton && (
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
             <ExitButton />
           </Stack>
@@ -97,86 +51,36 @@ export function AppBar() {
 
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
           <Stack direction="row" alignItems="center" gap={1.5} flex={1}>
-            {hasBackAction && <BackButton onClick={navigateBack} />}
-            {startSlot}
+            {visibility?.backAction && <BackButton onClick={back} />}
+
+            {slots?.leading}
+
             <Stack flex={1}>
               <Typography component="div" variant="body2" fontWeight="regular" color="text.secondary">
-                {overlineSlot}
+                {slots?.overline}
               </Typography>
+
               {title && (
                 <Typography variant="h6" fontWeight="medium">
                   {title}
                 </Typography>
               )}
-              <Typography component="div" variant="subtitle2" fontWeight="regular" color="text.secondary">
-                {subtitleSlot}
-              </Typography>
+
+              {slots?.subtitle && (
+                <Typography component="div" variant="subtitle2" fontWeight="regular" color="text.secondary">
+                  {slots.subtitle}
+                </Typography>
+              )}
             </Stack>
           </Stack>
 
-          {endSlot}
+          {slots?.trailing}
         </Stack>
 
-        {config.showProjectSelector && (
-          <Button sx={{ justifyContent: "space-between", p: 0, mt: 2 }} onClick={openProjectSelector} disableRipple>
-            <Stack direction="row" sx={{ alignItems: "center", flexGrow: 1, minWidth: 0, gap: 1 }}>
-              <Folder color={theme.palette.text.secondary} size={pxToRem(18)} />
-              <Typography variant="body1" color="text.secondary" sx={{ textTransform: "initial" }} noWrap>
-                {project.name}
-              </Typography>
-            </Stack>
-            <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />
-          </Button>
-        )}
+        {visibility?.projectSelector && <ProjectSelect />}
 
-        {/* Additional AppBar Content */}
-        {appBarSlots}
+        {slots?.bottom}
       </MuiAppBar>
-
-      {/* Popovers */}
-      <ProjectSelector anchorEl={projectSelectorAnchor} open={isProjectSelectorOpen} onClose={closeProjectSelector} />
-    </>
-  );
-}
-
-function BackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <IconButton aria-label="Go back" onClick={onClick} sx={{ p: 0 }} disableRipple>
-      <ArrowLeft size={pxToRem(20)} />
-    </IconButton>
-  );
-}
-
-export function ExitButton() {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <IconButton
-        disableRipple
-        color="error"
-        sx={{
-          gap: 1,
-          position: "absolute",
-          top: "var(--safe-top)",
-          left: 10,
-          p: 0,
-        }}
-        onClick={() => setOpen(true)}
-      >
-        <Grip size={pxToRem(20)} />
-        <Typography>Go to Apps</Typography>
-      </IconButton>
-
-      <ConfirmDialog
-        open={open}
-        title="Return to Apps"
-        description="Are you sure you want to leave this application?"
-        confirmColor="error"
-        confirmLabel="Leave"
-        onClose={() => setOpen(false)}
-        onConfirm={goToMyAppsScreen}
-      />
     </>
   );
 }

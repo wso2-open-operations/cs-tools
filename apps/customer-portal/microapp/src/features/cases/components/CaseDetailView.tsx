@@ -13,13 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useLayoutEffect } from "react";
 
 import { Card, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
 
-import { useLayout } from "@context/layout";
+import { useAppBar } from "@context/layout";
 
 import { AttachmentCard } from "@features/cases/components/AttachmentCard";
 import type { useAttachmentPreview } from "@features/cases/hooks/useAttachmentPreview";
@@ -58,14 +57,13 @@ export function CaseDetailView({
   comments,
   attachmentPreview,
 }: CaseDetailViewProps) {
-  const layout = useLayout();
   const { format } = useDateTime();
   const { ref, variant: overlineSlotVariant } = useOverlineVariant();
   const { comments: commentList, comment, setComment, handleSend, isSendingComment, bottomRef } = comments;
   const { previewAttachment, previewSrc, open: handlePreviewOpen, close: handlePreviewClose } = attachmentPreview;
 
-  useLayoutEffect(() => {
-    layout.setLayoutOverrides({
+  useAppBar(
+    {
       title: (
         <OverlineSlot
           variant={overlineSlotVariant}
@@ -74,20 +72,10 @@ export function CaseDetailView({
           title={data?.title}
         />
       ),
-    });
-    return () => {
-      layout.setLayoutOverrides({ title: undefined });
-    };
-  }, [data, overlineSlotVariant]);
-
-  useLayoutEffect(() => {
-    layout.setLayoutOverrides({
       endSlot: <MenuOptions disabled={!data || menuOptions.every((option) => option.hidden)} options={menuOptions} />,
-    });
-    return () => {
-      layout.setLayoutOverrides({ endSlot: undefined });
-    };
-  }, [data, menuOptions]);
+    },
+    [data, overlineSlotVariant, menuOptions],
+  );
 
   return (
     <>
