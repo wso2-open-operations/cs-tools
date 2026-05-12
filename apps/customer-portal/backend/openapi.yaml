@@ -1287,6 +1287,38 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /attachments/{id}/content:
+    get:
+      summary: Downloads an attachment.
+      operationId: getAttachmentsIdContent
+      parameters:
+      - name: id
+        in: path
+        description: ID of the attachment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      responses:
+        default:
+          description: Any Response
+          content:
+            '*/*':
+              schema:
+                description: Any type of entity body
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /attachments/{id}:
     get:
       summary: Get an attachment.
@@ -5248,6 +5280,7 @@ components:
       - acceptedSeverityValues
       - defaultCaseProductCategories
       - hasChangeRequestReadAccess
+      - hasComponentAnalysisReadAccess
       - hasDeploymentReadAccess
       - hasDeploymentWriteAccess
       - hasEngagementsReadAccess
@@ -5257,6 +5290,7 @@ components:
       - hasSraWriteAccess
       - hasTimeLogsReadAccess
       - hasUpdatesReadAccess
+      - hasUsageMetricsReadAccess
       - srProductCategories
       type: object
       properties:
@@ -5295,6 +5329,12 @@ components:
         hasDeploymentReadAccess:
           type: boolean
           description: Indicates if deployment read access is enabled
+        hasComponentAnalysisReadAccess:
+          type: boolean
+          description: Indicates if component analysis read access is enabled
+        hasUsageMetricsReadAccess:
+          type: boolean
+          description: Indicates if usage metrics read access is enabled
         defaultCaseProductCategories:
           type: array
           description: Allowed categories for default case creation in deployed product

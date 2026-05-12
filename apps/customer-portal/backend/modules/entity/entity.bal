@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ballerina/http;
+
 # Get metadata information.
 #
 # + idToken - ID token for authorization
@@ -631,4 +633,13 @@ public isolated function searchInstanceMetricsStats(string idToken, InstanceMetr
     returns InstanceMetricStatsResponse|error {
 
     return csEntityClient->/instances/metrics/stats/search.post(payload, generateHeaders(idToken));
+}
+
+# Download attachment content by attachment ID.
+#
+# + idToken - ID token for authorization
+# + attachmentId - Unique ID of the attachment for which content is to be downloaded
+# + return - Attachment content as a byte stream or error
+public isolated function downloadAttachment(string idToken, IdString attachmentId) returns http:Response|error {
+    return csEntityClient->/attachments/[attachmentId]/content.get(generateHeaders(idToken));
 }

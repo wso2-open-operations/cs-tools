@@ -127,6 +127,8 @@ public isolated function mapProjectFeatures(entity:ProjectMetadataResponse proje
         hasTimeLogsReadAccess: projectMetadata.features.hasTimeLogsReadAccess,
         hasDeploymentWriteAccess: projectMetadata.features.hasDeploymentWriteAccess,
         hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess,
+        hasComponentAnalysisReadAccess: projectMetadata.features.hasComponentAnalysisReadAccess,
+        hasUsageMetricsReadAccess: projectMetadata.features.hasUsageMetricsReadAccess,
         defaultCaseProductCategories: projectMetadata.features.defaultCaseProductCategories,
         srProductCategories: projectMetadata.features.srProductCategories
     };

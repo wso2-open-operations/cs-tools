@@ -596,6 +596,10 @@ public type ProjectFeatures record {|
     boolean hasDeploymentWriteAccess;
     # Indicates if deployment read access is enabled
     boolean hasDeploymentReadAccess;
+    # Indicates if component analysis read access is enabled
+    boolean hasComponentAnalysisReadAccess;
+    # Indicates if usage metrics read access is enabled
+    boolean hasUsageMetricsReadAccess;
     # Allowed categories for default case creation in deployed product search
     ProductCategory[]? defaultCaseProductCategories;
     # Allowed categories for service request creation in deployed product search
