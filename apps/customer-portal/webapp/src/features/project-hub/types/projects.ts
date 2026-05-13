@@ -172,6 +172,8 @@ export type ProjectFeatures = {
   hasTimeLogsReadAccess: boolean;
   hasDeploymentWriteAccess: boolean;
   hasDeploymentReadAccess: boolean;
+  hasComponentAnalysisReadAccess: boolean;
+  hasUsageMetricsReadAccess: boolean;
   defaultCaseProductCategories?: string[] | null;
   srProductCategories?: string[] | null;
 };
