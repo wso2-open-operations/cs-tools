@@ -45,6 +45,8 @@ function buildProjectFeatures(
     hasTimeLogsReadAccess: false,
     hasDeploymentWriteAccess: false,
     hasDeploymentReadAccess: false,
+    hasComponentAnalysisReadAccess: false,
+    hasUsageMetricsReadAccess: false,
     ...overrides,
   };
 }
