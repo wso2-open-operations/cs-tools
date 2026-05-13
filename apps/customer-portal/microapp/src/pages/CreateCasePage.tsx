@@ -131,6 +131,7 @@ export default function CreateCasePage() {
                 </InputAdornment>
               }
             />
+
             <SelectField
               required
               name="deployment"
@@ -153,6 +154,7 @@ export default function CreateCasePage() {
               error={formik.touched.deployment && Boolean(formik.errors.deployment)}
               helperText={formik.touched.deployment && formik.errors.deployment ? formik.errors.deployment : undefined}
             />
+
             <SelectField
               required
               name="product"

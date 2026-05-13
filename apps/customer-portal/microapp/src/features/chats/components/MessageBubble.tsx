@@ -26,8 +26,10 @@ export type MessageBlock =
   | { type: "checklist"; items: string[] }
   | { type: "kb"; items: { id: string; title: string }[] };
 
+export type MessageAuthor = "you" | "assistant";
+
 export interface ChatMessage {
-  author: "you" | "assistant";
+  author: MessageAuthor;
   blocks: MessageBlock[];
   timestamp?: string;
   animated?: boolean;

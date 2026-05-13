@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+export * from "./CreateCaseBanner";
 export * from "./MessageBubble";
 export * from "./KBCard";
 export * from "./ChecklistItem";

@@ -15,133 +15,64 @@
 // under the License.
 import { useEffect, useRef, useState } from "react";
 
-import { Backdrop, Box, Button, CircularProgress, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
-import { MessageSquareQuote, Pin } from "@wso2/oxygen-ui-icons-react";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
+import { useNavigate } from "react-router-dom";
 
-import { useAppBar } from "@context/layout";
+import { Stack } from "@wso2/oxygen-ui";
+
 import { useProject } from "@context/project";
 
-import { type ChatMessage, MessageBubble } from "@features/chats/components";
-import { useChatData } from "@features/chats/hooks/useChatData";
-import { useNoveraWebSocket } from "@features/chats/hooks/useNoveraWebSocket";
+import { CreateCaseBanner, MessageBubble } from "@features/chats/components";
+import { useConversation } from "@features/chats/hooks/useConversation";
+import { useNovera } from "@features/chats/hooks/useNovera";
+import { useStream } from "@features/chats/hooks/useStream";
+
+import { ROUTES } from "@shared/constants";
 
 import { StickyCommentBar } from "@components/detail";
 
-dayjs.extend(relativeTime);
-
 export default function ChatPage() {
-  useAppBar({
-    startSlot: (
-      <Box color="primary.main">
-        <MessageSquareQuote size={pxToRem(36)} />
-      </Box>
-    ),
-  });
-
+  const navigate = useNavigate();
   const { projectId } = useProject();
+  const { draft, committed, pending, stream, finish, reset } = useStream();
+  const { messages, append } = useConversation(committed, reset);
+  const { status, send } = useNovera(projectId!, stream);
+
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [comment, setComment] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      animated: false,
-      thinking: false,
-      author: "assistant",
-      blocks: [
-        {
-          type: "text",
-          value:
-            "Hi! I'm Novera, your AI-powered support assistant. How can I help you today? Please describe the issue you're experiencing.",
-        },
-      ],
-    },
-  ]);
-
-  const { ws, activeStreamingMessage, handleAnimationComplete, sendMessage } = useNoveraWebSocket(projectId!);
-
-  const { deploymentsLoading, productsLoading, envProducts, classifyMutation, isAwaitingCreateCase, handleCreateCase } =
-    useChatData(messages);
 
   const handleSend = () => {
     if (!comment.trim()) return;
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        animated: false,
-        thinking: false,
-        author: "you",
-        blocks: [{ type: "text", value: comment }],
-        timestamp: dayjs().fromNow(),
-      },
-    ]);
-
+    append(comment);
     setComment("");
+    send(comment);
+  };
 
-    sendMessage(comment, envProducts);
+  const handleCreateCase = () => {
+    navigate(ROUTES.default_case.create, { state: { messages } });
   };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeStreamingMessage]);
+  }, [messages, draft]);
 
   return (
     <>
-      <Backdrop
-        sx={{
-          color: "primary.contrastText",
-          zIndex: (theme) => theme.zIndex.drawer + 1,
-          flexDirection: "column",
-          gap: 2,
-        }}
-        open={isAwaitingCreateCase && (deploymentsLoading || productsLoading || classifyMutation.isPending)}
-      >
-        <CircularProgress color="inherit" />
-      </Backdrop>
-
       <Stack mb={20} gap={2}>
         {messages.map((message, index) => (
           <MessageBubble key={index} {...message} />
         ))}
 
-        {activeStreamingMessage && (
-          <MessageBubble
-            {...activeStreamingMessage}
-            onAnimationComplete={() => handleAnimationComplete((msg) => setMessages((prev) => [...prev, msg]))}
-          />
-        )}
+        {draft && <MessageBubble {...draft} onAnimationComplete={finish} />}
+        <div ref={bottomRef} />
       </Stack>
-      <div ref={bottomRef} />
-
       <StickyCommentBar
-        loading={!!activeStreamingMessage}
-        disabled={ws?.readyState !== WebSocket.OPEN}
+        loading={pending}
+        disabled={status !== WebSocket.OPEN}
         value={comment}
         placeholder="Type your message"
         onChange={setComment}
         onSend={handleSend}
-        topSlot={
-          messages.length > 2 && (
-            <Stack
-              direction="row"
-              alignItems="center"
-              gap={2}
-              p={2}
-              sx={{ borderBottom: `1px solid ${colors.grey[200]}`, position: "relative" }}
-            >
-              <Pin
-                size={pxToRem(12)}
-                fill={colors.grey[500]}
-                style={{ color: colors.grey[500], position: "absolute", right: 3, top: 5 }}
-              />
-              <Typography variant="body2">I can create a support case with all the details we've discussed.</Typography>
-              <Button variant="contained" sx={{ textTransform: "initial", flexShrink: 0 }} onClick={handleCreateCase}>
-                Create Case
-              </Button>
-            </Stack>
-          )
-        }
+        topSlot={messages.length > 2 && <CreateCaseBanner onCreateCase={handleCreateCase} />}
       />
     </>
   );
