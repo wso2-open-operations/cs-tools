@@ -35,17 +35,6 @@ export default function UserProfile(): JSX.Element {
   const { data: userDetails, isLoading, isError, error } = useGetUserDetails();
   const logger = useLogger();
 
-  if (!isAuthLoading && !isSignedIn) {
-    return <></>;
-  }
-  if (
-    isError &&
-    error instanceof ApiError &&
-    (error.status === 401 || error.status === 403)
-  ) {
-    return <></>;
-  }
-
   const handleLogout = async () => {
     window.dispatchEvent(new CustomEvent("app:signing-out"));
     try {
@@ -54,6 +43,22 @@ export default function UserProfile(): JSX.Element {
       logger.error("Failed to sign out", error);
     }
   };
+
+  if (!isAuthLoading && !isSignedIn) {
+    return <></>;
+  }
+  if (
+    isError &&
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    return (
+      <button onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "inherit" }}>
+        <LogOut size={18} />
+        Log out
+      </button>
+    );
+  }
 
   const isProfilePending = isLoading || isAuthLoading;
   const useErrorFallback = isError && !userDetails;
