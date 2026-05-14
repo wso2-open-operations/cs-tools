@@ -40,7 +40,7 @@ export function AppBar() {
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
-  const hasMultipleProjects = useInfiniteQuery(projects.paginated()).data?.pages[0].pagination.totalRecords !== 0;
+  const hasMultipleProjects = (useInfiniteQuery(projects.paginated()).data?.pages[0].pagination.totalRecords ?? 0) > 1;
 
   const ref = useRef<HTMLDivElement>(null);
 
@@ -120,6 +120,7 @@ export function AppBar() {
                 {projectName}
               </Typography>
             </Stack>
+
             {hasMultipleProjects && <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />}
           </Button>
         )}
