@@ -13,21 +13,24 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { cases } from "@features/cases/api/cases.queries";
+import { useScrollTo } from "@root/src/shared/utils/useScroll";
 
 export function useDetailComments(id: string) {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: comments, isFetching: isCommentsRefetching } = useQuery({
     ...cases.comments(id),
     select: (data) => [...data].sort((a, b) => a.createdOn.getTime() - b.createdOn.getTime()),
   });
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollTo(scrollRef, [comments]);
 
   const mutation = useMutation({
     ...cases.createComment(id),
@@ -44,9 +47,5 @@ export function useDetailComments(id: string) {
     mutation.mutate({ content: comment, type: "comments" });
   };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [comments]);
-
-  return { comments, comment, setComment, handleSend, isSendingComment, bottomRef };
+  return { comments, comment, setComment, handleSend, isSendingComment, bottomRef: scrollRef };
 }

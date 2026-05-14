@@ -13,7 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 
@@ -23,8 +23,7 @@ import { ConversationFeedback, MessageBubble, MessageBubbleSkeleton } from "@fea
 import type { ChatMessage } from "@features/chats/components";
 import type { Chat } from "@features/chats/types/chat.model";
 
-import { useDateTime } from "@shared/hooks/useDateTime";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
+import { useDateTime, useOverlineVariant, useScrollTo } from "@shared/hooks";
 
 import { SectionCard } from "@components/common";
 import { InfoField, OverlineSlot } from "@components/detail";
@@ -40,11 +39,8 @@ export function ChatDetailView({ data, messages, isCommentsLoading }: ChatDetail
   const layout = useLayout();
   const { format } = useDateTime();
   const { ref, variant: overlineSlotVariant } = useOverlineVariant();
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollTo(scrollRef, [messages]);
 
   useLayoutEffect(() => {
     layout.setLayoutOverrides({
@@ -109,7 +105,7 @@ export function ChatDetailView({ data, messages, isCommentsLoading }: ChatDetail
         </SectionCard>
         <ConversationFeedback />
       </Stack>
-      <div ref={bottomRef} />
+      <div ref={scrollRef} />
     </>
   );
 }

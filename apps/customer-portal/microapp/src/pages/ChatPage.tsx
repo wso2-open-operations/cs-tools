@@ -14,9 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 import { useEffect, useRef, useState } from "react";
-
 import { useNavigate } from "react-router-dom";
-
 import { Stack } from "@wso2/oxygen-ui";
 
 import { useProject } from "@context/project";
@@ -29,6 +27,7 @@ import { useStream } from "@features/chats/hooks/useStream";
 import { ROUTES } from "@shared/constants";
 
 import { StickyCommentBar } from "@components/detail";
+import { scrollTo } from "@shared/utils";
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -37,14 +36,15 @@ export default function ChatPage() {
   const { messages, append } = useConversation(committed, reset);
   const { status, send } = useNovera(projectId!, stream);
 
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState("");
-
+  
   const handleSend = () => {
     if (!comment.trim()) return;
+
     append(comment);
-    setComment("");
     send(comment);
+    setComment("");
   };
 
   const handleCreateCase = () => {
@@ -52,8 +52,8 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, draft]);
+      scrollTo(bottomRef); 
+  }, [messages, draft])
 
   return (
     <>
@@ -62,6 +62,7 @@ export default function ChatPage() {
           <MessageBubble key={index} {...message} />
         ))}
 
+        {/* Temporary message bubble for streamed content */}
         {draft && <MessageBubble {...draft} onAnimationComplete={finish} />}
         <div ref={bottomRef} />
       </Stack>

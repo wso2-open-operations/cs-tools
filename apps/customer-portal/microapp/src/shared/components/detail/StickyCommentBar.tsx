@@ -15,7 +15,7 @@
 // under the License.
 import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
 
-import { useThemeMode } from "@root/src/context/theme";
+import { useThemeMode } from "@context/theme";
 import { Box, CircularProgress, IconButton, pxToRem, Stack, TextField } from "@wso2/oxygen-ui";
 import { SendHorizonal } from "@wso2/oxygen-ui-icons-react";
 
@@ -45,7 +45,7 @@ export function StickyCommentBar({
   const hasContent = value.trim().length > 0;
 
   const send = () => {
-    if (loading || !hasContent) return;
+    if (disabled || loading || !hasContent) return;
     onSend();
   };
 
@@ -71,6 +71,7 @@ export function StickyCommentBar({
 
       <Stack direction="row" gap={2}>
         <TextField
+          fullWidth
           size="small"
           value={value}
           placeholder={placeholder}
@@ -78,7 +79,6 @@ export function StickyCommentBar({
           onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
           disabled={loading || disabled}
-          fullWidth
         />
         <IconButton color="primary" onClick={send} disabled={!hasContent || loading || disabled}>
           {loading ? (

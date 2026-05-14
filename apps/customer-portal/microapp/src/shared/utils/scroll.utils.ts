@@ -13,9 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { type RefObject } from "react";
 
-export * from "./date.utils";
-export * from "./filter.utils";
-export * from "./storage.utils";
-export * from "./string.utils";
-export * from "./scroll.utils"; 
+export function scrollTo(
+  ref: RefObject<HTMLElement | null>,
+  options: ScrollIntoViewOptions | ScrollLogicalPosition = "end",
+) {
+  const opts: ScrollIntoViewOptions =
+    typeof options === "string" ? { behavior: "smooth", block: options } : { behavior: "smooth", ...options };
+
+  ref.current?.scrollIntoView(opts);
+}

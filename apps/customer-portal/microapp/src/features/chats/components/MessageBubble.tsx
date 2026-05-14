@@ -62,6 +62,7 @@ export function MessageBubble({
             <Box color="primary.main">
               <Sparkle size={pxToRem(18)} />
             </Box>
+
             {thinking ? (
               <Typography
                 noWrap
