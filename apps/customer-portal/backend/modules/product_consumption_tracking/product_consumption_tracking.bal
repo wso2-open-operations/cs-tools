@@ -26,6 +26,5 @@ public isolated function importDeploymentUsage(string email, byte[] zipFile)
     req.setBinaryPayload(zipFile);
     req.setContentType(CONTENT_TYPE_APPLICATION_ZIP);
 
-    return productConsumptionTrackingClient->/deployment\-usage\-import.post(req, email);
-
+    return productConsumptionTrackingClient->/deployment\-usage.post(req, email);
 }
