@@ -320,39 +320,37 @@ function AttachmentCard({
   const { fromNow } = useDateTime();
 
   return (
-    <>
-      <Card sx={{ p: 1.5 }}>
-        <Stack direction="row" alignItems="flex-start" gap={1}>
-          <Box
-            sx={{
-              flexShrink: 0,
-              width: 40,
-              height: 40,
-              borderRadius: 0.5,
-              overflow: "hidden",
-              bgcolor: "action.hover",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "text.secondary",
-            }}
-          >
-            {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
-          </Box>
-          <Stack gap={0.25} minWidth={0} flex={1}>
-            <Typography variant="subtitle2" fontWeight="medium" noWrap>
-              {attachment.fileName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {attachment.createdBy} · {fromNow(attachment.createdOn)}
-            </Typography>
-          </Stack>
-          <IconButton onClick={() => onPreview(attachment)}>
-            <ArrowUpRight size={pxToRem(18)} />
-          </IconButton>
+    <Card sx={{ p: 1.5 }} onClick={() => onPreview(attachment)}>
+      <Stack direction="row" alignItems="flex-start" gap={1}>
+        <Box
+          sx={{
+            flexShrink: 0,
+            width: 40,
+            height: 40,
+            borderRadius: 0.5,
+            overflow: "hidden",
+            bgcolor: "action.hover",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "text.secondary",
+          }}
+        >
+          {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
+        </Box>
+        <Stack gap={0.25} minWidth={0} flex={1}>
+          <Typography variant="subtitle2" fontWeight="medium" noWrap>
+            {attachment.fileName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {attachment.createdBy} · {fromNow(attachment.createdOn)}
+          </Typography>
         </Stack>
-      </Card>
-    </>
+        <IconButton>
+          <ArrowUpRight size={pxToRem(18)} />
+        </IconButton>
+      </Stack>
+    </Card>
   );
 }
 
