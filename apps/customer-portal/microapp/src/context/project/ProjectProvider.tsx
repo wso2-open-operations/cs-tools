@@ -42,6 +42,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
     <ProjectContext.Provider
       value={{
         projectId,
+        projectName: data?.name,
         noveraEnabled: data?.agentEnabled ?? false,
         kbReferencesEnabled: data?.kbReferencesEnabled ?? false,
         setProjectId: setAndStoreProjectId,

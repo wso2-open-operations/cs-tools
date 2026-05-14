@@ -104,9 +104,8 @@ export const serviceRequests = {
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;
-        const nextOffset = offset + 1;
-        const totalPages = Math.ceil(totalRecords / limit);
-        return nextOffset >= totalPages ? undefined : nextOffset;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
       },
     }),
 };

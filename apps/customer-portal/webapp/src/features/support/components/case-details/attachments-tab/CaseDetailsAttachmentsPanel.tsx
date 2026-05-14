@@ -26,7 +26,7 @@ import {
 } from "@features/support/api/useGetCaseAttachments";
 import type { CaseAttachment } from "@features/support/types/cases";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
-import { useGetAttachment } from "@api/useGetAttachment";
+import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
@@ -59,7 +59,7 @@ export default function CaseDetailsAttachmentsPanel({
   const { data: userDetails } = useGetUserDetails();
   const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
   const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachment();
+    useGetAttachmentContent();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [minTimeElapsed, setMinTimeElapsed] = useState(false);
   const minTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,7 +144,6 @@ export default function CaseDetailsAttachmentsPanel({
         id: att.id,
         name: att.name,
         type: att.type,
-        content: att.content,
         downloadUrl: att.downloadUrl,
       });
     } catch (error) {

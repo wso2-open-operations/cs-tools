@@ -16,14 +16,14 @@
 
 import axios from "axios";
 import { users } from "@root/src/services/users";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { MeContext } from "./MeContext";
 import { LoadingFallback } from "@root/src/components/ui/LoadingFallback";
 import { AuthorizationFallback } from "@root/src/components/ui";
 import { ADMIN_USER_ROLE } from "@root/src/config/constants";
 import { getLastVisitedProjectId } from "@root/src/utils/others";
 import { projects } from "@root/src/services/projects";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useProject } from "../project";
 import { useNavigate } from "react-router-dom";
 
@@ -32,7 +32,9 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
   const { setProjectId } = useProject();
   const lastVisitedProjectId = getLastVisitedProjectId();
   const { data: meData, isLoading: meLoading, error: meError } = useQuery(users.me());
-  const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useQuery({ ...projects.all() });
+  // const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useQuery({ ...projects.all() });
+  const { isLoading: projectsLoading, error: projectsError } = useInfiniteQuery(projects.paginated());
+
   const { isLoading: isFeaturesLoading, isError: isFeaturesError } = useQuery({
     ...projects.features(lastVisitedProjectId!),
     enabled: !!lastVisitedProjectId,
@@ -40,11 +42,10 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
 
   const [initialized, setInitialized] = useState(false);
 
-  const lastVisitedProject = useMemo(() => {
-    if (!projectsData || !lastVisitedProjectId) return undefined;
-
-    return projectsData.find((p) => p.id === lastVisitedProjectId);
-  }, [projectsData, lastVisitedProjectId]);
+  const { data: lastVisitedProject } = useQuery({
+    ...projects.get(lastVisitedProjectId!),
+    enabled: !!lastVisitedProjectId,
+  });
 
   useEffect(() => {
     if (initialized) return;

@@ -300,6 +300,10 @@ public type ProjectFeatures record {|
     boolean hasDeploymentWriteAccess;
     # Indicates if deployment read access is enabled
     boolean hasDeploymentReadAccess;
+    # Indicates if component analysis read access is enabled
+    boolean hasComponentAnalysisReadAccess;
+    # Indicates if usage metrics read access is enabled
+    boolean hasUsageMetricsReadAccess;
     # Allowed categories for default case creation in deployed product search.
     entity:ProductCategory[]? defaultCaseProductCategories;
     # Allowed categories for service request creation in deployed product search.
@@ -1720,3 +1724,63 @@ public type CaseActivitySearchResponse record {|
 //     # Array of user email addresses to add to the group
 //     string[] emails;
 // |};
+
+# Request payload for fetching instance usage statistics.
+public type InstanceUsageStatsPayload record {|
+    # Filter criteria
+    record {|
+        # Start date filter, required
+        entity:Date startDate;
+        # End date filter, required
+        entity:Date endDate;
+    |} filters;
+|};
+
+# Request payload for fetching instance metrics statistics.
+public type InstanceMetricStatsPayload record {|
+    # Filter criteria
+    record {|
+        # Start date filter, required
+        entity:Date startDate;
+        # End date filter, required
+        entity:Date endDate;
+    |} filters;
+|};
+
+# Instance usage statistics response.
+public type InstanceUsageStatsResponse record {|
+    # Statistics grouped by date; each date maps to metric key → value (e.g. "TRANSACTION_COUNT": 30)
+    map<map<int>> stats;
+    # Total number of data points
+    int totalRecords;
+    # Start date of the queried range
+    string startDate;
+    # End date of the queried range
+    string endDate;
+|};
+
+# Aggregated statistics for a metric over a time range.
+public type MetricSummary record {|
+    # Current (latest) value
+    int curr;
+    # Minimum value across the range
+    int min;
+    # Maximum value across the range
+    int max;
+    # Average value across the range
+    decimal avg;
+|};
+
+# Instance metrics statistics response from ServiceNow.
+public type InstanceMetricStatsResponse record {|
+    # Statistics grouped by date; each date maps to metric key → value (e.g. "TOTAL_CORES": 123)
+    map<map<int>> stats;
+    # Summary statistics across the queried date range
+    MetricSummary summary;
+    # Total number of data points
+    int totalRecords;
+    # Start date of the queried range
+    string startDate;
+    # End date of the queried range
+    string endDate;
+|};

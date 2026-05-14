@@ -19,6 +19,7 @@ import { createContext } from "react";
 
 export type ProjectContextType = {
   projectId: string | null;
+  projectName?: string;
   noveraEnabled: boolean;
   kbReferencesEnabled: boolean;
   features?: ProjectFeaturesDto;

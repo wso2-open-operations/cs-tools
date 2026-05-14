@@ -14,17 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { Box, SearchBar, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Folder } from "@wso2/oxygen-ui-icons-react";
 import { ProjectCard, ProjectCardSkeleton } from "@components/features/projects";
 import { useNavigate } from "react-router-dom";
 import { useProject } from "@context/project";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
 import { ErrorBoundary, ExitButton } from "@components/core";
 import EmptyState from "../components/shared/EmptyState";
 import { useNotify } from "../context/snackbar";
+import { InfiniteScroll } from "../components/shared";
+import type { GetAllProjectsRequestDto } from "../types";
 
 export default function SelectProjectPage() {
   const theme = useTheme();
@@ -75,46 +77,49 @@ export default function SelectProjectPage() {
 function ProjectsListContent({ search }: { search: string }) {
   const navigate = useNavigate();
   const { setProjectId } = useProject();
-  const { data: projectsData } = useSuspenseQuery(projects.all());
+  const filters: GetAllProjectsRequestDto["filters"] = search
+    ? {
+        searchQuery: search,
+      }
+    : {};
 
-  const data = useMemo(() => {
-    if (!search) return projectsData;
+  const query = useInfiniteQuery(projects.paginated({ filters }));
 
-    const normalizedSearch = search.toLowerCase();
-
-    return projectsData.filter(
-      (project) =>
-        project.id.toLowerCase().includes(normalizedSearch) ||
-        project.name.toLowerCase().includes(normalizedSearch) ||
-        project.description?.toLowerCase().includes(normalizedSearch),
-    );
-  }, [projectsData, search]);
+  const totalRecords = query.data?.pages[0].pagination.totalRecords;
 
   useEffect(() => {
-    if (projectsData.length !== 1) return;
+    if (totalRecords !== 1) return;
     if (search) return;
 
-    setProjectId(projectsData[0].id);
-    navigate("/", { replace: true });
-  }, [navigate, projectsData, search, setProjectId]);
-
-  if (data.length === 0) return <EmptyState />;
-
-  if (data.length === 1) return <ProjectsListContentSkeleton />;
+    const project = query.data?.pages[0][0];
+    if (project) {
+      setProjectId(project.id);
+      navigate("/", { replace: true });
+    }
+  }, [query.data]);
 
   return (
-    <>
-      {data.map((props) => (
-        <ProjectCard
-          key={props.id}
-          {...props}
-          onClick={() => {
-            setProjectId(props.id);
-            navigate("/");
-          }}
-        />
-      ))}
-    </>
+    <InfiniteScroll {...query} sentinel={<ProjectsListContentSkeleton />} tail={totalRecords === 0 && <EmptyState />}>
+      {(data) => (
+        <>
+          {data &&
+            data.pages.map((page, pageIndex) => (
+              <React.Fragment key={pageIndex}>
+                {page.map((item) => (
+                  <ProjectCard
+                    key={item.id}
+                    {...item}
+                    onClick={() => {
+                      setProjectId(item.id);
+                      navigate("/");
+                    }}
+                  />
+                ))}
+              </React.Fragment>
+            ))}
+        </>
+      )}
+    </InfiniteScroll>
   );
 }
 

@@ -127,6 +127,8 @@ public isolated function mapProjectFeatures(entity:ProjectMetadataResponse proje
         hasTimeLogsReadAccess: projectMetadata.features.hasTimeLogsReadAccess,
         hasDeploymentWriteAccess: projectMetadata.features.hasDeploymentWriteAccess,
         hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess,
+        hasComponentAnalysisReadAccess: projectMetadata.features.hasComponentAnalysisReadAccess,
+        hasUsageMetricsReadAccess: projectMetadata.features.hasUsageMetricsReadAccess,
         defaultCaseProductCategories: projectMetadata.features.defaultCaseProductCategories,
         srProductCategories: projectMetadata.features.srProductCategories
     };
@@ -1137,3 +1139,33 @@ public isolated function mapCaseActivitySummaryResponse(entity:CaseActivitySearc
         };
     return {activities, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
 }
+
+# Map instance usage stats response to the desired structure.
+#
+# + response - Instance usage stats response from the entity service
+# + return - Mapped instance usage stats response
+public isolated function mapInstanceUsageStats(entity:InstanceUsageStatsResponse response)
+    returns types:InstanceUsageStatsResponse => {
+    stats: response.stats,
+    totalRecords: response.totalRecords,
+    startDate: response.startDate,
+    endDate: response.endDate
+};
+
+# Map instance metric stats response to the desired structure.
+#
+# + response - Instance metric stats response from the entity service
+# + return - Mapped instance metric stats response
+public isolated function mapInstanceMetricStats(entity:InstanceMetricStatsResponse response)
+    returns types:InstanceMetricStatsResponse => {
+    stats: response.stats,
+    summary: {
+        curr: response.summary.curr,
+        avg: response.summary.avg,
+        min: response.summary.min,
+        max: response.summary.max
+    },
+    totalRecords: response.totalRecords,
+    startDate: response.startDate,
+    endDate: response.endDate
+};

@@ -168,7 +168,7 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: 1,
-    appBarSlots: <FilterAppBarSlot type="change" />,
+    appBarSlots: <FilterAppBarSlot type="sra" />,
   },
   {
     path: "/sras/:id",
@@ -182,7 +182,7 @@ export const MAIN_LAYOUT_CONFIG: MainLayoutConfigType[] = [
     appBarVariant: "minimal",
     hasBackAction: true,
     tabIndex: 1,
-    appBarSlots: <FilterAppBarSlot type="change" />,
+    appBarSlots: <FilterAppBarSlot type="engagement" />,
   },
   {
     path: "/engagements/:id",

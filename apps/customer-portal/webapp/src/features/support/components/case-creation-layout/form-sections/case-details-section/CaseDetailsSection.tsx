@@ -244,7 +244,7 @@ export function CaseDetailsSection({
             maxHeight="210px"
           />
 
-          {!isRelatedCaseMode && (
+          {!isRelatedCaseMode && isDescriptionFromConversation && (
             <Typography
               variant="caption"
               color="text.disabled"

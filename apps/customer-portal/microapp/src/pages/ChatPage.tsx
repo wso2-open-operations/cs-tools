@@ -55,50 +55,50 @@ export default function ChatPage() {
     },
   ]);
 
+  const ws = useRef<WebSocket | null>(null);
   const [activeStreamingMessage, setActiveStreamingMessage] = useState<ChatMessage | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null);
 
   useEffect(() => {
-    let websocket: WebSocket;
+    if (!projectId || ws.current) return;
 
-    const init = async () => {
+    const accessToken = getAccessToken();
+    const idToken = getIdToken();
+
+    const websocket = new WebSocket(NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT(projectId!), [
+      "choreo-oauth2-token",
+      accessToken as string,
+      "cs-customer-portal",
+      idToken as string,
+    ]);
+
+    websocket.onopen = () => {
+      console.info("WebSocket Conection Established");
+      ws.current = websocket;
+    };
+
+    websocket.onmessage = (event) => {
       try {
-        const accessToken = getAccessToken();
-        const idToken = getIdToken();
-
-        websocket = new WebSocket(NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT(projectId!), [
-          "choreo-oauth2-token",
-          accessToken as string,
-          "cs-customer-portal",
-          idToken as string,
-        ]);
-
-        setWs(websocket);
-
-        websocket.onmessage = (event) => {
-          try {
-            const data: NoveraResponse = JSON.parse(event.data);
-            handleNoveraResponse(data);
-          } catch (error) {
-            console.error("Failed to parse Novera response:", error);
-          }
-        };
-
-        websocket.onerror = (error) => {
-          console.error("WebSocket error observed:", error);
-          websocket.close();
-        };
+        const data: NoveraResponse = JSON.parse(event.data);
+        handleNoveraResponse(data);
       } catch (error) {
-        console.error("Initialization failed", error);
+        console.error("Failed to parse Novera response:", error);
       }
     };
 
-    init();
+    websocket.onerror = (error) => {
+      console.error("WebSocket error observed:", error);
+    };
+
+    websocket.onclose = (event) => {
+      console.info("Closed:", event.code);
+      ws.current = null;
+    };
 
     return () => {
-      if (websocket) {
-        websocket.close();
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
       }
     };
   }, [projectId]);
@@ -158,7 +158,14 @@ export default function ChatPage() {
 
       case "token":
         setActiveStreamingMessage((prev) => {
-          if (!prev) return null;
+          if (!prev) {
+            return {
+              author: "assistant",
+              blocks: [{ type: "text", value: response.content }],
+              thinking: true,
+              animated: true,
+            };
+          }
           return {
             ...prev,
             blocks: prev.blocks.map((b) => (b.type === "text" ? { ...b, value: b.value + response.content } : b)),
@@ -193,8 +200,8 @@ export default function ChatPage() {
   };
 
   const sendMessage = (message: string) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(
+    if (ws.current && ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(
         JSON.stringify({
           type: "user_message",
           accountId: userId,
@@ -280,7 +287,6 @@ export default function ChatPage() {
 
       <StickyCommentBar
         loading={!!activeStreamingMessage}
-        disabled={ws?.readyState !== WebSocket.OPEN}
         value={comment}
         placeholder="Type your message"
         onChange={setComment}

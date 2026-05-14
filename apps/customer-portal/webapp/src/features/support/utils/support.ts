@@ -643,17 +643,17 @@ export function getConversationStatusColor(status: string): string {
 
   switch (true) {
     case normalized.includes(ConversationStatus.ABANDONED.toLowerCase()):
-      return "error.main";
+      return colors.grey[500];
     case normalized.includes(ConversationStatus.ACTIVE.toLowerCase()):
-      return "success.main";
+      return colors.green[500];
     case normalized.includes(ConversationStatus.CONVERTED.toLowerCase()):
-      return "info.main";
+      return colors.orange[500];
     case normalized.includes(ConversationStatus.OPEN.toLowerCase()):
-      return "warning.main";
+      return colors.lightBlue[500];
     case normalized.includes(ConversationStatus.RESOLVED.toLowerCase()):
-      return "success.main";
+      return colors.purple[300];
     default:
-      return "secondary.main";
+      return colors.grey[500];
   }
 }
 

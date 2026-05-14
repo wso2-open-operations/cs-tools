@@ -80,7 +80,7 @@ export default function SideBar({
   const navItems = useMemo(() => {
     let items = APP_SHELL_NAV_ITEMS;
 
-    if (!usageMetricsEnabled) {
+    if (!usageMetricsEnabled || !permissions.hasUsageMetrics) {
       items = items.filter((item: AppShellNavItem) => item.id !== "usage-metrics");
     }
 
@@ -100,6 +100,10 @@ export default function SideBar({
       items = items.filter((item: AppShellNavItem) => item.id !== "updates");
     }
 
+    if (!permissions.hasSecurityReportAnalysis && !permissions.hasComponentAnalysis) {
+      items = items.filter((item: AppShellNavItem) => item.id !== "security-center");
+    }
+
     return items;
   }, [
     isProjectTypeResolved,
@@ -108,6 +112,9 @@ export default function SideBar({
     permissions.hasCR,
     permissions.hasEngagements,
     permissions.hasUpdates,
+    permissions.hasSecurityReportAnalysis,
+    permissions.hasComponentAnalysis,
+    permissions.hasUsageMetrics,
     usageMetricsEnabled,
   ]);
 

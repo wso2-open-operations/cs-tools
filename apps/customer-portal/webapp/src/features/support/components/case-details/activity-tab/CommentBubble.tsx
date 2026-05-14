@@ -57,7 +57,7 @@ import DOMPurify from "dompurify";
 import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
-import { useGetAttachment } from "@api/useGetAttachment";
+import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 
@@ -85,7 +85,7 @@ export default function CommentBubble({
   const theme = useTheme();
   const isDarkMode = useDarkMode();
   const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachment();
+    useGetAttachmentContent();
   const rawContent = comment.content ?? "";
   const isFullCodeWrap = hasSingleCodeWrapper(rawContent);
   const codeBlockCount = rawContent.match(/\[code\]/gi)?.length ?? 0;
