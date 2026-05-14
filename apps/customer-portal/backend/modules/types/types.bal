@@ -1717,13 +1717,13 @@ public type CaseActivitySearchResponse record {|
     *entity:Pagination;
 |};
 
-// Disabled with SCIM add-users-to-group endpoint (pending team consultation).
-// public type AddUsersToGroupRequest record {|
-//     # Display name of the group
-//     string group;
-//     # Array of user email addresses to add to the group
-//     string[] emails;
-// |};
+# Request payload for adding users to a group.
+public type AddUsersToGroupRequest record {|
+    # Display name of the group
+    string group;
+    # Array of user email addresses to add to the group
+    string[] emails;
+|};
 
 # Request payload for fetching instance usage statistics.
 public type InstanceUsageStatsPayload record {|
