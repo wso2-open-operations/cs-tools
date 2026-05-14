@@ -36,6 +36,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { useQuery } from "@tanstack/react-query";
 import { cases } from "@root/src/services/cases";
+import ErrorState from "./ErrorState";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(PDF_JS_DIST_CDN(pdfjs.version)).toString();
 
@@ -244,6 +245,7 @@ function PdfPreview({ src }: PdfPreviewProps) {
   const [numberOfPages, setNumberOfPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
@@ -259,6 +261,11 @@ function PdfPreview({ src }: PdfPreviewProps) {
     setNumberOfPages(numPages);
     setTimeout(() => transformRef.current?.resetTransform(0), 100);
     setLoading(false);
+  };
+
+  const handleOnLoadError = () => {
+    setLoading(false);
+    setIsError(true);
   };
 
   const goToPage = (page: number) => {
@@ -284,6 +291,8 @@ function PdfPreview({ src }: PdfPreviewProps) {
     pageRefs.current.forEach((page) => page && observer.observe(page));
     return () => observer.disconnect();
   }, [numberOfPages]);
+
+  if (isError) return <ErrorFallback />;
 
   return (
     <>
@@ -312,7 +321,7 @@ function PdfPreview({ src }: PdfPreviewProps) {
             wrapperStyle={{ width: "100%", height: "100%" }}
             contentStyle={{ width: "fit-content", height: "fit-content" }}
           >
-            <Document file={src} onLoadSuccess={handleOnLoadSuccess}>
+            <Document file={src} onLoadSuccess={handleOnLoadSuccess} onLoadError={handleOnLoadError}>
               <Stack gap={0.5}>
                 {Array.from({ length: numberOfPages }, (_, i) => (
                   <Box
@@ -356,6 +365,14 @@ function LoadingFallback() {
   );
 }
 
+function ErrorFallback() {
+  return (
+    <Stack flex={1} alignItems="center" justifyContent="center" sx={{ bgcolor: "background.default" }}>
+      <ErrorState />
+    </Stack>
+  );
+}
+
 interface AttachmentPreviewDialogProps {
   open: boolean;
   attachment: Attachment | null;
@@ -363,7 +380,7 @@ interface AttachmentPreviewDialogProps {
 }
 
 export function AttachmentPreviewDialog({ open, attachment, onClose }: AttachmentPreviewDialogProps) {
-  const { data, isLoading } = useQuery(cases.attachment(attachment?.id));
+  const { data, isLoading, isError } = useQuery(cases.attachment(attachment?.id));
 
   const src = useMemo(() => {
     if (!data) return null;
@@ -406,11 +423,13 @@ export function AttachmentPreviewDialog({ open, attachment, onClose }: Attachmen
 
       {isLoading ? (
         <LoadingFallback />
+      ) : isError ? (
+        <ErrorFallback />
       ) : (
         <>
           {isTypeUnsupported && <UnsupportedPreview />}
           {isTypeImage && src && <ImagePreview src={src} />}
-          {isTypePdf && src && <PdfPreview src={src ?? "#"} />}
+          {isTypePdf && src && <PdfPreview src={src} />}
         </>
       )}
     </Dialog>
