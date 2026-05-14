@@ -13,148 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { Box, Card, Divider, pxToRem, Skeleton, Stack, type SxProps, type Theme, Typography } from "@wso2/oxygen-ui";
-import { Sparkle } from "@wso2/oxygen-ui-icons-react";
+import { Card, pxToRem, Skeleton, Stack, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import type { ChatMessage, MessageAuthor } from "@features/chats/types";
+import { AssistantBubble, YouBubble } from "@features/chats/components";
 
-import { TypewriterText } from "@components/common";
-
-import { ChecklistItem } from "./ChecklistItem";
-import { KBCard } from "./KBCard";
-
-export type MessageBlock =
-  | { type: "text"; value: string }
-  | { type: "checklist"; items: string[] }
-  | { type: "kb"; items: { id: string; title: string }[] };
-
-export type MessageAuthor = "you" | "assistant";
-
-export interface ChatMessage {
-  author: MessageAuthor;
-  blocks: MessageBlock[];
-  timestamp?: string;
-  animated?: boolean;
-  thinking?: boolean | string;
-  onAnimationComplete?: () => void;
+export function MessageBubble({ author, ...props }: ChatMessage & { sx?: SxProps<Theme> }) {
+  return author === "you" ? <YouBubble {...props} /> : <AssistantBubble {...props} />;
 }
 
-export function MessageBubble({
-  author,
-  blocks,
-  timestamp = "Just Now",
-  sx,
-  animated = true,
-  thinking = false,
-  onAnimationComplete,
-}: ChatMessage & { sx?: SxProps<Theme> }) {
-  const you = author === "you";
-
-  return (
-    <Stack direction="row" justifyContent={you ? "end" : "start"}>
-      <Card
-        component={Stack}
-        p={1.5}
-        ml={you ? 10 : undefined}
-        width={you ? "fit-content" : "100%"}
-        sx={{ ...sx, bgcolor: "background.paper" }}
-      >
-        {!you && (
-          <Stack direction="row" justifyContent="space-between" gap={1} mb={0.5}>
-            <Box color="primary.main">
-              <Sparkle size={pxToRem(18)} />
-            </Box>
-
-            {thinking ? (
-              <Typography
-                noWrap
-                variant="subtitle2"
-                sx={{
-                  fontWeight: "medium",
-                  background: "linear-gradient(90deg, #aaa 25%, #fff 50%, #aaa 75%)",
-                  backgroundSize: "200% 100%",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                  animation: "shimmer 1.5s infinite linear",
-                  "@keyframes shimmer": {
-                    from: { backgroundPosition: "200% center" },
-                    to: { backgroundPosition: "-200% center" },
-                  },
-                  opacity: "80%",
-                }}
-              >
-                {typeof thinking === "string" ? thinking : "Thinking"}
-              </Typography>
-            ) : (
-              <Typography variant="subtitle2" color="text.disabled">
-                {timestamp}
-              </Typography>
-            )}
-          </Stack>
-        )}
-
-        <Stack gap={2}>
-          {blocks.map((block, index) => {
-            switch (block.type) {
-              case "text":
-                return (
-                  <Typography
-                    key={index}
-                    variant="body2"
-                    component="span"
-                    sx={{ "& > *": { margin: 0, lineHeight: 1.7 } }}
-                  >
-                    <TypewriterText
-                      tokens={block.value.split("")}
-                      animated={animated}
-                      pending={!!thinking}
-                      onAnimationComplete={onAnimationComplete}
-                    />
-                  </Typography>
-                );
-
-              case "checklist":
-                return (
-                  <Stack key={index} gap={1}>
-                    {block.items.map((item, i) => (
-                      <ChecklistItem key={i}>{item}</ChecklistItem>
-                    ))}
-                  </Stack>
-                );
-
-              case "kb":
-                return (
-                  <Stack key={index} gap={1.5}>
-                    <Divider sx={{ my: 1 }} />
-                    {block.items.map((item, i) => (
-                      <KBCard key={i} id={item.id} title={item.title} />
-                    ))}
-                  </Stack>
-                );
-
-              default:
-                return null;
-            }
-          })}
-        </Stack>
-
-        {you && (
-          <Stack direction="row" justifyContent="end">
-            <Typography variant="subtitle2" color="text.disabled" mt={1}>
-              {timestamp}
-            </Typography>
-          </Stack>
-        )}
-      </Card>
-    </Stack>
-  );
-}
-
-interface MessageBubbleSkeletonProps {
-  author?: "you" | "assistant";
+export function MessageBubbleSkeleton({ author = "assistant", sx }: {
+  author?: MessageAuthor;
   sx?: SxProps<Theme>;
-}
-
-export function MessageBubbleSkeleton({ author = "assistant", sx }: MessageBubbleSkeletonProps) {
+}) {
   const isYou = author === "you";
 
   return (

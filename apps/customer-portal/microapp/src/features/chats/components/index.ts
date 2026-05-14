@@ -19,3 +19,7 @@ export * from "./MessageBubble";
 export * from "./KBCard";
 export * from "./ChecklistItem";
 export * from "./ConversationFeedback";
+export * from "./AssistantBubble"; 
+export * from "./YouBubble"; 
+export * from "./Block"; 
+export * from "./BlockList"; 
