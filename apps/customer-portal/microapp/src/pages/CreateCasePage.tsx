@@ -502,14 +502,23 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_MB = 10;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
 
 function AttachmentField({ onChange }: { onChange?: (attachments: AttachmentFile[]) => void }) {
+  const notify = useNotify();
   const ref = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
   const addFiles = (incoming: File[]) => {
     const valid = incoming.filter((f) => f.size <= MAX_BYTES);
+    const rejected = incoming.filter((f) => f.size > MAX_BYTES);
+
+    if (rejected.length > 0)
+      notify.warn(
+        `${rejected.length} file${rejected.length > 1 ? "s" : ""} exceeded the ${MAX_MB}MB limit and were not attached.`,
+      );
+
     const mapped = valid.map(toAttachmentFile);
 
     setAttachments((prev) => {
@@ -575,7 +584,7 @@ function AttachmentField({ onChange }: { onChange?: (attachments: AttachmentFile
           <Stack>
             <Typography variant="body2">Drag and drop files here, or click to browse</Typography>
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
-              Max 10 MB
+              Max {MAX_MB} MB
             </Typography>
           </Stack>
         </Stack>
