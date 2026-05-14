@@ -5113,7 +5113,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     #
     # + req - Request containing zip file binary body
     # + return - Deployment usage import response or error
-    isolated resource function post deployment\-usage\-import(http:RequestContext ctx, http:Request req)
+    isolated resource function post deployment\-usage(http:RequestContext ctx, http:Request req)
         returns product_consumption_tracking:DeploymentUsageImportResponse|http:BadRequest|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
