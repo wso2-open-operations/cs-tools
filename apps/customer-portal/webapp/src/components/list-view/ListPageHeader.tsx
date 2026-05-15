@@ -48,7 +48,8 @@ export default function ListPageHeader({
         variant="text"
         sx={{
           alignSelf: "flex-start",
-          px: 0,
+          px: 1,
+          ml: -1,
           minWidth: 0,
           mb: 0,
         }}
