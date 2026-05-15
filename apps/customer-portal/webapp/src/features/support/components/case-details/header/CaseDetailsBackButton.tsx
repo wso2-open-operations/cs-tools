@@ -27,7 +27,7 @@ import { type JSX } from "react";
  */
 export default function CaseDetailsBackButton({
   onClick,
-  sx = { mb: 1.5, ml: -0.5, alignSelf: "flex-start" },
+  sx = { mb: 1.5, ml: -1, px: 1, alignSelf: "flex-start" },
 }: CaseDetailsBackButtonProps): JSX.Element {
   return (
     <Button
