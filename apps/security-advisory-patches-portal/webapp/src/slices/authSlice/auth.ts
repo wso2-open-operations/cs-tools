@@ -17,6 +17,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { UserInfo } from '@src/types/types';
 
+/** Redux state for OIDC session and user display fields used by the header. */
 interface AuthState {
   isAuthenticated: boolean;
   user: UserInfo | null;
@@ -50,6 +51,7 @@ const authSlice = createSlice({
   },
 });
 
+/** Action creators: `setAuthenticated`, `setUser`, `setLoading`, `logout`. */
 export const { setAuthenticated, setUser, setLoading, logout } = authSlice.actions;
 
 export default authSlice.reducer;

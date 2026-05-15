@@ -3,6 +3,7 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
+//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -14,12 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Return URL after OAuth when sign-in started from a `.pdf` document link. */
+/** `sessionStorage` key for restoring a `.pdf` URL after Asgardeo redirects to `/`. */
 export const SEC_ADV_REDIRECT_PATH_KEY = 'sec_adv_redirect_path';
 
+/** `sessionStorage` flag used to avoid duplicate `signIn()` loops while unauthenticated. */
 export const SEC_ADV_SIGN_IN_INIT_KEY = 'sec_adv_sign_in_initiated';
 
-/** True when the URL path ends with `.pdf` (last path segment; query string ignored). */
+/**
+ * @param pathname - Path only (e.g. `/a/b.pdf`); query string is not considered.
+ * @returns Whether the last path segment ends with `.pdf` (case-insensitive).
+ */
 export function pathnameEndsWithPdf(pathname: string): boolean {
   const trimmed = pathname.replace(/\/+$/, '');
   const lastSegment = trimmed.split('/').pop() ?? '';

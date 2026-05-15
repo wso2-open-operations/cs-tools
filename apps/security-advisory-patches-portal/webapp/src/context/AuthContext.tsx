@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-//
 
 import React, { createContext, useContext, useEffect } from 'react';
 import { SecureApp, useAuthContext } from '@asgardeo/auth-react';
@@ -24,6 +23,7 @@ import { APIService } from '@src/utils/apiService';
 import { UserInfo } from '@src/types/types';
 import { SEC_ADV_REDIRECT_PATH_KEY, SEC_ADV_SIGN_IN_INIT_KEY, pathnameEndsWithPdf } from '@src/constants/constants';
 
+/** Context value: Asgardeo-backed sign-in/out used by the layout header. */
 interface AppAuthContextType {
   appSignIn: () => void;
   appSignOut: () => void;
@@ -31,6 +31,7 @@ interface AppAuthContextType {
 
 const AppAuthContext = createContext<AppAuthContextType | undefined>(undefined);
 
+/** Wraps the app with Asgardeo `SecureApp`, syncs Redux auth state, and wires `APIService` token refresh. */
 export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const dispatch = useAppDispatch();
   const { state, signIn, signOut, getBasicUserInfo, getIDToken } = useAuthContext();
@@ -39,8 +40,8 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const isSignInInitiated = sessionStorage.getItem(SEC_ADV_SIGN_IN_INIT_KEY) === 'true';
 
     if (state.isAuthenticated) {
-      Promise.all([getBasicUserInfo(), getIDToken()]).then(
-        async ([basicUserInfo, idToken]) => {
+      getBasicUserInfo().then(
+        async (basicUserInfo) => {
           const userInfo: UserInfo = {
             username: basicUserInfo?.username || basicUserInfo?.email || 'User',
             email: basicUserInfo?.email || '',
@@ -55,7 +56,7 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
             sessionStorage.removeItem(SEC_ADV_REDIRECT_PATH_KEY);
           }
 
-          new APIService(idToken || '', async () => {
+          new APIService(async () => {
             const token = await getIDToken();
             return { idToken: token || '' };
           });
@@ -140,6 +141,7 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 };
 
+/** Returns sign-in/out helpers from `AppAuthProvider`; throws if used outside the provider. */
 export const useAppAuth = (): AppAuthContextType => {
   const context = useContext(AppAuthContext);
   if (!context) {

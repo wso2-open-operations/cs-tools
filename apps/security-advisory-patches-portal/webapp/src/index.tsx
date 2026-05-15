@@ -20,8 +20,6 @@ import './index.css';
 import App from './App';
 import { SEC_ADV_REDIRECT_PATH_KEY, SEC_ADV_SIGN_IN_INIT_KEY } from './constants/constants';
 
-// Stash /patches/... before any React or Asgardeo logic runs (OAuth returns to "/" and must restore this).
-// Clear per-tab sign-in gate so a pasted deep link always triggers signIn (localStorage used to block other tabs).
 try {
   const path = window.location.pathname;
   if (path.startsWith('/patches')) {
@@ -29,7 +27,7 @@ try {
     sessionStorage.removeItem(SEC_ADV_SIGN_IN_INIT_KEY);
   }
 } catch {
-  /* ignore private mode / quota */
+  /* ignore */
 }
 
 const rootElement = document.getElementById('root');

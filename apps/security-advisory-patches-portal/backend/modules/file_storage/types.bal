@@ -3,6 +3,7 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
+//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -15,25 +16,12 @@
 // under the License.
 import ballerinax/azure_storage_service.files;
 
-# Azure File Share client configuration.
+# Connection parameters for the Azure Storage Files client.
 public type AzureFileStorageConfig record {|
-    # Azure storage account name
+    # Storage account name
     string accountName;
-    # Access key or SAS token
+    # Account access key or SAS token string
     string accessKeyOrSAS;
-    # Authorization method (accessKey or SAS)
+    # Whether `accessKeyOrSAS` is a shared key or SAS
     files:AuthorizationMethod authorizationMethod;
 |};
-
-# Represents an item (file or directory) in Azure File Share.
-public type FileShareItem record {|
-    # Name of the item (without path prefix)
-    string name;
-    # Whether this item is a directory
-    boolean isFolder;
-    # Size in bytes (only for files)
-    int size?;
-    # MIME type (only for files)
-    string contentType?;
-|};
-

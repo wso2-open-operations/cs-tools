@@ -3,6 +3,7 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
+//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -17,34 +18,21 @@
 import { APIService } from './apiService';
 import { AppConfig } from '@src/config/config';
 
+/**
+ * Download advisory bytes from `GET /file?path=…` using the configured backend URL and bearer auth.
+ *
+ * @param path - Share-relative path (slashes); must match Azure layout after SPA pathname mapping.
+ */
 export const downloadSecurityAdvisory = async (path: string): Promise<Blob> => {
-  const response = await APIService.getInstance().get(AppConfig.serviceUrls.downloadSecurityAdvisory, {
+  const response = await APIService.getInstance().get(AppConfig.downloadFileUrl, {
     params: { path },
     responseType: 'blob',
   });
   return response.data;
 };
 
-export const downloadFile = (fileData: Blob, filename: string) => {
-  const url = window.URL.createObjectURL(fileData);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-
-  setTimeout(() => {
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  }, 100);
-};
-
+/** Last segment of a `/`-delimited path (used for UI labels and `Content-Disposition` filename hints). */
 export const getFileName = (path: string): string => {
   const parts = path.split('/');
   return parts[parts.length - 1] || path;
-};
-
-export const getFileExtension = (filename: string): string => {
-  const parts = filename.split('.');
-  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
 };

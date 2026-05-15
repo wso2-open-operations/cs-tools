@@ -3,6 +3,7 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
+//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -14,14 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 import ballerina/url;
-import ballerinax/azure_storage_service.files as files;
 
-# Validate file path.
+# Validate share-relative path length (empty path is allowed).
 #
 # + path - Path to validate
-# + return - Error if path is invalid
+# + return - `()` if valid, or an error if the path is too long
 public isolated function validatePath(string path) returns error? {
-    // Empty path is valid (represents root directory)
     if path == "" {
         return;
     }
@@ -33,49 +32,52 @@ public isolated function validatePath(string path) returns error? {
     return;
 }
 
-# Normalizes a directory path for use with Azure SDK or general purposes.
+# Normalize a directory path for Azure SDK calls or internal use.
 #
-# + path - Directory path to normalize
-# + forSdkCall - If true, normalizes for Azure SDK (removes trailing delimiter and URL-encodes); if false, keeps trailing delimiter and does not encode
-# + return - Normalized (and optionally encoded) path or error
+# + path - Directory path (may include leading `/`)
+# + forSdkCall - When `true`, strip trailing slash and URL-encode each segment for the Azure Files REST API
+# + return - Normalized path, or an error from encoding
 public isolated function normalizePath(string path, boolean forSdkCall = false) returns string|error {
     if path == "" {
         return "";
     }
 
-    // Remove leading delimiter if present
     string normalized = path.startsWith(FOLDER_DELIMITER) ? path.substring(1) : path;
 
-    // Add trailing delimiter if not present
     if !normalized.endsWith(FOLDER_DELIMITER) {
         normalized = normalized + FOLDER_DELIMITER;
     }
 
-    // For SDK calls, remove the trailing delimiter and URL-encode
     if forSdkCall {
         if normalized.endsWith(FOLDER_DELIMITER) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
-        // URL encode for Azure API
         normalized = check encodePathSegments(normalized);
     }
 
     return normalized;
 }
 
-# Extract file name from full path.
+# Return the last path segment (file name), ignoring a trailing `/`.
 #
-# + filePath - Full path
-# + return - File name
+# + filePath - Full share-relative path
+# + return - File name portion
 public isolated function getFileName(string filePath) returns string {
-    string[] parts = re `${FOLDER_DELIMITER}`.split(filePath);
-    return parts.length() > 0 ? parts[parts.length() - 1] : filePath;
+    if filePath == "" {
+        return "";
+    }
+    string fp = filePath.endsWith(FOLDER_DELIMITER) ? filePath.substring(0, filePath.length() - 1) : filePath;
+    int? slash = fp.lastIndexOf(FOLDER_DELIMITER);
+    if slash is int && slash < fp.length() - 1 {
+        return fp.substring(slash + 1, fp.length());
+    }
+    return fp;
 }
 
-# Extract directory path from full path.
+# Return the directory prefix of a full path, including trailing `/`, or `""` for root-level files.
 #
-# + fullPath - Full path
-# + return - Directory path
+# + fullPath - Full share-relative path
+# + return - Directory path prefix
 public isolated function getDirectoryPath(string fullPath) returns string {
     if fullPath == "" {
         return "";
@@ -88,7 +90,7 @@ public isolated function getDirectoryPath(string fullPath) returns string {
     return "";
 }
 
-# Content type mapping for file extensions.
+# Extension to MIME map used by `getContentType`.
 const map<string> CONTENT_TYPE_MAP = {
     "pdf": "application/pdf",
     "png": "image/png",
@@ -109,15 +111,13 @@ const map<string> CONTENT_TYPE_MAP = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 };
 
-# Determine content type based on file extension (case-insensitive).
+# Resolve a MIME type from the file extension (case-insensitive); unknown extensions default to `application/octet-stream`.
 #
-# + fileName - File name
-# + return - MIME content type
+# + fileName - File name or path ending with a name that includes an extension
+# + return - Content type string
 public isolated function getContentType(string fileName) returns string {
-    // Normalize to lower case for case-insensitive matching
     string lowerFileName = fileName.toLowerAscii();
 
-    // Find the last dot to extract extension
     int? lastDotIndex = lowerFileName.lastIndexOf(".");
     if lastDotIndex is int && lastDotIndex < lowerFileName.length() - 1 {
         string extension = lowerFileName.substring(lastDotIndex + 1);
@@ -130,84 +130,20 @@ public isolated function getContentType(string fileName) returns string {
     return "application/octet-stream";
 }
 
-# URL encode path segments for Azure File Share API.
-# Azure requires URL encoding for paths containing special characters.
+# URL-encode each `/`-separated segment for Azure File Share REST paths (skips empty segments).
 #
-# + path - Path to encode
-# + return - URL-encoded path
+# + path - Unencoded path using `/` as the delimiter
+# + return - Encoded path, or an error from `url:encode`
 public isolated function encodePathSegments(string path) returns string|error {
     string[] parts = re `${FOLDER_DELIMITER}`.split(path);
     string[] encoded = [];
 
     foreach string p in parts {
-        string ep = check url:encode(p, "UTF-8");
-        encoded.push(ep);
+        if p.length() == 0 {
+            continue;
+        }
+        encoded.push(check url:encode(p, "UTF-8"));
     }
 
     return string:'join(FOLDER_DELIMITER, ...encoded);
 }
-
-# Create a directory item.
-#
-# + directoryName - Directory name without path prefix
-# + return - FileShareItem representing a directory
-public isolated function createDirectoryItem(string directoryName) returns FileShareItem {
-    return {
-        name: directoryName,
-        isFolder: true
-    };
-}
-
-# Create a file item with metadata extracted from File object.
-#
-# + file - File object from Azure SDK
-# + return - FileShareItem representing a file
-public isolated function createFileItem(files:File file) returns FileShareItem {
-    int fileSize = 0;
-    string contentType = getContentType(file.Name);
-
-    // Extract metadata from File Properties if available
-    files:PropertiesFileItem|""? props = file.Properties;
-    if props is files:PropertiesFileItem {
-        fileSize = extractFileSize(props);
-
-        string? extractedContentType = extractContentType(props);
-        if extractedContentType is string {
-            contentType = extractedContentType;
-        }
-    }
-
-    return {
-        name: file.Name,
-        isFolder: false,
-        size: fileSize,
-        contentType: contentType
-    };
-}
-
-# Extract file size from Properties object.
-#
-# + props - Properties object from Azure SDK
-# + return - File size in bytes
-public isolated function extractFileSize(files:PropertiesFileItem props) returns int {
-    anydata|""? contentLengthVal = props["Content-Length"];
-
-    if contentLengthVal is int {
-        return contentLengthVal;
-    } else if contentLengthVal is string {
-        int|error parsedSize = int:fromString(contentLengthVal);
-        return parsedSize is int ? parsedSize : 0;
-    }
-
-    return 0;
-}
-
-# Extract content type from Properties object.
-#
-# + props - Properties object from Azure SDK
-# + return - Content type or nil
-public isolated function extractContentType(files:PropertiesFileItem props) returns string? {
-    anydata|""? contentTypeVal = props["Content-Type"];
-    return contentTypeVal is string ? contentTypeVal : ();
-}
-

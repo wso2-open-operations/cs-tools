@@ -14,8 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+/** Signed-in user fields stored in Redux after Asgardeo `getBasicUserInfo()`. */
 export interface UserInfo {
+  /** Display or login name. */
   username: string;
+  /** Email when provided by the IdP. */
   email: string;
+  /** OIDC subject identifier. */
   sub: string;
 }

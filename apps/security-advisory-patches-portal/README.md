@@ -48,7 +48,8 @@ The webapp does **not** upload files to Azure. Publishing is always done **outsi
 ### 3.2 PDF viewing only
 
 - There is **no** folder browser—only the PDF viewer when the link is valid and the file exists.
-- **Hyphen encoding** in URLs is unchanged: spaces become `-`, literal `-` in Azure names become `--`, with **`encodeURIComponent`** per segment (legacy `%20` links still decode).
+- **Hyphen encoding** (legacy links): doubled `--` for literal hyphens and single `-` for spaces in a segment; segments without `--` keep `-` as-is. Prefer **`%20`** for spaces when building links.
+- **Folder slugs vs Azure**: Path segments for **directories** that look like lowercase kebab-case (e.g. `security-patches`, `january`) are turned into Azure-style names (`Security Patches`, `January`) before calling the API. The **PDF file name** segment is never changed—use the exact name in the share (e.g. `WSO2-2025-3857_CVE-2025-0326.pdf`). You can also put real folder names in the URL with **`%20`** for spaces; those segments are left as-is.
 - If the first URL segment is **`patches`**, it is stripped when resolving the Azure path (existing **`/patches/…`** links keep working).
 
 ### 3.3 Invalid links and missing files
@@ -113,7 +114,11 @@ Listener **9090** by default; startup fails fast if the share is unreachable.
 | `GET` | `/health` | — | Liveness: file share reachable |
 | `GET` | `/file` | `path` required | PDF (or other) bytes; `Content-Disposition: inline` |
 
-Invalid `path` → **400**; download errors → **500**.
+The server runs **`url:decode`** on the `path` query value (`UTF-8`) so `%2F` becomes `/` when needed.
+
+Invalid `path` → **400**; path valid but missing on the share (Azure **404**) → **404**; other download failures → **500**.
+
+The `path` query must be the **share-relative** path Azure expects (folder names, spaces, casing). The SPA maps lowercase **kebab-case** directory segments in the URL to that shape before calling `/file`; you can also send the literal path with **`%20`** for spaces (e.g. `Security%20Patches/...`).
 
 ### 5.5 CORS
 

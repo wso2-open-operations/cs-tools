@@ -14,8 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+# Error returned from `validatePath` when the path is syntactically invalid for this module.
 const ERR_MSG_INVALID_PATH = "Invalid path parameter";
+
+# Error returned when a share-relative path exceeds the configured maximum length.
 const ERR_MSG_PATH_TOO_LONG = "Path exceeds maximum allowed length";
+
+# Path delimiter between share directory segments and the file name.
 const FOLDER_DELIMITER = "/";
+
+# Maximum allowed length for a share-relative path string.
 const MAX_PATH_LENGTH = 2048;
 

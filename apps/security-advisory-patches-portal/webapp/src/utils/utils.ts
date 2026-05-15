@@ -3,6 +3,7 @@
 // WSO2 LLC. licenses this file to you under the Apache License,
 // Version 2.0 (the "License"); you may not use this file except
 // in compliance with the License.
+//
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -14,18 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/**
- * Encode a path segment for shareable URLs: spaces become "-", literal "-" become "--",
- * then encodeURIComponent.
- */
-export const toUrlFriendly = (segment: string): string => {
-  const escapedHyphens = segment.replace(/-/g, '--');
-  const spaced = escapedHyphens.replace(/\s+/g, '-');
-  return encodeURIComponent(spaced);
-};
-
 const DASH_LITERAL_HOLD = '\uE000';
 
+/** Decode legacy doubled-hyphen encoding inside a path segment. */
 function unescapeDashSegment(raw: string): string {
   return raw
     .split('--')
@@ -34,22 +26,40 @@ function unescapeDashSegment(raw: string): string {
     .replace(new RegExp(DASH_LITERAL_HOLD, 'g'), '-');
 }
 
-export const fromUrlFriendly = (segment: string): string => {
+/** Decode one URL path segment: `decodeURIComponent`, plus optional legacy `--` / `-` space rules. */
+function decodePathSegment(segment: string): string {
   if (segment.includes('%20')) {
     return decodeURIComponent(segment);
   }
   const raw = decodeURIComponent(segment);
-  if (!raw.includes('-')) {
+  if (!raw.includes('--')) {
     return raw;
   }
   return unescapeDashSegment(raw);
-};
+}
+
+const SLUG_FOLDER_SEGMENT = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+
+/** Map `security-patches` → `Security Patches`; leaves non-slug segments unchanged. */
+function slugFolderSegmentToAzureTitle(segment: string): string {
+  if (!SLUG_FOLDER_SEGMENT.test(segment)) {
+    return segment;
+  }
+  return segment
+    .split('-')
+    .filter((w) => w.length > 0)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
 
 /**
- * Map browser pathname to Azure file share path.
- * - Each URL segment is decoded with {@link fromUrlFriendly}.
- * - If the first segment is `patches`, it is stripped (legacy links).
- * - Last segment must be `.pdf`.
+ * Map the browser pathname to the share-relative path sent to `/file`.
+ * - Strips optional leading `patches` segment.
+ * - Requires the last segment to end in `.pdf`.
+ * - Rewrites lowercase kebab directory segments to Azure-style titled folder names; does not alter the PDF file name segment.
+ *
+ * @param pathname - `location.pathname` (no origin or query)
+ * @returns Share-relative path, or `null` if the URL is not a valid PDF document path
  */
 export function pathnameToPdfStoragePath(pathname: string): string | null {
   const trimmed = pathname.trim().replace(/\/+$/, '');
@@ -57,7 +67,7 @@ export function pathnameToPdfStoragePath(pathname: string): string | null {
   if (rawSegments.length === 0) {
     return null;
   }
-  const decoded = rawSegments.map((s) => fromUrlFriendly(s));
+  const decoded = rawSegments.map((s) => decodePathSegment(s));
   const last = decoded[decoded.length - 1];
   if (!/\.pdf$/i.test(last)) {
     return null;
@@ -69,5 +79,7 @@ export function pathnameToPdfStoragePath(pathname: string): string | null {
   if (rest.length === 0) {
     return null;
   }
-  return rest.join('/');
+  const fileSeg = rest[rest.length - 1];
+  const dirSegs = rest.slice(0, -1).map((d) => slugFolderSegmentToAzureTitle(d));
+  return [...dirSegs, fileSeg].join('/');
 }
