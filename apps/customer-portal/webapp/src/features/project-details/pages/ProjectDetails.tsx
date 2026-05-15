@@ -26,7 +26,6 @@ import {
 import { ProjectDetailsTabId } from "@features/project-details/types/projectDetails";
 import { getProjectPermissions } from "@utils/permission";
 import ProjectInformationCard from "@features/project-details/components/ProjectInformationCard";
-import ProjectStatisticsCard from "@features/project-details/components/ProjectStatisticsCard";
 import ContactInfoCard from "@features/project-details/components/project-overview/contact-info/ContactInfoCard";
 import ServiceHoursAllocationsCard from "@features/project-details/components/project-overview/service-hours-allocations/ServiceHoursAllocationsCard";
 import ProjectDeployments from "@features/project-details/components/deployments/ProjectDeployments";
@@ -161,7 +160,7 @@ export default function ProjectDetails(): JSX.Element {
         return (
           <Box>
             <Grid container spacing={3}>
-              <Grid size={{ xs: 12, md: 5 }}>
+              <Grid size={{ xs: 12, md: 6 }} sx={{ alignSelf: "flex-start" }}>
                 <ProjectInformationCard
                   project={project}
                   slaStatus={stats?.projectStats?.slaStatus || "--"}
@@ -169,33 +168,22 @@ export default function ProjectDetails(): JSX.Element {
                   isError={!!projectError}
                 />
               </Grid>
-              <Grid size={{ xs: 12, md: 7 }}>
-                <ProjectStatisticsCard
-                  stats={stats?.projectStats}
-                  isLoading={(isDetailsLoading || !stats) && !statsError}
-                  isError={!!statsError}
-                  showDeploymentsStat={permissions.hasDeployments}
-                  showServiceRequestStat={permissions.hasSR}
-                  showChangeRequestStat={permissions.hasCR}
-                  showSecurityReportStat={permissions.hasSecurityReportAnalysis}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, md: 5 }}>
-                <ContactInfoCard
-                  project={project}
-                  isLoading={(isDetailsLoading || !project) && !projectError}
-                  isError={!!projectError}
-                />
-              </Grid>
-              {permissions.showServiceHoursAllocationsCard && (
-                <Grid size={{ xs: 12, md: 7 }}>
-                  <ServiceHoursAllocationsCard
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 3, height: "100%" }}>
+                  <ContactInfoCard
                     project={project}
                     isLoading={(isDetailsLoading || !project) && !projectError}
                     isError={!!projectError}
                   />
-                </Grid>
-              )}
+                  {permissions.showServiceHoursAllocationsCard && (
+                    <ServiceHoursAllocationsCard
+                      project={project}
+                      isLoading={(isDetailsLoading || !project) && !projectError}
+                      isError={!!projectError}
+                    />
+                  )}
+                </Box>
+              </Grid>
             </Grid>
           </Box>
         );

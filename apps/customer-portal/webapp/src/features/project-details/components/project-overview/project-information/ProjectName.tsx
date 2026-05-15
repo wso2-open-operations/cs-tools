@@ -37,7 +37,7 @@ const ProjectName = ({
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         {isLoading ? (
           <>
-            <Skeleton variant="text" width={150} />
+            <Skeleton variant="text" width="60%" />
             <Skeleton variant="rounded" width={60} height={24} />
           </>
         ) : isError ? (

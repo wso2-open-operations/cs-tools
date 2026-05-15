@@ -52,7 +52,7 @@ const ProjectInformationCard = ({
   const hideOnboardingStatus = shouldHideOnboardingData(project?.onboardingStatus);
 
   return (
-    <Card sx={{ height: "100%" }}>
+    <Card>
       <CardContent sx={{ p: 3 }}>
         <ProjectHeader />
 
