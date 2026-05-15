@@ -71,6 +71,7 @@ export type DescriptionSections = {
 export function parseDescriptionSections(raw: string | null | undefined): DescriptionSections {
   const empty: DescriptionSections = { generalDescription: "", implementationDetails: "", impact: "" };
   if (!raw?.trim() || raw.trim().toLowerCase() === "n/a") return empty;
+  raw = stripHtmlTags(raw);
 
   const headerRe = /(?:^|\n)\s*(General\s+Description|Implementation\s+Details?|Impact)\s*:/gi;
   if (!headerRe.test(raw)) {
@@ -126,6 +127,81 @@ export function parseFileList(raw: string | null | undefined): string[] {
   return [...new Set(
     stripped.split(",").map((f) => f.trim()).filter(Boolean),
   )].sort();
+}
+
+/**
+ * Strips HTML tags and decodes common HTML entities, returning plain text
+ * suitable for PDF rendering. Block-level closing tags are replaced with
+ * newlines first so that section boundaries are preserved for parsers like
+ * parseDescriptionSections that rely on newline-anchored regex matching.
+ */
+export function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+type TextRun = { text: string; bold: boolean; italic: boolean };
+type PdfBlock = { runs: TextRun[]; isList?: boolean };
+
+/** Parses an HTML string into paragraph-level blocks with styled inline runs. */
+export function htmlToBlocks(html: string): PdfBlock[] {
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(`<body>${html}</body>`, "text/html");
+
+  const BLOCK_TAGS = new Set(["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"]);
+
+  function collectRuns(node: Node, bold: boolean, italic: boolean): TextRun[] {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = (node.textContent ?? "").replace(/\n/g, " ");
+      if (!text.trim()) return [];
+      return [{ text, bold, italic }];
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return [];
+    const el = node as Element;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "br") return [{ text: "\n", bold: false, italic: false }];
+    const nextBold = bold || tag === "strong" || tag === "b";
+    const nextItalic = italic || tag === "em" || tag === "i";
+    const runs: TextRun[] = [];
+    for (const child of el.childNodes) {
+      runs.push(...collectRuns(child, nextBold, nextItalic));
+    }
+    return runs;
+  }
+
+  const blocks: PdfBlock[] = [];
+
+  function walkTop(node: Node): void {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as Element;
+      const tag = el.tagName.toLowerCase();
+      if (BLOCK_TAGS.has(tag)) {
+        const runs = collectRuns(el, false, false);
+        if (runs.some((r) => r.text.trim())) {
+          blocks.push({ runs, isList: tag === "li" });
+        }
+      } else {
+        for (const child of el.childNodes) walkTop(child);
+      }
+    } else if (node.nodeType === Node.TEXT_NODE) {
+      const text = (node.textContent ?? "").trim();
+      if (text) blocks.push({ runs: [{ text, bold: false, italic: false }] });
+    }
+  }
+
+  for (const child of parsed.body.childNodes) walkTop(child);
+  return blocks;
 }
 
 export function isSafeHttpUrl(url: string): boolean {
@@ -336,20 +412,138 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
     y += 3;
   };
 
-  // Render a labelled field, skipping if value is empty.
-  const renderField = (label: string, value: string | null | undefined): void => {
-    if (!value?.trim()) return;
+  // Render a labelled HTML field by parsing into paragraph blocks and
+  // rendering each block with proper bold/italic inline runs.
+  const renderHtmlField = (label: string, html: string | null | undefined): void => {
+    if (!html?.trim()) return;
+    const blocks = htmlToBlocks(html);
+    const hasContent = blocks.some((b) => b.runs.some((r) => r.text.trim()));
+    if (!hasContent) return;
+
     ensureSpace(14);
     doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 0, 0);
     doc.text(`${label}:`, margin, y);
     y += 5;
+
+    const indent = margin + 4;
+    const blockW = contentW - 4;
+
+    for (const block of blocks) {
+      // Collect the full text of the block to split into lines.
+      // We track a parallel run-index so we can re-apply bold/italic per line.
+      const prefix = block.isList ? "• " : "";
+
+      // Flatten runs into word tokens while preserving run metadata.
+      type Token = { word: string; bold: boolean; italic: boolean };
+      const tokens: Token[] = [];
+      for (const run of block.runs) {
+        if (run.text === "\n") {
+          tokens.push({ word: "\n", bold: false, italic: false });
+          continue;
+        }
+        const words = run.text.split(/(\s+)/);
+        for (const w of words) {
+          if (w) tokens.push({ word: w, bold: run.bold, italic: run.italic });
+        }
+      }
+
+      // Build lines respecting word-wrap and forced \n breaks.
+      type StyledLine = { segments: { text: string; bold: boolean; italic: boolean }[] };
+      const lines: StyledLine[] = [{ segments: [] }];
+      let curLineWidth = indent - margin + doc.getTextWidth(prefix);
+
+      const pushSegment = (text: string, bold: boolean, italic: boolean): void => {
+        const cur = lines[lines.length - 1];
+        const last = cur.segments[cur.segments.length - 1];
+        if (last && last.bold === bold && last.italic === italic) {
+          last.text += text;
+        } else {
+          cur.segments.push({ text, bold, italic });
+        }
+      };
+
+      let firstToken = true;
+      for (const token of tokens) {
+        if (token.word === "\n") {
+          lines.push({ segments: [] });
+          curLineWidth = 0;
+          firstToken = true;
+          continue;
+        }
+        if (/^\s+$/.test(token.word)) {
+          if (!firstToken) {
+            const spW = doc.getTextWidth(" ");
+            if (curLineWidth + spW <= blockW) {
+              pushSegment(" ", token.bold, token.italic);
+              curLineWidth += spW;
+            }
+          }
+          continue;
+        }
+        const wordW = doc.getTextWidth(token.word);
+        if (!firstToken && curLineWidth + wordW > blockW) {
+          lines.push({ segments: [] });
+          curLineWidth = 0;
+          firstToken = true;
+        }
+        if (firstToken && prefix && lines.length === 1 && lines[0].segments.length === 0) {
+          pushSegment(prefix, false, false);
+          curLineWidth += doc.getTextWidth(prefix);
+        }
+        pushSegment(token.word, token.bold, token.italic);
+        curLineWidth += wordW;
+        firstToken = false;
+      }
+
+      const URL_RE = /https?:\/\/[^\s]+/g;
+
+      for (const line of lines) {
+        const lineText = line.segments.map((s) => s.text).join("");
+        if (!lineText.trim()) continue;
+        const lineH = 5;
+        ensureSpace(lineH + 2);
+        let x = indent;
+        for (const seg of line.segments) {
+          const font = seg.bold ? "bold" : seg.italic ? "italic" : "normal";
+          doc.setFont("helvetica", font);
+          URL_RE.lastIndex = 0;
+          const parts: { text: string; isUrl: boolean }[] = [];
+          let last = 0;
+          let m: RegExpExecArray | null;
+          while ((m = URL_RE.exec(seg.text)) !== null) {
+            if (m.index > last) parts.push({ text: seg.text.slice(last, m.index), isUrl: false });
+            parts.push({ text: m[0], isUrl: true });
+            last = m.index + m[0].length;
+          }
+          if (last < seg.text.length) parts.push({ text: seg.text.slice(last), isUrl: false });
+
+          for (const part of parts) {
+            if (part.isUrl) {
+              doc.setTextColor(0, 102, 204);
+              doc.text(part.text, x, y);
+              const w = doc.getTextWidth(part.text);
+              doc.setDrawColor(0, 102, 204);
+              doc.line(x, y + 0.8, x + w, y + 0.8);
+              doc.setDrawColor(0, 0, 0);
+              doc.link(x, y - 4, w, 5.5, { url: part.text });
+              x += w;
+            } else {
+              doc.setTextColor(60, 60, 60);
+              doc.text(part.text, x, y);
+              x += doc.getTextWidth(part.text);
+            }
+          }
+        }
+        y += lineH;
+      }
+      y += 2; // paragraph gap
+    }
+
     doc.setFont("helvetica", "normal");
-    const lines = doc.splitTextToSize(value.trim(), contentW - 4);
-    ensureSpace(lines.length * 5 + 3);
-    doc.text(lines, margin + 4, y);
-    y += lines.length * 5 + 5;
+    doc.setTextColor(0, 0, 0);
+    y += 5;
   };
 
   // ===== TITLE =====
@@ -447,9 +641,9 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
     const parsedDesc = parseDescriptionSections(entry.description);
     const bugFixUrls = parseBugFixes(entry.bugFixes);
 
-    if (parsedDesc.generalDescription) renderField("General Description", parsedDesc.generalDescription);
-    if (parsedDesc.implementationDetails) renderField("Implementation Details", parsedDesc.implementationDetails);
-    if (parsedDesc.impact) renderField("Impact", parsedDesc.impact);
+    if (parsedDesc.generalDescription) renderHtmlField("General Description", parsedDesc.generalDescription);
+    if (parsedDesc.implementationDetails) renderHtmlField("Implementation Details", parsedDesc.implementationDetails);
+    if (parsedDesc.impact) renderHtmlField("Impact", parsedDesc.impact);
     if (bugFixUrls.length > 0) renderUrlListField("Bug Fixes", bugFixUrls);
 
     // Instructions
@@ -531,12 +725,12 @@ export function generateUpdateLevelsReportPdf(reportData: UpdateLevelsReportData
       doc.text(advHeaderLines, margin + 3, y + 6);
       y += advBoxH + 4;
 
-      renderField("Overview", adv.overview);
-      renderField("Description", adv.description);
-      renderField("Impact", adv.impact);
-      renderField("Solution", adv.solution);
-      renderField("Notes", adv.notes);
-      renderField("Credits", adv.credits);
+      renderHtmlField("Overview", adv.overview);
+      renderHtmlField("Description", adv.description);
+      renderHtmlField("Impact", adv.impact);
+      renderHtmlField("Solution", adv.solution);
+      renderHtmlField("Notes", adv.notes);
+      renderHtmlField("Credits", adv.credits);
 
       y += 6;
     }
