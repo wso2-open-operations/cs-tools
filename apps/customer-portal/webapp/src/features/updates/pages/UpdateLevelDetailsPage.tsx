@@ -31,6 +31,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
+import DOMPurify from "dompurify";
+import { useDarkMode } from "@utils/useDarkMode";
+import { stripLightModeInlineStyles } from "@utils/common";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { usePostUpdateLevelsSearch } from "@features/updates/api/usePostUpdateLevelsSearch";
 import { getUpdateTypeChipColor } from "@features/updates/utils/updates";
@@ -96,37 +99,72 @@ function parseJsonStringArray(raw: string): string[] {
   }
 }
 
+// Matches real HTML formatting tags \u2014 not XML/config-style strings like <Product_Home>.
+const HTML_FORMAT_RE = /<\/?(p|span|div|ul|ol|li|strong|em|b|i|br|h[1-6]|a[\s>]|table|tr|td|th|code|pre|blockquote)\b/i;
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+const HTML_CONTENT_SX = {
+  fontSize: "0.875rem",
+  lineHeight: 1.7,
+  color: "text.secondary",
+  "& p": { margin: "0 0 0.4em 0" },
+  "& p:last-child": { marginBottom: 0 },
+  "& a": { color: "primary.main", textDecoration: "underline" },
+  "& ul, & ol": { mt: 0, mb: 0.5, pl: 2.5 },
+  "& li": { mb: 0.25 },
+  "& strong, & b": { fontWeight: 600, color: "text.primary" },
+};
+
 /**
- * Renders a labelled section with pre-wrapped text, supporting `\n` as real line breaks.
- *
- * @param {{ title: string; content: string }} props - Section heading and raw content string.
- * @returns {JSX.Element} The rendered section.
+ * Renders a labelled section. Real HTML formatting tags are sanitized via
+ * DOMPurify with dark-mode inline-style stripping. Plain text (including
+ * entity-encoded content like &lt;Product_Home&gt;) has entities decoded and
+ * newlines preserved so angle-bracket content renders correctly.
  */
 function UpdateSection({
   title,
   content,
+  isDark,
 }: {
   title: string;
   content: string;
+  isDark: boolean;
 }): JSX.Element {
-  const lines = content.split("\n");
+  let body: JSX.Element;
+
+  if (HTML_FORMAT_RE.test(content)) {
+    const stripped = isDark ? stripLightModeInlineStyles(content) : content;
+    body = (
+      <Box
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(stripped) }}
+        sx={HTML_CONTENT_SX}
+      />
+    );
+  } else {
+    const decoded = decodeEntities(content);
+    const safeHtml = decoded
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+    body = <Box dangerouslySetInnerHTML={{ __html: safeHtml }} sx={HTML_CONTENT_SX} />;
+  }
+
   return (
     <Box>
       <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
         {title}
       </Typography>
-      <Box>
-        {lines.map((line, i) => (
-          <Typography
-            key={i}
-            variant="body2"
-            color="text.secondary"
-            sx={{ lineHeight: 1.7 }}
-          >
-            {line || "\u00A0"}
-          </Typography>
-        ))}
-      </Box>
+      {body}
     </Box>
   );
 }
@@ -143,6 +181,7 @@ function UpdateDetailCard({
   desc: UpdateDescriptionLevel;
 }): JSX.Element {
   const theme = useTheme();
+  const isDark = useDarkMode();
   const chipColor = getUpdateTypeChipColor(desc.updateType);
   const bugFixes = parseJsonStringArray(desc.bugFixes);
   const filesModified = parseJsonStringArray(desc.filesModified);
@@ -203,12 +242,12 @@ function UpdateDetailCard({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
           {/* Description */}
           {desc.description && (
-            <UpdateSection title="Description" content={desc.description} />
+            <UpdateSection title="Description" content={desc.description} isDark={isDark} />
           )}
 
           {/* Instructions */}
           {desc.instructions && desc.instructions !== "N/A" && (
-            <UpdateSection title="Instructions" content={desc.instructions} />
+            <UpdateSection title="Instructions" content={desc.instructions} isDark={isDark} />
           )}
 
           {/* Bug Fixes */}
@@ -385,22 +424,26 @@ function UpdateDetailCard({
                         }}
                       />
                     </Box>
-                    <Typography
-                      variant="body2"
-                      fontWeight={600}
-                      sx={{ mb: 0.5 }}
-                    >
-                      {advisory.overview}
-                    </Typography>
-                    <UpdateSection
-                      title="Description"
-                      content={advisory.description}
-                    />
+                    <Box sx={{ mt: 1 }}>
+                      <UpdateSection
+                        title="Overview"
+                        content={advisory.overview}
+                        isDark={isDark}
+                      />
+                    </Box>
+                    <Box sx={{ mt: 1.5 }}>
+                      <UpdateSection
+                        title="Description"
+                        content={advisory.description}
+                        isDark={isDark}
+                      />
+                    </Box>
                     {advisory.impact && (
                       <Box sx={{ mt: 1.5 }}>
                         <UpdateSection
                           title="Impact"
                           content={advisory.impact}
+                          isDark={isDark}
                         />
                       </Box>
                     )}
@@ -409,12 +452,13 @@ function UpdateDetailCard({
                         <UpdateSection
                           title="Solution"
                           content={advisory.solution}
+                          isDark={isDark}
                         />
                       </Box>
                     )}
                     {advisory.notes && (
                       <Box sx={{ mt: 1.5 }}>
-                        <UpdateSection title="Notes" content={advisory.notes} />
+                        <UpdateSection title="Notes" content={advisory.notes} isDark={isDark} />
                       </Box>
                     )}
                     {advisory.credits && advisory.credits !== "-" && (
@@ -422,6 +466,7 @@ function UpdateDetailCard({
                         <UpdateSection
                           title="Credits"
                           content={advisory.credits}
+                          isDark={isDark}
                         />
                       </Box>
                     )}
