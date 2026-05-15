@@ -1,27 +1,28 @@
 import { useEffect, useState } from "react";
 
-import type { ChatMessage } from "@features/chats/components";
-import type { FinalNoveraResponse, NoveraResponse } from "@features/chats/types/novera.dto";
+import type { FinalNoveraResponse, NoveraResponse } from "@features/chats/types";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
+import type { BubbleAgentProps } from "@features/chats/components";
+import { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 
 export function useStream() {
   const { fromNow } = useDateTime();
 
-  const [draft, setDraft] = useState<ChatMessage | null>(null); // Message currently being displayed
+  const [draft, setDraft] = useState<BubbleAgentProps | null>(null); // Message currently being displayed
   const [pending, setPending] = useState<FinalNoveraResponse | null>(null);
-  const [committed, setCommitted] = useState<ChatMessage | null>(null); // ChatMessage object awaiting to be appended
+  const [committed, setCommitted] = useState<BubbleAgentProps | null>(null); // ChatMessage object awaiting to be appended
   const [animationComplete, setAnimationComplete] = useState(false); // Animation has finished rendering the text
 
   useEffect(() => {
     if (!pending || !draft || !animationComplete) return;
 
     setCommitted({
+      author: MESSAGE_AUTHOR_TYPES.AGENT,
+      content: pending.payload.message,
+      timestamp: fromNow(new Date()),
       animated: false,
       thinking: false,
-      author: "assistant",
-      blocks: [{ type: "text", value: pending.payload.message }],
-      timestamp: fromNow(new Date()),
     });
 
     setDraft(null);
@@ -33,8 +34,8 @@ export function useStream() {
     switch (response.type) {
       case "thinking_start":
         setDraft({
-          author: "assistant",
-          blocks: [{ type: "text", value: "" }],
+          author: MESSAGE_AUTHOR_TYPES.AGENT,
+          content: "",
           thinking: true,
           animated: true,
         });
@@ -55,7 +56,7 @@ export function useStream() {
           if (!prev) return null;
           return {
             ...prev,
-            blocks: prev.blocks.map((b) => (b.type === "text" ? { ...b, value: b.value + response.content } : b)),
+            content: prev.content + response.content,
           };
         });
         break;

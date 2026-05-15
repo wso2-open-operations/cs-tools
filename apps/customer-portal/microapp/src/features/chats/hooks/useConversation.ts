@@ -1,31 +1,31 @@
 import { useEffect, useState } from "react";
 
-import type { ChatMessage, MessageAuthor } from "@features/chats/components";
-
 import { useDateTime } from "@shared/hooks/useDateTime";
 
-import { NOVERA_INITIAL_MESSAGE } from "@shared/constants";
+import { MESSAGE_AUTHOR_TYPES, NOVERA_INITIAL_MESSAGE } from "@shared/constants";
+import type { BubbleProps } from "@features/chats/components";
+import type { MessageAuthor } from "@features/chats/types";
 
-export function useConversation(committed: ChatMessage | null, reset: () => void) {
+export function useConversation(committed: BubbleProps | null, reset: () => void) {
   const { fromNow } = useDateTime();
-  const [messages, setMessages] = useState<ChatMessage[]>([NOVERA_INITIAL_MESSAGE]);
+  const [messages, setMessages] = useState<BubbleProps[]>([NOVERA_INITIAL_MESSAGE]);
 
   useEffect(() => {
     if (committed) {
-      append(committed, "assistant");
+      append(committed, MESSAGE_AUTHOR_TYPES.AGENT);
       reset();
     }
   }, [committed]);
 
-  const append = (message: string | ChatMessage, author: MessageAuthor = "you") => {
-    const next: ChatMessage =
+  const append = (message: string | BubbleProps, author: MessageAuthor = MESSAGE_AUTHOR_TYPES.USER) => {
+    const next: BubbleProps =
       typeof message === "string"
         ? {
             author,
-            blocks: [{ type: "text", value: message }],
+            content: message,
+            timestamp: fromNow(new Date()),
             animated: false,
             thinking: false,
-            timestamp: fromNow(new Date()),
           }
         : message;
 

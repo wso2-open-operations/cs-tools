@@ -18,7 +18,7 @@ import { useState } from "react";
 import { Card, IconButton, pxToRem, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ThumbsDown, ThumbsUp } from "@wso2/oxygen-ui-icons-react";
 
-export function ConversationFeedback() {
+export function CalloutFeedback() {
   const theme = useTheme();
   const [feedback, setFeedback] = useState<"up" | "down" | undefined>(undefined);
   const up = feedback === "up";

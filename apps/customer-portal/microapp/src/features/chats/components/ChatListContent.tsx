@@ -8,9 +8,8 @@ import { useChatList } from "@features/chats/hooks/useChatList";
 
 import { usePaginationSubtitleOverride } from "@shared/hooks/usePaginationSubtitle";
 
-import { InfiniteScroll } from "@components/common";
-import EmptyState from "@components/common/EmptyState";
-import { ItemCardExtended, ItemsListContentSkeleton } from "@components/support/ItemCardExtended";
+import { EmptyState, InfiniteScroll } from "@shared/components/common";
+import { ItemCardExtended, ItemsListContentSkeleton } from "@shared/components/support";
 
 export function ChatListContent({ filter, search }: { filter: string; search: string }) {
   const { projectId } = useProject();

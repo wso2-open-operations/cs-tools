@@ -16,11 +16,9 @@
 import { Button, colors, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { Pin } from "@wso2/oxygen-ui-icons-react";
 
-type CreateCaseBannerProps = {
+export function PromptCreateCase({ onCreateCase }: {
   onCreateCase: () => void;
-};
-
-export function CreateCaseBanner({ onCreateCase }: CreateCaseBannerProps) {
+}) {
   return (
     <Stack
       direction="row"

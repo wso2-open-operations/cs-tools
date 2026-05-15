@@ -19,7 +19,7 @@ import { Stack } from "@wso2/oxygen-ui";
 
 import { useProject } from "@context/project";
 
-import { CreateCaseBanner, MessageBubble } from "@features/chats/components";
+import { PromptCreateCase, Bubble } from "@features/chats/components";
 import { useConversation } from "@features/chats/hooks/useConversation";
 import { useNovera } from "@features/chats/hooks/useNovera";
 import { useStream } from "@features/chats/hooks/useStream";
@@ -59,11 +59,11 @@ export default function ChatPage() {
     <>
       <Stack mb={20} gap={2}>
         {messages.map((message, index) => (
-          <MessageBubble key={index} {...message} />
+          <Bubble key={index} {...message} />
         ))}
 
         {/* Temporary message bubble for streamed content */}
-        {draft && <MessageBubble {...draft} onAnimationComplete={finish} />}
+        {draft && <Bubble {...draft} onAnimationComplete={finish} />}
         <div ref={bottomRef} />
       </Stack>
       <StickyCommentBar
@@ -73,7 +73,7 @@ export default function ChatPage() {
         placeholder="Type your message"
         onChange={setComment}
         onSend={handleSend}
-        topSlot={messages.length > 2 && <CreateCaseBanner onCreateCase={handleCreateCase} />}
+        topSlot={messages.length > 2 && <PromptCreateCase onCreateCase={handleCreateCase} />}
       />
     </>
   );

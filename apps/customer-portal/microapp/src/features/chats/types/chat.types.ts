@@ -1,16 +1,9 @@
-export type MessageBlock =
-  | { type: "text"; value: string }
-  | { type: "checklist"; items: string[] }
-  | { type: "kb"; items: { id: string; title: string }[] };
+import type { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 
-export type MessageAuthor = "you" | "assistant";
+export type MessageAuthor =  typeof MESSAGE_AUTHOR_TYPES[keyof typeof MESSAGE_AUTHOR_TYPES];
 
 export interface ChatMessage {
   author: MessageAuthor;
-  blocks: MessageBlock[];
+  content: string;
   timestamp?: string;
-  animated?: boolean;
-  /** Pass a string to show as the thinking label, or false to hide. */
-  thinking?: string | false;
-  onAnimationComplete?: () => void;
 }

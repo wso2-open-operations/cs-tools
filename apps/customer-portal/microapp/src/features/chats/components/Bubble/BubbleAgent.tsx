@@ -1,18 +1,25 @@
-import { Card, pxToRem, Stack, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Card, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import type { ChatMessage } from "@features/chats/types";
 import { Sparkle } from "@wso2/oxygen-ui-icons-react";
-import { BlockList } from "./BlockList";
+import { TypewriterText } from "@shared/components/common";
+import type { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 
-type AssistantBubbleProps = Omit<ChatMessage, "author"> & { sx?: SxProps<Theme> };
+export interface BubbleAgentProps extends ChatMessage {
+  author: typeof MESSAGE_AUTHOR_TYPES.AGENT,
+  animated?: boolean;
+  /** Pass a string to show as the thinking label, or false to hide. */
+  thinking?: string | boolean;
+  onAnimationComplete?: () => void;
+}
 
-export function AssistantBubble({ blocks, timestamp = "Just Now", sx, animated = true, thinking = false, onAnimationComplete }: AssistantBubbleProps) {
+export function BubbleAgent({ content, timestamp, animated = true, thinking = false, onAnimationComplete }: BubbleAgentProps) {
   return (
     <Stack direction="row" justifyContent="start" width="100%">
       <Card
         component={Stack}
         p={1.5}
         width="100%"
-        sx={{ ...sx, bgcolor: "background.paper" }}
+        sx={{ bgcolor: "background.paper" }}
       >
         <Stack direction="row" justifyContent="space-between" gap={1} mb={0.5}>
           <Sparkle size={pxToRem(18)} style={{ color: "var(--oxygen-palette-primary-main)" }} />
@@ -38,12 +45,19 @@ export function AssistantBubble({ blocks, timestamp = "Just Now", sx, animated =
             </Typography>
           ) : (
             <Typography variant="subtitle2" color="text.disabled">
-              {timestamp}
+              {timestamp ?? "Just Now"}
             </Typography>
           )}
         </Stack>
-        <BlockList blocks={blocks} animated={animated} thinking={thinking} onAnimationComplete={onAnimationComplete} />
-      </Card>
+          <Typography variant="body2" component="span" sx={{ "& > *": { margin: 0, lineHeight: 1.7 } }}>
+            <TypewriterText
+              tokens={content.split("")}
+              animated={animated}
+              pending={!!thinking}
+              onAnimationComplete={onAnimationComplete}
+            />
+          </Typography>
+        </Card>
     </Stack>
   );
 }
