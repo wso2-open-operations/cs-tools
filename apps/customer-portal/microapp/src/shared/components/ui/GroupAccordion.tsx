@@ -3,18 +3,10 @@ import { type ReactNode, useState } from "react";
 import { Box, Collapse, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { ListChevronsDownUp, ListChevronsUpDown } from "@wso2/oxygen-ui-icons-react";
 
-import type { CaseType } from "@shared/types";
 import { CASE_TYPE_CONFIGS, CASE_TYPE_PLURAL_LABELS } from "@shared/constants";
+import type { CaseType } from "@shared/types";
 
-export function GroupAccordion({
-  type,
-  count,
-  children,
-}: {
-  type: CaseType;
-  count?: number;
-  children: ReactNode;
-}) {
+export function GroupAccordion({ type, count, children }: { type: CaseType; count?: number; children: ReactNode }) {
   const [open, setOpen] = useState(true);
   const { icon: Icon } = CASE_TYPE_CONFIGS[type];
 

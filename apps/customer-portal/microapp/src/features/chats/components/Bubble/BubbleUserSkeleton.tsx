@@ -8,7 +8,7 @@ export function BubbleUserSkeleton() {
         sx={{
           p: 1.5,
           ml: 10,
-          wdith: "fit-content", 
+          wdith: "fit-content",
           bgcolor: "background.paper",
           borderStyle: "dashed",
           borderWidth: 1,
@@ -21,7 +21,7 @@ export function BubbleUserSkeleton() {
         </Stack>
 
         <Stack direction="row" justifyContent="end" mt={1}>
-        <Skeleton variant="text" width={50} height={20} />
+          <Skeleton variant="text" width={50} height={20} />
         </Stack>
       </Card>
     </Stack>

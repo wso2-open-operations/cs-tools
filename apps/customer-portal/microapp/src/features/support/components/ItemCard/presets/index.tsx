@@ -7,7 +7,7 @@ import { ItemCard } from "@features/support/components";
 
 import { PriorityChip, StatusChip } from "@shared/components/support";
 
-import { CASE_TYPES, CASE_TYPE_CONFIGS, ROUTES } from "@shared/constants";
+import { CASE_TYPE_CONFIGS, CASE_TYPES, ROUTES } from "@shared/constants";
 
 export function CaseItemCard({
   id,

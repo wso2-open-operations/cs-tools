@@ -15,10 +15,10 @@
 // under the License.
 import { useRef, useState } from "react";
 
+import { useScrollTo } from "@root/src/shared/utils/useScroll";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { cases } from "@features/cases/api/cases.queries";
-import { useScrollTo } from "@root/src/shared/utils/useScroll";
 
 export function useDetailComments(id: string) {
   const queryClient = useQueryClient();

@@ -1,4 +1,5 @@
 import type { CaseType } from "@shared/types";
+
 import { CASE_TYPES } from "./app.constants";
 
 export const SEARCH_PLACEHOLDER_CONFIG: Record<CaseType, string> = {

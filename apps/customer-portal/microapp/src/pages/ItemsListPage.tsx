@@ -14,9 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
+
+import { FilterContent } from "@features/items/components";
+
 import { ErrorState } from "@components/common";
 import { ErrorBoundary } from "@components/core";
-import { FilterContent } from "@features/items/components";
 
 export default function ItemsListPage() {
   const { reset } = useQueryErrorResetBoundary();

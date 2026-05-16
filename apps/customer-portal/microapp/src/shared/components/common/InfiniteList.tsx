@@ -13,25 +13,35 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import type React from "react";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
-import { Stack } from "@wso2/oxygen-ui";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
-interface InfiniteListProps<TPage, TError>
+interface InfiniteListProps<TItem, TError>
   extends Pick<
-    UseInfiniteQueryResult<InfiniteData<TPage>, TError>,
+    UseInfiniteQueryResult<InfiniteData<TItem[]>, TError>,
     "data" | "hasNextPage" | "isFetchingNextPage" | "fetchNextPage"
   > {
-  children: (data: InfiniteData<TPage>) => React.ReactNode;
+  children: (item: TItem, index: number) => React.ReactNode;
   sentinel: React.ReactNode;
   tail?: React.ReactNode;
 }
 
-export function InfiniteList<TPage, TError>(props: InfiniteListProps<TPage, TError>) {
+export function InfiniteList<TItem, TError>(props: InfiniteListProps<TItem, TError>) {
   const { children, sentinel, tail, data, hasNextPage, isFetchingNextPage, fetchNextPage } = props;
+  const scrollRef = useRef<HTMLDivElement>(null);
   const observer = useRef<IntersectionObserver | null>(null);
+
+  const allItems = useMemo(() => data?.pages.flat() ?? [], [data]);
+
+  const virtualizer = useVirtualizer({
+    count: allItems.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 88,
+    measureElement: (element) => element.getBoundingClientRect().height,
+    overscan: 5,
+  });
 
   const sentinelRef = useCallback(
     (node: HTMLElement | null) => {
@@ -45,10 +55,7 @@ export function InfiniteList<TPage, TError>(props: InfiniteListProps<TPage, TErr
             fetchNextPage();
           }
         },
-        {
-          root: null,
-          threshold: 0.1,
-        },
+        { root: scrollRef.current, threshold: 0.1 },
       );
 
       if (node) observer.current.observe(node);
@@ -57,16 +64,39 @@ export function InfiniteList<TPage, TError>(props: InfiniteListProps<TPage, TErr
   );
 
   return (
-    <>
-      {data && children(data)}
+    <div ref={scrollRef} style={{ height: "100%", overflow: "auto" }}>
+      <div
+        style={{
+          height: virtualizer.getTotalSize(),
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => (
+          <div
+            key={virtualItem.key}
+            data-index={virtualItem.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualItem.start}px)`,
+            }}
+          >
+            {children(allItems[virtualItem.index], virtualItem.index)}
+          </div>
+        ))}
+      </div>
 
-      {(!data || hasNextPage) && (
-        <Stack ref={sentinelRef} gap={2}>
+      {hasNextPage && (
+        <div ref={sentinelRef} style={{ padding: 1 }}>
           {sentinel}
-        </Stack>
+        </div>
       )}
 
       {data && !hasNextPage && tail}
-    </>
+    </div>
   );
 }

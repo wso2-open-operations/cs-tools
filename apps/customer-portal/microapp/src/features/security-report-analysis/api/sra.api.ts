@@ -21,8 +21,8 @@ import { toCase, toCaseSummary } from "@features/cases/mappers/case.mapper";
 import type { CaseDto, CasesDto, GetCasesRequestDto } from "@features/cases/types/case.dto";
 import type { Case, CaseSummary } from "@features/cases/types/case.model";
 
-import type { PaginatedArray } from "@shared/types";
 import { CASE_TYPES } from "@shared/constants";
+import type { PaginatedArray } from "@shared/types";
 
 export const getAllSecurityReportAnalysis = async (
   id: string,

@@ -1,4 +1,5 @@
 import { Box, SearchBar, Skeleton, Stack, Tab, Tabs } from "@wso2/oxygen-ui";
+
 import { useFilters } from "@features/items/hooks";
 
 export type FilterControlsVariant = "full" | "tabs-only" | "search-only";
@@ -14,11 +15,7 @@ export interface FilterControlsProps {
   variant?: FilterControlsVariant;
 }
 
-export function FilterControls({
-  variant = "full",
-  tabs,
-  placeholder,
-}: FilterControlsProps) {
+export function FilterControls({ variant = "full", tabs, placeholder }: FilterControlsProps) {
   const { filters, set } = useFilters();
   const showSearch = variant !== "tabs-only"; /** Hide the search bar */
   const showTabs = variant !== "search-only"; /** Hide the filter tabs section */

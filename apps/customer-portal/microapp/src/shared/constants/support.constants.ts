@@ -120,7 +120,6 @@ export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["
   "4": "default",
 };
 
-export const ITEMS_LIST_FILTERABLE_CASE_TYPES: CaseType[] =
-  (Object.values(CASE_TYPES) as CaseType[]).filter(
-    (type) => !([CASE_TYPES.ANNOUNCEMENT] as CaseType[]).includes(type)
-  );
+export const ITEMS_LIST_FILTERABLE_CASE_TYPES: CaseType[] = (Object.values(CASE_TYPES) as CaseType[]).filter(
+  (type) => !([CASE_TYPES.ANNOUNCEMENT] as CaseType[]).includes(type),
+);

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 
+import type { BubbleProps } from "@features/chats/components";
+import type { MessageAuthor } from "@features/chats/types";
+
 import { useDateTime } from "@shared/hooks/useDateTime";
 
 import { MESSAGE_AUTHOR_TYPES, NOVERA_INITIAL_MESSAGE } from "@shared/constants";
-import type { BubbleProps } from "@features/chats/components";
-import type { MessageAuthor } from "@features/chats/types";
 
 export function useConversation(committed: BubbleProps | null, reset: () => void) {
   const { fromNow } = useDateTime();

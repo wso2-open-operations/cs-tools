@@ -15,9 +15,10 @@
 // under the License.
 import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
 
-import { useThemeMode } from "@context/theme";
 import { Box, CircularProgress, IconButton, pxToRem, Stack, TextField } from "@wso2/oxygen-ui";
 import { SendHorizonal } from "@wso2/oxygen-ui-icons-react";
+
+import { useThemeMode } from "@context/theme";
 
 interface StickyCommentBarProps {
   value: string;

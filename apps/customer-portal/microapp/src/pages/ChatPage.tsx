@@ -14,20 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 import { useEffect, useRef, useState } from "react";
+
 import { useNavigate } from "react-router-dom";
+
 import { Stack } from "@wso2/oxygen-ui";
 
 import { useProject } from "@context/project";
 
-import { PromptCreateCase, Bubble } from "@features/chats/components";
+import { Bubble, PromptCreateCase } from "@features/chats/components";
 import { useConversation } from "@features/chats/hooks/useConversation";
 import { useNovera } from "@features/chats/hooks/useNovera";
 import { useStream } from "@features/chats/hooks/useStream";
 
 import { ROUTES } from "@shared/constants";
+import { scrollTo } from "@shared/utils";
 
 import { StickyCommentBar } from "@components/detail";
-import { scrollTo } from "@shared/utils";
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -38,7 +40,7 @@ export default function ChatPage() {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const [comment, setComment] = useState("");
-  
+
   const handleSend = () => {
     if (!comment.trim()) return;
 
@@ -52,8 +54,8 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-      scrollTo(bottomRef); 
-  }, [messages, draft])
+    scrollTo(bottomRef);
+  }, [messages, draft]);
 
   return (
     <>

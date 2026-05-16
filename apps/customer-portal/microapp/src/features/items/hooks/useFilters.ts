@@ -1,11 +1,12 @@
-import type { CaseType } from "@shared/types";
 import { useSearchParams } from "react-router-dom";
 
+import type { CaseType } from "@shared/types";
+
 export interface ListFilterParams {
-    types: CaseType[];
-    states?: string[];
-    severities?: string[];
-    search?: string;
+  types: CaseType[];
+  states?: string[];
+  severities?: string[];
+  search?: string;
 }
 
 export function useFilters() {
@@ -19,10 +20,19 @@ export function useFilters() {
   };
 
   const patch = (partial: Partial<ListFilterParams>) => {
-    setSearchParams(prev => {
-      if (partial.types) { prev.delete("type"); partial.types.forEach(t => prev.append("type", t)); }
-      if (partial.states) { prev.delete("state"); partial.states.forEach(s => prev.append("state", s)); }
-      if (partial.severities) { prev.delete("severity"); partial.severities.forEach(s => prev.append("severity", s)); }
+    setSearchParams((prev) => {
+      if (partial.types) {
+        prev.delete("type");
+        partial.types.forEach((t) => prev.append("type", t));
+      }
+      if (partial.states) {
+        prev.delete("state");
+        partial.states.forEach((s) => prev.append("state", s));
+      }
+      if (partial.severities) {
+        prev.delete("severity");
+        partial.severities.forEach((s) => prev.append("severity", s));
+      }
       if (partial.search !== undefined) prev.set("search", partial.search);
       return prev;
     });
@@ -33,6 +43,6 @@ export function useFilters() {
   return {
     filters,
     set: patch,
-    reset
+    reset,
   };
 }

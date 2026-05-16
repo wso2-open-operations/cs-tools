@@ -14,10 +14,10 @@ export function BubbleAgentSkeleton() {
           borderColor: "divider",
         }}
       >
-          <Stack direction="row" justifyContent="start" gap={1} mb={1.5}>
-            <Skeleton variant="circular" width={pxToRem(18)} height={pxToRem(18)} />
-            <Skeleton variant="text" width={60} height={20} />
-          </Stack>
+        <Stack direction="row" justifyContent="start" gap={1} mb={1.5}>
+          <Skeleton variant="circular" width={pxToRem(18)} height={pxToRem(18)} />
+          <Skeleton variant="text" width={60} height={20} />
+        </Stack>
 
         <Stack gap={1}>
           <Skeleton variant="text" width="90%" height={20} />

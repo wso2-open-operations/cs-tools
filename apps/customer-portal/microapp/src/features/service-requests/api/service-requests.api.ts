@@ -22,8 +22,8 @@ import { toServiceRequest, toServiceRequestSummary } from "@features/service-req
 import type { ServiceRequestDto, ServiceRequestsDto } from "@features/service-requests/types/service-request.dto";
 import type { ServiceRequest, ServiceRequestSummary } from "@features/service-requests/types/service-request.model";
 
-import type { PaginatedArray } from "@shared/types";
 import { CASE_TYPES } from "@shared/constants";
+import type { PaginatedArray } from "@shared/types";
 
 export const getAllServiceRequests = async (
   id: string,

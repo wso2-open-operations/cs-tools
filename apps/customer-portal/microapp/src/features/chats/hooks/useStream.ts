@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 
+import type { BubbleAgentProps } from "@features/chats/components";
 import type { FinalNoveraResponse, NoveraResponse } from "@features/chats/types";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
-import type { BubbleAgentProps } from "@features/chats/components";
+
 import { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 
 export function useStream() {

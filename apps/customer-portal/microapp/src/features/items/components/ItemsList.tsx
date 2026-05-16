@@ -1,17 +1,40 @@
-import { useAnnouncementItems, useCaseItems, useChangeRequestItems, useChatItems, useEngagementItems, useInfiniteListTail, useSecurityReportAnalysisItems, useServiceRequestItems } from "@features/items/hooks";
-import { InfiniteList } from "@shared/components/common";
-import { CASE_TYPES } from "@shared/constants";
-import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
-import type { CaseType } from "@shared/types";
 import type { ReactNode } from "react";
-import { AnnouncementItemCard, CaseItemCard, ChangeRequestItemCard, ChatItemCard, EngagementItemCard, FilterContentSkeleton, SecurityReportAnalysisItemCard, ServiceRequestItemCard, ItemsListWrapper } from "@features/items/components";
+
+import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
+
+import {
+  AnnouncementItemCard,
+  CaseItemCard,
+  ChangeRequestItemCard,
+  ChatItemCard,
+  EngagementItemCard,
+  FilterContentSkeleton,
+  ItemsListWrapper,
+  SecurityReportAnalysisItemCard,
+  ServiceRequestItemCard,
+} from "@features/items/components";
+import {
+  useAnnouncementItems,
+  useCaseItems,
+  useChangeRequestItems,
+  useChatItems,
+  useEngagementItems,
+  useInfiniteListTail,
+  useSecurityReportAnalysisItems,
+  useServiceRequestItems,
+} from "@features/items/hooks";
+
+import { InfiniteList } from "@shared/components/common";
+
+import { CASE_TYPES } from "@shared/constants";
+import type { CaseType } from "@shared/types";
 
 export function CaseItemsList() {
   const { query, total, count } = useCaseItems();
 
   return (
     <ItemsList type={CASE_TYPES.DEFAULT} query={query} total={total}>
-        {({ pages }) => pages.flatMap((page) => page.map((item) => <CaseItemCard {...item} to="" />))}
+      {(item) => <CaseItemCard {...item} to="" />}
     </ItemsList>
   );
 }
@@ -20,20 +43,20 @@ export function ChatItemsList() {
   const { query, total, count } = useChatItems();
 
   return (
-        <ItemsList type={CASE_TYPES.CHAT} query={query} total={total}>
-            {({ pages }) => pages.flatMap((page) => page.map((item) => <ChatItemCard {...item} to="" />))}
-        </ItemsList>
+    <ItemsList type={CASE_TYPES.CHAT} query={query} total={total}>
+      {(item) => <ChatItemCard {...item} to="" />}
+    </ItemsList>
   );
 }
 
 export function ServiceRequestItemsList() {
-    const { query, total, count } = useServiceRequestItems();
+  const { query, total, count } = useServiceRequestItems();
 
-    return (
-        <ItemsList type={CASE_TYPES.SERVICE_REQUEST} query={query} total={total}>
-            {({ pages }) => pages.flatMap((page) => page.map((item) => <ServiceRequestItemCard {...item} to="" />))}
-        </ItemsList>
-    );
+  return (
+    <ItemsList type={CASE_TYPES.SERVICE_REQUEST} query={query} total={total}>
+      {(item) => <ServiceRequestItemCard {...item} to="" />}
+    </ItemsList>
+  );
 }
 
 export function ChangeRequestItemsList() {
@@ -41,7 +64,7 @@ export function ChangeRequestItemsList() {
 
   return (
     <ItemsList type={CASE_TYPES.CHANGE_REQUEST} query={query} total={total}>
-        {({ pages }) => pages.flatMap((page) => page.map((item) => <ChangeRequestItemCard {...item} to="" />))}
+      {(item) => <ChangeRequestItemCard {...item} to="" />}
     </ItemsList>
   );
 }
@@ -51,7 +74,7 @@ export function SecurityReportAnalysisItemsList() {
 
   return (
     <ItemsList type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} query={query} total={total}>
-        {({ pages }) => pages.flatMap((page) => page.map((item) => <SecurityReportAnalysisItemCard {...item} to="" />))}
+      {(item) => <SecurityReportAnalysisItemCard {...item} to="" />}
     </ItemsList>
   );
 }
@@ -61,7 +84,7 @@ export function EngagementItemsList() {
 
   return (
     <ItemsList type={CASE_TYPES.ENGAGEMENT} query={query} total={total}>
-        {({ pages }) => pages.flatMap((page) => page.map((item) => <EngagementItemCard {...item} to="" />))}
+      {(item) => <EngagementItemCard {...item} to="" />}
     </ItemsList>
   );
 }
@@ -71,25 +94,32 @@ export function AnnouncementItemsList() {
 
   return (
     <ItemsList type={CASE_TYPES.ANNOUNCEMENT} query={query} total={total}>
-        {({ pages }) => pages.flatMap((page) => page.map((item) => <AnnouncementItemCard {...item} to="" />))}
+      {(item) => <AnnouncementItemCard {...item} to="" />}
     </ItemsList>
   );
 }
 
-
-function ItemsList<TPage, TError>({ type, query, total, children }: {
-    type: CaseType;
-    query: Pick<UseInfiniteQueryResult<InfiniteData<TPage>, TError>, "data" | "hasNextPage" | "isFetchingNextPage" | "fetchNextPage">;
-    total?: number;
-    children: (data: InfiniteData<TPage>) => ReactNode;
+function ItemsList<TItem, TError>({
+  type,
+  query,
+  total,
+  children,
+}: {
+  type: CaseType;
+  query: Pick<
+    UseInfiniteQueryResult<InfiniteData<TItem[]>, TError>,
+    "data" | "hasNextPage" | "isFetchingNextPage" | "fetchNextPage"
+  >;
+  total?: number;
+  children: (item: TItem, index: number) => ReactNode;
 }) {
-const tail = useInfiniteListTail(total ?? 0);
+  const tail = useInfiniteListTail(total ?? 0);
 
-return (
+  return (
     <ItemsListWrapper type={type}>
-        <InfiniteList {...query} sentinel={<FilterContentSkeleton />} tail={tail}>
-            {children}
-        </InfiniteList>
+      <InfiniteList {...query} sentinel={<FilterContentSkeleton />} tail={tail}>
+        {children}
+      </InfiniteList>
     </ItemsListWrapper>
-);
+  );
 }

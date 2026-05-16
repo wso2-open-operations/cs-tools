@@ -23,6 +23,8 @@ import ChatPage from "@pages/ChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
 import EditUserPage from "@pages/EditUserPage";
 import HomePage from "@pages/HomePage";
+import ItemDetailPage from "@pages/ItemDetailPage";
+import ItemsListPage from "@pages/ItemsListPage";
 import ProfilePage from "@pages/ProfilePage";
 import SelectProjectPage from "@pages/SelectProjectPage";
 import SupportPage from "@pages/SupportPage";
@@ -31,14 +33,13 @@ import UsersPage from "@pages/UsersPage";
 
 import { useScrollControl } from "@shared/hooks/useScrollControl";
 
+import { CASE_TYPES } from "@shared/constants";
+
 import { ErrorState } from "@components/common";
 import MainLayout from "@components/layout/MainLayout";
 import RequireProject from "@components/layout/RequireProject";
 
 import AppProvider from "./providers";
-import ItemsListPage from "@pages/ItemsListPage";
-import ItemDetailPage from "@pages/ItemDetailPage";
-import { CASE_TYPES } from "@shared/constants";
 
 const App: React.FC = () => {
   useLayoutEffect(() => {

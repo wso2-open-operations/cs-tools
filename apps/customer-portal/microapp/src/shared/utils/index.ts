@@ -18,4 +18,4 @@ export * from "./date.utils";
 export * from "./filter.utils";
 export * from "./storage.utils";
 export * from "./string.utils";
-export * from "./scroll.utils"; 
+export * from "./scroll.utils";

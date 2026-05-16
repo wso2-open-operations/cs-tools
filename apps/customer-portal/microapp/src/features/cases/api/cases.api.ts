@@ -48,8 +48,8 @@ import type {
 } from "@features/cases/types/case.dto";
 import type { Attachment, Case, CaseSummary, Comment } from "@features/cases/types/case.model";
 
-import type { PaginatedArray, Pagination } from "@shared/types";
 import { CASE_TYPES } from "@shared/constants";
+import type { PaginatedArray, Pagination } from "@shared/types";
 
 export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Promise<PaginatedArray<CaseSummary>> => {
   const response = (
