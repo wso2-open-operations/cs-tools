@@ -20,7 +20,6 @@ import type { ProjectMetricMeta } from "@features/projects/components";
 import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
 
 import type { ProgressTimelineEntryProps } from "@components/detail";
-import type { ItemCardProps } from "@components/support";
 
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
@@ -115,25 +114,5 @@ export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => st
 };
 
 export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";
-
-export const SEARCH_PLACEHOLDER_CONFIG: Record<ItemCardProps["type"], string> = {
-  case: "Search Cases",
-  chat: "Search Chats",
-  service: "Search Service Requests",
-  change: "Search Change Requests",
-  sra: "Search Security Report Analysis",
-  engagement: "Search Engagement",
-  announcement: "Search Announcements",
-};
-
-export const PLURALS: Record<ItemCardProps["type"], string> = {
-  case: "Cases",
-  chat: "Chats",
-  service: "Service Requests",
-  change: "Change Requests",
-  sra: "Security Report Analysis",
-  engagement: "Engagements",
-  announcement: "Announcements",
-};
 
 export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

@@ -19,20 +19,12 @@ import { Route, HashRouter as Router, Routes } from "react-router-dom";
 
 import { requestDeviceSafeAreaInsets } from "@bridge/index";
 
-import AllItemsPage from "@pages/AllItemsPage";
-import AnnouncementDetailPage from "@pages/AnnouncementDetailPage";
-import CaseDetailPage from "@pages/CaseDetailPage";
-import ChangeDetailPage from "@pages/ChangeDetailPage";
-import ChatDetailPage from "@pages/ChatDetailPage";
 import ChatPage from "@pages/ChatPage";
 import CreateCasePage from "@pages/CreateCasePage";
 import EditUserPage from "@pages/EditUserPage";
-import EngagementDetailPage from "@pages/EngagementDetailPage";
 import HomePage from "@pages/HomePage";
 import ProfilePage from "@pages/ProfilePage";
-import SecurityReportAnalysisDetailPage from "@pages/SecurityReportAnalysisDetailPage";
 import SelectProjectPage from "@pages/SelectProjectPage";
-import ServiceDetailPage from "@pages/ServiceDetailPage";
 import SupportPage from "@pages/SupportPage";
 import UpdateProfileSettingsPage from "@pages/UpdateProfileSettingsPage";
 import UsersPage from "@pages/UsersPage";
@@ -44,6 +36,9 @@ import MainLayout from "@components/layout/MainLayout";
 import RequireProject from "@components/layout/RequireProject";
 
 import AppProvider from "./providers";
+import ItemsListPage from "@pages/ItemsListPage";
+import ItemDetailPage from "@pages/ItemDetailPage";
+import { CASE_TYPES } from "@shared/constants";
 
 const App: React.FC = () => {
   useLayoutEffect(() => {
@@ -90,42 +85,42 @@ const App: React.FC = () => {
               <Route path="/create" element={<CreateCasePage />} />
 
               <Route path="/cases">
-                <Route path="all" element={<AllItemsPage type="case" />} />
-                <Route path=":id" element={<CaseDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.DEFAULT} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.DEFAULT} />} />
               </Route>
 
               <Route path="/chats">
-                <Route path="all" element={<AllItemsPage type="chat" />} />
-                <Route path=":id" element={<ChatDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.CHAT} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.CHAT} />} />
               </Route>
 
               <Route path="/services">
-                <Route path="all" element={<AllItemsPage type="service" />} />
-                <Route path=":id" element={<ServiceDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.SERVICE_REQUEST} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.SERVICE_REQUEST} />} />
               </Route>
 
               <Route path="/changes">
-                <Route path="all" element={<AllItemsPage type="change" />} />
-                <Route path=":id" element={<ChangeDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.CHANGE_REQUEST} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.CHANGE_REQUEST} />} />
               </Route>
 
               <Route path="/sras">
-                <Route path="all" element={<AllItemsPage type="sra" />} />
-                <Route path=":id" element={<SecurityReportAnalysisDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />} />
               </Route>
 
               <Route path="/engagements">
-                <Route path="all" element={<AllItemsPage type="engagement" />} />
-                <Route path=":id" element={<EngagementDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.ENGAGEMENT} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.ENGAGEMENT} />} />
               </Route>
 
               <Route path="announcements">
-                <Route path="all" element={<AllItemsPage type="announcement" />} />
-                <Route path=":id" element={<AnnouncementDetailPage />} />
+                <Route path="all" element={<ItemsListPage type={CASE_TYPES.ANNOUNCEMENT} />} />
+                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.ANNOUNCEMENT} />} />
               </Route>
 
               <Route path="/multiple">
-                <Route path="all" element={<AllItemsPage type="multiple" />} />
+                <Route path="all" element={<ItemsListPage />} />
               </Route>
             </Route>
           </Route>

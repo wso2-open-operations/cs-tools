@@ -49,12 +49,13 @@ import type {
 import type { Attachment, Case, CaseSummary, Comment } from "@features/cases/types/case.model";
 
 import type { PaginatedArray, Pagination } from "@shared/types";
+import { CASE_TYPES } from "@shared/constants";
 
 export const getAllCases = async (id: string, body: GetCasesRequestDto = {}): Promise<PaginatedArray<CaseSummary>> => {
   const response = (
     await apiClient.post<CasesDto>(PROJECT_CASES_ENDPOINT(id), {
       ...body,
-      filters: { ...(body?.filters ?? {}), caseTypes: ["default_case"] },
+      filters: { ...(body?.filters ?? {}), caseTypes: [CASE_TYPES.DEFAULT] },
     })
   ).data;
   const result = response.cases.map(toCaseSummary) as PaginatedArray<CaseSummary>;

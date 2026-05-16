@@ -14,8 +14,5 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./ItemCardExtended";
 export * from "./Chip";
-export * from "./FilterSlotBuilder";
-export * from "./FilterSlotContent";
 export * from "./CallRequestCard";

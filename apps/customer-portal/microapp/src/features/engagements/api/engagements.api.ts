@@ -23,6 +23,7 @@ import type { Case, CaseSummary } from "@features/cases/types/case.model";
 import type { CallRequestsDto } from "@features/engagements/types/engagement.dto";
 
 import type { PaginatedArray } from "@shared/types";
+import { CASE_TYPES } from "@shared/constants";
 
 export const getAllEngagements = async (
   id: string,
@@ -31,7 +32,7 @@ export const getAllEngagements = async (
   const response = (
     await apiClient.post<CasesDto>(PROJECT_CASES_ENDPOINT(id), {
       ...body,
-      filters: { ...(body?.filters ?? {}), caseTypes: ["engagement"] },
+      filters: { ...(body?.filters ?? {}), caseTypes: [CASE_TYPES.ENGAGEMENT] },
     })
   ).data;
   const result = response.cases.map(toCaseSummary) as PaginatedArray<CaseSummary>;

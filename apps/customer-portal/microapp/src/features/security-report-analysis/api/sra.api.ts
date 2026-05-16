@@ -22,6 +22,7 @@ import type { CaseDto, CasesDto, GetCasesRequestDto } from "@features/cases/type
 import type { Case, CaseSummary } from "@features/cases/types/case.model";
 
 import type { PaginatedArray } from "@shared/types";
+import { CASE_TYPES } from "@shared/constants";
 
 export const getAllSecurityReportAnalysis = async (
   id: string,
@@ -30,7 +31,7 @@ export const getAllSecurityReportAnalysis = async (
   const response = (
     await apiClient.post<CasesDto>(PROJECT_CASES_ENDPOINT(id), {
       ...body,
-      filters: { ...(body?.filters ?? {}), caseTypes: ["security_report_analysis"] },
+      filters: { ...(body?.filters ?? {}), caseTypes: [CASE_TYPES.SECURITY_REPORT_ANALYSIS] },
     })
   ).data;
   const result = response.cases.map(toCaseSummary) as PaginatedArray<CaseSummary>;

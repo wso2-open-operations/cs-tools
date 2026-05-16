@@ -16,7 +16,7 @@
 
 export * from "./TabPanel";
 export * from "./SectionCard";
-export * from "./InfiniteScroll";
+export * from "./InfiniteList";
 export * from "./EmptyState";
 export * from "./ErrorState";
 export * from "./RichText";

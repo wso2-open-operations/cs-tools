@@ -7,7 +7,7 @@ import { ItemCard } from "@features/support/components";
 
 import { PriorityChip, StatusChip } from "@shared/components/support";
 
-import { CASE_TYPES, CASE_TYPES_CONFIG, ROUTES } from "@shared/constants";
+import { CASE_TYPES, CASE_TYPE_CONFIGS, ROUTES } from "@shared/constants";
 
 export function CaseItemCard({
   id,
@@ -20,7 +20,7 @@ export function CaseItemCard({
   createdOn,
 }: CaseSummary) {
   const type = CASE_TYPES.DEFAULT;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -38,7 +38,7 @@ export function CaseItemCard({
 
 export function ChatItemCard({ id, description, number, statusId, count, createdOn }: Chat) {
   const type = CASE_TYPES.CHAT;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -63,7 +63,7 @@ export function ServiceRequestItemCard({
   createdOn,
 }: ServiceRequestSummary) {
   const type = CASE_TYPES.SERVICE_REQUEST;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -91,7 +91,7 @@ export function ChangeRequestItemCard({
   createdOn,
 }: ChangeRequestSummary) {
   const type = CASE_TYPES.CHANGE_REQUEST;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -119,7 +119,7 @@ export function SecurityReportAnalysisItemCard({
   createdOn,
 }: CaseSummary) {
   const type = CASE_TYPES.SECURITY_REPORT_ANALYSIS;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -145,7 +145,7 @@ export function EngagementItemCard({
   createdOn,
 }: CaseSummary) {
   const type = CASE_TYPES.ENGAGEMENT;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>
@@ -161,7 +161,7 @@ export function EngagementItemCard({
 
 export function AnnouncementItemCard({ id, title, number, statusId, createdOn }: CaseSummary) {
   const type = CASE_TYPES.ANNOUNCEMENT;
-  const { icon, color } = CASE_TYPES_CONFIG[type];
+  const { icon, color } = CASE_TYPE_CONFIGS[type];
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>

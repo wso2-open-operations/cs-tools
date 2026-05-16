@@ -13,13 +13,26 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { Badge, badgeClasses } from "@mui/material";
-import { styled } from "@mui/system";
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
+import { ErrorState } from "@components/common";
+import { ErrorBoundary } from "@components/core";
+import { FilterContent } from "@features/items/components";
 
-export const NotificationBadge = styled(Badge)`
-  & .${badgeClasses.badge} {
-    position: absolute;
-    top: -8px;
-    right: 12px;
-  }
-`;
+export default function ItemsListPage() {
+  const { reset } = useQueryErrorResetBoundary();
+
+  return (
+    <ErrorBoundary
+      fallback={(_error, resetErrorBoundary) => (
+        <ErrorState
+          onRetry={() => {
+            reset();
+            resetErrorBoundary();
+          }}
+        />
+      )}
+    >
+      <FilterContent />
+    </ErrorBoundary>
+  );
+}

@@ -19,7 +19,7 @@ import { useCallback, useRef } from "react";
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
 import { Stack } from "@wso2/oxygen-ui";
 
-interface InfiniteScrollProps<TPage, TError>
+interface InfiniteListProps<TPage, TError>
   extends Pick<
     UseInfiniteQueryResult<InfiniteData<TPage>, TError>,
     "data" | "hasNextPage" | "isFetchingNextPage" | "fetchNextPage"
@@ -29,7 +29,7 @@ interface InfiniteScrollProps<TPage, TError>
   tail?: React.ReactNode;
 }
 
-export function InfiniteScroll<TPage, TError>(props: InfiniteScrollProps<TPage, TError>) {
+export function InfiniteList<TPage, TError>(props: InfiniteListProps<TPage, TError>) {
   const { children, sentinel, tail, data, hasNextPage, isFetchingNextPage, fetchNextPage } = props;
   const observer = useRef<IntersectionObserver | null>(null);
 

@@ -23,6 +23,7 @@ import type { ServiceRequestDto, ServiceRequestsDto } from "@features/service-re
 import type { ServiceRequest, ServiceRequestSummary } from "@features/service-requests/types/service-request.model";
 
 import type { PaginatedArray } from "@shared/types";
+import { CASE_TYPES } from "@shared/constants";
 
 export const getAllServiceRequests = async (
   id: string,
@@ -31,7 +32,7 @@ export const getAllServiceRequests = async (
   const response = (
     await apiClient.post<ServiceRequestsDto>(PROJECT_CASES_ENDPOINT(id), {
       ...body,
-      filters: { ...(body?.filters ?? {}), caseTypes: ["service_request"] },
+      filters: { ...(body?.filters ?? {}), caseTypes: [CASE_TYPES.SERVICE_REQUEST] },
     })
   ).data;
   const result = response.cases.map(toServiceRequestSummary) as PaginatedArray<ServiceRequestSummary>;

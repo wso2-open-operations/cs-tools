@@ -19,7 +19,7 @@ export const DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS = "Outstanding Engagements
 export const SERVICE_REQUESTS_LABEL = "Service Requests"; // TODO: Requires pointing to a global constant instead
 export const CHANGE_REQUESTS_LABEL = "Change Requests"; // TODO: Requires pointing to a global constant instead
 
-export const CASE_TYPE_PLURAL_LABEL: Record<CaseType, string> = {
+export const CASE_TYPE_PLURAL_LABELS: Record<CaseType, string> = {
   default_case: "Cases",
   chat: "Chats",
   service_request: "Service Requests",

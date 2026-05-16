@@ -3,22 +3,20 @@ import { type ReactNode, useState } from "react";
 import { Box, Collapse, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 import { ListChevronsDownUp, ListChevronsUpDown } from "@wso2/oxygen-ui-icons-react";
 
-import { PLURALS } from "@config/constants";
-
-import type { ItemCardProps } from "../support";
-import { TYPE_CONFIG } from "../support/config";
+import type { CaseType } from "@shared/types";
+import { CASE_TYPE_CONFIGS, CASE_TYPE_PLURAL_LABELS } from "@shared/constants";
 
 export function GroupAccordion({
   type,
   count,
   children,
 }: {
-  type: ItemCardProps["type"];
+  type: CaseType;
   count?: number;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
-  const { icon: Icon } = TYPE_CONFIG[type];
+  const { icon: Icon } = CASE_TYPE_CONFIGS[type];
 
   return (
     <Box
@@ -45,15 +43,18 @@ export function GroupAccordion({
           <Box color="text.secondary">
             <Icon size={pxToRem(18)} />
           </Box>
+
           <Typography variant="body1" sx={{ flex: 1 }}>
-            {PLURALS[type]}
+            {CASE_TYPE_PLURAL_LABELS[type]}
           </Typography>
         </Stack>
+
         <Stack direction="row" gap={1} alignItems="center">
           {count !== undefined && count}
           {open ? <ListChevronsDownUp size={pxToRem(18)} /> : <ListChevronsUpDown size={pxToRem(18)} />}
         </Stack>
       </Stack>
+
       <Collapse in={open}>
         <Stack gap={2} px={2} py={1}>
           {children}

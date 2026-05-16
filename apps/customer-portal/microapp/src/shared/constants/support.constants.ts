@@ -38,7 +38,7 @@ export const SUPPORT_TAB_VIEW_CONFIG: Record<CaseType, { title: string; subtitle
   },
 };
 
-export const CASE_TYPES_CONFIG: Record<CaseType, { icon: LucideIcon; color: string }> = {
+export const CASE_TYPE_CONFIGS: Record<CaseType, { icon: LucideIcon; color: string }> = {
   [CASE_TYPES.DEFAULT]: {
     icon: OctagonAlert,
     color: colors.red[500],
@@ -119,3 +119,8 @@ export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["
   "3": "success",
   "4": "default",
 };
+
+export const ITEMS_LIST_FILTERABLE_CASE_TYPES: CaseType[] =
+  (Object.values(CASE_TYPES) as CaseType[]).filter(
+    (type) => !([CASE_TYPES.ANNOUNCEMENT] as CaseType[]).includes(type)
+  );
