@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Card, IconButton, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Card, IconButton, pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { Download, Image, Paperclip } from "@wso2/oxygen-ui-icons-react";
 
 import { cases } from "@features/cases/api/cases.queries";
@@ -22,7 +22,7 @@ import type { Attachment } from "@features/cases/types/case.model";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
 
-export function AttachmentCard({
+export function AttachmentItem({
   attachment,
   onPreview,
 }: {
@@ -68,17 +68,35 @@ export function AttachmentCard({
         >
           {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
         </Box>
+
         <Stack gap={0.25} minWidth={0} flex={1}>
           <Typography variant="subtitle2" fontWeight="medium" noWrap>
             {attachment.fileName}
           </Typography>
+
           <Typography variant="caption" color="text.secondary" noWrap>
             {attachment.createdBy} · {fromNow(attachment.createdOn)}
           </Typography>
         </Stack>
+
         <IconButton onClick={handlePreview}>
           <Download size={pxToRem(18)} />
         </IconButton>
+      </Stack>
+    </Card>
+  );
+}
+
+export function AttachmentItemSkeleton() {
+  return (
+    <Card variant="outlined" sx={{ p: 1.5 }}>
+      <Stack direction="row" gap={1} alignItems="center">
+        <Skeleton variant="rounded" width={40} height={40} />
+        <Stack gap={0.5} flex={1} minWidth={0}>
+          <Skeleton variant="text" width="80%" />
+          <Skeleton variant="text" width="50%" />
+        </Stack>
+        <Skeleton variant="circular" width={32} height={32} />
       </Stack>
     </Card>
   );

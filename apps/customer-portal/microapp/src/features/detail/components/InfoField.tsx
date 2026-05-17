@@ -22,9 +22,10 @@ interface InfoFieldProps {
   label: string;
   value?: string | ReactNode;
   icon?: LucideIcon;
+  loading?: boolean | boolean[];
 }
 
-export function InfoField({ label, value, icon }: InfoFieldProps) {
+export function InfoField({ label, value, icon, loading = false }: InfoFieldProps) {
   const Icon = icon;
 
   return (
@@ -35,7 +36,11 @@ export function InfoField({ label, value, icon }: InfoFieldProps) {
       <Stack direction="row" alignItems="center" gap={1}>
         {Icon && <Icon size={pxToRem(16)} />}
         <Typography variant="body2" component="div" sx={{ flex: 1, wordBreak: "break-all", textAlign: "justify" }}>
-          {value ?? <Skeleton variant="text" width="100%" height={30} />}
+          {(Array.isArray(loading) ? loading.some(Boolean) : loading) ? (
+            <Skeleton variant="text" width="100%" height={30} />
+          ) : (
+            (value ?? "N/A")
+          )}
         </Typography>
       </Stack>
     </Stack>

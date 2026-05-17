@@ -15,15 +15,15 @@
 // under the License.
 import { useEffect, useRef, useState } from "react";
 
-export function useOverlineVariant() {
+export function useTitleSlotVariant() {
   const ref = useRef<HTMLSpanElement>(null);
-  const [variant, setVariant] = useState<"normal" | "shrunk">("normal");
+  const [variant, setVariant] = useState<"default" | "shrunk">("default");
 
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
 
-    const observer = new IntersectionObserver(([entry]) => setVariant(entry.isIntersecting ? "normal" : "shrunk"), {
+    const observer = new IntersectionObserver(([entry]) => setVariant(entry.isIntersecting ? "default" : "shrunk"), {
       root: null,
       rootMargin: "-80px 0px 0px 0px",
       threshold: 1.0,

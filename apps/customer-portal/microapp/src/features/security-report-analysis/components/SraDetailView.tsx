@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useOverlineVariant } from "@root/src/features/detail/hooks/useTitleSlotVariant";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
@@ -25,7 +26,6 @@ import { stripHtmlTags } from "@shared/utils/string.utils";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
 import type { useDetailComments } from "@shared/hooks/useDetailComments";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
 
 import { RichText, SectionCard } from "@components/common";
 import EmptyState from "@components/common/EmptyState";

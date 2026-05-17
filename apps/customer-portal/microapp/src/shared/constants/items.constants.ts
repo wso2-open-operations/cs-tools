@@ -1,6 +1,5 @@
+import { CASE_TYPES } from "@shared/constants";
 import type { CaseType } from "@shared/types";
-
-import { CASE_TYPES } from "./app.constants";
 
 export const SEARCH_PLACEHOLDER_CONFIG: Record<CaseType, string> = {
   [CASE_TYPES.DEFAULT]: "Search Cases",
@@ -11,3 +10,10 @@ export const SEARCH_PLACEHOLDER_CONFIG: Record<CaseType, string> = {
   [CASE_TYPES.ENGAGEMENT]: "Search Engagement",
   [CASE_TYPES.ANNOUNCEMENT]: "Search Announcements",
 };
+
+export const COMMENT_ENABLED_TYPES: CaseType[] = [
+  CASE_TYPES.DEFAULT,
+  CASE_TYPES.SERVICE_REQUEST,
+  CASE_TYPES.SECURITY_REPORT_ANALYSIS,
+  CASE_TYPES.ENGAGEMENT,
+];

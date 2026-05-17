@@ -22,3 +22,4 @@ export * from "./Fab";
 export * from "./BackButton";
 export * from "./ExitButton";
 export * from "./ProjectSelect";
+export * from "./CommentBar";

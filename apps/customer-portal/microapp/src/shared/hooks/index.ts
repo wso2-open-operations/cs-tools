@@ -15,7 +15,6 @@
 // under the License.
 
 export * from "./useDateTime";
-export * from "./useOverlineVariant";
 export * from "./usePaginationSubtitle";
 export * from "./useResolvedDateRange";
 export * from "./useScrollControl";

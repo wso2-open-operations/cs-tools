@@ -2,6 +2,8 @@ import { useNavigate } from "react-router-dom";
 
 import { useProject } from "@context/project";
 
+import type { Case } from "@features/cases/types";
+
 import { CASE_TYPES, OUTSTANDING_CASES_BY_SEVERITY_TITLE, ROUTES } from "@shared/constants";
 import type { ModeType } from "@shared/types";
 
@@ -16,5 +18,6 @@ export const useCaseNavigation = () => {
       }),
 
     toCaseCreate: () => navigate(noveraEnabled ? ROUTES[CASE_TYPES.CHAT].create : ROUTES[CASE_TYPES.DEFAULT].create),
+    toRelativeCaseCreate: (data: Case) => navigate(ROUTES[CASE_TYPES.DEFAULT].create, { state: { case: data } }),
   };
 };

@@ -14,11 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./InfoField";
-export * from "./StickyCommentBar";
 export * from "./TimelineEntry";
-export * from "./Comment";
 export * from "./StakeholderItem";
-export * from "./OverlineSlot";
 export * from "./MoreOptionsButton";
 export * from "./ProgressTimeline";

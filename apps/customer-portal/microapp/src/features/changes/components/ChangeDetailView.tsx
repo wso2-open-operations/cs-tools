@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { useOverlineVariant } from "@root/src/features/detail/hooks/useTitleSlotVariant";
 import { Chip, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
 
@@ -21,8 +22,6 @@ import { useAppBar } from "@context/layout";
 import type { ChangeRequest } from "@features/changes/types/change.model";
 
 import { stripHtmlTags } from "@shared/utils/string.utils";
-
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
 
 import { SectionCard } from "@components/common";
 import {

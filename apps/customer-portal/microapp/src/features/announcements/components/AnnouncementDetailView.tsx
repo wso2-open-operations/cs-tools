@@ -15,6 +15,7 @@
 // under the License.
 import { useLayoutEffect } from "react";
 
+import { useOverlineVariant } from "@root/src/features/detail/hooks/useTitleSlotVariant";
 import { Box, Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 
@@ -23,7 +24,6 @@ import { useLayout } from "@context/layout";
 import type { Case } from "@features/cases/types/case.model";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
-import { useOverlineVariant } from "@shared/hooks/useOverlineVariant";
 
 import { RichText, SectionCard } from "@components/common";
 import { InfoField, OverlineSlot } from "@components/detail";

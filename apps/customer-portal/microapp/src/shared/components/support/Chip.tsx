@@ -29,7 +29,7 @@ interface PriorityChipProps extends Omit<ChipProps, "label"> {
 export function PriorityChip({ prefix, id, type = CASE_TYPES.DEFAULT, ...props }: PriorityChipProps) {
   const { label, color } = usePriorityChip(type, id) ?? {};
 
-  if (!label || !color) return <SkeletonChip />;
+  if (!id || !label || !color) return <SkeletonChip />;
 
   return (
     <Chip
@@ -55,7 +55,7 @@ interface StatusChipProps extends Omit<ChipProps, "label"> {
 export function StatusChip({ id, type = CASE_TYPES.DEFAULT, ...props }: StatusChipProps) {
   const { label, color } = useStatusChip(type, id) ?? {};
 
-  if (!label || !color) return <SkeletonChip />;
+  if (!id || !label || !color) return <SkeletonChip />;
 
   return (
     <Chip

@@ -14,6 +14,5 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./AttachmentCard";
 export * from "./Field";
 export * from "./ConversationSummary";
