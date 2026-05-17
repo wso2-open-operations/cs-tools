@@ -13,13 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useParams } from "react-router-dom";
+import { ProfileSettingsView } from "@features/projects/components/ProfileSettingsView";
+import { useProfileSettings } from "@features/projects/hooks/useProfileSettings";
 
-import { EngagementDetailView } from "@features/engagements/components/EngagementDetailView";
-import { useEngagementDetail } from "@features/engagements/hooks/useEngagementDetail";
-
-export default function EngagementDetailPage() {
-  const { id } = useParams();
-  const { data, isLoading, calls, comments } = useEngagementDetail(id!);
-  return <EngagementDetailView data={data} isLoading={isLoading} calls={calls} comments={comments} />;
+export default function ProfileUpdatePage() {
+  const { me, timeZones, mutation, buildPayload } = useProfileSettings();
+  return <ProfileSettingsView me={me} timeZones={timeZones} mutation={mutation} buildPayload={buildPayload} />;
 }

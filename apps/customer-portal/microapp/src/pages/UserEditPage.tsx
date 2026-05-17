@@ -13,13 +13,10 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useParams } from "react-router-dom";
+import { EditUserView } from "@features/users/components/EditUserView";
+import { useUserEditor } from "@features/users/hooks/useUserEditor";
 
-import { CaseDetailView } from "@features/cases/components/CaseDetailView";
-import { useCaseDetail } from "@features/cases/hooks/useCaseDetail";
-
-export default function CaseDetailPage() {
-  const { id } = useParams();
-  const caseDetail = useCaseDetail(id!);
-  return <CaseDetailView {...caseDetail} />;
+export default function UserEditPage({ mode = "invite" }: { mode?: "invite" | "edit" }) {
+  const editor = useUserEditor(mode);
+  return <EditUserView mode={mode} {...editor} />;
 }

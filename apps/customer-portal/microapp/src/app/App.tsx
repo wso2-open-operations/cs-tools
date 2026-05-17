@@ -13,48 +13,32 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useLayoutEffect } from "react";
-
 import { Route, HashRouter as Router, Routes } from "react-router-dom";
 
-import { requestDeviceSafeAreaInsets } from "@bridge/index";
-
-import ChatPage from "@pages/ChatPage";
-import CreateCasePage from "@pages/CreateCasePage";
-import EditUserPage from "@pages/EditUserPage";
-import HomePage from "@pages/HomePage";
-import ItemDetailPage from "@pages/ItemDetailPage";
-import ItemsListPage from "@pages/ItemsListPage";
-import ProfilePage from "@pages/ProfilePage";
-import SelectProjectPage from "@pages/SelectProjectPage";
-import SupportPage from "@pages/SupportPage";
-import UpdateProfileSettingsPage from "@pages/UpdateProfileSettingsPage";
-import UsersPage from "@pages/UsersPage";
-
-import { useScrollControl } from "@shared/hooks/useScrollControl";
+import AppProvider from "@app/providers";
+import {
+  ChatPage,
+  CreateCasePage,
+  HomePage,
+  ItemPage,
+  ItemsListPage,
+  ProfileEditPage,
+  ProfilePage,
+  ProjectSelectPage,
+  SupportPage,
+  UserEditPage,
+  UsersPage,
+} from "@src/pages";
 
 import { CASE_TYPES } from "@shared/constants";
+import { useSafeAreaInsets, useScrollControl } from "@shared/hooks";
 
 import { ErrorState } from "@components/common";
 import MainLayout from "@components/layout/MainLayout";
 import RequireProject from "@components/layout/RequireProject";
 
-import AppProvider from "./providers";
-
 const App: React.FC = () => {
-  useLayoutEffect(() => {
-    requestDeviceSafeAreaInsets((data) => {
-      if (data?.insets) {
-        const { top, right, bottom, left } = data.insets;
-
-        const root = document.documentElement;
-        root.style.setProperty("--safe-top", `${top}px`);
-        root.style.setProperty("--safe-right", `${right}px`);
-        root.style.setProperty("--safe-bottom", `${bottom}px`);
-        root.style.setProperty("--safe-left", `${left}px`);
-      }
-    });
-  }, []);
+  useSafeAreaInsets();
 
   return (
     <Router>
@@ -62,67 +46,36 @@ const App: React.FC = () => {
         <ScrollHandler />
 
         <Routes>
-          <Route path="/select" element={<SelectProjectPage />} />
+          <Route path="/select" element={<ProjectSelectPage />} />
 
           <Route element={<RequireProject />} errorElement={<ErrorState />}>
             <Route element={<MainLayout />} errorElement={<ErrorState />}>
               <Route path="/" element={<HomePage />} />
 
-              <Route path="/support" element={<SupportPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/users/invite" element={<UserEditPage mode="invite" />} />
+              <Route path="/users/edit" element={<UserEditPage mode="edit" />} />
 
-              <Route path="/users">
-                <Route element={<UsersPage />} index />
-                <Route path="invite" element={<EditUserPage mode="invite" />} />
-                <Route path="edit" element={<EditUserPage mode="edit" />} />
-              </Route>
-
-              <Route path="/profile">
-                <Route element={<ProfilePage />} index />
-                <Route path="update" element={<UpdateProfileSettingsPage />} />
-              </Route>
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/profile/update" element={<ProfileEditPage />} />
 
               <Route path="/chat" element={<ChatPage />} />
 
               <Route path="/create" element={<CreateCasePage />} />
 
-              <Route path="/cases">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.DEFAULT} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.DEFAULT} />} />
-              </Route>
+              <Route path="/support" element={<SupportPage />} />
+              <Route path="/support/all" element={<ItemsListPage />} />
 
-              <Route path="/chats">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.CHAT} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.CHAT} />} />
-              </Route>
-
-              <Route path="/services">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.SERVICE_REQUEST} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.SERVICE_REQUEST} />} />
-              </Route>
-
-              <Route path="/changes">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.CHANGE_REQUEST} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.CHANGE_REQUEST} />} />
-              </Route>
-
-              <Route path="/sras">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />} />
-              </Route>
-
-              <Route path="/engagements">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.ENGAGEMENT} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.ENGAGEMENT} />} />
-              </Route>
-
-              <Route path="announcements">
-                <Route path="all" element={<ItemsListPage type={CASE_TYPES.ANNOUNCEMENT} />} />
-                <Route path=":id" element={<ItemDetailPage type={CASE_TYPES.ANNOUNCEMENT} />} />
-              </Route>
-
-              <Route path="/multiple">
-                <Route path="all" element={<ItemsListPage />} />
-              </Route>
+              <Route path="/cases/:id" element={<ItemPage type={CASE_TYPES.DEFAULT} />} />
+              <Route path="/conversations/:id" element={<ItemPage type={CASE_TYPES.CHAT} />} />
+              <Route path="/service-requests/:id" element={<ItemPage type={CASE_TYPES.SERVICE_REQUEST} />} />
+              <Route path="/change-requests/:id" element={<ItemPage type={CASE_TYPES.CHANGE_REQUEST} />} />
+              <Route path="/engagements/:id" element={<ItemPage type={CASE_TYPES.ENGAGEMENT} />} />
+              <Route path="/announcements/:id" element={<ItemPage type={CASE_TYPES.ANNOUNCEMENT} />} />
+              <Route
+                path="/security-report-analysis/:id"
+                element={<ItemPage type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />}
+              />
             </Route>
           </Route>
         </Routes>

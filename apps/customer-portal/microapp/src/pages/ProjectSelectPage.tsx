@@ -13,13 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useParams } from "react-router-dom";
+import { SelectProjectView } from "@features/projects/components/SelectProjectView";
 
-import { SraDetailView } from "@features/sra/components/SraDetailView";
-import { useSraDetail } from "@features/sra/hooks/useSraDetail";
-
-export default function SecurityReportAnalysisDetailPage() {
-  const { id } = useParams();
-  const { data, isLoading, comments } = useSraDetail(id!);
-  return <SraDetailView data={data} isLoading={isLoading} comments={comments} />;
+export default function ProjectSelectPage() {
+  return <SelectProjectView />;
 }
