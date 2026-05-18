@@ -1,0 +1,13 @@
+# Binaries
+*.exe
+*.out
+/bin/
+
+# Environment files
+.env
+
+# Go build cache
+vendor/
+
+# OS files
+.DS_Store
