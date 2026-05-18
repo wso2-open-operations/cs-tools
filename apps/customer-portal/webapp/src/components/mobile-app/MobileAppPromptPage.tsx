@@ -16,7 +16,6 @@
 
 import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import wso2SuperAppIcon from "@assets/super-app-icon/wso2-super-app-icon.png";
 import {
   DeviceType,
   MobileOs,
@@ -74,25 +73,9 @@ export default function MobileAppPromptPage({
         alignItems="center"
         sx={{ width: "100%", maxWidth: 400, textAlign: "center" }}
       >
-        <Stack spacing={1} alignItems="center" sx={{ width: "100%" }}>
-          <Box
-            component="img"
-            src={wso2SuperAppIcon}
-            alt="WSO2 app"
-            data-testid="wso2-super-app-icon"
-            sx={{
-              width: { xs: 72, sm: 80 },
-              height: { xs: 72, sm: 80 },
-              borderRadius: "50%",
-              objectFit: "cover",
-              flexShrink: 0,
-            }}
-          />
-
-          <Typography variant="h5" fontWeight={700}>
-            Get the WSO2 Super App
-          </Typography>
-        </Stack>
+        <Typography variant="h5" fontWeight={700}>
+          Get the WSO2 Super App
+        </Typography>
 
         <Typography
           variant="body1"
