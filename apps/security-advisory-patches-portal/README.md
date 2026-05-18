@@ -179,8 +179,8 @@ The backend reads **`x-jwt-assertion`** (JWT decode) and checks Asgardeo **`grou
 | Backend won’t start | Share name, credentials, firewall |
 | 400 on `/file` | Path fails segment validation (e.g. `..`, empty segment); or missing user context after auth |
 | 403 on `/file` | User not in `advisoryPatchesReaderRole` group; ID token missing `groups` |
-| 500 “Missing invoker info header” | SPA not sending `x-jwt-assertion` (see `apiService.ts`) |
-| 500 “Malformed Invoker info object!” | Decode the ID token: it must include **`email`** and **`groups`**. Use scopes **`openid`**, **`email`**, **`groups`** in `webapp/src/config/config.ts`; in Asgardeo enable those attributes on the app and assign the user to a group matching `advisoryPatchesReaderRole` |
+| 400 "User information header not found!" | Request reached `/file` without expected auth context; verify JWT interceptor wiring and that SPA sends `x-jwt-assertion` (see `apiService.ts`) |
+| 500 auth/JWT payload errors | Decode the ID token: it must include **`email`** and **`groups`**. Use scopes **`openid`**, **`email`**, **`groups`** in `webapp/src/config/config.ts`; in Asgardeo enable those attributes on the app and assign the user to a group matching `advisoryPatchesReaderRole` |
 | Blank PDF | Wrong path mapping vs Azure layout; browser blocking blob iframe |
 | Auth loops | Redirect URIs match `config.js` |
 | Deep link → home after login | Keep sign-in redirect at site root; the app restores **`.pdf`** links from session |
