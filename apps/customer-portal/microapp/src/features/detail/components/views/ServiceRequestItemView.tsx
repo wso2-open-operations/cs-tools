@@ -2,7 +2,7 @@ import { Grid } from "@wso2/oxygen-ui";
 import { User, Users } from "@wso2/oxygen-ui-icons-react";
 
 import { CommentsList, InfoField, Layout } from "@features/detail/components";
-import { useActions, useServiceRequest } from "@features/detail/hooks";
+import { useServiceRequest } from "@features/detail/hooks";
 
 import { SectionCard } from "@shared/components/common";
 import { PriorityChip, StatusChip } from "@shared/components/support";
@@ -16,10 +16,9 @@ export function ServiceRequestItemView() {
 
   const { format, fromNow } = useDateTime();
   const { data, isLoading } = useServiceRequest();
-  const actions = useActions();
 
   return (
-    <Layout type={type} title={data?.title} id={data?.id} actions={actions}>
+    <Layout type={type} title={data?.title} id={data?.id}>
       <SectionCard title="Request Information">
         <Grid spacing={1.5} container>
           <Grid size={12}>

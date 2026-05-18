@@ -8,3 +8,7 @@ export * from "./AttachmentsList";
 export * from "./CommentItem";
 export * from "./CommentsList";
 export * from "./BubbleList";
+export * from "./StakeholderItem";
+export * from "./StakeholdersList";
+export * from "./ProgressStep";
+export * from "./ProgressTimeline";

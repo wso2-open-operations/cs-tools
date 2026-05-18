@@ -2,7 +2,7 @@ import { Grid } from "@wso2/oxygen-ui";
 
 import { CalloutFeedback } from "@features/chats/components";
 import { BubbleList, InfoField, Layout } from "@features/detail/components";
-import { useActions, useChat } from "@features/detail/hooks";
+import { useChat } from "@features/detail/hooks";
 
 import { SectionCard } from "@shared/components/common";
 import { StatusChip } from "@shared/components/support";
@@ -15,10 +15,9 @@ export function ChatItemView() {
 
   const { format } = useDateTime();
   const { data, isLoading } = useChat();
-  const actions = useActions();
 
   return (
-    <Layout type={type} title={data?.description} id={data?.id} actions={actions}>
+    <Layout type={type} title={data?.description} id={data?.id}>
       <SectionCard>
         <Grid spacing={1.5} container>
           <Grid size={6}>

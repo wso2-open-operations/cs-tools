@@ -10,6 +10,8 @@ import {
   Shield,
 } from "@wso2/oxygen-ui-icons-react";
 
+import type { ProgressStepProps } from "@features/detail/components";
+
 import { CASE_TYPES } from "@shared/constants";
 import type { CaseType } from "@shared/types";
 
@@ -123,3 +125,52 @@ export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["
 export const ITEMS_LIST_FILTERABLE_CASE_TYPES: CaseType[] = (Object.values(CASE_TYPES) as CaseType[]).filter(
   (type) => !([CASE_TYPES.ANNOUNCEMENT] as CaseType[]).includes(type),
 );
+
+export const PROGRESS_TIMELINE_META: Pick<ProgressStepProps, "title" | "description">[] = [
+  {
+    title: "New",
+    description: "Change request created",
+  },
+  {
+    title: "Assess",
+    description: "Technical assessment completed",
+  },
+  {
+    title: "Authorize",
+    description: "Internal authorization obtained",
+  },
+  {
+    title: "Customer Approval",
+    description: "Customer approval received",
+  },
+  {
+    title: "Scheduled",
+    description: "Maintenance window scheduled",
+  },
+  {
+    title: "Implement",
+    description: "Change implementation",
+  },
+  {
+    title: "Review",
+    description: "Internal review",
+  },
+  {
+    title: "Customer Review",
+    description: "Customer validation",
+  },
+  {
+    title: "Rollback",
+    description: "Change rollback if needed",
+  },
+  {
+    title: "Closed",
+    description: "Change request completed",
+  },
+  {
+    title: "Canceled",
+    description: "Change request canceled",
+  },
+];
+
+export const PROGRESS_TIMELINE_RESOLVED_STAGES_FROM = PROGRESS_TIMELINE_META.length - 3;

@@ -19,8 +19,6 @@ import { CircleAlert, Cloud, type LucideIcon, MessageSquare, Moon } from "@wso2/
 import type { ProjectMetricMeta } from "@features/projects/components";
 import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
 
-import type { ProgressTimelineEntryProps } from "@components/detail";
-
 export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
 
 export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
@@ -55,53 +53,6 @@ export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
 };
 
 export const ADMIN_USER_ROLE = "sn_customerservice.customer_admin";
-
-export const TIMELINE_META: Omit<ProgressTimelineEntryProps, "variant">[] = [
-  {
-    title: "New",
-    description: "Change request created",
-  },
-  {
-    title: "Assess",
-    description: "Technical assessment completed",
-  },
-  {
-    title: "Authorize",
-    description: "Internal authorization obtained",
-  },
-  {
-    title: "Customer Approval",
-    description: "Customer approval received",
-  },
-  {
-    title: "Scheduled",
-    description: "Maintenance window scheduled",
-  },
-  {
-    title: "Implement",
-    description: "Change implementation",
-  },
-  {
-    title: "Review",
-    description: "Internal review",
-  },
-  {
-    title: "Customer Review",
-    description: "Customer validation",
-  },
-  {
-    title: "Rollback",
-    description: "Change rollback if needed",
-  },
-  {
-    title: "Closed",
-    description: "Change request completed",
-  },
-  {
-    title: "Canceled",
-    description: "Change request canceled",
-  },
-];
 
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
   case: (id) => `/cases/${id}`,
