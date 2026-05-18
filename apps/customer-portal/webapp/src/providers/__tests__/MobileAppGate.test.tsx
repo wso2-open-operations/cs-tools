@@ -16,7 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DeviceType, MobileOs } from "@models/mobileDevice";
+import { DeviceType, MobileOs } from "@/types/mobileDevice";
 import MobileAppGate from "@providers/MobileAppGate";
 
 vi.mock("@utils/deviceDetection", () => ({

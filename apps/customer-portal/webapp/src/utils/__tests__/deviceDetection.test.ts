@@ -15,7 +15,7 @@
 // under the License.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DeviceType, MobileOs, NavigatorPlatform } from "@models/mobileDevice";
+import { DeviceType, MobileOs, NavigatorPlatform } from "@/types/mobileDevice";
 import { detectMobileDevice } from "@utils/deviceDetection";
 
 function mockNavigator(partial: Partial<Navigator> & { userAgent: string }): void {

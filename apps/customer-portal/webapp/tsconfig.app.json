@@ -45,7 +45,6 @@
       "@context/*": ["src/context/*"],
       "@hooks/*": ["src/hooks/*"],
       "@layouts/*": ["src/layouts/*"],
-      "@models/*": ["src/models/*"],
       "@features/*": ["src/features/*"],
       "@providers/*": ["src/providers/*"],
       "@utils/*": ["src/utils/*"],

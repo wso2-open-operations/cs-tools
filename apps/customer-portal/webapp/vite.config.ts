@@ -76,7 +76,6 @@ const viteConfig = defineConfig({
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),
       "@hooks": fileURLToPath(new URL("./src/hooks", import.meta.url)),
       "@layouts": fileURLToPath(new URL("./src/layouts", import.meta.url)),
-      "@models": fileURLToPath(new URL("./src/models", import.meta.url)),
       "@features": fileURLToPath(new URL("./src/features", import.meta.url)),
       "@providers": fileURLToPath(new URL("./src/providers", import.meta.url)),
       "@utils": fileURLToPath(new URL("./src/utils", import.meta.url)),
