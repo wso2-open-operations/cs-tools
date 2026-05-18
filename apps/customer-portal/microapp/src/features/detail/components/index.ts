@@ -7,3 +7,4 @@ export * from "./AttachmentItem";
 export * from "./AttachmentsList";
 export * from "./CommentItem";
 export * from "./CommentsList";
+export * from "./BubbleList";

@@ -13,9 +13,9 @@ import { useDateTime } from "@shared/hooks";
 export function CaseDetailView() {
   const type = CASE_TYPES.DEFAULT;
 
+  const { format } = useDateTime();
   const { data, isLoading } = useCase();
   const actions = useActions();
-  const { format } = useDateTime();
 
   return (
     <Layout type={type} title={data?.title} id={data?.id} actions={actions}>
