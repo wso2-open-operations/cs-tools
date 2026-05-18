@@ -1,4 +1,10 @@
-import { CaseItemView, ChangeRequestItemView, ChatItemView, ServiceRequestItemView } from "@features/detail/components";
+import {
+  CaseItemView,
+  ChangeRequestItemView,
+  ChatItemView,
+  SecurityReportAnalysisItemView,
+  ServiceRequestItemView,
+} from "@features/detail/components";
 
 import { CASE_TYPES } from "@shared/constants";
 import type { CaseType } from "@shared/types";
@@ -13,8 +19,8 @@ export default function ItemPage({ type }: { type: CaseType }) {
       return <ServiceRequestItemView />;
     case CASE_TYPES.CHANGE_REQUEST:
       return <ChangeRequestItemView />;
-    // case CASE_TYPES.SECURITY_REPORT_ANALYSIS:
-    //   return <SecurityReportAnalysisItemsList key={type} />;
+    case CASE_TYPES.SECURITY_REPORT_ANALYSIS:
+      return <SecurityReportAnalysisItemView />;
     // case CASE_TYPES.ENGAGEMENT:
     //   return <EngagementItemsList key={type} />;
     // case CASE_TYPES.ANNOUNCEMENT:

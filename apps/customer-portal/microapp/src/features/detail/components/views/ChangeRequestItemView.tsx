@@ -23,7 +23,7 @@ export function ChangeRequestItemView() {
             <InfoField
               loading={isLoading}
               label="Description"
-              value={data?.description ? stripHtmlTags(data.description) : "Description not available"}
+              value={data?.description ? stripHtmlTags(data.description) : "No Description"}
             />
           </Grid>
           <Grid size={6}>
