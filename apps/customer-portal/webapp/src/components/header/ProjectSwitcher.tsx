@@ -16,7 +16,6 @@
 
 import {
   Box,
-  Header as HeaderUI,
   MenuItem,
   Paper,
   Popover,
