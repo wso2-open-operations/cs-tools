@@ -47,9 +47,18 @@ export default function Actions({
   const isPublicLandingPage = location.pathname === "/home";
 
   return (
-    <HeaderUI.Actions>
+    <HeaderUI.Actions
+      sx={{
+        flexShrink: 0,
+        minWidth: 0,
+        gap: { xs: 0.5, sm: 1 },
+      }}
+    >
       {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, suspended project, or portal access error) */}
-      {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && !hideGetHelp && <GetHelpDropdown />}
+      {!isProjectHub &&
+        !isPublicLandingPage &&
+        !isProjectSuspended &&
+        !hideGetHelp && <GetHelpDropdown />}
       {/* theme switcher */}
       <ColorSchemeToggle />
       {/* header action divider */}

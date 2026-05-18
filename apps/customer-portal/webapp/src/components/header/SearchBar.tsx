@@ -52,11 +52,48 @@ import { isS0Case } from "@features/support/utils/support";
 import { SortOrder } from "@/types/common";
 
 const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_RESULTS_DROPDOWN_MIN_WIDTH_PX = 320;
+const SEARCH_RESULTS_DROPDOWN_VIEWPORT_PADDING_PX = 16;
+
+/**
+ * Resolves dropdown size and position from the search field anchor rect.
+ * Width matches the search bar when wide; uses a minimum width when the input is narrow.
+ *
+ * @param {DOMRect} anchorRect - Bounding rect of the search input container.
+ * @returns {{ top: number; left: number; width: number }} Dropdown layout in viewport coordinates.
+ */
+function getSearchResultsDropdownLayout(anchorRect: DOMRect): {
+  top: number;
+  left: number;
+  width: number;
+} {
+  const viewportWidth = window.innerWidth;
+  const maxViewportWidth =
+    viewportWidth - SEARCH_RESULTS_DROPDOWN_VIEWPORT_PADDING_PX * 2;
+  const width = Math.min(
+    Math.max(anchorRect.width, SEARCH_RESULTS_DROPDOWN_MIN_WIDTH_PX),
+    maxViewportWidth,
+  );
+  const maxLeft =
+    viewportWidth - width - SEARCH_RESULTS_DROPDOWN_VIEWPORT_PADDING_PX;
+  const left = Math.min(
+    Math.max(anchorRect.left, SEARCH_RESULTS_DROPDOWN_VIEWPORT_PADDING_PX),
+    maxLeft,
+  );
+
+  return {
+    top: anchorRect.bottom + 8,
+    left,
+    width,
+  };
+}
 
 export interface SearchBarProps {
   /** Project ID for case search. When absent, search is disabled. */
   projectId?: string;
   excludeS0?: boolean;
+  /** Expands to fill the header second-row slot (tablet/phone layout). */
+  fillAvailableWidth?: boolean;
 }
 
 /**
@@ -68,6 +105,7 @@ export interface SearchBarProps {
 export default function SearchBar({
   projectId,
   excludeS0 = false,
+  fillAvailableWidth = false,
 }: SearchBarProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -202,15 +240,20 @@ export default function SearchBar({
   const hasAnyError = isError || isChangeRequestError;
   const shouldShowError = hasAnyError && hasNoResults;
 
-  const dropdownContent = showDropdown && dropdownRect && (
+  const dropdownLayout = dropdownRect
+    ? getSearchResultsDropdownLayout(dropdownRect)
+    : null;
+
+  const dropdownContent = showDropdown && dropdownLayout && (
     <Paper
       data-testid="header-search-dropdown"
       elevation={3}
       sx={{
         position: "fixed",
-        top: dropdownRect.bottom + 8,
-        left: dropdownRect.left,
-        width: dropdownRect.width,
+        top: dropdownLayout.top,
+        left: dropdownLayout.left,
+        width: dropdownLayout.width,
+        minWidth: dropdownLayout.width,
         maxHeight: 480,
         overflow: "auto",
         zIndex: 9999,
@@ -310,8 +353,18 @@ export default function SearchBar({
       ref={containerRef}
       sx={{
         position: "relative",
-        minWidth: 460,
-        flexShrink: 0,
+        flex: 1,
+        minWidth: 0,
+        width: "100%",
+        maxWidth: fillAvailableWidth
+          ? "100%"
+          : { xs: "100%", md: 380, lg: 560, xl: 640 },
+        ...(fillAvailableWidth
+          ? {}
+          : {
+              minWidth: { md: 200, lg: 400, xl: 480 },
+              width: { lg: 520, xl: 600 },
+            }),
       }}
     >
       <TextField

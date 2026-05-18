@@ -16,7 +16,7 @@
 
 import { type JSX } from "react";
 import { BrowserRouter } from "react-router";
-import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
+import { GlobalStyles, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import App from "./App";
@@ -24,6 +24,7 @@ import { AsgardeoProvider } from "@asgardeo/react";
 import { themeConfig } from "@config/themeConfig";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
+import MobileAppGate from "@providers/MobileAppGate";
 import { authConfig } from "@config/authConfig";
 
 /**
@@ -91,8 +92,19 @@ export default function AppWithConfig(): JSX.Element {
       <BrowserRouter>
         <LoggerProvider config={loggerConfig}>
           <OxygenUIThemeProvider theme={themeConfig}>
+            <GlobalStyles
+              styles={{
+                "html, body, #root": {
+                  width: "100%",
+                  maxWidth: "100vw",
+                  overflowX: "clip",
+                },
+              }}
+            />
             <QueryClientProvider client={queryClient}>
-              <App />
+              <MobileAppGate>
+                <App />
+              </MobileAppGate>
               <ReactQueryDevtools initialIsOpen={false} />
             </QueryClientProvider>
           </OxygenUIThemeProvider>

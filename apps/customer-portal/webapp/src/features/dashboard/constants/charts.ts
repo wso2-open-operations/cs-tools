@@ -15,7 +15,8 @@
 // under the License.
 
 // Card title: severity distribution donut.
-export const DASHBOARD_CHART_TITLE_OUTSTANDING_CASES = "Outstanding Support Cases";
+export const DASHBOARD_CHART_TITLE_OUTSTANDING_CASES =
+  "Outstanding Support Cases";
 
 // Card title: engagements distribution donut.
 export const DASHBOARD_CHART_TITLE_OUTSTANDING_ENGAGEMENTS =
@@ -35,7 +36,8 @@ export const DASHBOARD_CHART_TOTAL_PLACEHOLDER_NA = "N/A";
 export const DASHBOARD_CHART_TOTAL_PLACEHOLDER_DASH = "--";
 
 // `ErrorIndicator` entity label for outstanding severity chart.
-export const DASHBOARD_CHART_ERROR_ENTITY_OUTSTANDING_CASES = "outstanding cases";
+export const DASHBOARD_CHART_ERROR_ENTITY_OUTSTANDING_CASES =
+  "outstanding cases";
 
 // `ErrorIndicator` entity label for operations chart.
 export const DASHBOARD_CHART_ERROR_ENTITY_ACTIVE_CASES = "active cases";

@@ -21,6 +21,15 @@ import Brand from "@components/header/Brand";
 
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
+  Box: ({ children, component: Component = "div", ...props }: any) => {
+    const Tag = Component;
+    return <Tag {...props}>{children}</Tag>;
+  },
+  useTheme: () => ({
+    breakpoints: {
+      down: (key: string) => `(down:${key})`,
+    },
+  }),
   Header: {
     Brand: ({ children, onClick }: { children: any; onClick?: () => void }) => (
       <div onClick={onClick}>{children}</div>
@@ -30,20 +39,15 @@ vi.mock("@wso2/oxygen-ui", () => ({
   },
 }));
 
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  WSO2: () => <svg data-testid="wso2-logo" />,
-}));
-
 describe("Brand", () => {
-  it("should render the wso2 logo and product title", () => {
+  it("should render the company logo and product title", () => {
     render(
       <MemoryRouter>
         <Brand />
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId("wso2-logo")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Company Logo" })).toBeInTheDocument();
     expect(screen.getByText("Customer Portal")).toBeInTheDocument();
   });
 });

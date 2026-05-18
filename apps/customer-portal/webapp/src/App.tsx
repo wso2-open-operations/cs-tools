@@ -64,145 +64,193 @@ export default function App(): JSX.Element {
           <ErrorPageProvider>
             <Routes>
               {/* Error Routes */}
-              <Route path="/401" element={<ErrorLayout><Error401Page /></ErrorLayout>} />
-              <Route path="/403" element={<ErrorLayout><Error403Page /></ErrorLayout>} />
-              <Route path="/404" element={<ErrorLayout><Error404Page /></ErrorLayout>} />
+              <Route
+                path="/401"
+                element={
+                  <ErrorLayout>
+                    <Error401Page />
+                  </ErrorLayout>
+                }
+              />
+              <Route
+                path="/403"
+                element={
+                  <ErrorLayout>
+                    <Error403Page />
+                  </ErrorLayout>
+                }
+              />
+              <Route
+                path="/404"
+                element={
+                  <ErrorLayout>
+                    <Error404Page />
+                  </ErrorLayout>
+                }
+              />
 
-            <Route element={<AuthGuard />}>
-              {/* ProjectHub Page */}
-              <Route path="/" element={<ProjectHubPage />} />
+              <Route element={<AuthGuard />}>
+                {/* ProjectHub Page */}
+                <Route path="/" element={<ProjectHubPage />} />
 
-              {/* ServiceNow deep-link redirect */}
-              <Route path="support" element={<ServiceNowCaseRedirectPage />} />
+                {/* ServiceNow deep-link redirect */}
+                <Route
+                  path="support"
+                  element={<ServiceNowCaseRedirectPage />}
+                />
 
-              {/* Project Specific Routes */}
-              <Route path="projects/:projectId" element={<ProjectGuard />}>
-                {/* Dashboard */}
-                <Route index element={<Navigate to="dashboard" replace />} />
-                <Route path="dashboard">
-                  <Route index element={<DashboardPage />} />
-                  <Route path="action-required" element={<DashboardItemsPage mode="action-required" />} />
-                  <Route path="outstanding-interactions" element={<DashboardItemsPage mode="outstanding-interactions" />} />
-                  <Route path="closed-last-30d" element={<DashboardItemsPage mode="closed-last-30d" />} />
-                </Route>
-                {/* Project Details */}
-                <Route path="project-details" element={<ProjectDetailsPage />} />
-                {/* Operations */}
-                <Route path="operations">
-                  <Route index element={<OperationsPage />} />
-                  <Route path="service-requests">
-                    <Route index element={<ServiceRequestsPage />} />
+                {/* Project Specific Routes */}
+                <Route path="projects/:projectId" element={<ProjectGuard />}>
+                  {/* Dashboard */}
+                  <Route index element={<Navigate to="dashboard" replace />} />
+                  <Route path="dashboard">
+                    <Route index element={<DashboardPage />} />
                     <Route
-                      path="create"
-                      element={<CreateServiceRequestPage />}
+                      path="action-required"
+                      element={<DashboardItemsPage mode="action-required" />}
                     />
                     <Route
-                      path=":serviceRequestId"
-                      element={<ServiceRequestDetailsPage />}
+                      path="outstanding-interactions"
+                      element={
+                        <DashboardItemsPage mode="outstanding-interactions" />
+                      }
+                    />
+                    <Route
+                      path="closed-last-30d"
+                      element={<DashboardItemsPage mode="closed-last-30d" />}
                     />
                   </Route>
-                  <Route path="change-requests">
-                    <Route index element={<ChangeRequestsPage />} />
+                  {/* Project Details */}
+                  <Route
+                    path="project-details"
+                    element={<ProjectDetailsPage />}
+                  />
+                  {/* Operations */}
+                  <Route path="operations">
+                    <Route index element={<OperationsPage />} />
+                    <Route path="service-requests">
+                      <Route index element={<ServiceRequestsPage />} />
+                      <Route
+                        path="create"
+                        element={<CreateServiceRequestPage />}
+                      />
+                      <Route
+                        path=":serviceRequestId"
+                        element={<ServiceRequestDetailsPage />}
+                      />
+                    </Route>
+                    <Route path="change-requests">
+                      <Route index element={<ChangeRequestsPage />} />
+                      <Route
+                        path=":changeRequestId"
+                        element={<ChangeRequestDetailsPage />}
+                      />
+                    </Route>
+                  </Route>
+                  {/* Support */}
+                  <Route path="support">
+                    <Route index element={<SupportPage />} />
+                    <Route path="cases">
+                      <Route index element={<AllCasesPage />} />
+                      <Route path=":caseId" element={<CaseDetailsPage />} />
+                    </Route>
+                    <Route path="change-requests">
+                      <Route index element={<ChangeRequestsPage />} />
+                      <Route
+                        path=":changeRequestId"
+                        element={<ChangeRequestDetailsPage />}
+                      />
+                    </Route>
+                    <Route path="conversations">
+                      <Route index element={<AllConversationsPage />} />
+                      <Route
+                        path=":conversationId"
+                        element={<ConversationDetailsPage />}
+                      />
+                    </Route>
+                    <Route path="service-requests">
+                      <Route index element={<ServiceRequestsPage />} />
+                      <Route
+                        path="create"
+                        element={<CreateServiceRequestPage />}
+                      />
+                      <Route
+                        path=":serviceRequestId"
+                        element={<ServiceRequestDetailsPage />}
+                      />
+                    </Route>
+                    <Route path="chat">
+                      <Route index element={<NoveraChatPage />} />
+                      <Route
+                        path=":conversationId"
+                        element={<NoveraChatPage />}
+                      />
+                      <Route
+                        path="describe-issue"
+                        element={<DescribeIssuePage />}
+                      />
+                      <Route path="create-case" element={<CreateCasePage />} />
+                      <Route
+                        path="create-related-case"
+                        element={<CreateCasePage />}
+                      />
+                    </Route>
+                    <Route path="security-report">
+                      <Route path="create" element={<CreateCasePage />} />
+                    </Route>
+                  </Route>
+                  {/* Updates */}
+                  <Route path="updates">
+                    <Route index element={<UpdatesPage />} />
+                    <Route path="pending">
+                      <Route index element={<PendingUpdatesPage />} />
+                      <Route
+                        path="level/:levelKey"
+                        element={<UpdateLevelDetailsPage />}
+                      />
+                    </Route>
+                  </Route>
+                  {/* SecurityCenter */}
+                  <Route path="security-center">
+                    <Route index element={<SecurityPage />} />
                     <Route
-                      path=":changeRequestId"
-                      element={<ChangeRequestDetailsPage />}
+                      path="security-report-analysis/:caseId"
+                      element={<CaseDetailsPage />}
+                    />
+                    <Route
+                      path=":vulnerabilityId"
+                      element={<VulnerabilityDetailsPage />}
                     />
                   </Route>
-                </Route>
-                {/* Support */}
-                <Route path="support">
-                  <Route index element={<SupportPage />} />
-                  <Route path="cases">
-                    <Route index element={<AllCasesPage />} />
+                  {/* Engagements */}
+                  <Route path="engagements">
+                    <Route index element={<EngagementsPage />} />
                     <Route path=":caseId" element={<CaseDetailsPage />} />
                   </Route>
-                  <Route path="change-requests">
-                    <Route index element={<ChangeRequestsPage />} />
+                  <Route path="usage-metrics" element={<UsageMetricsPage />} />
+                  {/* Announcements */}
+                  <Route path="announcements">
+                    <Route index element={<AnnouncementsPage />} />
                     <Route
-                      path=":changeRequestId"
-                      element={<ChangeRequestDetailsPage />}
+                      path=":caseId"
+                      element={<AnnouncementDetailsPage />}
                     />
                   </Route>
-                  <Route path="conversations">
-                    <Route index element={<AllConversationsPage />} />
-                    <Route
-                      path=":conversationId"
-                      element={<ConversationDetailsPage />}
-                    />
-                  </Route>
-                  <Route path="service-requests">
-                    <Route index element={<ServiceRequestsPage />} />
-                    <Route
-                      path="create"
-                      element={<CreateServiceRequestPage />}
-                    />
-                    <Route
-                      path=":serviceRequestId"
-                      element={<ServiceRequestDetailsPage />}
-                    />
-                  </Route>
-                  <Route path="chat">
-                    <Route index element={<NoveraChatPage />} />
-                    <Route
-                      path=":conversationId"
-                      element={<NoveraChatPage />}
-                    />
-                    <Route
-                      path="describe-issue"
-                      element={<DescribeIssuePage />}
-                    />
-                    <Route path="create-case" element={<CreateCasePage />} />
-                    <Route
-                      path="create-related-case"
-                      element={<CreateCasePage />}
-                    />
-                  </Route>
-                  <Route path="security-report">
-                    <Route path="create" element={<CreateCasePage />} />
-                  </Route>
+                  {/* Settings */}
+                  <Route path="settings" element={<SettingsPage />} />
                 </Route>
-                {/* Updates */}
-                <Route path="updates">
-                  <Route index element={<UpdatesPage />} />
-                  <Route path="pending">
-                    <Route index element={<PendingUpdatesPage />} />
-                    <Route
-                      path="level/:levelKey"
-                      element={<UpdateLevelDetailsPage />}
-                    />
-                  </Route>
-                </Route>
-                {/* SecurityCenter */}
-                <Route path="security-center">
-                  <Route index element={<SecurityPage />} />
-                  <Route
-                    path="security-report-analysis/:caseId"
-                    element={<CaseDetailsPage />}
-                  />
-                  <Route
-                    path=":vulnerabilityId"
-                    element={<VulnerabilityDetailsPage />}
-                  />
-                </Route>
-                {/* Engagements */}
-                <Route path="engagements">
-                  <Route index element={<EngagementsPage />} />
-                  <Route path=":caseId" element={<CaseDetailsPage />} />
-                </Route>
-                <Route path="usage-metrics" element={<UsageMetricsPage />} />
-                {/* Announcements */}
-                <Route path="announcements">
-                  <Route index element={<AnnouncementsPage />} />
-                  <Route path=":caseId" element={<AnnouncementDetailsPage />} />
-                </Route>
-                {/* Settings */}
-                <Route path="settings" element={<SettingsPage />} />
               </Route>
-            </Route>
 
-            {/* Fallback */}
-            <Route path="*" element={<ErrorLayout><Error404Page /></ErrorLayout>} />
-          </Routes>
+              {/* Fallback */}
+              <Route
+                path="*"
+                element={
+                  <ErrorLayout>
+                    <Error404Page />
+                  </ErrorLayout>
+                }
+              />
+            </Routes>
           </ErrorPageProvider>
         </SuccessBannerProvider>
       </ErrorBannerProvider>

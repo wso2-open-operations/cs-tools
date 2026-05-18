@@ -298,7 +298,15 @@ const CasesTable = ({
   const activeFiltersCount = countCasesTableActiveFilters(filters);
 
   return (
-    <ListingTable.Container sx={{ width: "100%", mb: 4, p: 3 }}>
+    <ListingTable.Container
+      sx={{
+        width: "100%",
+        maxWidth: "100%",
+        mb: 4,
+        boxSizing: "border-box",
+        p: { xs: 2, sm: 2.5, md: 3 },
+      }}
+    >
       <CasesTableHeader
         activeFiltersCount={activeFiltersCount}
         isFiltersOpen={isFilterOpen}

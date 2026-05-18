@@ -52,9 +52,11 @@ const CasesTableHeader = ({
           mb: 3,
           flexWrap: "wrap",
           gap: 2,
+          width: "100%",
+          minWidth: 0,
         }}
       >
-        <Box>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography variant="h6">{CASES_TABLE_HEADER_TITLE}</Typography>
           <Typography variant="body2" color="text.secondary">
             {CASES_TABLE_HEADER_SUBTITLE}
@@ -64,6 +66,7 @@ const CasesTableHeader = ({
           variant="outlined"
           color="warning"
           size="small"
+          sx={{ flexShrink: 0 }}
           onClick={onFilterToggle}
           startIcon={
             hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
