@@ -10,7 +10,7 @@ import { PriorityChip, StatusChip } from "@shared/components/support";
 import { CASE_TYPES } from "@shared/constants";
 import { useDateTime } from "@shared/hooks";
 
-export function CaseDetailView() {
+export function CaseItemView() {
   const type = CASE_TYPES.DEFAULT;
 
   const { format } = useDateTime();

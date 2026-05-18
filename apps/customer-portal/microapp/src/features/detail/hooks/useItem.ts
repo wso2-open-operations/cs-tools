@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { cases } from "@features/cases/api/cases.queries";
+import { chats } from "@features/chats/api/chats.queries";
 import { useRequiredParams } from "@features/detail/hooks";
+import { serviceRequests } from "@features/service-requests/api/service-requests.queries";
 
 import { useIssueType } from "@shared/hooks";
-
-import { chats } from "../../chats/api/chats.queries";
 
 export function useCase() {
   const { id } = useRequiredParams();
@@ -21,6 +21,13 @@ export function useCase() {
 export function useChat() {
   const { id } = useRequiredParams();
   const query = useQuery(chats.get(id));
+
+  return query;
+}
+
+export function useServiceRequest() {
+  const { id } = useRequiredParams();
+  const query = useQuery(serviceRequests.get(id));
 
   return query;
 }

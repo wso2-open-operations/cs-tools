@@ -1,4 +1,4 @@
 export * from "./Layout";
-export * from "./CaseDetailView";
-export * from "./ChatDetailView";
-export * from "./ServiceRequestDetailView";
+export * from "./CaseItemView";
+export * from "./ChatItemView";
+export * from "./ServiceRequestItemView";

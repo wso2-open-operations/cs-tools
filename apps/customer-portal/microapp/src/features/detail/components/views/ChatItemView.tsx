@@ -10,7 +10,7 @@ import { StatusChip } from "@shared/components/support";
 import { CASE_TYPES } from "@shared/constants";
 import { useDateTime } from "@shared/hooks";
 
-export function ChatDetailView() {
+export function ChatItemView() {
   const type = CASE_TYPES.CHAT;
 
   const { format } = useDateTime();
@@ -25,7 +25,7 @@ export function ChatDetailView() {
             <InfoField label="Started" value={data?.createdOn && format(data.createdOn)} loading={isLoading} />
           </Grid>
           <Grid size={6}>
-            <InfoField label="Status" value={<StatusChip type="chat" id={data?.statusId} size="small" />} />
+            <InfoField label="Status" value={<StatusChip type={type} id={data?.statusId} size="small" />} />
           </Grid>
           <Grid size={6}>
             <InfoField label="Messages Exchanged" value={`${data?.count} messages`} loading={isLoading} />
