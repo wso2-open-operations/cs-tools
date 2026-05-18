@@ -140,7 +140,7 @@ export default function Header({
     <SearchBar
       projectId={projectId}
       excludeS0={excludeS0}
-      fillAvailableWidth={isStackedHeader}
+      fillAvailableWidth={showSearchBar}
     />
   );
 
@@ -150,6 +150,12 @@ export default function Header({
         width: "100%",
         maxWidth: "100%",
         overflow: "hidden",
+        ...(!isStackedHeader && {
+          "& .MuiToolbar-root": {
+            gap: { lg: 0.5, xl: 1 },
+            px: { lg: 1.5, xl: 2 },
+          },
+        }),
         ...(isStackedHeader && {
           "& .MuiToolbar-root": {
             flexDirection: "column",
@@ -235,29 +241,47 @@ export default function Header({
           {!isProjectHub && !hideProjectControls && (
             <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
           )}
-          <Box sx={{ minWidth: 0, flex: "0 1 auto" }}>
+          <Box sx={{ flexShrink: 0 }}>
             <Brand isNavigationDisabled={totalRecords <= 1} />
           </Box>
           {!isProjectHub && !hideProjectControls && (
-            <>
-              {projectSwitcher}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                flex: "1 1 0",
+                minWidth: 0,
+                gap: { lg: 1, xl: 1.5 },
+                mx: { lg: 0.5, xl: 1 },
+              }}
+            >
+              <Box
+                sx={{
+                  flex: "0 0 auto",
+                  minWidth: { lg: 200, xl: 220 },
+                  maxWidth: { lg: 280, xl: 320 },
+                }}
+              >
+                {projectSwitcher}
+              </Box>
               {showSearchBar ? (
                 <HeaderUI.Switchers
                   showDivider={false}
                   sx={{
-                    flex: "1 1 auto",
-                    minWidth: 0,
-                    maxWidth: { lg: 640, xl: 720 },
+                    flex: "1 1 0",
+                    minWidth: { lg: 200, xl: 280 },
+                    width: 0,
                     justifyContent: "flex-end",
                   }}
                 >
                   {searchBar}
                 </HeaderUI.Switchers>
               ) : null}
-            </>
+            </Box>
           )}
-          <HeaderUI.Spacer />
-          <Actions hideGetHelp={hideProjectControls} />
+          <Box sx={{ flexShrink: 0, ml: "auto" }}>
+            <Actions hideGetHelp={hideProjectControls} />
+          </Box>
         </>
       )}
     </HeaderUI>

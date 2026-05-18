@@ -18,7 +18,13 @@ import { Box, Header as HeaderUI, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 
-const BRAND_LOGO_HEIGHT = { xs: 18, sm: 20, md: 24 } as const;
+const BRAND_LOGO_HEIGHT = {
+  xs: 18,
+  sm: 20,
+  md: 24,
+  lg: 20,
+  xl: 24,
+} as const;
 
 const BRAND_TITLE_BASE_SX = {
   whiteSpace: "nowrap",
@@ -72,6 +78,9 @@ export default function Brand({
         cursor: isNavigationDisabled ? "default" : "pointer",
         flexShrink: 0,
         gap: { xs: 0.75, sm: 1, md: 1.5 },
+        [theme.breakpoints.between("lg", "xl")]: {
+          gap: 0.75,
+        },
       }}
     >
       <HeaderUI.BrandLogo
@@ -96,7 +105,13 @@ export default function Brand({
       <HeaderUI.BrandTitle
         sx={{
           ...BRAND_TITLE_BASE_SX,
-          fontSize: { xs: "0.8125rem", sm: "0.875rem", md: "1rem" },
+          fontSize: {
+            xs: "0.8125rem",
+            sm: "0.875rem",
+            md: "1rem",
+            lg: "0.875rem",
+            xl: "1rem",
+          },
           [theme.breakpoints.down("xl")]: {
             display: "inline-block",
           },
