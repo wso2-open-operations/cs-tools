@@ -96,10 +96,8 @@ export default function ChatPage() {
     };
 
     return () => {
-      if (ws.current) {
-        ws.current.close();
-        ws.current = null;
-      }
+      websocket.close();
+      ws.current = null;
     };
   }, [projectId]);
 

@@ -40,7 +40,7 @@ export function AppBar() {
 
   const [projectSelectorAnchor, setProjectSelectorAnchor] = useState<HTMLButtonElement | null>(null);
   const isProjectSelectorOpen = Boolean(projectSelectorAnchor);
-  const hasMultipleProjects = useInfiniteQuery(projects.paginated()).data?.pages[0].pagination.totalRecords !== 0;
+  const hasMultipleProjects = (useInfiniteQuery(projects.paginated()).data?.pages[0].pagination.totalRecords ?? 0) > 1;
 
   const ref = useRef<HTMLDivElement>(null);
 
@@ -115,11 +115,12 @@ export function AppBar() {
         {config.showProjectSelector && (
           <Button sx={{ justifyContent: "space-between", p: 0, mt: 2 }} onClick={openProjectSelector} disableRipple>
             <Stack direction="row" sx={{ alignItems: "center", flexGrow: 1, minWidth: 0, gap: 1 }}>
-              <Folder color={theme.palette.text.secondary} size={pxToRem(18)} />
+              <Folder color={theme.palette.text.secondary} size={pxToRem(18)} style={{ flexShrink: 0 }} />
               <Typography variant="body1" color="text.secondary" sx={{ textTransform: "initial" }} noWrap>
                 {projectName}
               </Typography>
             </Stack>
+
             {hasMultipleProjects && <ChevronDown color={theme.palette.text.secondary} size={pxToRem(18)} />}
           </Button>
         )}
