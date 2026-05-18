@@ -5,3 +5,4 @@ export * from "./ServiceRequestItemView";
 export * from "./ChangeRequestItemView";
 export * from "./SecurityReportAnalysisItemView";
 export * from "./EngagementItemView";
+export * from "./AnnouncementItemView";

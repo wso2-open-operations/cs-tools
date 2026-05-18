@@ -1,4 +1,5 @@
 import {
+  AnnouncementItemView,
   CaseItemView,
   ChangeRequestItemView,
   ChatItemView,
@@ -24,8 +25,8 @@ export default function ItemPage({ type }: { type: CaseType }) {
       return <SecurityReportAnalysisItemView />;
     case CASE_TYPES.ENGAGEMENT:
       return <EngagementItemView />;
-    // case CASE_TYPES.ANNOUNCEMENT:
-    //   return <AnnouncementItemsList key={type} />;
+    case CASE_TYPES.ANNOUNCEMENT:
+      return <AnnouncementItemView />;
     default:
       return null;
   }
