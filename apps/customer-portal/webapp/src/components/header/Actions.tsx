@@ -51,7 +51,7 @@ export default function Actions({
       sx={{
         flexShrink: 0,
         minWidth: 0,
-        gap: { xs: 0.5, sm: 1 },
+        gap: { xs: 0.5, sm: 0.75, lg: 0.5, xl: 1 },
       }}
     >
       {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, suspended project, or portal access error) */}
@@ -66,7 +66,7 @@ export default function Actions({
         orientation="vertical"
         flexItem
         sx={{
-          mx: 1,
+          mx: { sm: 0.75, xl: 1 },
           display: { xs: "none", sm: "block" },
           visibility: showUserProfile ? "visible" : "hidden",
         }}

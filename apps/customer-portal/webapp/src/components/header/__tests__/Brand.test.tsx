@@ -28,6 +28,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
   useTheme: () => ({
     breakpoints: {
       down: (key: string) => `(down:${key})`,
+      between: (start: string, end: string) => `(between:${start}-${end})`,
     },
   }),
   Header: {

@@ -107,7 +107,11 @@ export default function ProjectSwitcher({
 }: ProjectSwitcherProps): JSX.Element {
   const triggerSx = stackedHeaderRow
     ? { width: "100%", maxWidth: "100%" }
-    : { minWidth: 0, maxWidth: { md: 220 } };
+    : {
+        minWidth: { lg: 200, xl: 220 },
+        width: { lg: 200, xl: "auto" },
+        maxWidth: { lg: 280, xl: 320 },
+      };
   const [searchQuery, setSearchQuery] = useState("");
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const isMenuOpen = Boolean(anchorEl);

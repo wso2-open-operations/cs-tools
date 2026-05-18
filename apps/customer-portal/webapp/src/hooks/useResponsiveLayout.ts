@@ -32,12 +32,13 @@ export function useIsMidSizeTouchViewport(): boolean {
 }
 
 /**
- * Viewports below xl use the stacked header: row 1 brand/actions, row 2 project
- * switcher and search. Covers phones, tablets, and narrow/resized desktop windows.
+ * Viewports below lg use the stacked header: row 1 brand/actions, row 2 project
+ * switcher and search. Covers phones and tablets; laptops (e.g. MacBook Air at
+ * 1280px+) use the single-row header.
  *
  * @returns {boolean} True when the stacked (two-row) header layout applies.
  */
 export function useIsStackedHeaderLayout(): boolean {
   const theme = useTheme();
-  return useMediaQuery(theme.breakpoints.down("xl"));
+  return useMediaQuery(theme.breakpoints.down("lg"));
 }
