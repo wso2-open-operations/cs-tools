@@ -81,9 +81,9 @@ describe("useIsStackedHeaderLayout", () => {
     mockUseMediaQuery.mockReset();
   });
 
-  it("should return true for viewports below xl", () => {
+  it("should return true for viewports below lg", () => {
     mockUseMediaQuery.mockImplementation((query: string) =>
-      query.includes("down:xl"),
+      query.includes("down:lg"),
     );
 
     const { result } = renderHook(() => useIsStackedHeaderLayout());
@@ -92,7 +92,7 @@ describe("useIsStackedHeaderLayout", () => {
 
   it("should return true for phone-sized viewports below sm", () => {
     mockUseMediaQuery.mockImplementation((query: string) => {
-      if (query.includes("down:xl")) return true;
+      if (query.includes("down:lg")) return true;
       if (query.includes("between:sm-md")) return false;
       return false;
     });
@@ -101,7 +101,7 @@ describe("useIsStackedHeaderLayout", () => {
     expect(result.current).toBe(true);
   });
 
-  it("should return false at xl desktop width and above", () => {
+  it("should return false at lg laptop width and above", () => {
     mockUseMediaQuery.mockImplementation(() => false);
 
     const { result } = renderHook(() => useIsStackedHeaderLayout());
