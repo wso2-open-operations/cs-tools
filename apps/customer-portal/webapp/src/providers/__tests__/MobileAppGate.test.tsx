@@ -29,13 +29,11 @@ vi.mock("@config/mobileAppConfig", () => ({
     iosStoreUrl: "https://apps.apple.com/app/example",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=example",
     includeTablets: false,
-    allowWebContinue: false,
   })),
   getMobileAppStoreUrl: (os: string) =>
     os === "ios"
       ? "https://apps.apple.com/app/example"
       : "https://play.google.com/store/apps/details?id=example",
-  MOBILE_APP_WEB_CONTINUE_STORAGE_KEY: "customer_portal_mobile_app_web_continue",
 }));
 
 import { detectMobileDevice } from "@utils/deviceDetection";
@@ -43,7 +41,6 @@ import { detectMobileDevice } from "@utils/deviceDetection";
 describe("MobileAppGate", () => {
   afterEach(() => {
     vi.clearAllMocks();
-    sessionStorage.clear();
   });
 
   it("should render children on desktop", () => {

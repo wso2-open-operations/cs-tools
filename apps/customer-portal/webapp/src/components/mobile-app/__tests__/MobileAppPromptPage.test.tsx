@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DeviceType, MobileOs } from "@/types/mobileDevice";
 import MobileAppPromptPage from "@components/mobile-app/MobileAppPromptPage";
@@ -71,18 +71,16 @@ describe("MobileAppPromptPage", () => {
     expect(link).toHaveTextContent("Get it on Google Play");
   });
 
-  it("should call onContinueInBrowser when continue is allowed", () => {
-    const onContinue = vi.fn();
-
+  it("should not offer a continue-in-browser option", () => {
     render(
       <MobileAppPromptPage
         device={{ os: MobileOs.Android, deviceType: DeviceType.Phone }}
-        allowWebContinue
-        onContinueInBrowser={onContinue}
       />,
     );
 
-    fireEvent.click(screen.getByTestId("mobile-app-continue-web-button"));
-    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByTestId("mobile-app-continue-web-button"),
+    ).toBeNull();
+    expect(screen.queryByText("Continue in browser")).toBeNull();
   });
 });

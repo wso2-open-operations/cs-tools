@@ -18,11 +18,10 @@ import MobileAppPromptPage from "@components/mobile-app/MobileAppPromptPage";
 import {
   getMobileAppConfig,
   getMobileAppStoreUrl,
-  MOBILE_APP_WEB_CONTINUE_STORAGE_KEY,
 } from "@config/mobileAppConfig";
 import type { MobileDeviceInfo } from "@/types/mobileDevice";
 import { detectMobileDevice } from "@utils/deviceDetection";
-import { type JSX, type ReactNode, useMemo, useState } from "react";
+import { type JSX, type ReactNode, useMemo } from "react";
 
 export interface MobileAppGateProps {
   children: ReactNode;
@@ -30,7 +29,7 @@ export interface MobileAppGateProps {
 
 /**
  * Blocks the web portal on detected iOS/Android phones (and optional tablets),
- * showing a native-app download prompt instead.
+ * showing the WSO2 Super App download prompt. There is no in-browser bypass.
  *
  * @param {MobileAppGateProps} props - Child tree to render when not on mobile.
  * @returns {JSX.Element} Mobile prompt or children.
@@ -43,33 +42,13 @@ export default function MobileAppGate({ children }: MobileAppGateProps): JSX.Ele
     [mobileAppConfig.includeTablets],
   );
 
-  const [continuedOnWeb, setContinuedOnWeb] = useState(
-    () =>
-      mobileAppConfig.allowWebContinue &&
-      sessionStorage.getItem(MOBILE_APP_WEB_CONTINUE_STORAGE_KEY) === "true",
-  );
-
   const storeUrl = device ? getMobileAppStoreUrl(device.os, mobileAppConfig) : undefined;
 
   const shouldShowPrompt =
-    mobileAppConfig.enabled &&
-    device !== null &&
-    !!storeUrl &&
-    !continuedOnWeb;
-
-  const handleContinueInBrowser = (): void => {
-    sessionStorage.setItem(MOBILE_APP_WEB_CONTINUE_STORAGE_KEY, "true");
-    setContinuedOnWeb(true);
-  };
+    mobileAppConfig.enabled && device !== null && !!storeUrl;
 
   if (shouldShowPrompt && device) {
-    return (
-      <MobileAppPromptPage
-        device={device}
-        allowWebContinue={mobileAppConfig.allowWebContinue}
-        onContinueInBrowser={handleContinueInBrowser}
-      />
-    );
+    return <MobileAppPromptPage device={device} />;
   }
 
   return <>{children}</>;
