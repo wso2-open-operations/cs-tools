@@ -2,6 +2,6 @@ reviews:
   review_status: true
   auto_review:
     enabled: true
-    base_branches: ["main", "customer-portal-.*", "release.*", "dev-.*"]
+    base_branches: ["main", "customer-portal-.*", "release.*", "dev-.*", "v2"]
 chat:
   auto_reply: true
