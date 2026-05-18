@@ -2,6 +2,7 @@ import {
   CaseItemView,
   ChangeRequestItemView,
   ChatItemView,
+  EngagementItemView,
   SecurityReportAnalysisItemView,
   ServiceRequestItemView,
 } from "@features/detail/components";
@@ -21,8 +22,8 @@ export default function ItemPage({ type }: { type: CaseType }) {
       return <ChangeRequestItemView />;
     case CASE_TYPES.SECURITY_REPORT_ANALYSIS:
       return <SecurityReportAnalysisItemView />;
-    // case CASE_TYPES.ENGAGEMENT:
-    //   return <EngagementItemsList key={type} />;
+    case CASE_TYPES.ENGAGEMENT:
+      return <EngagementItemView />;
     // case CASE_TYPES.ANNOUNCEMENT:
     //   return <AnnouncementItemsList key={type} />;
     default:
