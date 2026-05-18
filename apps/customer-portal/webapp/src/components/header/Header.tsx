@@ -15,7 +15,8 @@
 // under the License.
 
 import { useEffect, type JSX, useMemo, useCallback } from "react";
-import { Header as HeaderUI } from "@wso2/oxygen-ui";
+import { Box, Header as HeaderUI } from "@wso2/oxygen-ui";
+import { useIsStackedHeaderLayout } from "@hooks/useResponsiveLayout";
 import { useNavigate, useLocation, useParams } from "react-router";
 import useInfiniteProjects, {
   flattenProjectPages,
@@ -44,7 +45,10 @@ interface HeaderProps {
  * @param {HeaderProps} props - The props for the component.
  * @returns {JSX.Element} The Header component.
  */
-export default function Header({ onToggleSidebar, hideProjectControls = false }: HeaderProps): JSX.Element {
+export default function Header({
+  onToggleSidebar,
+  hideProjectControls = false,
+}: HeaderProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const logger = useLogger();
@@ -53,10 +57,19 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
   }>();
   const { isLoading: isAuthLoading } = useAsgardeo();
   const { isProjectSuspended } = useErrorPageContext();
+  const isStackedHeader = useIsStackedHeaderLayout();
 
   const isProjectHub = location.pathname === "/";
+  const showProjectToolbar =
+    !isProjectHub && !hideProjectControls;
+  const showSearchBar =
+    showProjectToolbar && !isProjectSuspended;
 
-  const { data, isLoading: isProjectsLoading, isError } = useInfiniteProjects({
+  const {
+    data,
+    isLoading: isProjectsLoading,
+    isError,
+  } = useInfiniteProjects({
     pageSize: 20,
     enabled: !isProjectHub,
   });
@@ -113,32 +126,136 @@ export default function Header({ onToggleSidebar, hideProjectControls = false }:
     [projects, logger, navigate],
   );
 
+  const projectSwitcher = (
+    <ProjectSwitcher
+      projectId={projectId}
+      onProjectChange={handleProjectChange}
+      isAuthLoading={isAuthLoading || isProjectsLoading}
+      stackedHeaderRow={isStackedHeader}
+    />
+  );
+
+  const searchBar = (
+    <SearchBar
+      projectId={projectId}
+      excludeS0={excludeS0}
+      fillAvailableWidth={isStackedHeader}
+    />
+  );
+
   return (
-    <HeaderUI>
-      {!isProjectHub && !hideProjectControls && (
-        /* header sidebar toggle */
-        <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
-      )}
-      {/* header brand logo and title */}
-      <Brand isNavigationDisabled={totalRecords <= 1} />
-      {!isProjectHub && !hideProjectControls && (
-        <>
-          {/* header project switcher */}
-          <ProjectSwitcher
-            projectId={projectId}
-            onProjectChange={handleProjectChange}
-            isAuthLoading={isAuthLoading || isProjectsLoading}
-          />
-          {/* header search bar */}
-          {!isProjectSuspended && (
-            <SearchBar projectId={projectId} excludeS0={excludeS0} />
+    <HeaderUI
+      sx={{
+        width: "100%",
+        maxWidth: "100%",
+        overflow: "hidden",
+        ...(isStackedHeader && {
+          "& .MuiToolbar-root": {
+            flexDirection: "column",
+            alignItems: "stretch",
+            minHeight: "auto",
+            py: 1,
+            gap: 1,
+          },
+        }),
+      }}
+    >
+      {isStackedHeader ? (
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            width: "100%",
+            minWidth: 0,
+            gap: 1,
+          }}
+        >
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              width: "100%",
+              minWidth: 0,
+              gap: 1,
+            }}
+          >
+            {!isProjectHub && !hideProjectControls && (
+              <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
+            )}
+            <Box sx={{ minWidth: 0, flex: "0 1 auto" }}>
+              <Brand isNavigationDisabled={totalRecords <= 1} />
+            </Box>
+            <HeaderUI.Spacer />
+            <Actions hideGetHelp={hideProjectControls} />
+          </Box>
+          {!isProjectHub && !hideProjectControls && (
+            <Box
+              data-testid="header-stacked-controls-row"
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                width: "100%",
+                minWidth: 0,
+                gap: { xs: 1, sm: 1.5 },
+                px: { xs: 1, sm: 2 },
+                boxSizing: "border-box",
+              }}
+            >
+              <Box
+                sx={{
+                  flex: showSearchBar
+                    ? { xs: "1 1 42%", sm: "1 1 40%", md: "1 1 38%" }
+                    : "1 1 100%",
+                  minWidth: 0,
+                  display: "flex",
+                }}
+              >
+                {projectSwitcher}
+              </Box>
+              {showSearchBar ? (
+                <Box
+                  sx={{
+                    flex: { xs: "1 1 58%", sm: "1 1 60%", md: "1 1 62%" },
+                    minWidth: 0,
+                    display: "flex",
+                  }}
+                >
+                  {searchBar}
+                </Box>
+              ) : null}
+            </Box>
           )}
+        </Box>
+      ) : (
+        <>
+          {!isProjectHub && !hideProjectControls && (
+            <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
+          )}
+          <Box sx={{ minWidth: 0, flex: "0 1 auto" }}>
+            <Brand isNavigationDisabled={totalRecords <= 1} />
+          </Box>
+          {!isProjectHub && !hideProjectControls && (
+            <>
+              {projectSwitcher}
+              {showSearchBar ? (
+                <HeaderUI.Switchers
+                  showDivider={false}
+                  sx={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    maxWidth: { lg: 640, xl: 720 },
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  {searchBar}
+                </HeaderUI.Switchers>
+              ) : null}
+            </>
+          )}
+          <HeaderUI.Spacer />
+          <Actions hideGetHelp={hideProjectControls} />
         </>
       )}
-      {/* header spacer */}
-      <HeaderUI.Spacer />
-      {/* header action buttons */}
-      <Actions hideGetHelp={hideProjectControls} />
     </HeaderUI>
   );
 }
