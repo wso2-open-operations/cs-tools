@@ -42,6 +42,9 @@ func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
 }
 
+// maxRequestBodyBytes caps incoming request bodies at 1 MiB to prevent memory DoS.
+const maxRequestBodyBytes = 1 << 20
+
 // CreateCase handles POST /cases.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	// TODO: Verify the caller is an authenticated agent user (validate bearer JWT,
@@ -53,8 +56,13 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	// TODO: Apply agent-portal business rules before forwarding to entity
 	// (e.g. restrict allowed case types, enforce project membership).
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
@@ -84,8 +92,13 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	// TODO: Inject agent-specific filters into the search payload before forwarding
 	// (e.g. restrict results to the agent's assigned projects or queues).
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}

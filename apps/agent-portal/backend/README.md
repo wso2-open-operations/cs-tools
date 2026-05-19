@@ -37,7 +37,7 @@ Copy `.env` and fill in the values:
 
 ## Project Structure
 
-```
+```text
 backend/
 ├── cmd/server/main.go          # Entry point — routes + server startup
 ├── internal/

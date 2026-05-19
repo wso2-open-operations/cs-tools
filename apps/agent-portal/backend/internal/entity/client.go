@@ -95,7 +95,12 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("entity: %s %s returned %d: %s", method, path, resp.StatusCode, respBody)
+		const maxErrBody = 256
+		excerpt := respBody
+		if len(excerpt) > maxErrBody {
+			excerpt = excerpt[:maxErrBody]
+		}
+		return nil, fmt.Errorf("entity: %s %s returned %d: %s", method, path, resp.StatusCode, excerpt)
 	}
 
 	return respBody, nil

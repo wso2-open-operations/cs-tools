@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/agent-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/agent-portal/backend/internal/handler"
@@ -47,7 +48,15 @@ func main() {
 	addr := envOrDefault("PORT", ":8080")
 	slog.Info("starting agent-portal backend", "addr", addr)
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
 	}
