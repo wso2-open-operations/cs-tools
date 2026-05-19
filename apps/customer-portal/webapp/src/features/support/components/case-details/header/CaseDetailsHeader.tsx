@@ -46,6 +46,7 @@ export default function CaseDetailsHeader({
   severityLabel,
   statusLabel,
   assignedEngineerLabel,
+  engagementTypeLabel,
   statusChipSx,
   isLoading = false,
   showSeverityChip = true,
@@ -96,6 +97,14 @@ export default function CaseDetailsHeader({
         <Typography variant="body2" fontWeight={500} color="text.primary">
           {formatValue(caseNumber)}
         </Typography>
+        {engagementTypeLabel && (
+          <Chip
+            label={engagementTypeLabel}
+            size="small"
+            variant="outlined"
+            sx={{ height: 20, fontSize: "0.75rem" }}
+          />
+        )}
         {showStatusChip && (
           <Stack direction="row" spacing={0.75} alignItems="center">
             <Box
