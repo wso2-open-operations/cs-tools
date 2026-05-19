@@ -13,90 +13,70 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 
 import {
-  alpha,
-  Chip,
   FormControl,
   FormHelperText,
   MenuItem,
   TextField as MuiTextField,
-  pxToRem,
   Select,
   type SelectChangeEvent,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Sparkle } from "@wso2/oxygen-ui-icons-react";
+import { useField } from "formik";
 
 interface SelectFieldProps {
   name: string;
-  label: string | ReactNode;
   options: { value: number | string; label: string | ReactNode }[];
-  value?: number | string;
+  label?: string | ReactNode;
   required?: boolean;
-  aiLabel?: string;
   placeholder?: string;
-  startAdornment?: React.ReactNode;
   disabled?: boolean;
-  error?: boolean;
-  helperText?: string;
-  onChange?: (event: SelectChangeEvent<number | string>) => void;
-}
+  slots?: {
+    label?: { endAdornment?: ReactNode };
+    input?: { startAdornment?: ReactNode };
+  };
 
+  onChange?: (event: SelectChangeEvent) => void;
+}
 export function SelectField({
   name,
   label,
-  options,
-  value = 0,
-  disabled = false,
-  required = false,
-  error = false,
-  helperText,
-  aiLabel,
   placeholder,
-  startAdornment,
+  options,
+  required = false,
+  disabled = false,
+  slots,
   onChange,
 }: SelectFieldProps) {
-  const seen = new Set();
-  options = options.filter((option) => {
-    if (seen.has(option.value)) return false;
-    else {
-      seen.add(option.value);
-      return true;
-    }
-  });
+  const [field, meta] = useField(name);
 
   return (
     <FormControl component={Stack} gap={1} fullWidth>
-      <Stack direction="row" justifyContent="space-between" alignItems="end" gap={1}>
-        <Stack direction="row" alignItems="center" gap={0.5}>
-          <Typography variant="subtitle2">{label}</Typography>
-          {required && (
-            <Typography variant="h5" component="span" color="error">
-              *
-            </Typography>
-          )}
-        </Stack>
-        {aiLabel && <AILabel label={aiLabel} />}
-      </Stack>
+      <FieldLabel label={label} required={required} endAdornment={slots?.label?.endAdornment} />
+
       <Select
-        error={error}
+        {...field}
+        error={meta.touched && Boolean(meta.error)}
         displayEmpty={placeholder !== undefined}
-        name={name}
-        value={value}
         sx={{ bgcolor: "background.paper" }}
-        startAdornment={startAdornment}
-        onChange={onChange}
+        startAdornment={slots?.input?.startAdornment}
         disabled={disabled}
+        onChange={(event) => {
+          field.onChange(event);
+          onChange?.(event);
+        }}
         renderValue={(selected) => {
-          if (typeof selected === "string" && selected.length === 0)
+          if (typeof selected === "string" && selected.length === 0) {
             return (
               <Typography variant="body2" color="text.secondary">
                 {placeholder}
               </Typography>
             );
+          }
+
           return options.find((option) => option.value === selected)?.label ?? selected;
         }}
       >
@@ -106,105 +86,99 @@ export function SelectField({
           </MenuItem>
         ))}
       </Select>
-      {helperText && (
-        <FormHelperText error={error} sx={{ m: 0, mt: -0.5 }}>
-          {helperText}
+
+      {meta.touched && meta.error && (
+        <FormHelperText error sx={{ m: 0, mt: -0.5 }}>
+          {meta.error}
         </FormHelperText>
       )}
     </FormControl>
   );
 }
 
-export function TextField({
-  name,
-  label,
-  value,
-  multiline = false,
-  rows = 10,
-  required = false,
-  error = false,
-  placeholder,
-  helperText,
-  aiLabel,
-  startAdornment,
-  disabled = false,
-  onChange,
-}: {
+interface TextFieldProps {
   name: string;
-  label: string;
-  value: string;
+  value?: string;
+  label?: string;
   placeholder?: string;
   multiline?: boolean;
   rows?: number;
   required?: boolean;
-  aiLabel?: string;
-  startAdornment?: React.ReactNode;
-  error?: boolean;
-  helperText?: string;
   disabled?: boolean;
+  slots?: {
+    label?: { endAdornment?: ReactNode };
+    input?: { startAdornment?: ReactNode };
+  };
 
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  onBlur?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-}) {
+  onChange?: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+}
+
+export function TextField({
+  name,
+  value,
+  label,
+  placeholder,
+  multiline = false,
+  rows = 10,
+  required = false,
+  disabled = false,
+  slots,
+  onChange,
+}: TextFieldProps) {
+  const [field, meta] = useField(name);
+
   return (
     <FormControl component={Stack} gap={1} fullWidth>
-      <Stack direction="row" justifyContent="space-between" alignItems="end" gap={1}>
-        <Stack direction="row" alignItems="center" gap={0.5}>
-          <Typography variant="subtitle2">{label}</Typography>
-          {required && (
-            <Typography variant="h5" component="span" color="error">
-              *
-            </Typography>
-          )}
-        </Stack>
-        {aiLabel && <AILabel label={aiLabel} />}
-      </Stack>
+      <FieldLabel label={label} required={required} endAdornment={slots?.label?.endAdornment} />
+
       <MuiTextField
-        disabled={disabled}
-        error={error}
-        name={name}
+        {...field}
         value={value}
+        error={meta.touched && Boolean(meta.error)}
         placeholder={placeholder}
         multiline={multiline}
         rows={rows}
+        disabled={disabled}
         sx={{
           lineHeight: multiline ? 1.65 : undefined,
-
-          "& .MuiOutlinedInput-root": {
-            bgcolor: "background.paper",
-          },
+          "& .MuiOutlinedInput-root": { bgcolor: "background.paper" },
         }}
-        slotProps={{
-          input: {
-            startAdornment: startAdornment,
-          },
+        slotProps={{ input: { startAdornment: slots?.input?.startAdornment } }}
+        onChange={(event) => {
+          field.onChange(event);
+          onChange?.(event);
         }}
-        onChange={onChange}
       />
-      {helperText && (
-        <FormHelperText error={error} sx={{ m: 0, mt: -0.5 }}>
-          {helperText}
+
+      {meta.touched && meta.error && (
+        <FormHelperText error sx={{ m: 0, mt: -0.5 }}>
+          {meta.error}
         </FormHelperText>
       )}
     </FormControl>
   );
 }
 
-function AILabel({ label }: { label: string }) {
+interface FieldLabelProps {
+  label: string | ReactNode;
+  required?: boolean;
+  endAdornment?: ReactNode;
+}
+
+function FieldLabel({ label, required, endAdornment }: FieldLabelProps) {
   return (
-    <Chip
-      size="small"
-      label={
-        <Stack direction="row" alignItems="center" gap={1}>
-          <Sparkle size={pxToRem(12)} />
-          {label}
-        </Stack>
-      }
-      sx={(theme) => ({
-        bgcolor: alpha(theme.palette.success.light, 0.1),
-        color: theme.palette.success.light,
-        alignSelf: "end",
-      })}
-    />
+    <Stack direction="row" justifyContent="space-between" alignItems="end" gap={1}>
+      <Stack direction="row" alignItems="center" gap={0.5}>
+        <Typography variant="subtitle2">{label}</Typography>
+        {required && (
+          <Typography variant="h5" component="span" color="error">
+            *
+          </Typography>
+        )}
+      </Stack>
+
+      {/* Optional element displayed at the end of the label row */}
+      {endAdornment}
+    </Stack>
   );
 }
