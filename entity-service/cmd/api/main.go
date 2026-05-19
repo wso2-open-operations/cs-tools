@@ -17,7 +17,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
@@ -25,11 +28,14 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Fatalf("load .env: %v", err)
+	}
 
 	cfg := config.Load()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	pool, err := db.NewPool(ctx, cfg.DSN())
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
