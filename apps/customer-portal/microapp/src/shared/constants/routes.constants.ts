@@ -9,4 +9,5 @@ export const ROUTES = {
   security_report_analysis: { all: "/sras/all", by: (id: string) => `/sras/${id}` },
   engagement: { all: "/engagements/all", by: (id: string) => `/engagements/${id}` },
   announcement: { all: "/announcements/all", by: (id: string) => `/announcements/${id}` },
+  users: { invite: "/users/invite", edit: "/users/edit" },
 } satisfies Record<CaseType, unknown> & Record<string, unknown>;

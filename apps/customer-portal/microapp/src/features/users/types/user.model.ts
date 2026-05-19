@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { ROLES } from "@shared/constants";
 
 export interface Me {
   id: string;
@@ -34,4 +35,4 @@ export interface User {
   lastActive: Date;
 }
 
-export type Role = "Admin" | "Portal User" | "System User";
+export type Role = (typeof ROLES)[keyof typeof ROLES];

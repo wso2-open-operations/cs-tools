@@ -33,3 +33,9 @@ export const CASE_TYPES = {
   ANNOUNCEMENT: "announcement",
   CHAT: "chat",
 } as const;
+
+export const ROLES = {
+  ADMIN: "Admin",
+  PORTAL_USER: "Portal User",
+  SYSTEM_USER: "System User",
+} as const;

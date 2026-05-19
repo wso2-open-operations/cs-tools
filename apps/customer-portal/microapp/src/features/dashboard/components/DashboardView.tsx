@@ -26,7 +26,7 @@ import { useNavigation } from "@root/src/shared/hooks";
 import { colors, Grid, pxToRem } from "@wso2/oxygen-ui";
 import { Activity, CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
 
-import { MetricWidget, PieChartWidget } from "@features/dashboard/components";
+import { WidgetMetric, WidgetPieChart } from "@features/dashboard/components";
 import type { useDashboardStats } from "@features/dashboard/hooks/useDashboardStats";
 
 type DashboardViewProps = ReturnType<typeof useDashboardStats>;
@@ -42,7 +42,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
   return (
     <Grid spacing={1.5} container>
       <Grid size={6}>
-        <MetricWidget
+        <WidgetMetric
           label={DASHBOARD_METRIC_ACTION_REQUIRED}
           value={stats.actionRequired}
           icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
@@ -51,7 +51,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
       </Grid>
 
       <Grid size={6}>
-        <MetricWidget
+        <WidgetMetric
           label={DASHBOARD_METRIC_OUTSTANDING}
           value={stats.outstanding}
           icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
@@ -60,7 +60,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
       </Grid>
 
       <Grid size={6}>
-        <MetricWidget
+        <WidgetMetric
           label={DASHBOARD_METRIC_CLOSED}
           value={stats.resolvedThisMonth}
           icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
@@ -69,7 +69,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
       </Grid>
 
       <Grid size={6}>
-        <MetricWidget
+        <WidgetMetric
           label={DASHBOARD_METRIC_AVG_RESPONSE_TIME}
           value={stats.averageResponseTime !== undefined ? `${stats.averageResponseTime}h` : undefined}
           icon={<Activity size={pxToRem(18)} color={colors.cyan[500]} />}
@@ -77,7 +77,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
       </Grid>
 
       <Grid size={6}>
-        <PieChartWidget
+        <WidgetPieChart
           title={DASHBOARD_WIDGET_OUTSTANDING_SUPPORT_CASES}
           data={stats.outstandingSupportCasesPieData}
           onClick={navigateBySeverity}
@@ -86,7 +86,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
 
       {(hasServiceRequestReadAccess || hasChangeRequestReadAccess) && (
         <Grid size={6}>
-          <PieChartWidget
+          <WidgetPieChart
             title={DASHBOARD_WIDGET_OUTSTANDING_OPERATIONS}
             data={stats.outstandingOperationsPieData}
             onClick={navigateByOperationsType}
@@ -96,7 +96,7 @@ export function DashboardView({ stats, features, navigateBySeverity, navigateByO
 
       {hasEngagementsReadAccess && (
         <Grid size={6}>
-          <PieChartWidget title={DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS} data={stats.outstandingEngagementsPieData} />
+          <WidgetPieChart title={DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS} data={stats.outstandingEngagementsPieData} />
         </Grid>
       )}
     </Grid>

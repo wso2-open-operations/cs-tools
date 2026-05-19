@@ -15,36 +15,25 @@
 // under the License.
 import { useMemo } from "react";
 
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { useProject } from "@context/project";
 
 import { users } from "@features/users/api/users.queries";
+import { useFilters } from "@features/users/hooks";
 
-export function useUserMetrics(projectId: string) {
-  const { data } = useQuery(users.all(projectId));
-
-  return {
-    total: data?.length,
-    registered: data?.filter((u) => u.status === "registered").length,
-    invited: data?.filter((u) => u.status === "invited").length,
-    admins: data?.filter((u) => u.roles.includes("Admin")).length,
-  };
-}
-
-export function useUserList(search: string) {
+export function useUsersList() {
   const { projectId } = useProject();
-  const { data: usersData } = useSuspenseQuery(users.all(projectId!));
+  const { filters } = useFilters();
+  const query = useQuery(users.all(projectId!));
 
   const filtered = useMemo(() => {
-    if (!search) return usersData;
-    const normalizedSearch = search.toLowerCase();
-    return usersData.filter(
-      (user) =>
-        user.firstName.toLowerCase().includes(normalizedSearch) ||
-        user.lastName.toLowerCase().includes(normalizedSearch),
+    if (!filters.search) return query.data;
+    const normalized = filters.search.toLowerCase();
+    return query.data?.filter(
+      (user) => user.firstName.toLowerCase().includes(normalized) || user.lastName.toLowerCase().includes(normalized),
     );
-  }, [usersData, search]);
+  }, [query.data, filters.search]);
 
-  return { users: filtered };
+  return { ...query, data: filtered };
 }

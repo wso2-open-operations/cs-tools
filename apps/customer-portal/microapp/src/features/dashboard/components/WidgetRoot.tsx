@@ -17,12 +17,12 @@ import type { ReactNode } from "react";
 
 import { Card, CardActionArea, type CardProps, Stack, Typography } from "@wso2/oxygen-ui";
 
-interface WidgetBoxProps extends Omit<CardProps, "variant"> {
+interface WidgetRootProps extends Omit<CardProps, "variant"> {
   title?: string;
   children: ReactNode;
 }
 
-export function WidgetBox({ title, children, ...props }: WidgetBoxProps) {
+export function WidgetRoot({ title, children, ...props }: WidgetRootProps) {
   return (
     <Card sx={{ height: "100%", bgcolor: "background.paper" }} {...props}>
       <CardActionArea disableRipple={!props.onClick} sx={{ p: 1.2 }}>

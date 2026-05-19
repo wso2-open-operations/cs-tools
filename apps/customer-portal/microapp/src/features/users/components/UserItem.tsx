@@ -15,38 +15,37 @@
 // under the License.
 import { Link } from "react-router-dom";
 
-import { Card, Chip, Avatar as MuiAvatar, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Card, Chip, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, Mail } from "@wso2/oxygen-ui-icons-react";
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
 
-import type { Role, User } from "@features/users/types/user.model";
+import { UserAvatar } from "@features/users/components";
+import type { Role, User } from "@features/users/types";
 
-import { capitalize, stringAvatar } from "@shared/utils/string.utils";
+import { capitalize } from "@shared/utils/string.utils";
 
-dayjs.extend(relativeTime);
+import { ROLES } from "@shared/constants";
 
-export interface UserListItemProps {
+export interface UserItemProps {
   name: string;
   email: string;
   role: Role;
   lastActive: string;
 }
 
-export function UserListItem({ firstName, lastName, email, roles }: User) {
+export function UserItem({ firstName, lastName, email, roles }: User) {
   const theme = useTheme();
 
   return (
     <Card
       component={Link}
       elevation={0}
-      to="/users/edit"
+      to="/users/edit" // TODO:
       state={{ email, firstName, lastName, role: roles[0] }}
       sx={{ textDecoration: "none", p: 1 }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>
-          <Avatar>{firstName}</Avatar>
+          <UserAvatar>{firstName}</UserAvatar>
 
           <Stack minWidth={0}>
             <Stack direction="row" gap={1} alignItems="center">
@@ -54,17 +53,18 @@ export function UserListItem({ firstName, lastName, email, roles }: User) {
                 variant="subtitle1"
                 fontWeight="medium"
                 sx={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
                   display: "-webkit-box",
                   WebkitLineClamp: 1,
                   WebkitBoxOrient: "vertical",
                   wordBreak: "break-word",
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
                 }}
               >
                 {`${firstName} ${lastName}`}
               </Typography>
-              {roles.length > 0 && roles[0] !== "Portal User" && <Chip size="small" label={capitalize(roles[0])} />}
+
+              {roles.length > 0 && roles[0] !== ROLES.PORTAL_USER && <Chip size="small" label={capitalize(roles[0])} />}
             </Stack>
 
             <Stack direction="row" alignItems="center" gap={1}>
@@ -82,23 +82,7 @@ export function UserListItem({ firstName, lastName, email, roles }: User) {
   );
 }
 
-export function Avatar({ children }: { children: string }) {
-  return (
-    <MuiAvatar
-      sx={(theme) => ({
-        height: 40,
-        width: 40,
-        bgcolor: "primary.main",
-        fontSize: theme.typography.h5,
-        fontWeight: "medium",
-      })}
-    >
-      {stringAvatar(children)}
-    </MuiAvatar>
-  );
-}
-
-export function UserListItemSkeleton() {
+export function UserItemSkeleton() {
   return (
     <Card elevation={0} sx={{ p: 1, pointerEvents: "none" }}>
       <Stack direction="row" alignItems="center" gap={2}>

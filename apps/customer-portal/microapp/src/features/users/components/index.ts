@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./UserListItem";
 export * from "./InvitationSummaryContent";
 export * from "./RoleSelector";
+export * from "./UserAvatar";
+export * from "./UserItem";
+export * from "./UsersList";

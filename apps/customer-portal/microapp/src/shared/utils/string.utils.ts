@@ -15,7 +15,7 @@
 // under the License.
 import { STRING_OVERRIDES } from "@shared/constants";
 
-export function stringAvatar(name: string): string {
+export function getAvatarInitials(name: string): string {
   if (!name) return "";
   const parts = name.trim().split(/\s+/);
 

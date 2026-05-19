@@ -13,13 +13,67 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { useProject } from "@context/project";
+import { Link } from "react-router-dom";
 
-import { UserListView } from "@features/users/components/UserListView";
-import { useUserMetrics } from "@features/users/hooks/useUserList";
+import { Button, Card, Divider, Grid, SearchBar, Stack, Typography } from "@wso2/oxygen-ui";
+import { Plus } from "@wso2/oxygen-ui-icons-react";
+
+import { useNotify } from "@context/snackbar";
+
+import { WidgetMetric } from "@features/dashboard/components";
+import { UsersList, UsersListSkeleton } from "@features/users/components";
+import { useFilters, useUserStats } from "@features/users/hooks";
+
+import { ErrorBoundary } from "@shared/components/core";
+
+import { ROUTES } from "@shared/constants";
 
 export default function UsersPage() {
-  const { projectId } = useProject();
-  const metrics = useUserMetrics(projectId!);
-  return <UserListView metrics={metrics} />;
+  const notify = useNotify();
+  const { total, registered, invited, admins } = useUserStats();
+  const { set } = useFilters();
+
+  return (
+    <>
+      <Grid spacing={1.5} container>
+        <Grid size={3}>
+          <WidgetMetric label="Total" value={total} />
+        </Grid>
+        <Grid size={3}>
+          <WidgetMetric label="Registered" value={registered} />
+        </Grid>
+        <Grid size={3}>
+          <WidgetMetric label="Invited" value={invited} />
+        </Grid>
+        <Grid size={3}>
+          <WidgetMetric label="Admins" value={admins} />
+        </Grid>
+
+        <SearchBar
+          fullWidth
+          size="small"
+          placeholder="Search Users"
+          onChange={(e) => set({ search: e.target.value })}
+        />
+      </Grid>
+
+      <Card component={Stack} p={2} mt={2} gap={0.5} divider={<Divider />}>
+        <Stack direction="row" justifyContent="space-between" pb={1}>
+          <Typography variant="h6">All Users</Typography>
+          <Button component={Link} to={ROUTES.users.invite} startIcon={<Plus />} sx={{ textTransform: "none" }}>
+            Add
+          </Button>
+        </Stack>
+
+        <Stack gap={2} pt={1}>
+          <ErrorBoundary
+            fallback={<UsersListSkeleton />}
+            onError={() => notify.error("Failed to load users. Try again later.")}
+          >
+            <UsersList />
+          </ErrorBoundary>
+        </Stack>
+      </Card>
+    </>
+  );
 }
