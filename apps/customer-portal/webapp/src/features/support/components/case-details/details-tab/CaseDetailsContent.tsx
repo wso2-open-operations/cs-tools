@@ -312,6 +312,11 @@ export default function CaseDetailsContent({
                     assignedEngineerLabel={
                       hideAssignedEngineer ? null : assignedEngineerLabel
                     }
+                    engagementTypeLabel={
+                      isEngagementRoute
+                        ? (data?.engagementType?.label ?? null)
+                        : null
+                    }
                     statusChipIcon={statusChipIcon}
                     statusChipSx={statusChipSx}
                     isLoading={isLoading}
