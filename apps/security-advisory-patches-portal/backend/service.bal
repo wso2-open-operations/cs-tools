@@ -43,19 +43,7 @@ public isolated service class ErrorInterceptor {
     label: "Security Advisories File Share Backend",
     id: "security-advisories/files-backend"
 }
-@http:ServiceConfig {
-    cors: {
-        allowOrigins: [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000"
-        ],
-        allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allowCredentials: true,
-        allowHeaders: ["x-jwt-assertion", "Authorization", "Content-Type"],
-        exposeHeaders: [],
-        maxAge: 84900
-    }
-}
+
 service http:InterceptableService / on new http:Listener(9090) {
 
     # Request interceptors.
