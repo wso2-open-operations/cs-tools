@@ -53,8 +53,8 @@ const App: React.FC = () => {
               <Route path="/" element={<HomePage />} />
 
               <Route path="/users" element={<UsersPage />} />
-              <Route path="/users/invite" element={<UserEditPage mode="invite" />} />
-              <Route path="/users/edit" element={<UserEditPage mode="edit" />} />
+              <Route path="/users/invite" element={<UserEditPage />} />
+              <Route path="/users/edit" element={<UserEditPage />} />
 
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/update" element={<ProfileEditPage />} />

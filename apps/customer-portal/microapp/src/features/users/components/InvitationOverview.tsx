@@ -14,22 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 import { Chip, Stack, Typography } from "@wso2/oxygen-ui";
+import { useFormikContext } from "formik";
 
-import type { RoleName } from "./RoleSelector";
+import { useProject } from "@context/project";
 
-interface InvitationSummaryProps {
-  projectName?: string;
-  email: string;
-  name: string;
-  role: RoleName;
-}
+import type { EditUserFormValues } from "@pages/UserEditPage";
 
-export function InvitationSummaryContent({ projectName, email, name, role }: InvitationSummaryProps) {
+export function InvitationOverview() {
+  const { projectId } = useProject();
+  const { values } = useFormikContext<EditUserFormValues>();
+
   const summary = [
-    { label: "Project", value: projectName || "-" },
-    { label: "User Email", value: email || "-" },
-    { label: "User Name", value: name || "-" },
-    { label: "Role", value: <Chip size="small" label={role} color={role === "Admin" ? "primary" : "default"} /> },
+    { label: "Project", value: projectId },
+    { label: "User Email", value: values.email || "-" },
+    { label: "User Name", value: `${values.firstName} ${values.lastName}` || "-" },
+    { label: "Role", value: <Chip size="small" label={values.roles[0]} /> },
     { label: "Delivery Method", value: "Email" },
   ];
 

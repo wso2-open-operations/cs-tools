@@ -1,4 +1,5 @@
 export * from "./useFilters";
 export * from "./useUserStats";
 export * from "./useUsersList";
-export * from "./useUserEditor";
+export * from "./useMode";
+export * from "./useUserMutations";
