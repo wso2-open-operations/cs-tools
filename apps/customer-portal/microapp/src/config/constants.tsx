@@ -52,8 +52,6 @@ export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
   Onboarding: colors.yellow[600],
 };
 
-export const ADMIN_USER_ROLE = "sn_customerservice.customer_admin";
-
 export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
   case: (id) => `/cases/${id}`,
   chat: (id) => `/chats/${id}`,

@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import type { Role } from "@features/users/types";
 
 export const ErrorMessages = {
   NATIVE_BRIDGE_NOT_AVAILABLE: "Native bridge is not available",
@@ -39,3 +40,7 @@ export const ROLES = {
   PORTAL_USER: "Portal User",
   SYSTEM_USER: "System User",
 } as const;
+
+export const DEFAULT_USER_ROLE: Role = ROLES.PORTAL_USER;
+
+export const ADMIN_ROLE_ID = "sn_customerservice.customer_admin";

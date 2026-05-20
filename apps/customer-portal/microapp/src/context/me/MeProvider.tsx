@@ -22,12 +22,12 @@ import axios from "axios";
 
 import { useProject } from "@context/project";
 
-import { ADMIN_USER_ROLE } from "@config/constants";
-
 import { projects } from "@features/projects/api/projects.queries";
 import { users } from "@features/users/api/users.queries";
 
 import { getLastVisitedProjectId } from "@shared/utils/storage.utils";
+
+import { ADMIN_ROLE_ID } from "@shared/constants";
 
 import { AuthorizationFallback } from "@components/ui";
 import { LoadingFallback } from "@components/ui/LoadingFallback";
@@ -75,7 +75,7 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
       value={{
         id: meData.id,
         roles: meData.roles,
-        isAdmin: meData.roles.includes(ADMIN_USER_ROLE),
+        isAdmin: meData.roles.includes(ADMIN_ROLE_ID),
         timezone: meData.timezone,
       }}
     >
