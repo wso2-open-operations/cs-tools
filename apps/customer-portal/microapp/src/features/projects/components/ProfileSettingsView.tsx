@@ -51,7 +51,7 @@ export function ProfileSettingsView({ me, timeZones, mutation, buildPayload }: P
       phoneNumber: me.phoneNumber ?? "",
       timeZone: me.timezone && me.timezone !== "--None--" ? me.timezone : "",
     },
-    validationSchema: updateProfileValidationSchema,
+    validationSchema: validationSchema,
     validateOnBlur: true,
     validateOnChange: true,
     onSubmit: async (values, { setSubmitting }) => {
@@ -151,7 +151,7 @@ export function ProfileSettingsView({ me, timeZones, mutation, buildPayload }: P
   );
 }
 
-const updateProfileValidationSchema = Yup.object({
+const validationSchema = Yup.object({
   phoneNumber: Yup.string()
     .required("Phone number is required")
     .matches(/^\+[1-9]\d{1,14}$/, "Enter a valid phone number"),

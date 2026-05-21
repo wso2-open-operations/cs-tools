@@ -15,11 +15,11 @@
 // under the License.
 import type { ReactNode } from "react";
 
-import { Card, Stack, Typography } from "@wso2/oxygen-ui";
+import { Card, Stack, type SxProps, Typography } from "@wso2/oxygen-ui";
 
-export function SectionCard({ title, children }: { title?: string; children: ReactNode }) {
+export function SectionCard({ title, children, sx }: { title?: string; children: ReactNode; sx?: SxProps }) {
   return (
-    <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper" }}>
+    <Card component={Stack} p={1.5} gap={1.5} sx={{ bgcolor: "background.paper", ...sx }}>
       {title && (
         <Typography variant="h6" fontWeight="medium">
           {title}

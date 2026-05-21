@@ -31,11 +31,12 @@ interface SelectFieldProps {
   name: string;
   options: { value: number | string; label: string | ReactNode }[];
   label?: string | ReactNode;
-  required?: boolean;
   placeholder?: string;
+  helperText?: string;
+  required?: boolean;
   disabled?: boolean;
   slots?: {
-    label?: { endAdornment?: ReactNode };
+    label?: { startAdornment?: ReactNode; endAdornment?: ReactNode };
     input?: { startAdornment?: ReactNode };
   };
 
@@ -45,6 +46,7 @@ export function SelectField({
   name,
   label,
   placeholder,
+  helperText,
   options,
   required = false,
   disabled = false,
@@ -55,7 +57,12 @@ export function SelectField({
 
   return (
     <FormControl component={Stack} gap={1} fullWidth>
-      <FieldLabel label={label} required={required} endAdornment={slots?.label?.endAdornment} />
+      <FieldLabel
+        label={label}
+        required={required}
+        startAdornment={slots?.label?.startAdornment}
+        endAdornment={slots?.label?.endAdornment}
+      />
 
       <Select
         {...field}
@@ -87,11 +94,13 @@ export function SelectField({
         ))}
       </Select>
 
-      {meta.touched && meta.error && (
+      {meta.touched && meta.error ? (
         <FormHelperText error sx={{ m: 0, mt: -0.5 }}>
           {meta.error}
         </FormHelperText>
-      )}
+      ) : helperText ? (
+        <FormHelperText sx={{ m: 0, mt: -0.5 }}>{helperText}</FormHelperText>
+      ) : null}
     </FormControl>
   );
 }
@@ -101,12 +110,13 @@ interface TextFieldProps {
   value?: string;
   label?: string;
   placeholder?: string;
+  helperText?: string;
   multiline?: boolean;
   rows?: number;
   required?: boolean;
   disabled?: boolean;
   slots?: {
-    label?: { endAdornment?: ReactNode };
+    label?: { startAdornment?: ReactNode; endAdornment?: ReactNode };
     input?: { startAdornment?: ReactNode };
   };
 
@@ -118,6 +128,7 @@ export function TextField({
   value,
   label,
   placeholder,
+  helperText,
   multiline = false,
   rows = 10,
   required = false,
@@ -129,7 +140,12 @@ export function TextField({
 
   return (
     <FormControl component={Stack} gap={1} fullWidth>
-      <FieldLabel label={label} required={required} endAdornment={slots?.label?.endAdornment} />
+      <FieldLabel
+        label={label}
+        required={required}
+        startAdornment={slots?.label?.startAdornment}
+        endAdornment={slots?.label?.endAdornment}
+      />
 
       <MuiTextField
         {...field}
@@ -150,11 +166,13 @@ export function TextField({
         }}
       />
 
-      {meta.touched && meta.error && (
+      {meta.touched && meta.error ? (
         <FormHelperText error sx={{ m: 0, mt: -0.5 }}>
           {meta.error}
         </FormHelperText>
-      )}
+      ) : helperText ? (
+        <FormHelperText sx={{ m: 0, mt: -0.5 }}>{helperText}</FormHelperText>
+      ) : null}
     </FormControl>
   );
 }
@@ -162,12 +180,16 @@ export function TextField({
 interface FieldLabelProps {
   label: string | ReactNode;
   required?: boolean;
+  startAdornment?: ReactNode;
   endAdornment?: ReactNode;
 }
 
-function FieldLabel({ label, required, endAdornment }: FieldLabelProps) {
+function FieldLabel({ label, required, startAdornment, endAdornment }: FieldLabelProps) {
   return (
     <Stack direction="row" justifyContent="space-between" alignItems="end" gap={1}>
+      {/* Optional element displayed at the beginning of the label row */}
+      {startAdornment}
+
       <Stack direction="row" alignItems="center" gap={0.5}>
         <Typography variant="subtitle2">{label}</Typography>
         {required && (

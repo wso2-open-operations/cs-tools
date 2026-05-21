@@ -21,7 +21,7 @@ export default function ProfilePage() {
   const version = useAppVersion();
   const { data: project } = useProject();
   const { data: me, isLoading } = useMe();
-  const { edit } = useProfileMutations();
+  const { editProject: edit } = useProfileMutations();
 
   useEffect(() => {
     queryClient.prefetchQuery(metadata.get());
@@ -78,7 +78,7 @@ export default function ProfilePage() {
             <Switch
               checked={project?.agentEnabled}
               onChange={(event) => edit.mutate({ hasAgent: event.target.checked })}
-              disabled={!me.isAdmin}
+              disabled={!me?.isAdmin}
             />
           }
         />
@@ -91,7 +91,7 @@ export default function ProfilePage() {
             <Switch
               checked={project?.kbReferencesEnabled}
               onChange={(event) => edit.mutate({ hasKbReferences: event.target.checked })}
-              disabled={!me.isAdmin}
+              disabled={!me?.isAdmin}
             />
           }
         />

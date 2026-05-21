@@ -16,3 +16,4 @@
 
 export * from "./SettingsItem";
 export * from "./ProfileTitleSlot";
+export * from "./ProfileEditCallout";
