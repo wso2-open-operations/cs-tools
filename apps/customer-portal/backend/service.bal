@@ -18,6 +18,7 @@ import customer_portal.ai_chat_agent;
 import customer_portal.authorization;
 import customer_portal.entity;
 import customer_portal.product_consumption_subscription;
+import customer_portal.product_consumption_tracking;
 import customer_portal.registry;
 import customer_portal.scim;
 import customer_portal.types;
@@ -4058,7 +4059,6 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     resource function post projects/[entity:IdString id]/cases/time\-cards/search(http:RequestContext ctx,
             types:TimeCardSearchPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
-        
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
@@ -5163,6 +5163,65 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
         return licenseResponse;
+    }
+
+    # Import product consumption usage from a zip file.
+    #
+    # + req - Request containing zip file binary body
+    # + return - Deployment usage import response or error
+    isolated resource function post deployment\-usage(http:RequestContext ctx, http:Request req)
+        returns product_consumption_tracking:DeploymentUsageImportResponse|http:BadRequest|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        string? validationError = validateDeploymentUsageImportRequest(req);
+        if validationError is string {
+            log:printWarn(validationError);
+            return <http:BadRequest>{
+                body: {
+                    message: validationError
+                }
+            };
+        }
+
+        byte[]|http:ClientError zipFile = req.getBinaryPayload();
+        if zipFile is http:ClientError {
+            string customError = "Failed to read deployment usage import zip file.";
+            log:printError(customError, zipFile);
+            return <http:BadRequest>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        product_consumption_tracking:DeploymentUsageImportResponse|error response =
+            product_consumption_tracking:importDeploymentUsage(userInfo.email, zipFile);
+        if response is error {
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid deployment usage import request."
+                    }
+                };
+            }
+
+            string customError = "Failed to import deployment usage data.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response;
     }
 
     # Get usage stats for a specific project.

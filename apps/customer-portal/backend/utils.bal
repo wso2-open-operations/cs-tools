@@ -25,6 +25,23 @@ configurable types:FeatureFlags featureFlags = {
 };
 configurable string[] restrictedChangeRequestStateIds = ["-3", "-4", "-5"];
 
+# Validate deployment usage import request.
+#
+# + req - Request containing zip file binary body
+# + return - Error message if validation fails, nil otherwise
+isolated function validateDeploymentUsageImportRequest(http:Request req) returns string? {
+    string contentType = req.getContentType();
+    if contentType.trim().length() == 0 {
+        return "Content-Type header is required.";
+    }
+
+    string baseType = re `;`.split(contentType.trim().toLowerAscii())[0].trim();
+    if baseType != "application/zip" && baseType != "application/x-zip-compressed" {
+        return "Request body must be a zip file.";
+    }
+    return;
+}
+
 # Search cases for a given project.
 #
 # + idToken - ID token for authorization

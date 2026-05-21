@@ -366,10 +366,10 @@ modules = [
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.authorization"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.entity"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.product_consumption_subscription"},
+	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.product_consumption_tracking"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.registry"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.scim"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.types"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.updates"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.user_management"}
 ]
-
