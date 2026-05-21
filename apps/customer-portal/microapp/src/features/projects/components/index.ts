@@ -17,3 +17,5 @@
 export * from "./ProjectCard";
 export * from "./ProjectPopoverItem";
 export * from "./ProjectSelector";
+export * from "./ProjectItem";
+export * from "./ProjectsList";

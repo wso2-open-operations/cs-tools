@@ -52,16 +52,6 @@ export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
   Onboarding: colors.yellow[600],
 };
 
-export const ITEM_DETAIL_PATHS: Record<ItemCardProps["type"], (id: string) => string> = {
-  case: (id) => `/cases/${id}`,
-  chat: (id) => `/chats/${id}`,
-  service: (id) => `/services/${id}`,
-  change: (id) => `/changes/${id}`,
-  sra: (id) => `/sras/${id}`,
-  engagement: (id) => `/engagements/${id}`,
-  announcement: (id) => `/announcements/${id}`,
-};
-
 export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";
 
 export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

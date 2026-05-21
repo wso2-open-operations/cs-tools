@@ -5,5 +5,6 @@ export const useCoreNavigation = () => {
 
   return {
     back: () => navigate(-1),
+    toHome: () => navigate("/"),
   };
 };

@@ -21,7 +21,7 @@ import type {
 } from "@features/projects/types/project.dto";
 import type { Deployment, Product, Project, ProjectInfo, ProjectStatus } from "@features/projects/types/project.model";
 
-import { parseApiDate } from "@shared/utils/date.utils";
+import { toDate } from "@shared/utils/date.utils";
 import { stripHtmlTags } from "@shared/utils/string.utils";
 
 export function toProjectSummary(dto: ProjectsDto["projects"][number]): Project {
@@ -29,8 +29,8 @@ export function toProjectSummary(dto: ProjectsDto["projects"][number]): Project 
     id: dto.id,
     projectKey: dto.key,
     name: dto.name,
-    createdOn: parseApiDate(dto.createdOn),
-    description: dto.description ? dto.description.replace(/<\/?[^>]+(>|$)/g, "") : "",
+    createdOn: toDate(dto.createdOn),
+    description: dto.description ? stripHtmlTags(dto.description) : "",
     metrics: {
       outstanding: dto.outstandingCount,
       chats: dto.activeChatsCount,
@@ -45,7 +45,7 @@ export function toProject(dto: ProjectDto): ProjectInfo {
     id: dto.id,
     projectKey: dto.key,
     name: dto.name,
-    createdOn: parseApiDate(dto.createdOn),
+    createdOn: toDate(dto.createdOn),
     description: stripHtmlTags(dto.description),
     type: dto.type?.label ?? "N/A",
     agentEnabled: dto.account.hasAgent,
@@ -58,8 +58,8 @@ export function toDeployment(dto: ProjectDeploymentDto): Deployment {
   return {
     id: dto.id,
     name: dto.name,
-    createdOn: parseApiDate(dto.createdOn),
-    updatedOn: parseApiDate(dto.updatedOn),
+    createdOn: toDate(dto.createdOn),
+    updatedOn: toDate(dto.updatedOn),
     url: dto.url ?? undefined,
     typeId: dto.type.id,
     projectId: dto.project.id,
@@ -70,8 +70,8 @@ export function toDeployment(dto: ProjectDeploymentDto): Deployment {
 export function toProduct(dto: DeploymentProductDto): Product {
   return {
     id: dto.id,
-    createdOn: parseApiDate(dto.createdOn),
-    updatedOn: parseApiDate(dto.updatedOn),
+    createdOn: toDate(dto.createdOn),
+    updatedOn: toDate(dto.updatedOn),
     description: dto.description ?? undefined,
     name: dto.product.label,
     deploymentId: dto.deployment.id,

@@ -14,6 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export function parseApiDate(value: string): Date {
+export function toDate(value: string): Date {
   return new Date(value.replace(" ", "T"));
 }

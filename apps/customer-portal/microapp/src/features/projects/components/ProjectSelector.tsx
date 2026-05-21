@@ -17,10 +17,9 @@ import { Suspense } from "react";
 
 import { alpha, Box, CircularProgress, Popover, type PopoverProps, pxToRem, Stack, Typography } from "@wso2/oxygen-ui";
 
-import { ProjectPopoverItem } from "@features/projects/components";
-import { useProjectSelector } from "@features/projects/hooks/useProjectSelector";
-
 import { ErrorBoundary } from "@components/core";
+
+import { ProjectPopoverList } from "./ProjectPopoverList";
 
 export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
   const fallback = (
@@ -61,29 +60,9 @@ export function ProjectSelector({ open, anchorEl, onClose }: PopoverProps) {
       </Typography>
       <ErrorBoundary fallback={fallback}>
         <Suspense fallback={fallback}>
-          <ProjectsList onClose={onClose} />
+          <ProjectPopoverList onClose={onClose} />
         </Suspense>
       </ErrorBoundary>
     </Popover>
-  );
-}
-
-function ProjectsList({ onClose }: { onClose: PopoverProps["onClose"] }) {
-  const { projects, projectId, setProjectId } = useProjectSelector();
-
-  return (
-    <Stack gap={1} pt={1}>
-      {projects.map((props) => (
-        <ProjectPopoverItem
-          {...props}
-          key={props.id}
-          active={props.id === projectId}
-          onClick={() => {
-            setProjectId(props.id);
-            onClose?.({}, "backdropClick");
-          }}
-        />
-      ))}
-    </Stack>
   );
 }
