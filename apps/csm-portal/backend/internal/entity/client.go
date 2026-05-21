@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"golang.org/x/oauth2/clientcredentials"
 )
 
@@ -100,7 +101,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		if len(excerpt) > maxErrBody {
 			excerpt = excerpt[:maxErrBody]
 		}
-		return nil, fmt.Errorf("entity: %s %s returned %d: %s", method, path, resp.StatusCode, excerpt)
+		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 
 	return respBody, nil

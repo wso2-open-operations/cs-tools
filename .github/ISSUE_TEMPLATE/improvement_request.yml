@@ -20,6 +20,7 @@ body:
       options:
         - Customer Portal
         - Customer Service
+        - CSM Portal
     validations:
       required: true
 

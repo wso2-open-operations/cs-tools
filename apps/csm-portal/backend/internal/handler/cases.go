@@ -21,6 +21,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
 // entityCaseClient abstracts the entity service operations used by CaseHandler,
@@ -47,45 +49,48 @@ const maxRequestBodyBytes = 1 << 20
 
 // CreateCase handles POST /cases.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
-	// TODO: Verify the caller is an authenticated agent user (validate bearer JWT,
-	// extract agent identity, and enforce role-based access control).
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
 
 	// TODO: Decode the request body into a typed CaseCreatePayload and run
 	// field-level validation (required fields, enum values, etc.).
 
-	// TODO: Apply agent-portal business rules before forwarding to entity
+	// TODO: Apply CSM portal business rules before forwarding to entity
 	// (e.g. restrict allowed case types, enforce project membership).
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := err.(*http.MaxBytesError); ok {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
 			return
 		}
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
 		return
 	}
 
 	result, err := h.entity.CreateCase(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCase failed", "err", err)
-		// TODO: Translate entity error codes to appropriate HTTP status codes.
-		http.Error(w, "failed to create case", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "entity CreateCase failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to create case.")
 		return
 	}
 
 	// TODO: Unmarshal result into a typed CaseCreateResponse and transform it
-	// to the agent-portal response shape before writing.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write(result)
+	// to the CSM portal response shape before writing.
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // SearchCases handles POST /cases/search.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
-	// TODO: Verify the caller is an authenticated agent user (validate bearer JWT,
-	// extract agent identity, and enforce role-based access control).
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
 
 	// TODO: Decode the request body into a typed CaseSearchPayload and validate.
 
@@ -96,49 +101,47 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := err.(*http.MaxBytesError); ok {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
 			return
 		}
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
 		return
 	}
 
 	result, err := h.entity.SearchCases(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCases failed", "err", err)
-		// TODO: Translate entity error codes to appropriate HTTP status codes.
-		http.Error(w, "failed to search cases", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "entity SearchCases failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to search cases.")
 		return
 	}
 
 	// TODO: Unmarshal result into a typed CaseSearchResponse and transform it
-	// to the agent-portal response shape before writing.
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(result)
+	// to the CSM portal response shape before writing.
+	writeJSON(w, http.StatusOK, result)
 }
 
 // GetCase handles GET /cases/{id}.
 func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
-	// TODO: Verify the caller is an authenticated agent user (validate bearer JWT,
-	// extract agent identity, and enforce role-based access control).
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
 
 	caseID := r.PathValue("id")
 	if caseID == "" {
-		http.Error(w, "missing case id", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Case ID cannot be empty!")
 		return
 	}
 
 	result, err := h.entity.GetCase(r.Context(), caseID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetCase failed", "caseID", caseID, "err", err)
-		// TODO: Translate entity error codes to appropriate HTTP status codes
-		// (e.g. 404 when entity returns a not-found error).
-		http.Error(w, "failed to get case", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve case details.")
 		return
 	}
 
 	// TODO: Unmarshal result into a typed CaseResponse and transform it
-	// to the agent-portal response shape before writing.
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(result)
+	// to the CSM portal response shape before writing.
+	writeJSON(w, http.StatusOK, result)
 }
