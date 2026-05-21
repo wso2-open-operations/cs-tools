@@ -5,8 +5,8 @@ Go backend service for the CSM Portal application.
 ## Quick Start
 
 ```bash
-# from apps/agent-portal/backend
-export $(cat .env | xargs) && go run ./cmd/server
+# from apps/csm-portal/backend
+set -a && source .env && set +a && go run ./cmd/server
 ```
 
 Backend starts at `http://localhost:8080`.
@@ -16,7 +16,9 @@ Backend starts at `http://localhost:8080`.
 - Default port: `8080`
 - Runtime: Go `1.22+`
 - Entry point: `cmd/server/main.go`
-- Authentication: OAuth2 client credentials grant (tokens managed automatically)
+- Authentication:
+  - Incoming requests: JWT Bearer token (validated by Choreo gateway + JWKS endpoint); pass as `x-jwt-assertion` header when testing locally
+  - Outbound service calls: OAuth2 client credentials grant (managed automatically)
 
 ## Prerequisites
 
@@ -81,40 +83,48 @@ backend/
 
 ### Updates
 
-- `GET /updates/recommended-update-levels` — Get recommended update levels (requires `?user=<email>`)
+- `GET /updates/recommended-update-levels` — Get recommended update levels (user email sourced from JWT)
 - `GET /updates/product-update-levels` — Get product update levels
 - `POST /updates/levels/search` — Search updates between update levels
 
 ## Run Locally
 
 ```bash
-export $(cat .env | xargs) && go run ./cmd/server
+# from apps/csm-portal/backend
+set -a && source .env && set +a && go run ./cmd/server
 ```
+
+When `AUTH_TOKEN_VALIDATOR_ENABLED=false` (default for local), pass any valid JWT as the `x-jwt-assertion` header. In production, the Choreo gateway validates the Bearer token and injects this header automatically.
 
 ### Examples
 
 ```bash
+JWT="<your-jwt-token>"
+
 # Create a case
 curl -X POST http://localhost:8080/cases \
+  -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"type":"DEFAULT_CASE","projectId":"<project-id>","deploymentId":"<deployment-id>"}'
 
 # Search cases
 curl -X POST http://localhost:8080/cases/search \
+  -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"filters":{"searchQuery":"login error"},"pagination":{"limit":10,"offset":0}}'
 
 # Get a case
-curl http://localhost:8080/cases/<case-id>
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/cases/<case-id>
 
-# Get recommended update levels
-curl "http://localhost:8080/updates/recommended-update-levels?user=agent@example.com"
+# Get recommended update levels (user email is read from the JWT)
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/updates/recommended-update-levels
 
 # Get product update levels
-curl http://localhost:8080/updates/product-update-levels
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/updates/product-update-levels
 
 # Search updates between update levels
 curl -X POST http://localhost:8080/updates/levels/search \
+  -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
-  -d '{"product-name":"wso2am","product-version":"4.2.0","channel":"full","starting-update-level":1,"ending-update-level":10,"user-email":"agent@example.com"}'
+  -d '{"productName":"wso2am","productVersion":"4.2.0","startingUpdateLevel":1,"endingUpdateLevel":10}'
 ```

@@ -74,7 +74,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.CreateCase(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCase failed", "user", user.Email, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateCase failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to create case.")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.SearchCases(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCases failed", "user", user.Email, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchCases failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to search cases.")
 		return
 	}
@@ -136,7 +136,7 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetCase(r.Context(), caseID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetCase failed", "user", user.Email, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to retrieve case details.")
 		return
 	}

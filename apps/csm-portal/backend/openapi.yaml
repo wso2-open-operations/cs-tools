@@ -2,6 +2,8 @@ openapi: 3.0.1
 info:
   title: CSM Portal API
   version: 1.0.0
+security:
+  - bearerAuth: []
 servers:
   - url: "{server}:{port}/"
     variables:
@@ -14,6 +16,7 @@ paths:
     get:
       summary: Health check endpoint.
       operationId: getHealth
+      security: []
       responses:
         "200":
           description: Ok
@@ -158,6 +161,11 @@ paths:
           description: InternalServerError
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     ErrorPayload:
       type: object
@@ -245,25 +253,19 @@ components:
     UpdateDescriptionRequest:
       type: object
       required:
-        - product-name
-        - product-version
-        - channel
-        - starting-update-level
-        - ending-update-level
-        - user-email
+        - productName
+        - productVersion
+        - startingUpdateLevel
+        - endingUpdateLevel
       properties:
-        product-name:
+        productName:
           type: string
-        product-version:
+        productVersion:
           type: string
-        channel:
-          type: string
-        starting-update-level:
+        startingUpdateLevel:
           type: integer
-        ending-update-level:
+        endingUpdateLevel:
           type: integer
-        user-email:
-          type: string
 
     Pagination:
       type: object

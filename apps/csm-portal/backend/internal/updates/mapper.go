@@ -16,6 +16,8 @@
 
 package updates
 
+import "strconv"
+
 // mapRecommendedUpdateLevels converts the upstream snake-case response to the
 // portal camelCase response shape, mirroring processRecommendedUpdateLevels in utils.bal.
 func mapRecommendedUpdateLevels(src []upstreamRecommendedUpdateLevel) []RecommendedUpdateLevel {
@@ -80,7 +82,7 @@ func groupByUpdateLevel(src []upstreamUpdateDescription) map[string]UpdateLevelG
 	groups := make(map[string]UpdateLevelGroup)
 
 	for _, d := range src {
-		key := itoa(d.UpdateLevel)
+		key := strconv.Itoa(d.UpdateLevel)
 
 		group, exists := groups[key]
 		if !exists {
@@ -146,27 +148,4 @@ func mapUpdateDescription(d upstreamUpdateDescription) UpdateDescription {
 		Timestamp:          d.Timestamp,
 		SecurityAdvisories: advisories,
 	}
-}
-
-// itoa converts an int to its decimal string representation without importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	buf := [20]byte{}
-	pos := len(buf)
-	for n > 0 {
-		pos--
-		buf[pos] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return string(buf[pos:])
 }
