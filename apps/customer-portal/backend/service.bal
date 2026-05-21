@@ -6030,7 +6030,92 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return <http:Ok>{body: mapCaseActivitySummaryResponse(response)};
     }
 
-    // TODO: Add POST /users/groups — expose scim:addUsersToExternalGroup behind auth once team finalizes Asgardeo group.
+    # Add users to a group via the SCIM operations service.
+    #
+    # + ctx - Request context with authenticated user
+    # + payload - Request payload containing group name and user emails
+    # + return - Response with added/failed users or error response
+    resource function post users/groups(http:RequestContext ctx, types:AddUsersToGroupRequest payload)
+        returns scim:AddUsersToGroupResponse|http:BadRequest|http:NotFound|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        string[] userGroups = userInfo.groups ?: [];
+        if !authorization:checkRoles([authorization:authorizedRoles.securityAdvisoryPatchesAdminRole], userGroups) {
+            log:printWarn(string `User: ${userInfo.userId} is not authorized to manage group users.`);
+            return <http:Forbidden>{
+                body: {
+                    message: "You do not have permission to manage group users."
+                }
+            };
+        }
+
+        if payload.group.trim().length() == 0 {
+            return <http:BadRequest>{
+                body: {
+                    message: "Group name must be provided."
+                }
+            };
+        }
+
+        if payload.emails.length() == 0 {
+            return <http:BadRequest>{
+                body: {
+                    message: "At least one user email must be provided."
+                }
+            };
+        }
+
+        boolean hasInvalidEmail = payload.emails.some(email => email.trim().length() == 0);
+        if hasInvalidEmail {
+            return <http:BadRequest>{
+                body: {
+                    message: "Email list contains empty or whitespace-only values."
+                }
+            };
+        }
+
+        scim:AddUsersToGroupResponse|error response = scim:addUsersToExternalGroup(payload.group,
+                {emails: payload.emails});
+        if response is error {
+            int statusCode = getStatusCode(response);
+            if statusCode == http:STATUS_NOT_FOUND {
+                string customError = string `Group '${payload.group}' is not found.`;
+                log:printWarn(customError);
+                return <http:NotFound>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+            if statusCode == http:STATUS_BAD_REQUEST {
+                string customError = string `Invalid request while adding users to the provided group. ${
+                        extractErrorMessage(response)}`;
+                log:printWarn(customError);
+                return <http:BadRequest>{
+                    body: {
+                        message: customError
+                    }
+                };
+            }
+
+            string customError = "Failed to add users to group.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return response;
+    }
 }
 
 # WebSocket service to proxy messages between the browser and the upstream Python AI chat agent for real-time communication in chat sessions.
