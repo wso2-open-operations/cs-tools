@@ -4002,6 +4002,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     resource function post projects/[entity:IdString id]/cases/time\-cards/search(http:RequestContext ctx,
             types:TimeCardSearchPayload payload)
         returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
             return <http:InternalServerError>{
