@@ -48,6 +48,16 @@ Copy `.env` and fill in the values:
 | `UPDATES_CLIENT_SECRET` | OAuth2 client secret |
 | `UPDATES_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
+### SCIM operations service
+
+| Variable | Description |
+|---|---|
+| `SCIM_BASE_URL` | Base URL of the SCIM operations service |
+| `SCIM_TOKEN_URL` | OAuth2 token endpoint |
+| `SCIM_CLIENT_ID` | OAuth2 client ID |
+| `SCIM_CLIENT_SECRET` | OAuth2 client secret |
+| `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
 ### Server
 
 | Variable | Description |
@@ -80,6 +90,11 @@ backend/
 - `POST /cases` — Create a case
 - `POST /cases/search` — Search cases
 - `GET /cases/{id}` — Get case by ID
+
+### Users
+
+- `GET /users/me` — Get current user profile (phone number + last password update time from SCIM; other fields TODO pending entity)
+- `PATCH /users/me` — Update current user profile (phone number via SCIM; time zone TODO pending entity)
 
 ### Updates
 
@@ -115,6 +130,15 @@ curl -X POST http://localhost:8080/cases/search \
 
 # Get a case
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/cases/<case-id>
+
+# Get current user profile
+curl -H "x-jwt-assertion: $JWT" http://localhost:8080/users/me
+
+# Update current user's phone number
+curl -X PATCH http://localhost:8080/users/me \
+  -H "x-jwt-assertion: $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNumber":"+94771234567"}'
 
 # Get recommended update levels (user email is read from the JWT)
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/updates/recommended-update-levels

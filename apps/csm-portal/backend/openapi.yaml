@@ -133,6 +133,67 @@ paths:
         "500":
           description: InternalServerError
 
+  /users/me:
+    get:
+      summary: Get the current user's profile.
+      operationId: getUsersMe
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update the current user's profile.
+      operationId: patchUsersMe
+      requestBody:
+        description: User update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedUser'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /updates/levels/search:
     post:
       summary: Search updates between update levels.
@@ -266,6 +327,32 @@ components:
           type: integer
         endingUpdateLevel:
           type: integer
+
+    UserResponse:
+      type: object
+      properties:
+        email:
+          type: string
+        phoneNumber:
+          type: string
+        lastPasswordUpdateTime:
+          type: string
+        # TODO: id, firstName, lastName, timeZone, roles — requires entity
+
+    UserUpdatePayload:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          description: Mobile phone number in E.164 format
+        # TODO: timeZone — requires entity
+
+    UpdatedUser:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+        # TODO: timeZone — requires entity
 
     Pagination:
       type: object

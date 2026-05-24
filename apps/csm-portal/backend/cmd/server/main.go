@@ -26,6 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
@@ -52,6 +53,16 @@ func main() {
 	updatesClient := updates.NewClient(updatesCfg)
 	updatesHandler := handler.NewUpdatesHandler(updatesClient)
 
+	scimCfg := scim.Config{
+		BaseURL:      mustEnv("SCIM_BASE_URL"),
+		TokenURL:     mustEnv("SCIM_TOKEN_URL"),
+		ClientID:     mustEnv("SCIM_CLIENT_ID"),
+		ClientSecret: mustEnv("SCIM_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
+	}
+	scimClient := scim.NewClient(scimCfg)
+	usersHandler := handler.NewUsersHandler(scimClient)
+
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
 		Issuer:                mustEnv("AUTH_ISSUER"),
@@ -70,6 +81,8 @@ func main() {
 	mux.HandleFunc("GET /updates/recommended-update-levels", updatesHandler.GetRecommendedUpdateLevels)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
+	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
+	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
 
 	addr := envOrDefault("PORT", ":8080")
 	slog.Info("starting csm-portal backend", "addr", addr)
