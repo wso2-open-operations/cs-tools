@@ -39,7 +39,7 @@ public type DeploymentUsageImportResponse record {|
 #
 # + email - email address of the user performing the import operation  
 # + zip - zip file content as base64 string
-public type ImportRequest record {
+public type ImportRequest record {|
     string email;
     string zip;
-};
+|};
