@@ -101,7 +101,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, query
 		return nil, fmt.Errorf("updates: read response body: %w", err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		const maxErrBody = 256
 		excerpt := respBody
 		if len(excerpt) > maxErrBody {

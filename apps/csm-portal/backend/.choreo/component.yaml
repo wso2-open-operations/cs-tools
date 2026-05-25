@@ -1,9 +1,11 @@
-version: 1
+schemaVersion: 1
 
 endpoints:
   - name: csm-portal-api
     displayName: CSM Portal API
-    port: 8080
+    service:
+      basePath: /
+      port: 8080
     type: REST
     networkVisibilities:
       - Public
