@@ -96,7 +96,9 @@ export default function AnnouncementList({
         const statusLabel = caseItem.status?.label;
         const statusColor = getStatusColor(statusLabel);
         const resolvedStatusColor = resolveColorFromTheme(statusColor, theme);
-        const updatedOnLabel = formatAnnouncementDateDisplay(caseItem.updatedOn);
+        const updatedOnLabel = formatAnnouncementDateDisplay(
+          caseItem.updatedOn ?? caseItem.createdOn,
+        );
 
         const cardContent = (
           <>

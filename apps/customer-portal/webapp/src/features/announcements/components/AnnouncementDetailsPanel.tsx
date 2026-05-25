@@ -113,7 +113,9 @@ export default function AnnouncementDetailsPanel({
   const statusLabel = data.status?.label;
   const statusColorPath = getStatusColor(statusLabel ?? undefined);
   const resolvedStatusColor = resolveColorFromTheme(statusColorPath, theme);
-  const updatedOnLabel = formatAnnouncementDateDisplay(data.updatedOn);
+  const updatedOnLabel = formatAnnouncementDateDisplay(
+    data.updatedOn ?? data.createdOn,
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
