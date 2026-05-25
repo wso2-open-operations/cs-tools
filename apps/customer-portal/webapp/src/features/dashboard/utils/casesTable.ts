@@ -181,10 +181,12 @@ export function parseDashboardCasesViewMode(
   tabId: string,
 ): DashboardCasesViewMode {
   switch (tabId) {
-    case DashboardCasesViewMode.MY:
-      return DashboardCasesViewMode.MY;
-    case DashboardCasesViewMode.ALL:
+    case DashboardCasesViewMode.MyCases:
+    case "my":
+      return DashboardCasesViewMode.MyCases;
+    case DashboardCasesViewMode.AllCases:
+    case "all":
     default:
-      return DashboardCasesViewMode.ALL;
+      return DashboardCasesViewMode.AllCases;
   }
 }

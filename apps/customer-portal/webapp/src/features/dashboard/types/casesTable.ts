@@ -58,12 +58,21 @@ export type CasesListProps = {
   hasListRefinement?: boolean;
 };
 
+/** My vs all cases on the dashboard outstanding cases table. */
+export enum DashboardCasesViewMode {
+  MyCases = "my-cases",
+  AllCases = "all-cases",
+}
+
 // Case table header props.
 export type CasesTableHeaderProps = {
   activeFiltersCount: number;
   isFiltersOpen: boolean;
   onFilterToggle: () => void;
   hasAgent?: boolean;
+  viewTabs: ReadonlyArray<{ id: string; label: string }>;
+  activeViewMode: DashboardCasesViewMode;
+  onViewModeChange: (tabId: string) => void;
 };
 
 // Case table skeleton props.
