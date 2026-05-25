@@ -24,7 +24,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
-import { Button, CircularProgress, Divider, Stack } from "@wso2/oxygen-ui";
+import { Box, Button, CircularProgress, Divider, Stack } from "@wso2/oxygen-ui";
 import { Download } from "@wso2/oxygen-ui-icons-react";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -36,6 +36,7 @@ import { CHANGE_REQUEST_FILTER_DEFINITIONS } from "@features/operations/constant
 import ListPageHeader from "@components/list-view/ListPageHeader";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
+import ChangeRequestsCsvExportButton from "@features/operations/components/change-requests/ChangeRequestsCsvExportButton";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ChangeRequestsList from "@features/operations/components/change-requests/ChangeRequestsList";
@@ -259,6 +260,35 @@ export default function ChangeRequestsPage(): JSX.Element {
   };
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+  const hideSearchPanel =
+    outstandingOnly || actionRequired || scheduledOnly;
+  const showDownloadResults =
+    listHasRefinement ||
+    outstandingOnly ||
+    actionRequired ||
+    scheduledOnly ||
+    searchTerm.trim().length > 0;
+
+  const downloadResultsButton =
+    showDownloadResults && projectId ? (
+      <ChangeRequestsCsvExportButton
+        projectId={projectId}
+        searchRequest={changeRequestSearchRequest}
+        prefetchedItems={
+          viewMode === ChangeRequestsViewMode.List
+            ? changeRequests
+            : flattenChangeRequestInfinitePages(infiniteData?.pages)
+        }
+        totalRecords={totalRecords}
+        disabled={
+          isLoading ||
+          isError ||
+          totalRecords === 0 ||
+          (viewMode === ChangeRequestsViewMode.Calendar &&
+            (hasNextPage || isFetchingNextPage))
+        }
+      />
+    ) : null;
   const visibleFilterDefinitions = useMemo(
     () =>
       outstandingOnly || actionRequired || scheduledOnly
@@ -316,7 +346,7 @@ export default function ChangeRequestsPage(): JSX.Element {
         actions={exportButton}
       />
 
-      {outstandingOnly || actionRequired || scheduledOnly ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchBar
@@ -327,6 +357,7 @@ export default function ChangeRequestsPage(): JSX.Element {
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
           activeFiltersCount={countListSearchAndFilters("", filters)}
           onClearFilters={handleClearFilters}
+          actionsBeforeClearFilters={downloadResultsButton}
           filtersContent={
             <ListFiltersPanel
               filterDefinitions={visibleFilterDefinitions}
@@ -346,15 +377,18 @@ export default function ChangeRequestsPage(): JSX.Element {
         totalCount={totalRecords}
         entityLabel={CHANGE_REQUESTS_ENTITY_LABEL}
         rightContent={
-          <TabBar
-            tabs={CHANGE_REQUESTS_VIEW_TABS_CONFIG}
-            activeTab={viewMode}
-            onTabChange={(tabId) => {
-              setViewMode(tabId as ChangeRequestsViewMode);
-              setPage(1);
-            }}
-            sx={{ mb: 0, height: 32 }}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {hideSearchPanel ? downloadResultsButton : null}
+            <TabBar
+              tabs={CHANGE_REQUESTS_VIEW_TABS_CONFIG}
+              activeTab={viewMode}
+              onTabChange={(tabId) => {
+                setViewMode(tabId as ChangeRequestsViewMode);
+                setPage(1);
+              }}
+              sx={{ mb: 0, height: 32 }}
+            />
+          </Box>
         }
       />
 

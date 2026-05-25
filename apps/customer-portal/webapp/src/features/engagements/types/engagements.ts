@@ -21,7 +21,7 @@ import type {
   CaseMetadataResponse,
 } from "@features/support/types/cases";
 import { SortOrder } from "@/types/common";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 
 /** Sort field for engagements list API (`sortBy.field`). */
 export enum EngagementsSortField {
@@ -73,4 +73,6 @@ export type EngagementsListSectionProps = {
   rowsPerPage: number;
   onPageChange: (event: ChangeEvent<unknown>, value: number) => void;
   onRowsPerPageChange: (newSize: number) => void;
+  actionsBeforeClearFilters?: ReactNode;
+  resultsBarRightContent?: ReactNode;
 };

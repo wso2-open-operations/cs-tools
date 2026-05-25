@@ -38,6 +38,7 @@ import ListFiltersPanel from "@components/list-view/ListFiltersPanel";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListCard from "@components/list-view/ListCard";
+import CaseListCsvExportButton from "@features/support/components/list-export/CaseListCsvExportButton";
 import { countListSearchAndFilters } from "@features/support/utils/support";
 import type {
   AllCasesFilterValues,
@@ -159,7 +160,31 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
     [data],
   );
 
-  const totalItems = displayedCases.length;
+  const apiTotalRecords = data?.pages?.[0]?.totalRecords ?? displayedCases.length;
+  const totalItems = apiTotalRecords || displayedCases.length;
+  const listHasRefinement = countListSearchAndFilters(searchTerm, filters) > 0;
+  const showDownloadResults =
+    listHasRefinement ||
+    viewMode === SecurityReportViewMode.MY ||
+    searchTerm.trim().length > 0;
+
+  const downloadResultsButton =
+    showDownloadResults && projectId ? (
+      <CaseListCsvExportButton
+        projectId={projectId}
+        caseSearchRequest={caseSearchRequest}
+        filenamePrefix="security-reports"
+        prefetchedCases={displayedCases}
+        totalRecords={totalItems}
+        disabled={
+          isLoading ||
+          hasNextPage ||
+          totalItems === 0 ||
+          !isSecurityReportAvailable
+        }
+        emptyMessage="No security reports to export for the current search or filters."
+      />
+    ) : null;
 
   const paginatedCases = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
@@ -303,6 +328,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
           activeFiltersCount={countListSearchAndFilters("", filters)}
           onClearFilters={handleClearFilters}
+          actionsBeforeClearFilters={downloadResultsButton}
           filtersContent={
             <ListFiltersPanel
               filterDefinitions={SECURITY_REPORT_FILTER_DEFINITIONS}
@@ -332,6 +358,9 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
         onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={
+          fixedStatusIds !== undefined ? downloadResultsButton : undefined
+        }
       />
 
       <Box>

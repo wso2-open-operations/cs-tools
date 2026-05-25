@@ -50,6 +50,7 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import ListItems from "@components/list-view/ListItems";
+import CaseListCsvExportButton from "@features/support/components/list-export/CaseListCsvExportButton";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import { ServiceRequestCaseSortField } from "@features/operations/types/serviceRequests";
 import {
@@ -291,6 +292,32 @@ export default function ServiceRequestsPage(): JSX.Element {
     severityId: undefined,
   });
 
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
+  const hideSearchPanel = outstandingOnly || actionRequired;
+  const showDownloadResults =
+    listHasRefinement ||
+    createdByMe ||
+    outstandingOnly ||
+    actionRequired ||
+    searchTerm.trim().length > 0;
+
+  const downloadResultsButton =
+    showDownloadResults && projectId ? (
+      <CaseListCsvExportButton
+        projectId={projectId}
+        caseSearchRequest={caseSearchRequest}
+        filenamePrefix="service-requests"
+        prefetchedCases={loadedCasesForExport}
+        totalRecords={totalItems}
+        disabled={!hasCasesResponse || isCasesError || totalItems === 0}
+        emptyMessage="No service requests to export for the current search or filters."
+      />
+    ) : null;
+
   const handleNewServiceRequest = () => {
     navigate(`/projects/${projectId}/${navSegment}/service-requests/create`);
   };
@@ -371,7 +398,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         actions={newRequestButton}
       />
 
-      {outstandingOnly || actionRequired ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchPanel
@@ -403,6 +430,7 @@ export default function ServiceRequestsPage(): JSX.Element {
           hideSeverityFilter
           hideDeploymentFilter={!permissions.hasDeployments}
           isProjectContextLoading={isProjectContextLoading}
+          actionsBeforeClearFilters={downloadResultsButton}
         />
       )}
 
@@ -415,6 +443,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={hideSearchPanel ? downloadResultsButton : undefined}
       />
 
       <ListItems

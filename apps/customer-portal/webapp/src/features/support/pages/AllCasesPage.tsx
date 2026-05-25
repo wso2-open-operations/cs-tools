@@ -56,6 +56,7 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListSearchPanel from "@components/list-view/ListSearchPanel";
 import ListItems from "@components/list-view/ListItems";
+import AllCasesCsvExportButton from "@features/support/components/all-cases/AllCasesCsvExportButton";
 
 /**
  * AllCasesPage component to display all cases with stats, filters, and search.
@@ -236,6 +237,11 @@ export default function AllCasesPage(): JSX.Element {
 
   const paginatedCases = currentPageCases;
 
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
   const handlePageChange = (_event: ChangeEvent<unknown>, value: number) => {
     setPage(value);
   };
@@ -286,6 +292,25 @@ export default function AllCasesPage(): JSX.Element {
   // Note: deploymentId is ignored in API request when user lacks permissions.
 
   const listHasRefinement = hasListSearchOrFilters(searchTerm, filters);
+  const showCsvExport =
+    listHasRefinement ||
+    createdByMe ||
+    statusFilter != null ||
+    isDashboardSeverityNavigation ||
+    searchTerm.trim().length > 0;
+
+  const downloadResultsButton =
+    showCsvExport && projectId ? (
+      <AllCasesCsvExportButton
+        projectId={projectId}
+        caseSearchRequest={caseSearchRequest}
+        prefetchedCases={loadedCasesForExport}
+        totalRecords={totalItems}
+        disabled={!hasCasesResponse || isCasesError || totalItems === 0}
+      />
+    ) : null;
+
+  const hideSearchPanel = statusFilter != null || isDashboardSeverityNavigation;
 
   return (
     <Stack spacing={3} sx={{ minWidth: 0 }}>
@@ -325,7 +350,7 @@ export default function AllCasesPage(): JSX.Element {
         }}
       />
 
-      {statusFilter || isDashboardSeverityNavigation ? (
+      {hideSearchPanel ? (
         <Divider />
       ) : (
         <ListSearchPanel
@@ -361,6 +386,7 @@ export default function AllCasesPage(): JSX.Element {
               ? ["severityId"]
               : []
           }
+          actionsBeforeClearFilters={downloadResultsButton}
         />
       )}
 
@@ -382,6 +408,7 @@ export default function AllCasesPage(): JSX.Element {
         }
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
+        rightContent={hideSearchPanel ? downloadResultsButton : undefined}
       />
 
       <ListItems

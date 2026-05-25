@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import ListSearchBar from "@components/list-view/ListSearchBar";
@@ -49,6 +49,7 @@ export interface ListSearchPanelProps {
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
   excludeFromCount?: string[];
+  actionsBeforeClearFilters?: ReactNode;
 }
 
 /**
@@ -80,6 +81,7 @@ export default function ListSearchPanel({
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
   excludeFromCount = [],
+  actionsBeforeClearFilters,
 }: ListSearchPanelProps): JSX.Element {
   const excluded = Object.fromEntries(excludeFromCount.map((k) => [k, undefined]));
   const filtersForCount = {
@@ -104,6 +106,7 @@ export default function ListSearchPanel({
       onClearFilters={onClearFilters}
       hideFiltersButton={hideFiltersButton}
       isLoading={isProjectContextLoading}
+      actionsBeforeClearFilters={actionsBeforeClearFilters}
       filtersContent={
         <ListFilters
           filters={filters}

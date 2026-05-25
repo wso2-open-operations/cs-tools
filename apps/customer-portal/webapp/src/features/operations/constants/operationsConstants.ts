@@ -203,11 +203,16 @@ export const DAYS_OF_WEEK = [
   "Sat",
 ] as const;
 
+// Weekday labels for the calendar view.
 export const CHANGE_REQUEST_CALENDAR_WEEKDAY_LABELS = DAYS_OF_WEEK;
 
+// Max rows per search page when exporting change requests. 
 export const OPERATIONS_LIST_PAGE_SIZE = 10;
 
-/** Shared list header back control. */
+// Max rows per search page when exporting change requests. 
+export const CHANGE_REQUEST_SEARCH_RESULTS_PAGE_SIZE = 50;
+
+// Shared list header back control. 
 export const OPERATIONS_LIST_BACK_LABEL = "Back";
 
 // --- Change requests page ----------------------------------------------------

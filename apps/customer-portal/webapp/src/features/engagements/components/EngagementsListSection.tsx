@@ -70,6 +70,8 @@ export default function EngagementsListSection({
   rowsPerPage,
   onPageChange,
   onRowsPerPageChange,
+  actionsBeforeClearFilters,
+  resultsBarRightContent,
 }: EngagementsListSectionProps): JSX.Element {
   const activeFiltersCount = countListSearchAndFilters(searchTerm, {
     statusId: filters.statusId,
@@ -91,6 +93,7 @@ export default function EngagementsListSection({
           onClearFilters={onClearFilters}
           hideFiltersButton={hideFiltersButton}
           isLoading={isProjectContextLoading}
+          actionsBeforeClearFilters={actionsBeforeClearFilters}
           filtersContent={
             <Grid container spacing={2} sx={{ mt: 1 }}>
               {filterMetadata?.caseStates && (
@@ -155,6 +158,7 @@ export default function EngagementsListSection({
         onSortFieldChange={onSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={onSortOrderChange}
+        rightContent={resultsBarRightContent}
       />
 
       <ListItems
