@@ -353,8 +353,16 @@ export function useEngagementsPageState() {
     }));
   }, [stats]);
 
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
   return {
     projectId,
+    engagementSearchRequest,
+    loadedCasesForExport,
+    hasCasesResponse,
     projectReady,
     restrictSeverityToLow,
     filterMetadata,
