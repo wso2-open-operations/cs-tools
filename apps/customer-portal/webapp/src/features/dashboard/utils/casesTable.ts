@@ -172,6 +172,30 @@ export function navigateToProjectCaseDetail(
 }
 
 /**
+ * Formats case number and WSO2 internal id for the dashboard cases table details row.
+ *
+ * @param number - Portal case number.
+ * @param internalId - WSO2 case internal id.
+ * @returns Display string such as `ID: CS-001 | INT-1`, or `ID: --` when both are missing.
+ */
+export function formatCasesTableCaseIdentifier(
+  number?: string | null,
+  internalId?: string | null,
+): string {
+  const caseNumber = number?.trim() ?? "";
+  const wso2CaseId = internalId?.trim() ?? "";
+  let identifier = "--";
+  if (caseNumber && wso2CaseId) {
+    identifier = `${caseNumber} | ${wso2CaseId}`;
+  } else if (caseNumber) {
+    identifier = caseNumber;
+  } else if (wso2CaseId) {
+    identifier = wso2CaseId;
+  }
+  return `ID: ${identifier}`;
+}
+
+/**
  * Maps TabBar tab id to dashboard cases view mode.
  *
  * @param tabId - Tab id from `DASHBOARD_CASES_VIEW_TABS`.

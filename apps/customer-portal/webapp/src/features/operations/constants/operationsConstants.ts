@@ -24,7 +24,10 @@ import {
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ChangeRequestFilterValues } from "@features/operations/types/changeRequests";
 import type { SupportStatConfig } from "@features/support/constants/supportConstants";
-import { ChangeRequestsViewMode } from "@features/operations/types/changeRequests";
+import {
+  ChangeRequestSortField,
+  ChangeRequestsViewMode,
+} from "@features/operations/types/changeRequests";
 import { ServiceRequestCaseSortField } from "@features/operations/types/serviceRequests";
 
 /**
@@ -235,6 +238,27 @@ export const CHANGE_REQUESTS_SEARCH_PLACEHOLDER =
   "Search change requests by number, title, or description...";
 
 export const CHANGE_REQUESTS_ENTITY_LABEL = "change requests";
+
+export type ChangeRequestSortFieldOption = {
+  value: ChangeRequestSortField;
+  label: string;
+  kind?: "chronological" | "ordinal";
+};
+
+/** Sort options for change requests list (updated / created only). */
+export const CHANGE_REQUESTS_SORT_FIELD_OPTIONS: ChangeRequestSortFieldOption[] =
+  [
+    {
+      value: ChangeRequestSortField.UpdatedOn,
+      label: "Updated on",
+      kind: "chronological",
+    },
+    {
+      value: ChangeRequestSortField.CreatedOn,
+      label: "Created on",
+      kind: "chronological",
+    },
+  ];
 
 export const CHANGE_REQUESTS_VIEW_TAB_LIST_LABEL = "List View";
 
