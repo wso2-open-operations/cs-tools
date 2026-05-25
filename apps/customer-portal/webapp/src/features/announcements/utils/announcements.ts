@@ -47,7 +47,7 @@ export function buildAnnouncementCaseSearchRequest(
   filters: AnnouncementFilterValues,
   searchTerm: string,
   sortOrder: SortOrder,
-  sortField: AnnouncementSortField = AnnouncementSortField.CreatedOn,
+  sortField: AnnouncementSortField = AnnouncementSortField.UpdatedOn,
 ): Omit<CaseSearchRequest, "pagination"> {
   return {
     filters: {
