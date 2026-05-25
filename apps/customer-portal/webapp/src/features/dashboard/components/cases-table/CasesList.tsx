@@ -39,6 +39,7 @@ import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CasesTableSkeleton from "@features/dashboard/components/cases-table/CasesTableSkeleton";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
+import { CASES_TABLE_HEADER_CREATED_BY } from "@features/dashboard/constants/casesTable";
 import type { CasesListProps } from "@/features/dashboard/types/casesTable";
 
 const CasesList = ({
@@ -60,14 +61,15 @@ const CasesList = ({
         elevation={0}
         sx={{ maxWidth: "100%", overflowX: "auto" }}
       >
-        <Table sx={{ minWidth: { xs: 480, sm: 650 } }}>
+        <Table sx={{ minWidth: { xs: 520, sm: 780 } }}>
           <TableHead>
             <TableRow>
               <TableCell>Updated</TableCell>
               <TableCell sx={{ maxWidth: 320 }}>Details</TableCell>
               <TableCell>Severity</TableCell>
-              <TableCell align="center">Assigned to</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>{CASES_TABLE_HEADER_CREATED_BY}</TableCell>
+              <TableCell align="center">Assigned to</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -75,7 +77,7 @@ const CasesList = ({
               <CasesTableSkeleton rowsPerPage={rowsPerPage} />
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   <Box
                     sx={{
                       display: "flex",
@@ -93,7 +95,7 @@ const CasesList = ({
               </TableRow>
             ) : data?.cases.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   <Box
                     sx={{
                       display: "flex",
@@ -152,6 +154,7 @@ const CasesList = ({
                         : assignedEngineerValue?.label?.trim() || "";
                     const assignedEngineerDisplay =
                       assignedEngineerName || "--";
+                    const createdByDisplay = row.createdBy?.trim() || "--";
 
                     return (
                       <>
@@ -239,11 +242,6 @@ const CasesList = ({
                             );
                           })()}
                         </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" color="text.primary">
-                            {assignedEngineerDisplay}
-                          </Typography>
-                        </TableCell>
                         <TableCell>
                           <Box
                             sx={{
@@ -266,6 +264,25 @@ const CasesList = ({
                               {row.status?.label || "--"}
                             </Typography>
                           </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            color="text.primary"
+                            sx={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: 160,
+                            }}
+                          >
+                            {createdByDisplay}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2" color="text.primary">
+                            {assignedEngineerDisplay}
+                          </Typography>
                         </TableCell>
                       </>
                     );

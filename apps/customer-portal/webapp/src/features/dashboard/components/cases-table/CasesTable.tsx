@@ -35,9 +35,12 @@ import {
   countCasesTableActiveFilters,
   filterCasesTableMetadataOptions,
   mapCasesTableFilterOptionLabel,
+  parseDashboardCasesViewMode,
   resolveCasesTableDefaultStatusIds,
   resolveCasesTableSearchStatusIds,
 } from "@features/dashboard/utils/casesTable";
+import { DASHBOARD_CASES_VIEW_TABS } from "@features/dashboard/constants/casesTable";
+import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
 import { isS0Case, deriveFilterLabels } from "@features/support/utils/support";
 import {
   CaseType,
@@ -82,6 +85,9 @@ const CasesTable = ({
   const [showAll, setShowAll] = useState(false);
   // loading all
   const [isLoadingAll, setIsLoadingAll] = useState(false);
+  const [viewMode, setViewMode] = useState<DashboardCasesViewMode>(
+    DashboardCasesViewMode.AllCases,
+  );
 
   const { data: filtersMetadata } = useGetProjectFilters(projectId);
   // deployments query
@@ -194,13 +200,15 @@ const CasesTable = ({
         deploymentId: effectiveFilters.deploymentId
           ? String(effectiveFilters.deploymentId)
           : undefined,
+        createdByMe:
+          viewMode === DashboardCasesViewMode.MyCases ? true : undefined,
       },
       sortBy: {
         field: "updatedOn",
         order: SortOrder.DESC,
       },
     };
-  }, [effectiveFilters, filtersMetadata]);
+  }, [effectiveFilters, filtersMetadata, viewMode]);
 
   // offset
   const offset = page * rowsPerPage;
@@ -318,6 +326,14 @@ const CasesTable = ({
           }
         }}
         hasAgent={hasAgent}
+        viewTabs={DASHBOARD_CASES_VIEW_TABS}
+        activeViewMode={viewMode}
+        onViewModeChange={(tabId) => {
+          setViewMode(parseDashboardCasesViewMode(tabId));
+          setPage(0);
+          setShowAll(false);
+          setIsLoadingAll(false);
+        }}
       />
 
       {isFilterOpen && (
