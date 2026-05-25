@@ -54,6 +54,7 @@ import {
   OPERATIONS_HUB_STAT_ENTITY_NAME,
 } from "@features/operations/constants/operationsConstants";
 import {
+  buildChangeRequestSearchRequest,
   formatOperationsOverviewChangeRequestsSubtitle,
   formatOperationsOverviewServiceRequestsSubtitle,
   resolveOutstandingCrStateIds,
@@ -111,6 +112,19 @@ export default function OperationsPage(): JSX.Element {
     [filterMetadata?.changeRequestStates],
   );
 
+  const changeRequestOverviewSearchRequest = useMemo(
+    () =>
+      buildChangeRequestSearchRequest(
+        {},
+        "",
+        true,
+        false,
+        false,
+        filterMetadata?.changeRequestStates,
+      ),
+    [filterMetadata?.changeRequestStates],
+  );
+
   const {
     data: srData,
     isLoading: isSrDataLoading,
@@ -122,7 +136,7 @@ export default function OperationsPage(): JSX.Element {
         caseTypes: [CaseType.SERVICE_REQUEST],
         statusIds: nonClosedStatusIds,
       },
-      sortBy: { field: "createdOn", order: SortOrder.DESC },
+      sortBy: { field: "updatedOn", order: SortOrder.DESC },
     },
     0,
     OPERATIONS_OVERVIEW_LIST_LIMIT,
@@ -144,11 +158,7 @@ export default function OperationsPage(): JSX.Element {
     isError: isCrError,
   } = useGetChangeRequests(
     projectId || "",
-    {
-      filters: {
-        stateKeys: outstandingCrStateIds ?? [],
-      },
-    },
+    changeRequestOverviewSearchRequest,
     0,
     OPERATIONS_OVERVIEW_LIST_LIMIT,
     {
