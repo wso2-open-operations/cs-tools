@@ -1521,6 +1521,8 @@ public type ChangeRequestSearchPayload record {|
         # End date for closed date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
         entity:UtcDateTimeString closedEndDate?;
     |} filters?;
+    # Sort configuration
+    entity:SortBy sortBy?;
     # Pagination details
     entity:Pagination pagination?;
 |};

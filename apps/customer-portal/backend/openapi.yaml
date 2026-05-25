@@ -3885,10 +3885,18 @@ components:
               $ref: '#/components/schemas/UtcDateTimeString'
           additionalProperties: false
           description: Filter criteria
+        sortBy:
+          $ref: '#/components/schemas/SortBy'
         pagination:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
       description: Request payload for searching change requests.
+    ChangeRequestSortField:
+      type: string
+      description: Valid change request sort field values.
+      enum:
+      - updatedOn
+      - createdOn
     ChangeRequestUpdatePayload:
       type: object
       properties:
@@ -5871,7 +5879,10 @@ components:
       type: object
       properties:
         field:
-          $ref: '#/components/schemas/CaseSortField'
+          description: Field to sort by
+          oneOf:
+          - $ref: '#/components/schemas/CaseSortField'
+          - $ref: '#/components/schemas/ChangeRequestSortField'
         order:
           $ref: '#/components/schemas/SortOrder'
       description: Sort configuration.

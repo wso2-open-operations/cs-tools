@@ -564,7 +564,7 @@ public type ServiceRequestVariable record {|
 # Sort configuration.
 public type SortBy record {|
     # Field to sort by
-    CaseSortField 'field;
+    CaseSortField|ChangeRequestSortField 'field;
     # Sort order
     SortOrder 'order;
     json...;
@@ -2036,6 +2036,8 @@ public type ChangeRequestSearchPayload record {|
         # End date for closed date filter
         UtcDateTimeString closedEndDate?;
     |} filters?;
+    # Sort configuration
+    SortBy sortBy?;
     # Pagination details
     Pagination pagination?;
 |};

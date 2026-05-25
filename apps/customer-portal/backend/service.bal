@@ -4196,6 +4196,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                         closedStartDate: payload.filters?.closedStartDate,
                         closedEndDate: payload.filters?.closedEndDate
                     },
+                    sortBy: payload.sortBy,
                     pagination: payload.pagination
                 });
         if response is error {
