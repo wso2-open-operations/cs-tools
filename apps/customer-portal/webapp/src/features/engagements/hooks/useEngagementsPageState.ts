@@ -75,7 +75,7 @@ export function useEngagementsPageState() {
     hasListSearchOrFilters(searchTerm, filters),
   );
   const [sortField, setSortField] = useState<EngagementsSortField>(
-    EngagementsSortField.CreatedOn,
+    EngagementsSortField.UpdatedOn,
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);

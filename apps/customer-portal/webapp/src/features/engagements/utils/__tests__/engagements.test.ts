@@ -27,9 +27,9 @@ import {
 } from "@features/engagements/utils/engagements";
 
 describe("parseEngagementsSortField", () => {
-  it("returns CreatedOn for unknown values", () => {
+  it("returns UpdatedOn for unknown values", () => {
     expect(parseEngagementsSortField("unknown")).toBe(
-      EngagementsSortField.CreatedOn,
+      EngagementsSortField.UpdatedOn,
     );
   });
 
@@ -39,9 +39,9 @@ describe("parseEngagementsSortField", () => {
     );
   });
 
-  it("maps legacy Severity sort to CreatedOn", () => {
+  it("maps legacy Severity sort to UpdatedOn", () => {
     expect(parseEngagementsSortField(EngagementsSortField.Severity)).toBe(
-      EngagementsSortField.CreatedOn,
+      EngagementsSortField.UpdatedOn,
     );
   });
 });
@@ -51,11 +51,11 @@ describe("buildEngagementSearchRequest", () => {
     const req = buildEngagementSearchRequest(
       {},
       "",
-      EngagementsSortField.CreatedOn,
+      EngagementsSortField.UpdatedOn,
       SortOrder.DESC,
     );
     expect(req.filters?.caseTypes).toEqual([CaseType.ENGAGEMENT]);
-    expect(req.sortBy?.field).toBe(EngagementsSortField.CreatedOn);
+    expect(req.sortBy?.field).toBe(EngagementsSortField.UpdatedOn);
     expect(req.sortBy?.order).toBe(SortOrder.DESC);
   });
 
@@ -69,14 +69,14 @@ describe("buildEngagementSearchRequest", () => {
     expect(req.filters?.severityId).toBeUndefined();
   });
 
-  it("normalizes legacy Severity sort field to CreatedOn in API payload", () => {
+  it("normalizes legacy Severity sort field to UpdatedOn in API payload", () => {
     const req = buildEngagementSearchRequest(
       {},
       "",
       EngagementsSortField.Severity,
       SortOrder.DESC,
     );
-    expect(req.sortBy?.field).toBe(EngagementsSortField.CreatedOn);
+    expect(req.sortBy?.field).toBe(EngagementsSortField.UpdatedOn);
   });
 });
 
