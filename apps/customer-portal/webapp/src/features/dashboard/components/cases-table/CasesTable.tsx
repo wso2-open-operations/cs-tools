@@ -196,7 +196,7 @@ const CasesTable = ({
           : undefined,
       },
       sortBy: {
-        field: "createdOn",
+        field: "updatedOn",
         order: SortOrder.DESC,
       },
     };

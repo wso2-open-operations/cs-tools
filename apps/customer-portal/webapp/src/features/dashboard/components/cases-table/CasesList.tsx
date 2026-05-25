@@ -63,7 +63,7 @@ const CasesList = ({
         <Table sx={{ minWidth: { xs: 480, sm: 650 } }}>
           <TableHead>
             <TableRow>
-              <TableCell>Created</TableCell>
+              <TableCell>Updated</TableCell>
               <TableCell sx={{ maxWidth: 320 }}>Details</TableCell>
               <TableCell>Severity</TableCell>
               <TableCell align="center">Assigned to</TableCell>
@@ -158,21 +158,27 @@ const CasesList = ({
                         <TableCell>
                           <Box>
                             <Typography variant="body2" color="text.primary">
-                              {formatBackendTimestampForDisplay(row.createdOn, {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              }) ?? "--"}
+                              {formatBackendTimestampForDisplay(
+                                row.updatedOn ?? row.createdOn,
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              ) ?? "--"}
                             </Typography>
                             <Typography
                               variant="caption"
                               color="text.secondary"
                             >
-                              {formatBackendTimestampForDisplay(row.createdOn, {
-                                hour: "numeric",
-                                minute: "2-digit",
-                                hour12: true,
-                              }) ?? ""}
+                              {formatBackendTimestampForDisplay(
+                                row.updatedOn ?? row.createdOn,
+                                {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                },
+                              ) ?? ""}
                             </Typography>
                           </Box>
                         </TableCell>
