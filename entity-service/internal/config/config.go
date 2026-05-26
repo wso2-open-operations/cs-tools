@@ -13,6 +13,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+// Package config loads runtime configuration from environment variables.
 package config
 
 import (
@@ -20,6 +21,7 @@ import (
 	"os"
 )
 
+// Config holds all environment-driven settings for the service.
 type Config struct {
 	DBHost     string
 	DBPort     string
@@ -27,19 +29,25 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	DBSSLMode  string
+	ServerPort string
 }
 
+// Load reads configuration from environment variables and returns a populated
+// Config. Missing variables are returned as empty strings; callers should
+// validate required fields before use.
 func Load() *Config {
 	return &Config{
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "postgres"),
-		DBSSLMode:  getEnv("DB_SSLMODE", "require"),
+		DBHost:     os.Getenv("DB_HOST"),
+		DBPort:     os.Getenv("DB_PORT"),
+		DBUser:     os.Getenv("DB_USER"),
+		DBPassword: os.Getenv("DB_PASSWORD"),
+		DBName:     os.Getenv("DB_NAME"),
+		DBSSLMode:  os.Getenv("DB_SSLMODE"),
+		ServerPort: os.Getenv("SERVER_PORT"),
 	}
 }
 
+// DSN constructs a PostgreSQL connection string from the config fields.
 func (c *Config) DSN() string {
 	u := &url.URL{
 		Scheme: "postgres",
@@ -53,9 +61,3 @@ func (c *Config) DSN() string {
 	return u.String()
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
