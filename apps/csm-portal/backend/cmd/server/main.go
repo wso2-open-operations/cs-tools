@@ -23,8 +23,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/apps/agent-portal/backend/internal/entity"
-	"github.com/wso2-open-operations/cs-tools/apps/agent-portal/backend/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
 func main() {
@@ -40,17 +43,53 @@ func main() {
 	entityClient := entity.NewClient(cfg)
 	caseHandler := handler.NewCaseHandler(entityClient)
 
+	updatesCfg := updates.Config{
+		BaseURL:      mustEnv("UPDATES_BASE_URL"),
+		TokenURL:     mustEnv("UPDATES_TOKEN_URL"),
+		ClientID:     mustEnv("UPDATES_CLIENT_ID"),
+		ClientSecret: mustEnv("UPDATES_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("UPDATES_SCOPES")),
+	}
+	updatesClient := updates.NewClient(updatesCfg)
+	updatesHandler := handler.NewUpdatesHandler(updatesClient)
+
+	scimCfg := scim.Config{
+		BaseURL:      mustEnv("SCIM_BASE_URL"),
+		TokenURL:     mustEnv("SCIM_TOKEN_URL"),
+		ClientID:     mustEnv("SCIM_CLIENT_ID"),
+		ClientSecret: mustEnv("SCIM_CLIENT_SECRET"),
+		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
+	}
+	scimClient := scim.NewClient(scimCfg)
+	usersHandler := handler.NewUsersHandler(scimClient)
+
+	authCfg := middleware.Config{
+		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
+		Issuer:                mustEnv("AUTH_ISSUER"),
+		Audience:              mustEnv("AUTH_AUDIENCE"),
+		ClockSkew:             5 * time.Second,
+		TokenValidatorEnabled: os.Getenv("AUTH_TOKEN_VALIDATOR_ENABLED") != "false",
+	}
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
+	mux.HandleFunc("GET /updates/recommended-update-levels", updatesHandler.GetRecommendedUpdateLevels)
+	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
+	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
+	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
+	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
 
 	addr := envOrDefault("PORT", ":8080")
-	slog.Info("starting agent-portal backend", "addr", addr)
+	slog.Info("starting csm-portal backend", "addr", addr)
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           middleware.Auth(authCfg)(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

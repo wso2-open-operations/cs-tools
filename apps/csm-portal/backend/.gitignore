@@ -1,6 +1,5 @@
 # Environment
 .env
-.env.*
 
 # Build output
 /server
