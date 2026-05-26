@@ -39,11 +39,16 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 	accountSvc := service.NewAccountService(accountRepo)
 	accountHandler := handler.NewAccountHandler(accountSvc)
 
+	projectRepo := repository.NewProjectRepository(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	projectHandler := handler.NewProjectHandler(projectSvc)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 	mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
+	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 
 	return middleware.Recovery(
 		middleware.Logger(

@@ -14,8 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package handler wires HTTP request parsing to the service layer and writes
-// JSON responses. Handlers do not contain business logic.
+// Package handler is declared in user_handler.go.
 package handler
 
 import (
@@ -31,26 +30,19 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// maxRequestBodySize caps the JSON body at 1 MiB to prevent memory exhaustion
-// from oversized payloads.
-const maxRequestBodySize = int64(1 << 20)
-
-// UserHandler handles HTTP requests for the user resource.
-type UserHandler struct {
-	svc service.UserService
+// ProjectHandler handles HTTP requests for the project resource.
+type ProjectHandler struct {
+	svc service.ProjectService
 }
 
-// NewUserHandler constructs a UserHandler with the given service.
-func NewUserHandler(svc service.UserService) *UserHandler {
-	return &UserHandler{svc: svc}
+// NewProjectHandler constructs a ProjectHandler with the given service.
+func NewProjectHandler(svc service.ProjectService) *ProjectHandler {
+	return &ProjectHandler{svc: svc}
 }
 
-// SearchUsers handles POST /users/search.
-// It decodes a SearchUsersRequest from the request body and writes a paginated
-// SearchUsersResponse as JSON. Validation errors produce 400; all other errors
-// produce 500.
-func (h *UserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
-	var req domain.SearchUsersRequest
+// SearchProjects handles POST /projects/search.
+func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchProjectsRequest
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -63,7 +55,7 @@ func (h *UserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.svc.SearchUsers(r.Context(), req)
+	resp, err := h.svc.SearchProjects(r.Context(), req)
 	if err != nil {
 		var ve *apierror.ValidationError
 		switch {
@@ -72,7 +64,6 @@ func (h *UserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, context.DeadlineExceeded):
 			apierror.WriteJSON(w, http.StatusRequestTimeout, "request timeout")
 		case errors.Is(err, context.Canceled):
-			// Client disconnected — connection is already gone, just log it.
 			w.WriteHeader(499)
 			log.Printf("request canceled: %s %s", r.Method, r.URL.Path)
 		default:

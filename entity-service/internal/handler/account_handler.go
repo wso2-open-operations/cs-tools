@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 
@@ -46,7 +47,13 @@ func NewAccountHandler(svc service.AccountService) *AccountHandler {
 func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchAccountsRequest
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		apierror.WriteJSON(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		apierror.WriteJSON(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -60,6 +67,7 @@ func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(err, context.DeadlineExceeded):
 			apierror.WriteJSON(w, http.StatusRequestTimeout, "request timeout")
 		case errors.Is(err, context.Canceled):
+			w.WriteHeader(499)
 			log.Printf("request canceled: %s %s", r.Method, r.URL.Path)
 		default:
 			apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")

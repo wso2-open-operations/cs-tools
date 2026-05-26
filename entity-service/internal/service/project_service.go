@@ -26,49 +26,40 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-const (
-	defaultLimit       = 20
-	maxLimit           = 100
-	maxSearchQueryLen  = 200
-)
-
-type userService struct {
-	repo repository.UserRepository
+type projectService struct {
+	repo repository.ProjectRepository
 }
 
-// NewUserService constructs a UserService backed by the given repository.
-func NewUserService(repo repository.UserRepository) UserService {
-	return &userService{repo: repo}
+// NewProjectService constructs a ProjectService backed by the given repository.
+func NewProjectService(repo repository.ProjectRepository) ProjectService {
+	return &projectService{repo: repo}
 }
 
-// SearchUsers implements UserService.
-func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error) {
+// SearchProjects implements ProjectService.
+func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) (domain.SearchProjectsResponse, error) {
 	if req.Pagination.Limit <= 0 {
 		req.Pagination.Limit = defaultLimit
 	}
 	if req.Pagination.Limit > maxLimit {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "limit cannot exceed 100"}
+		return domain.SearchProjectsResponse{}, &apierror.ValidationError{Msg: "limit cannot exceed 100"}
 	}
 	if req.Pagination.Offset < 0 {
 		req.Pagination.Offset = 0
 	}
 	if utf8.RuneCountInString(req.SearchQuery) > maxSearchQueryLen {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
-	}
-	if req.UserType != nil && *req.UserType != domain.UserTypeInternal && *req.UserType != domain.UserTypeCustomer {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "invalid userType: must be \"internal\" or \"customer\""}
+		return domain.SearchProjectsResponse{}, &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
 	}
 
-	users, total, err := s.repo.SearchUsers(ctx, req)
+	projects, total, err := s.repo.SearchProjects(ctx, req)
 	if err != nil {
-		return domain.SearchUsersResponse{}, err
+		return domain.SearchProjectsResponse{}, err
 	}
 
-	return domain.SearchUsersResponse{
-		Users:   users,
-		Total:   total,
-		Limit:   req.Pagination.Limit,
-		Offset:  req.Pagination.Offset,
-		HasMore: req.Pagination.Offset+len(users) < total,
+	return domain.SearchProjectsResponse{
+		Projects: projects,
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  req.Pagination.Offset+len(projects) < total,
 	}, nil
 }

@@ -41,3 +41,11 @@ type AccountService interface {
 	// indicates an infrastructure failure.
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchAccountsResponse, error)
 }
+
+// ProjectService defines the operations available on the project entity.
+type ProjectService interface {
+	// SearchProjects returns a paginated list of projects that match the filters
+	// in req. A ValidationError is returned for invalid input; any other error
+	// indicates an infrastructure failure.
+	SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) (domain.SearchProjectsResponse, error)
+}

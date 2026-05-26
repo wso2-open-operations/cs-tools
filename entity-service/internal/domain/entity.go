@@ -115,3 +115,48 @@ type SearchAccountsResponse struct {
 	Offset   int       `json:"offset"`
 	HasMore  bool      `json:"hasMore"`
 }
+
+// SubscriptionType classifies the subscription type of a project.
+type SubscriptionType string
+
+const (
+	SubscriptionTypeDevelopmentSupport       SubscriptionType = "development_support"
+	SubscriptionTypeManagedCloudSubscription SubscriptionType = "managed_cloud_subscription"
+	SubscriptionTypeEvaluationSubscription   SubscriptionType = "evaluation_subscription"
+	SubscriptionTypeSubscription             SubscriptionType = "subscription"
+	SubscriptionTypeCloudEvaluationSupport   SubscriptionType = "cloud_evaluation_support"
+	SubscriptionTypeInternal                 SubscriptionType = "internal"
+	SubscriptionTypePlatformerSubscription   SubscriptionType = "platformer_subscription"
+	SubscriptionTypeCloudSupport             SubscriptionType = "cloud_support"
+	SubscriptionTypeProfessionalServices     SubscriptionType = "professional_services"
+)
+
+// Project represents a customer project linked to an account.
+type Project struct {
+	ID               string           `json:"id"`
+	AccountID        string           `json:"accountId"`
+	SfID             string           `json:"sfId"`
+	Name             string           `json:"name"`
+	ProjectKey       string           `json:"projectKey"`
+	SubscriptionType SubscriptionType `json:"subscriptionType"`
+	StartDate        time.Time        `json:"startDate"`
+	EndDate          time.Time        `json:"endDate"`
+	CreatedAt        time.Time        `json:"createdAt"`
+	UpdatedAt        time.Time        `json:"updatedAt"`
+}
+
+// SearchProjectsRequest is the input for a project search operation.
+// SearchQuery is matched case-insensitively against name, project_key, and subscription_type.
+type SearchProjectsRequest struct {
+	Pagination  Pagination `json:"pagination"`
+	SearchQuery string     `json:"searchQuery"`
+}
+
+// SearchProjectsResponse is the paginated result of a project search.
+type SearchProjectsResponse struct {
+	Projects []Project `json:"projects"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
+}

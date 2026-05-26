@@ -26,25 +26,25 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// AccountRepository defines the persistence operations for the accounts table.
-type AccountRepository interface {
-	// SearchAccounts returns a filtered, paginated slice of accounts together
+// ProjectRepository defines the persistence operations for the projects table.
+type ProjectRepository interface {
+	// SearchProjects returns a filtered, paginated slice of projects together
 	// with the total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
-	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) ([]domain.Account, int, error)
+	SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) ([]domain.Project, int, error)
 }
 
-type accountRepo struct {
+type projectRepo struct {
 	db *pgxpool.Pool
 }
 
-// NewAccountRepository constructs an AccountRepository backed by the given connection pool.
-func NewAccountRepository(db *pgxpool.Pool) AccountRepository {
-	return &accountRepo{db: db}
+// NewProjectRepository constructs a ProjectRepository backed by the given connection pool.
+func NewProjectRepository(db *pgxpool.Pool) ProjectRepository {
+	return &projectRepo{db: db}
 }
 
-// SearchAccounts implements AccountRepository.
-func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) ([]domain.Account, int, error) {
+// SearchProjects implements ProjectRepository.
+func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) ([]domain.Project, int, error) {
 	filterArgs := []any{}
 	argIdx := 1
 
@@ -53,33 +53,36 @@ func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccou
 	if req.SearchQuery != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.SearchQuery)
 		pattern := "%" + escaped + "%"
-		where += fmt.Sprintf(" AND (name ILIKE $%d ESCAPE '\\' OR sf_id ILIKE $%d ESCAPE '\\')", argIdx, argIdx)
+		// All three ILIKE branches reference the same positional parameter — PostgreSQL
+		// allows a single $N to appear multiple times in one query.
+		where += fmt.Sprintf(
+			" AND (name ILIKE $%d ESCAPE '\\' OR project_key ILIKE $%d ESCAPE '\\' OR subscription_type::TEXT ILIKE $%d ESCAPE '\\')",
+			argIdx, argIdx, argIdx,
+		)
 		filterArgs = append(filterArgs, pattern)
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM accounts " + where
+	countQuery := "SELECT COUNT(*) FROM projects " + where
 
 	dataQuery := fmt.Sprintf(
-		`SELECT id, sf_id, name, tier, region, activation_date, deactivation_date,
-		        owner_id, technical_owner_id, agent_enabled, kb_references_enabled,
-		        created_at, updated_at
-		 FROM accounts %s
+		`SELECT id, account_id, sf_id, name, project_key, subscription_type,
+		        start_date, end_date, created_at, updated_at
+		 FROM projects %s
 		 ORDER BY created_at DESC, id
 		 LIMIT $%d OFFSET $%d`,
 		where, argIdx, argIdx+1,
 	)
 	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
 
-	// Run COUNT and SELECT in parallel goroutines — each uses its own pool connection.
 	var total int
-	var accounts []domain.Account
+	var projects []domain.Project
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
 		if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
-			return fmt.Errorf("count accounts: %w", err)
+			return fmt.Errorf("count projects: %w", err)
 		}
 		return nil
 	})
@@ -87,28 +90,25 @@ func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccou
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
 		if err != nil {
-			return fmt.Errorf("query accounts: %w", err)
+			return fmt.Errorf("query projects: %w", err)
 		}
 		defer rows.Close()
 
-		result := make([]domain.Account, 0, req.Pagination.Limit)
+		result := make([]domain.Project, 0, req.Pagination.Limit)
 		for rows.Next() {
-			var a domain.Account
+			var p domain.Project
 			if err := rows.Scan(
-				&a.ID, &a.SfID, &a.Name, &a.Tier, &a.Region,
-				&a.ActivationDate, &a.DeactivationDate,
-				&a.OwnerID, &a.TechnicalOwnerID,
-				&a.AgentEnabled, &a.KbReferencesEnabled,
-				&a.CreatedAt, &a.UpdatedAt,
+				&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.ProjectKey, &p.SubscriptionType,
+				&p.StartDate, &p.EndDate, &p.CreatedAt, &p.UpdatedAt,
 			); err != nil {
-				return fmt.Errorf("scan account: %w", err)
+				return fmt.Errorf("scan project: %w", err)
 			}
-			result = append(result, a)
+			result = append(result, p)
 		}
 		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate accounts: %w", err)
+			return fmt.Errorf("iterate projects: %w", err)
 		}
-		accounts = result
+		projects = result
 		return nil
 	})
 
@@ -116,5 +116,5 @@ func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccou
 		return nil, 0, err
 	}
 
-	return accounts, total, nil
+	return projects, total, nil
 }

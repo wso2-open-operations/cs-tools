@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -45,7 +46,7 @@ func (s *accountService) SearchAccounts(ctx context.Context, req domain.SearchAc
 	if req.Pagination.Offset < 0 {
 		req.Pagination.Offset = 0
 	}
-	if len(req.SearchQuery) > maxSearchQueryLen {
+	if utf8.RuneCountInString(req.SearchQuery) > maxSearchQueryLen {
 		return domain.SearchAccountsResponse{}, &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
 	}
 	accounts, total, err := s.repo.SearchAccounts(ctx, req)
