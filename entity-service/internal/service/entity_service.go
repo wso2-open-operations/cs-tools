@@ -50,6 +50,9 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	if req.Pagination.Offset < 0 {
 		req.Pagination.Offset = 0
 	}
+	if req.UserType != nil && *req.UserType != domain.UserTypeInternal && *req.UserType != domain.UserTypeCustomer {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "invalid userType: must be \"internal\" or \"customer\""}
+	}
 
 	users, total, err := s.repo.SearchUsers(ctx, req)
 	if err != nil {
