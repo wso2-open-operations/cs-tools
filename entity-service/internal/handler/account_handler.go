@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package handler is declared in entity_handler.go.
+// Package handler is declared in user_handler.go.
 package handler
 
 import (
