@@ -17,18 +17,24 @@
 package middleware
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 )
 
 // Recovery is an HTTP middleware that catches any panic in a downstream handler,
-// logs it, and writes a 500 response so the server goroutine keeps running.
+// logs it, and writes a JSON 500 response so the server goroutine keeps running.
 func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("panic: %v", rec)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				}{Code: http.StatusInternalServerError, Message: "internal server error"})
 			}
 		}()
 		next.ServeHTTP(w, r)

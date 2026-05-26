@@ -18,13 +18,13 @@ package server
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
 // NewRouter builds the dependency graph (repository → service → handler),

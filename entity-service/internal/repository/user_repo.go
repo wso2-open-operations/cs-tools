@@ -56,6 +56,8 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 
 	if req.SearchQuery != "" {
 		pattern := "%" + req.SearchQuery + "%"
+		// All four ILIKE branches reference the same positional parameter — PostgreSQL
+		// allows a single $N to appear multiple times in one query.
 		where += fmt.Sprintf(
 			" AND (first_name ILIKE $%d OR last_name ILIKE $%d OR user_name ILIKE $%d OR email ILIKE $%d)",
 			argIdx, argIdx, argIdx, argIdx,
