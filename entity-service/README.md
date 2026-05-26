@@ -11,7 +11,7 @@
 
 ## Project Structure
 
-```
+```text
 entity-service/
 ├── cmd/api/main.go              # Entry point — wires all layers and starts the server
 ├── internal/
@@ -88,7 +88,7 @@ Server starts at `http://localhost:8080`.
 
 ## Request Flow
 
-```
+```text
 HTTP Request
   └── Gin Router
         └── Middleware (logger, recovery, timeout)
@@ -113,4 +113,4 @@ HTTP Request
 
 ## License
 
-Apache License 2.0 — see [LICENSE](../../LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
