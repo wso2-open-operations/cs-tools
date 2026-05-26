@@ -166,8 +166,6 @@ func (h *UsersHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Decode and validate the request body before forwarding.
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -178,6 +176,13 @@ func (h *UsersHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errMsgReadBody)
 		return
 	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// TODO: Decode into a typed SearchUsersRequest and validate fields before forwarding.
 
 	result, err := h.entity.SearchUsers(r.Context(), body)
 	if err != nil {
