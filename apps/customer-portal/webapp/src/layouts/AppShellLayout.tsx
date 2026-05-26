@@ -169,6 +169,7 @@ export default function AppShellLayout({
           }}
         >
           <Box
+            id="main-scroll-container"
             sx={{
               display: "flex",
               flexDirection: "column",
