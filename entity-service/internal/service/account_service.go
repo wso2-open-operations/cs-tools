@@ -45,6 +45,9 @@ func (s *accountService) SearchAccounts(ctx context.Context, req domain.SearchAc
 	if req.Pagination.Offset < 0 {
 		req.Pagination.Offset = 0
 	}
+	if len(req.SearchQuery) > maxSearchQueryLen {
+		return domain.SearchAccountsResponse{}, &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
+	}
 	accounts, total, err := s.repo.SearchAccounts(ctx, req)
 	if err != nil {
 		return domain.SearchAccountsResponse{}, err

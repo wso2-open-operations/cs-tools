@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	defaultLimit = 20
-	maxLimit     = 100
+	defaultLimit       = 20
+	maxLimit           = 100
+	maxSearchQueryLen  = 200
 )
 
 type userService struct {
@@ -49,6 +50,9 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	}
 	if req.Pagination.Offset < 0 {
 		req.Pagination.Offset = 0
+	}
+	if len(req.SearchQuery) > maxSearchQueryLen {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
 	}
 	if req.UserType != nil && *req.UserType != domain.UserTypeInternal && *req.UserType != domain.UserTypeCustomer {
 		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "invalid userType: must be \"internal\" or \"customer\""}
