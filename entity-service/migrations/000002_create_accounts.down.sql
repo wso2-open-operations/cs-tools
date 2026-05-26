@@ -1,7 +1,3 @@
 DROP TABLE IF EXISTS accounts;
 
 DROP TYPE IF EXISTS account_tier;
-
-DROP TABLE IF EXISTS users;
-
-DROP TYPE IF EXISTS user_type;
