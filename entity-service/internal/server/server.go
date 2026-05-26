@@ -13,4 +13,33 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
+// Package server assembles the HTTP server, router, and middleware chain.
 package server
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// New creates an http.Server listening on addr with production-safe timeouts
+// and the full middleware/router chain wired up via NewRouter.
+const (
+	serverReadTimeout  = 15 * time.Second
+	serverWriteTimeout = 15 * time.Second
+	serverIdleTimeout  = 60 * time.Second
+)
+
+// New creates an http.Server listening on addr with production-safe timeouts
+// and the full middleware/router chain wired up via NewRouter.
+func New(addr string, db *pgxpool.Pool) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      NewRouter(db),
+		ReadTimeout:  serverReadTimeout,
+		WriteTimeout: serverWriteTimeout,
+		IdleTimeout:  serverIdleTimeout,
+	}
+}

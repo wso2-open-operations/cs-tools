@@ -13,4 +13,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 package middleware
+
+import (
+	"context"
+	"net/http"
+	"time"
+)
+
+// Timeout returns an HTTP middleware that cancels the request context after
+// duration d. The value of d should be shorter than the server's WriteTimeout
+// so the handler has a chance to write a clean error response before the
+// connection is forcibly closed.
+func Timeout(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), d)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}

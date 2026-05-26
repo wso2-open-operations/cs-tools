@@ -13,4 +13,17 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 package handler
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+// HealthCheck handles GET /health. It always responds 200 with {"status":"ok"}
+// and is used by load balancers and readiness probes.
+func HealthCheck(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
