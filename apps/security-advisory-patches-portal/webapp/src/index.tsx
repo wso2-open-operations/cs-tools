@@ -18,11 +18,15 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import { SEC_ADV_REDIRECT_PATH_KEY, SEC_ADV_SIGN_IN_INIT_KEY } from './constants/constants';
+import {
+  SEC_ADV_REDIRECT_PATH_KEY,
+  SEC_ADV_SIGN_IN_INIT_KEY,
+  pathnameEndsWithPdf,
+} from './constants/constants';
 
 try {
   const path = window.location.pathname;
-  if (path.startsWith('/patches')) {
+  if (pathnameEndsWithPdf(path)) {
     sessionStorage.setItem(SEC_ADV_REDIRECT_PATH_KEY, path + window.location.search);
     sessionStorage.removeItem(SEC_ADV_SIGN_IN_INIT_KEY);
   }

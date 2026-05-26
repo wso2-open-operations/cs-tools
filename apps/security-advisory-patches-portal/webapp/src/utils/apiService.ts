@@ -26,6 +26,7 @@ export class APIService {
   private static _instance: AxiosInstance;
   private static _callback: () => Promise<{ idToken: string }>;
   private static _initialized = false;
+  private static _retryAxiosAttached = false;
   private static _authInterceptorId: number | null = null;
 
   /**
@@ -39,7 +40,10 @@ export class APIService {
       });
     }
 
-    attach(APIService._instance);
+    if (!APIService._retryAxiosAttached) {
+      attach(APIService._instance);
+      APIService._retryAxiosAttached = true;
+    }
 
     APIService._callback = callback;
     APIService._initialized = true;
@@ -70,9 +74,9 @@ export class APIService {
       });
     }
 
-    if (!APIService._initialized) {
+    if (!APIService._retryAxiosAttached) {
       attach(APIService._instance);
-      APIService._initialized = true;
+      APIService._retryAxiosAttached = true;
     }
 
     return APIService._instance;
