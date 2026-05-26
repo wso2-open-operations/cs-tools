@@ -13,4 +13,35 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
+// Package apierror provides shared HTTP error types and response helpers
+// used across all handlers.
 package apierror
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+// ErrorResponse is the JSON body returned for all error responses.
+type ErrorResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// ValidationError signals a caller-side input problem that should be
+// reported as HTTP 400. Use errors.As in handlers to distinguish it from
+// infrastructure errors.
+type ValidationError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *ValidationError) Error() string { return e.Msg }
+
+// WriteJSON writes an ErrorResponse JSON body with the given HTTP status code.
+func WriteJSON(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(ErrorResponse{Code: status, Message: msg})
+}
