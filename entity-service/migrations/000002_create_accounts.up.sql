@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     kb_references_enabled BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_accounts_date_chronology   CHECK (deactivation_date IS NULL OR deactivation_date >= activation_date),
     CONSTRAINT fk_accounts_owner_id           FOREIGN KEY (owner_id)           REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_accounts_technical_owner_id FOREIGN KEY (technical_owner_id) REFERENCES users(id) ON DELETE SET NULL
 );

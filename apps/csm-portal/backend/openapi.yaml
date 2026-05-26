@@ -194,6 +194,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /users/search:
+    post:
+      summary: Search users.
+      operationId: postUsersSearch
+      requestBody:
+        description: User search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /updates/levels/search:
     post:
       summary: Search updates between update levels.
@@ -354,6 +393,68 @@ components:
         phoneNumber:
           type: string
         # TODO: timeZone — requires entity
+
+    UserSearchPayload:
+      type: object
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+        searchQuery:
+          type: string
+          description: Searches across firstName, lastName, userName, and email (case-insensitive)
+        userType:
+          type: string
+          enum: [internal, customer]
+          description: Filter by user type
+
+    UserSearchResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+          description: Total number of matching users
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        userName:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        timezone:
+          type: string
+        userType:
+          type: string
+          enum: [internal, customer]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
     Pagination:
       type: object
