@@ -398,7 +398,12 @@ components:
       type: object
       properties:
         pagination:
-          $ref: '#/components/schemas/Pagination'
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
         searchQuery:
           type: string
           description: Searches across firstName, lastName, userName, and email (case-insensitive)
