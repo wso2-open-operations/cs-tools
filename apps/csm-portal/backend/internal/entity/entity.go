@@ -40,3 +40,9 @@ func (c *Client) SearchCases(ctx context.Context, body []byte) ([]byte, error) {
 func (c *Client) GetCase(ctx context.Context, caseID string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/cases/%s", url.PathEscape(caseID)), nil)
 }
+
+// SearchUsers calls POST /users/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/users/search", body)
+}

@@ -35,14 +35,20 @@ type scimClient interface {
 	UpdateUserPhone(ctx context.Context, userID, mobile string) (*string, error)
 }
 
-// UsersHandler handles HTTP requests for user-related operations.
-type UsersHandler struct {
-	scim scimClient
+// entityUserClient abstracts the entity service user operations used by UsersHandler.
+type entityUserClient interface {
+	SearchUsers(ctx context.Context, body []byte) ([]byte, error)
 }
 
-// NewUsersHandler creates a UsersHandler backed by the given SCIM client.
-func NewUsersHandler(scim scimClient) *UsersHandler {
-	return &UsersHandler{scim: scim}
+// UsersHandler handles HTTP requests for user-related operations.
+type UsersHandler struct {
+	scim   scimClient
+	entity entityUserClient
+}
+
+// NewUsersHandler creates a UsersHandler backed by the given SCIM and entity clients.
+func NewUsersHandler(scim scimClient, entity entityUserClient) *UsersHandler {
+	return &UsersHandler{scim: scim, entity: entity}
 }
 
 // userMeResponse is the GET /users/me response shape.
@@ -150,4 +156,41 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	// TODO: update timeZone via entity once available.
 
 	writeJSONValue(w, http.StatusOK, resp)
+}
+
+// SearchUsers handles POST /users/search.
+func (h *UsersHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// TODO: Decode into a typed SearchUsersRequest and validate fields before forwarding.
+
+	result, err := h.entity.SearchUsers(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchUsers failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to search users.")
+		return
+	}
+
+	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
 }
