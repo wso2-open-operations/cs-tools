@@ -1,0 +1,72 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// Package handler is declared in entity_handler.go.
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
+)
+
+// AccountHandler handles HTTP requests for the account resource.
+type AccountHandler struct {
+	svc service.AccountService
+}
+
+// NewAccountHandler constructs an AccountHandler with the given service.
+func NewAccountHandler(svc service.AccountService) *AccountHandler {
+	return &AccountHandler{svc: svc}
+}
+
+// SearchAccounts handles POST /accounts/search.
+// It decodes a SearchAccountsRequest from the request body and writes a
+// paginated SearchAccountsResponse as JSON. Validation errors produce 400;
+// timeouts produce 408; all other errors produce 500.
+func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchAccountsRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apierror.WriteJSON(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	resp, err := h.svc.SearchAccounts(r.Context(), req)
+	if err != nil {
+		var ve *apierror.ValidationError
+		switch {
+		case errors.As(err, &ve):
+			apierror.WriteJSON(w, http.StatusBadRequest, ve.Error())
+		case errors.Is(err, context.DeadlineExceeded):
+			apierror.WriteJSON(w, http.StatusRequestTimeout, "request timeout")
+		case errors.Is(err, context.Canceled):
+			log.Printf("request canceled: %s %s", r.Method, r.URL.Path)
+		default:
+			apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
