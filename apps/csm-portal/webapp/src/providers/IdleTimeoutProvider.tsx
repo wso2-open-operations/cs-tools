@@ -50,6 +50,10 @@ export default function IdleTimeoutProvider({
     }
   };
 
+  // TODO(idle-auto-signout): wire onIdle to auto-sign-out when the user
+  // doesn't respond to the prompt within IDLE_PROMPT_BEFORE_MS. Currently the
+  // "Are you still there?" dialog only prompts; if the user is fully idle the
+  // session is never terminated. Tracked separately from the initial PR.
   const { activate } = useIdleTimer({
     onPrompt,
     timeout: IDLE_TIMEOUT_MS,

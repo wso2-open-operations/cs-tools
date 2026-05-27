@@ -82,7 +82,7 @@ export function ErrorBannerProvider({
     <ErrorBannerContext.Provider value={contextValue}>
       {children}
       {visible && message && (
-        <ErrorBanner message={message} onClose={dismiss} />
+        <ErrorBanner key={key} message={message} onClose={dismiss} />
       )}
     </ErrorBannerContext.Provider>
   );

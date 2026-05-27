@@ -48,7 +48,7 @@ const viteConfig = defineConfig({
   },
   envPrefix: ["CSM_PORTAL_"],
   server: {
-    port: 3000,
+    port: 3001,
     strictPort: true,
   },
 });

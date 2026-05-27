@@ -89,9 +89,11 @@ export default function CsmProjectsPage(): JSX.Element {
 
       <TextField
         size="small"
+        label="Search projects"
         placeholder="Search projects by name, key, or subscription"
         value={searchInput}
         onChange={handleSearchChange}
+        slotProps={{ htmlInput: { "aria-label": "Search projects by name, key, or subscription type" } }}
         sx={{ maxWidth: 480 }}
       />
 

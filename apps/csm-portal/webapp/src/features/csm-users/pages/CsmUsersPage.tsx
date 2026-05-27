@@ -76,9 +76,11 @@ export default function CsmUsersPage(): JSX.Element {
 
       <TextField
         size="small"
+        label="Search users"
         placeholder="Search users by username or email"
         value={searchInput}
         onChange={handleSearchChange}
+        slotProps={{ htmlInput: { "aria-label": "Search users by username or email" } }}
         sx={{ maxWidth: 480 }}
       />
 
@@ -90,7 +92,7 @@ export default function CsmUsersPage(): JSX.Element {
 
       <Paper variant="outlined">
         <TableContainer>
-          <Table size="small">
+          <Table size="small" aria-label="Users search results">
             <TableHead>
               <TableRow>
                 <TableCell>Username</TableCell>

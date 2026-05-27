@@ -29,6 +29,5 @@ dist-ssr
 .env.local
 .env.*.local
 
-# OS files
-.DS_Store
+# Runtime config (per-deployment)
 config.js

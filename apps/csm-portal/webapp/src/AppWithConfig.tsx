@@ -14,11 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, lazy, Suspense } from "react";
 import { BrowserRouter } from "react-router";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import App from "./App";
 import { AsgardeoProvider } from "@asgardeo/react";
 import { themeConfig } from "@config/themeConfig";
@@ -26,43 +25,43 @@ import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { authConfig } from "@config/authConfig";
 
-/**
- * Custom retry function for React Query.
- * Only retries on 502 (Bad Gateway) and 503 (Service Unavailable) errors.
- *
- * @param {number} failureCount - The number of times the request has failed.
- * @param {Error} error - The error that occurred.
- * @returns {boolean} True if the request should be retried, false otherwise.
- */
-function shouldRetry(failureCount: number, error: Error): boolean {
-  // Max 3 retries
-  if (failureCount >= 2) {
-    return false;
-  }
+// React-Query devtools ship from a devDependency and must not enter the
+// production bundle. Dynamic import + DEV check accomplishes both.
+const ReactQueryDevtools = import.meta.env.DEV
+  ? lazy(() =>
+      import("@tanstack/react-query-devtools").then((m) => ({
+        default: m.ReactQueryDevtools,
+      })),
+    )
+  : null;
 
-  // Check if error has a status code property
+/**
+ * Custom retry function for React Query queries.
+ * Only retries on 502 (Bad Gateway) and 503 (Service Unavailable) errors.
+ */
+function shouldRetryQuery(failureCount: number, error: Error): boolean {
+  if (failureCount >= 2) return false;
   const errorWithStatus = error as Error & {
     response?: { status?: number };
     status?: number;
   };
   const statusCode = errorWithStatus.response?.status || errorWithStatus.status;
-
-  // Only retry on 502 (Bad Gateway) and 503 (Service Unavailable)
   return statusCode === 502 || statusCode === 503;
 }
 
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: shouldRetry,
+      retry: shouldRetryQuery,
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: true,
     },
+    // Mutations default to no retry. Non-idempotent operations (PATCH/PUT/POST
+    // with side effects) should opt in per-mutation when retries are safe.
     mutations: {
-      retry: shouldRetry,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+      retry: false,
     },
   },
 });
@@ -74,9 +73,6 @@ export default function AppWithConfig(): JSX.Element {
       clientId={authConfig.clientId}
       afterSignInUrl={authConfig.signInRedirectURL}
       afterSignOutUrl={authConfig.signOutRedirectURL}
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      periodicTokenRefresh
       scopes={["openid", "email", "groups", "profile"]}
       preferences={{
         theme: {
@@ -93,7 +89,11 @@ export default function AppWithConfig(): JSX.Element {
           <OxygenUIThemeProvider theme={themeConfig}>
             <QueryClientProvider client={queryClient}>
               <App />
-              <ReactQueryDevtools initialIsOpen={false} />
+              {ReactQueryDevtools && (
+                <Suspense fallback={null}>
+                  <ReactQueryDevtools initialIsOpen={false} />
+                </Suspense>
+              )}
             </QueryClientProvider>
           </OxygenUIThemeProvider>
         </LoggerProvider>

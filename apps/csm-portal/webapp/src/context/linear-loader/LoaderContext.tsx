@@ -25,6 +25,10 @@ import {
   type JSX,
 } from "react";
 
+// Debounce the loader's hide transition so very brief loading bursts don't
+// flash on and off the screen.
+const LOADER_HIDE_DEBOUNCE_MS = 500;
+
 interface LoaderContextType {
   isVisible: boolean;
   showLoader: () => void;
@@ -61,7 +65,7 @@ export function LoaderProvider({
       timeoutRef.current = setTimeout(() => {
         setIsVisible(false);
         timeoutRef.current = null;
-      }, 500);
+      }, LOADER_HIDE_DEBOUNCE_MS);
     }
   }, []);
 

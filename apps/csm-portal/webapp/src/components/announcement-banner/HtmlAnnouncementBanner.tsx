@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, type JSX, type MouseEvent } from "react";
+import DOMPurify from "dompurify";
+import { useMemo, useState, type JSX, type MouseEvent } from "react";
 import { announcementBannerConfig } from "@config/announcementBannerConfig";
 
 function isDismissed(storageKey: string): boolean {
@@ -43,7 +44,12 @@ export default function HtmlAnnouncementBanner(): JSX.Element | null {
   const { visible, storageKey, html } = announcementBannerConfig;
   const [closed, setClosed] = useState(() => isDismissed(storageKey));
 
-  if (!visible || !html || closed) return null;
+  const sanitizedHtml = useMemo(
+    () => (html ? DOMPurify.sanitize(html) : ""),
+    [html],
+  );
+
+  if (!visible || !sanitizedHtml || closed) return null;
 
   const handleClick = (e: MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -57,8 +63,8 @@ export default function HtmlAnnouncementBanner(): JSX.Element | null {
     // biome-ignore lint/a11y/useKeyWithClickEvents: close is handled by the button inside the HTML
     <div
       onClick={handleClick}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: operator-controlled config HTML
-      dangerouslySetInnerHTML={{ __html: html }}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML sanitized via DOMPurify above
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   );
 }

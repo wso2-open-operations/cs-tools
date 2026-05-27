@@ -60,13 +60,10 @@ export function getApiErrorMessage(error: unknown): string | undefined {
   return undefined;
 }
 
-/** @deprecated Use getApiErrorMessage instead. */
-export const getForbiddenMessage = getApiErrorMessage;
-
 /**
  * Extracts a clean human-readable message from an HTTP error response body.
- * Tries to parse the body as JSON and returns `body.message` when present.
- * Falls back to `statusText`, then `HTTP {status}`.
+ * Tries JSON first (returns `body.message` when present), then falls back to
+ * the trimmed plain-text body, then to `statusText`, then `HTTP {status}`.
  *
  * @param text - Raw response body string (may be JSON or plain text).
  * @param status - HTTP status code.
@@ -78,9 +75,10 @@ export function parseApiResponseMessage(
   status: number,
   statusText: string,
 ): string {
-  if (text) {
+  const trimmed = text?.trim();
+  if (trimmed) {
     try {
-      const parsed: unknown = JSON.parse(text);
+      const parsed: unknown = JSON.parse(trimmed);
       if (
         parsed !== null &&
         typeof parsed === "object" &&
@@ -91,7 +89,8 @@ export function parseApiResponseMessage(
         return (parsed as { message: string }).message.trim();
       }
     } catch {
-      // not JSON — fall through
+      // not JSON — preserve plain-text body so backend details aren't lost
+      return trimmed;
     }
   }
   return statusText?.trim() || `HTTP ${status}`;

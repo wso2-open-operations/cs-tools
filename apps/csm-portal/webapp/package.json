@@ -23,7 +23,6 @@
     "@lexical/selection": "0.40.0",
     "@lexical/utils": "0.40.0",
     "@tanstack/react-query": "5.90.20",
-    "@tanstack/react-query-devtools": "5.91.2",
     "@types/markdown-it": "^14.1.2",
     "@wso2/oxygen-ui": "0.6.0",
     "@wso2/oxygen-ui-charts-react": "0.6.0",
@@ -45,6 +44,7 @@
   "devDependencies": {
     "@eslint/js": "9.39.1",
     "@playwright/test": "1.49.0",
+    "@tanstack/react-query-devtools": "5.91.2",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",

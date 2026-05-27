@@ -26,7 +26,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ExternalLink, Lock, PencilLine, X } from "@wso2/oxygen-ui-icons-react";
+import { PencilLine, X } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useCallback, useEffect, useState } from "react";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { usePatchUsersMe } from "@features/settings/api/usePatchUsersMe";
@@ -35,10 +35,8 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
 
-const PASSWORD_RESET_URL = "https://wso2.com/user/password";
-
-// E.164 phone validator: optional leading +, 8-15 digits.
-const E164 = /^\+?[1-9]\d{7,14}$/;
+// E.164 phone validator: leading + required, then country code digit + 7-14 more digits.
+const E164 = /^\+[1-9]\d{7,14}$/;
 
 // Show at most this many group chips inline before collapsing with "+N more".
 const GROUPS_PREVIEW_LIMIT = 4;
@@ -146,6 +144,7 @@ export default function UserProfileModal({
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
           <Avatar
             src={info.avatarUrl}
+            imgProps={{ referrerPolicy: "no-referrer" }}
             sx={{ width: 64, height: 64, fontSize: 24 }}
           >
             {initials}
@@ -243,34 +242,13 @@ export default function UserProfileModal({
             <Typography variant="caption" color="text.secondary">
               Last password update
             </Typography>
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                mt: 0.5,
-              }}
-            >
-              <Typography variant="body2">
-                {isLoading ? (
-                  <Skeleton width={160} />
-                ) : (
-                  formatLastPasswordUpdate(userMe?.lastPasswordUpdateTime)
-                )}
-              </Typography>
-              <Button
-                size="small"
-                variant="text"
-                startIcon={<Lock size={14} />}
-                endIcon={<ExternalLink size={14} />}
-                component="a"
-                href={PASSWORD_RESET_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Reset password
-              </Button>
-            </Box>
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              {isLoading ? (
+                <Skeleton width={160} />
+              ) : (
+                formatLastPasswordUpdate(userMe?.lastPasswordUpdateTime)
+              )}
+            </Typography>
           </Box>
         </Box>
 

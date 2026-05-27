@@ -27,12 +27,13 @@ interface HeaderProps {
 
 export default function Header({
   onToggleSidebar,
+  collapsed = false,
   hideProjectControls = false,
 }: HeaderProps): JSX.Element {
   return (
     <HeaderUI>
       {!hideProjectControls && (
-        <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
+        <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
       )}
       <Brand />
       <HeaderUI.Spacer />

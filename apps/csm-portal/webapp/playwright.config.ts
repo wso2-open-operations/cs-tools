@@ -22,7 +22,7 @@ export default defineConfig({
   fullyParallel: true,
   outputDir: "test-results",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
     video: "retain-on-failure",
   },

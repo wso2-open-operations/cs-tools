@@ -24,7 +24,12 @@ export interface IdTokenClaims {
   name?: string;
   preferred_username?: string;
   username?: string;
+  // Either of the standard OIDC claims may carry the profile picture URL,
+  // depending on the IdP. `profile` is the URL of the user's profile page in
+  // strict OIDC, but in practice IdPs (Asgardeo, Google, etc.) use it for the
+  // avatar image; `picture` is the canonical OIDC field. Read both.
   profile?: string;
+  picture?: string;
   groups?: string[];
   org_name?: string;
   org_handle?: string;
@@ -53,7 +58,7 @@ export function resolveUserInfo(user: unknown): ResolvedUserInfo {
   return {
     fullName,
     email: c.email ?? "",
-    avatarUrl: c.profile,
+    avatarUrl: c.picture || c.profile,
     orgName: c.org_name,
     orgHandle: c.org_handle,
     groups: Array.isArray(c.groups) ? c.groups : [],

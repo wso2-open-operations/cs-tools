@@ -105,7 +105,9 @@ export class Logger implements ILogger {
       case "ERROR":
         return LogLevel.ERROR;
       default:
-        return LogLevel.ERROR;
+        // Default to INFO so a misconfigured log level still surfaces
+        // useful diagnostics rather than silencing everything but errors.
+        return LogLevel.INFO;
     }
   }
 }

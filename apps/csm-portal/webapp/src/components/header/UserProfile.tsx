@@ -48,7 +48,6 @@ export default function UserProfile(): JSX.Element {
           name={info.fullName}
           email={info.email}
           avatar={info.avatarUrl}
-          role={info.orgName || undefined}
         />
         <UserMenu.Divider />
         <UserMenu.Item

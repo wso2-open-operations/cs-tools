@@ -82,7 +82,7 @@ export function SuccessBannerProvider({
     <SuccessBannerContext.Provider value={contextValue}>
       {children}
       {visible && message && (
-        <SuccessBanner message={message} onClose={dismiss} />
+        <SuccessBanner key={key} message={message} onClose={dismiss} />
       )}
     </SuccessBannerContext.Provider>
   );

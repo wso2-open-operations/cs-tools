@@ -54,12 +54,15 @@ export default function GlobalNotificationBanner({
       message={notificationBannerConfig.message}
       actionLabel={notificationBannerConfig.actionLabel}
       onAction={() => {
-        if (notificationBannerConfig.actionUrl) {
-          window.open(
-            notificationBannerConfig.actionUrl,
-            "_blank",
-            "noopener,noreferrer",
-          );
+        const rawUrl = notificationBannerConfig.actionUrl;
+        if (!rawUrl) return;
+        try {
+          const parsed = new URL(rawUrl, window.location.origin);
+          // Allowlist http(s) only to block javascript:/data: URIs.
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+          window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+        } catch {
+          // ignore invalid URLs
         }
       }}
       onDismiss={() => setDismissed(true)}

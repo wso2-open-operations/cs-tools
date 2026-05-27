@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import DOMPurify from "dompurify";
+import { useMemo, type JSX } from "react";
 
 /**
  * Renders an optional HTML banner above the main header, sourced from
@@ -24,12 +25,17 @@ export default function TopBanner(): JSX.Element | null {
   const enabled = window.config?.CSM_PORTAL_TOP_BANNER_ENABLED;
   const html = window.config?.CSM_PORTAL_TOP_BANNER_HTML;
 
-  if (!enabled || !html) return null;
+  const sanitizedHtml = useMemo(
+    () => (html ? DOMPurify.sanitize(html) : ""),
+    [html],
+  );
+
+  if (!enabled || !sanitizedHtml) return null;
 
   return (
     <div
       style={{ display: "block", lineHeight: 0, fontSize: 0, overflow: "hidden" }}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   );
 }

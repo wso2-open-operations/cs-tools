@@ -50,7 +50,7 @@ export default function AuthGuard(): JSX.Element {
         void navigate(redirect, { replace: true });
       }
     }
-  }, [isSignedIn, navigate, location.pathname]);
+  }, [isSignedIn, navigate]);
 
   return (
     <ProtectedRoute

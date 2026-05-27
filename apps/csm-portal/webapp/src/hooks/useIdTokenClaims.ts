@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import type { IdTokenClaims } from "@utils/userClaims";
 
@@ -22,8 +22,18 @@ import type { IdTokenClaims } from "@utils/userClaims";
 // SDK exposes a `user` field on the auth context, but only when
 // `preferences.user.fetchUserProfile` is true, which triggers an additional
 // SCIM call we don't need. The ID token is already in storage; just decode it.
+//
+// We capture `getDecodedIdToken` via a ref instead of putting it in the deps
+// array because the SDK does not guarantee referential stability for the
+// callback — adding it would re-run the effect on every render and trigger
+// repeated token decodes.
 export function useIdTokenClaims(): IdTokenClaims | undefined {
   const { getDecodedIdToken, isSignedIn } = useAsgardeo();
+  const getDecodedIdTokenRef = useRef(getDecodedIdToken);
+  useEffect(() => {
+    getDecodedIdTokenRef.current = getDecodedIdToken;
+  }, [getDecodedIdToken]);
+
   const [claims, setClaims] = useState<IdTokenClaims | undefined>(undefined);
 
   useEffect(() => {
@@ -35,7 +45,7 @@ export function useIdTokenClaims(): IdTokenClaims | undefined {
     let cancelled = false;
     void (async () => {
       try {
-        const decoded = (await getDecodedIdToken()) as unknown as IdTokenClaims;
+        const decoded = (await getDecodedIdTokenRef.current()) as unknown as IdTokenClaims;
         if (!cancelled) setClaims(decoded);
       } catch {
         if (!cancelled) setClaims(undefined);
@@ -45,7 +55,7 @@ export function useIdTokenClaims(): IdTokenClaims | undefined {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, getDecodedIdToken]);
+  }, [isSignedIn]);
 
   return claims;
 }

@@ -85,9 +85,11 @@ export default function CsmAccountsPage(): JSX.Element {
 
       <TextField
         size="small"
+        label="Search accounts"
         placeholder="Search accounts by name or SF ID"
         value={searchInput}
         onChange={handleSearchChange}
+        slotProps={{ htmlInput: { "aria-label": "Search accounts by name or SF ID" } }}
         sx={{ maxWidth: 480 }}
       />
 

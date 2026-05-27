@@ -55,6 +55,7 @@ import type {
 } from "@features/updates/types/updates";
 import {
   buildReportData,
+  parseJsonStringArray,
   type ReportData,
   type ReportRow,
 } from "@features/updates/utils/updateReport";
@@ -89,16 +90,6 @@ const HTML_CONTENT_SX = {
   "& strong, & b": { fontWeight: 600, color: "text.primary" },
 };
 
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
 function HtmlOrText({ content }: { content: string }): JSX.Element {
   if (HTML_FORMAT_RE.test(content)) {
     return (
@@ -108,23 +99,27 @@ function HtmlOrText({ content }: { content: string }): JSX.Element {
       />
     );
   }
-  const decoded = decodeEntities(content);
-  const safeHtml = decoded
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
-  return <Box dangerouslySetInnerHTML={{ __html: safeHtml }} sx={HTML_CONTENT_SX} />;
+  // Plain-text branch: render as text so React handles escaping. Avoids the
+  // decode/re-encode round-trip and the need for dangerouslySetInnerHTML.
+  return (
+    <Box
+      component="pre"
+      sx={{
+        ...HTML_CONTENT_SX,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        m: 0,
+        fontFamily: "inherit",
+      }}
+    >
+      {content}
+    </Box>
+  );
 }
 
-function parseJsonStringArray(raw: string | undefined | null): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
-  } catch {
-    return [];
-  }
+function isMeaningfulContent(value: string | undefined | null): boolean {
+  const t = (value ?? "").trim().toLowerCase();
+  return t !== "" && t !== "n/a" && t !== "na";
 }
 
 function getProductNames(data: ProductUpdateLevel[] | undefined): string[] {
@@ -275,8 +270,11 @@ function UpdateDetailsDialog({
                   {desc.description && (
                     <UpdateSection title="Description" content={desc.description} />
                   )}
-                  {desc.instructions && desc.instructions !== "N/A" && (
-                    <UpdateSection title="Instructions" content={desc.instructions} />
+                  {isMeaningfulContent(desc.instructions) && (
+                    <UpdateSection
+                      title="Instructions"
+                      content={desc.instructions as string}
+                    />
                   )}
                   {bugFixes.length > 0 && (
                     <FileList title="Bug fixes" items={bugFixes} />
@@ -632,7 +630,12 @@ export default function CsmUpdatesPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Typography variant="h5">Updates</Typography>
+      <Box>
+        <Typography variant="h5">Updates</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Check release notes between two update levels of a WSO2 product version.
+        </Typography>
+      </Box>
 
       {/* Filter */}
       <Card variant="outlined">

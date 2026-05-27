@@ -24,16 +24,21 @@ export interface NotificationBannerConfig {
   actionUrl?: string;
 }
 
+const ALLOWED_SEVERITIES: ReadonlySet<NotificationBannerConfig["severity"]> =
+  new Set(["info", "warning", "error", "success"]);
+
+function resolveSeverity(raw: unknown): NotificationBannerConfig["severity"] {
+  return typeof raw === "string" &&
+    ALLOWED_SEVERITIES.has(raw as NotificationBannerConfig["severity"])
+    ? (raw as NotificationBannerConfig["severity"])
+    : "info";
+}
+
 export const notificationBannerConfig: NotificationBannerConfig = {
   actionLabel: window.config?.CSM_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL,
   actionUrl: window.config?.CSM_PORTAL_MAINTENANCE_BANNER_ACTION_URL,
   message: window.config?.CSM_PORTAL_MAINTENANCE_BANNER_MESSAGE || "",
-  severity:
-    (window.config?.CSM_PORTAL_MAINTENANCE_BANNER_SEVERITY as
-      | "info"
-      | "warning"
-      | "error"
-      | "success") || "info",
+  severity: resolveSeverity(window.config?.CSM_PORTAL_MAINTENANCE_BANNER_SEVERITY),
   title: window.config?.CSM_PORTAL_MAINTENANCE_BANNER_TITLE || "",
   visible: window.config?.CSM_PORTAL_MAINTENANCE_BANNER_VISIBLE || false,
 };

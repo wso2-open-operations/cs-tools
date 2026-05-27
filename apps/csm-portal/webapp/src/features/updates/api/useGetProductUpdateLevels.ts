@@ -17,7 +17,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { apiConfig } from "@config/apiConfig";
-import { ApiError } from "@utils/ApiError";
+import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 import type { ProductUpdateLevel } from "@features/updates/types/updates";
 
 export function useGetProductUpdateLevels() {
@@ -28,7 +28,12 @@ export function useGetProductUpdateLevels() {
     queryFn: async () => {
       const res = await authFetch(`${apiConfig.backendUrl}/updates/product-update-levels`);
       if (!res.ok) {
-        throw new ApiError(res.status, res.statusText);
+        const body = await res.text();
+        throw new ApiError(
+          res.status,
+          res.statusText,
+          parseApiResponseMessage(body, res.status, res.statusText),
+        );
       }
       return (await res.json()) as ProductUpdateLevel[];
     },

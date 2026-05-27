@@ -14,7 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type JSX,
+  type ReactNode,
+} from "react";
 
 interface ErrorPageContextType {
   isErrorPageDisplayed: boolean;
@@ -39,19 +46,24 @@ interface ErrorPageProviderProps {
   children: ReactNode;
 }
 
-export function ErrorPageProvider({ children }: ErrorPageProviderProps) {
+export function ErrorPageProvider({
+  children,
+}: ErrorPageProviderProps): JSX.Element {
   const [isErrorPageDisplayed, setIsErrorPageDisplayed] = useState(false);
   const [isProjectSuspended, setIsProjectSuspended] = useState(false);
 
+  const value = useMemo(
+    () => ({
+      isErrorPageDisplayed,
+      setIsErrorPageDisplayed,
+      isProjectSuspended,
+      setIsProjectSuspended,
+    }),
+    [isErrorPageDisplayed, isProjectSuspended],
+  );
+
   return (
-    <ErrorPageContext.Provider
-      value={{
-        isErrorPageDisplayed,
-        setIsErrorPageDisplayed,
-        isProjectSuspended,
-        setIsProjectSuspended,
-      }}
-    >
+    <ErrorPageContext.Provider value={value}>
       {children}
     </ErrorPageContext.Provider>
   );

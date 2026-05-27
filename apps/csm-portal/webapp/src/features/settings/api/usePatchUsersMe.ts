@@ -17,7 +17,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { apiConfig } from "@config/apiConfig";
-import { ApiError } from "@utils/ApiError";
+import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 
 // BFF currently accepts only phoneNumber (E.164). timeZone is TODO per BFF
 // openapi.
@@ -40,7 +40,12 @@ export function usePatchUsersMe() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        throw new ApiError(res.status, res.statusText);
+        const body = await res.text();
+        throw new ApiError(
+          res.status,
+          res.statusText,
+          parseApiResponseMessage(body, res.status, res.statusText),
+        );
       }
       return (await res.json()) as UpdatedUserResponse;
     },

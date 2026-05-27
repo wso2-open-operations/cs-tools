@@ -17,7 +17,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { apiConfig } from "@config/apiConfig";
-import { ApiError } from "@utils/ApiError";
+import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 
 // Matches csm-portal-backend openapi UserResponse; id/firstName/lastName/
 // timeZone/roles are intentionally absent — TODO on the BFF side, blocked on
@@ -36,7 +36,12 @@ export function useGetUsersMe() {
     queryFn: async () => {
       const res = await authFetch(`${apiConfig.backendUrl}/users/me`);
       if (!res.ok) {
-        throw new ApiError(res.status, res.statusText);
+        const body = await res.text();
+        throw new ApiError(
+          res.status,
+          res.statusText,
+          parseApiResponseMessage(body, res.status, res.statusText),
+        );
       }
       return (await res.json()) as UsersMeResponse;
     },
