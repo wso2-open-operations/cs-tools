@@ -14,7 +14,7 @@ Backend starts at `http://localhost:8080`.
 ## Overview
 
 - Default port: `8080`
-- Runtime: Go `1.22+`
+- Runtime: Go `1.23+`
 - Entry point: `cmd/server/main.go`
 - Authentication:
   - Incoming requests: JWT Bearer token (validated by Choreo gateway + JWKS endpoint); pass as `x-jwt-assertion` header when testing locally
