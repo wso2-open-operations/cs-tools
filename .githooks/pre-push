@@ -7,8 +7,11 @@
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BACKEND_DIR="apps/csm-portal/backend"
 ZERO="0000000000000000000000000000000000000000"
+TESTS_RUN=false
 
 run_backend_tests() {
+    [ "$TESTS_RUN" = "true" ] && return 0
+    TESTS_RUN=true
     echo "[pre-push] Backend changes detected — running tests..."
     (cd "$REPO_ROOT/$BACKEND_DIR" && go test ./...) || {
         echo "[pre-push] Tests FAILED. Push aborted. Fix the failures and try again."
