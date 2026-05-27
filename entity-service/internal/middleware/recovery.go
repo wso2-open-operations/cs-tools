@@ -48,7 +48,7 @@ func Recovery(next http.Handler) http.Handler {
 		rw := &recoveryWriter{ResponseWriter: w}
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("panic: %v", rec)
+				log.Printf("Panic recovered (type: %T)", rec)
 				if !rw.headerWritten {
 					rw.ResponseWriter.Header().Set("Content-Type", "application/json")
 					rw.ResponseWriter.WriteHeader(http.StatusInternalServerError)

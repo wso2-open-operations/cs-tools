@@ -34,18 +34,25 @@ type Config struct {
 }
 
 // Load reads configuration from environment variables and returns a populated
-// Config. Missing variables are returned as empty strings; callers should
-// validate required fields before use.
+// Config. Missing variables fall back to sensible defaults; callers should
+// validate required fields (e.g. DBUser, DBPassword, DBName) before use.
 func Load() *Config {
 	return &Config{
-		DBHost:     os.Getenv("DB_HOST"),
-		DBPort:     os.Getenv("DB_PORT"),
+		DBHost:     getEnvOrDefault("DB_HOST", "localhost"),
+		DBPort:     getEnvOrDefault("DB_PORT", "5432"),
 		DBUser:     os.Getenv("DB_USER"),
 		DBPassword: os.Getenv("DB_PASSWORD"),
 		DBName:     os.Getenv("DB_NAME"),
 		DBSSLMode:  os.Getenv("DB_SSLMODE"),
-		ServerPort: os.Getenv("SERVER_PORT"),
+		ServerPort: getEnvOrDefault("SERVER_PORT", "8080"),
 	}
+}
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 // DSN constructs a PostgreSQL connection string from the config fields.
@@ -61,4 +68,3 @@ func (c *Config) DSN() string {
 	u.RawQuery = q.Encode()
 	return u.String()
 }
-

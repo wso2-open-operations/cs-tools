@@ -57,32 +57,32 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &ve):
 		// 400 – caller-supplied input is invalid; the message is safe to return.
-		log.Printf("[ENTITY] bad request: %s %s: %s", r.Method, r.URL.Path, ve.Msg)
+		log.Printf("Bad request: %s %s: %s", r.Method, r.URL.Path, ve.Msg)
 		apierror.WriteJSON(w, http.StatusBadRequest, ve.Msg)
 
 	case errors.As(err, &nfe):
 		// 404 – resource not found; message is safe to return.
-		log.Printf("[ENTITY] not found: %s %s: %s", r.Method, r.URL.Path, nfe.Msg)
+		log.Printf("Not found: %s %s: %s", r.Method, r.URL.Path, nfe.Msg)
 		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
 
 	case errors.As(err, &sue):
 		// 503 – downstream dependency unavailable; log details, return generic message.
-		log.Printf("[ENTITY] service unavailable: %s %s: %s", r.Method, r.URL.Path, sue.Msg)
+		log.Printf("Service unavailable: %s %s: %s", r.Method, r.URL.Path, sue.Msg)
 		apierror.WriteJSON(w, http.StatusServiceUnavailable, "service temporarily unavailable, please try again later")
 
 	case errors.Is(err, context.DeadlineExceeded):
 		// 408 – request timed out waiting for a downstream call or DB query.
-		log.Printf("[ENTITY] request timeout: %s %s", r.Method, r.URL.Path)
+		log.Printf("Request timeout: %s %s", r.Method, r.URL.Path)
 		apierror.WriteJSON(w, http.StatusRequestTimeout, "request timed out")
 
 	case errors.Is(err, context.Canceled):
 		// Client closed the connection — log it and return nothing; the response is already gone.
-		log.Printf("[ENTITY] request canceled: %s %s", r.Method, r.URL.Path)
+		log.Printf("Request canceled: %s %s", r.Method, r.URL.Path)
 
 	default:
 		// 500 – unexpected infrastructure error (DB, network, etc.).
 		// Log the full error for debugging; the client only receives the generic message.
-		log.Printf("[ENTITY] internal error: %s %s: %v", r.Method, r.URL.Path, err)
+		log.Printf("Internal error: %s %s: %v", r.Method, r.URL.Path, err)
 		apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")
 	}
 }
