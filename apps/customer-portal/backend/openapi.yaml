@@ -2584,6 +2584,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /deployment-usages:
+    post:
+      summary: Import product consumption usage from a zip file.
+      operationId: postDeploymentUsages
+      requestBody:
+        description: Zip archive containing deployment usage data
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentUsageImportResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
   /projects/{id}/instances/metrics/search:
     post:
       summary: Search instance metrics for a specific project based on provided filters.
@@ -4610,6 +4637,15 @@ components:
           description: Active status (can only be set to false to deactivate deployment)
       additionalProperties: false
       description: Request payload for updating a deployment.
+    DeploymentUsageImportResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Response message
+        result:
+          description: Response result payload
+      description: Deployment usage import response.
     ErrorPayload:
       required:
       - message
