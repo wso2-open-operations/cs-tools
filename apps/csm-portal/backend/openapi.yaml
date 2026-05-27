@@ -272,6 +272,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /projects/search:
+    post:
+      summary: Search projects.
+      operationId: postProjectsSearch
+      requestBody:
+        description: Project search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /updates/levels/search:
     post:
       summary: Search updates between update levels.
@@ -445,11 +484,7 @@ components:
                   maximum: 100
         searchQuery:
           type: string
-          description: Searches across firstName, lastName, userName, and email (case-insensitive)
-        userType:
-          type: string
-          enum: [internal, customer]
-          description: Filter by user type
+          description: Searches across userName and email (case-insensitive); max 200 characters
 
     UserSearchResponse:
       type: object
@@ -554,6 +589,75 @@ components:
           type: boolean
         kbReferencesEnabled:
           type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProjectSearchPayload:
+      type: object
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+        searchQuery:
+          type: string
+          description: Searches across name, projectKey, and subscriptionType (case-insensitive); max 200 characters
+
+    ProjectSearchResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        total:
+          type: integer
+          description: Total number of matching projects
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        projectKey:
+          type: string
+        subscriptionType:
+          type: string
+          enum:
+            - development_support
+            - managed_cloud_subscription
+            - evaluation_subscription
+            - subscription
+            - cloud_evaluation_support
+            - internal
+            - platformer_subscription
+            - cloud_support
+            - professional_services
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
         createdAt:
           type: string
           format: date-time
