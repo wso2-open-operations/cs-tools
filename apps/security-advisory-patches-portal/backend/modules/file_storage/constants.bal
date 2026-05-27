@@ -25,4 +25,3 @@ const FOLDER_DELIMITER = "/";
 
 # Maximum allowed length for a share-relative path string.
 const MAX_PATH_LENGTH = 2048;
-
