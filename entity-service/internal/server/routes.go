@@ -18,27 +18,37 @@ package server
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
 // NewRouter builds the dependency graph (repository → service → handler),
 // registers all routes, and wraps the mux with the middleware chain:
 // Recovery → Logger → Timeout.
 func NewRouter(db *pgxpool.Pool) http.Handler {
-	repo := repository.NewUserRepository(db)
-	svc := service.NewUserService(repo)
-	userHandler := handler.NewUserHandler(svc)
+	userRepo := repository.NewUserRepository(db)
+	userSvc := service.NewUserService(userRepo)
+	userHandler := handler.NewUserHandler(userSvc)
+
+	accountRepo := repository.NewAccountRepository(db)
+	accountSvc := service.NewAccountService(accountRepo)
+	accountHandler := handler.NewAccountHandler(accountSvc)
+
+	projectRepo := repository.NewProjectRepository(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	projectHandler := handler.NewProjectHandler(projectSvc)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 	mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
+	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
+	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 
 	return middleware.Recovery(
 		middleware.Logger(

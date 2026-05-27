@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -26,9 +27,33 @@ import (
 )
 
 const (
-	defaultLimit = 20
-	maxLimit     = 100
+	defaultLimit      = 20
+	maxLimit          = 100
+	maxSearchQueryLen = 200
 )
+
+// normalizePagination applies defaults and clamps to p in-place.
+// Returns a ValidationError if the limit exceeds maxLimit.
+func normalizePagination(p *domain.Pagination) error {
+	if p.Limit <= 0 {
+		p.Limit = defaultLimit
+	}
+	if p.Limit > maxLimit {
+		return &apierror.ValidationError{Msg: "limit cannot exceed 100"}
+	}
+	if p.Offset < 0 {
+		p.Offset = 0
+	}
+	return nil
+}
+
+// validateSearchQuery returns a ValidationError if q exceeds the character limit.
+func validateSearchQuery(q string) error {
+	if utf8.RuneCountInString(q) > maxSearchQueryLen {
+		return &apierror.ValidationError{Msg: "searchQuery cannot exceed 200 characters"}
+	}
+	return nil
+}
 
 type userService struct {
 	repo repository.UserRepository
@@ -41,17 +66,11 @@ func NewUserService(repo repository.UserRepository) UserService {
 
 // SearchUsers implements UserService.
 func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error) {
-	if req.Pagination.Limit <= 0 {
-		req.Pagination.Limit = defaultLimit
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchUsersResponse{}, err
 	}
-	if req.Pagination.Limit > maxLimit {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "limit cannot exceed 100"}
-	}
-	if req.Pagination.Offset < 0 {
-		req.Pagination.Offset = 0
-	}
-	if req.UserType != nil && *req.UserType != domain.UserTypeInternal && *req.UserType != domain.UserTypeCustomer {
-		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "invalid userType: must be \"internal\" or \"customer\""}
+	if err := validateSearchQuery(req.SearchQuery); err != nil {
+		return domain.SearchUsersResponse{}, err
 	}
 
 	users, total, err := s.repo.SearchUsers(ctx, req)
