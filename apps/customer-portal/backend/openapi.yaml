@@ -2551,7 +2551,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorPayload'
+                $ref: "#/components/schemas/ErrorPayload"
+  /deployment-usages:
+    post:
+      summary: Import product consumption usage from a zip file.
+      operationId: postDeploymentUsages
+      requestBody:
+        content:
+          '*/*':
+            schema:
+              description: Any type of entity body
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentUsageImportResponse"
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: InternalServerError
   /projects/{id}/stats/usage:
     get:
       summary: Get usage stats for a specific project.
@@ -2583,34 +2607,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorPayload'
-  /deployment-usages:
-    post:
-      summary: Import product consumption usage from a zip file.
-      operationId: postDeploymentUsages
-      requestBody:
-        description: Zip archive containing deployment usage data
-        content:
-          application/zip:
-            schema:
-              type: string
-              format: binary
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeploymentUsageImportResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
+                $ref: "#/components/schemas/ErrorPayload"
   /projects/{id}/instances/metrics/search:
     post:
       summary: Search instance metrics for a specific project based on provided filters.
