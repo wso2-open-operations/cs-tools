@@ -57,6 +57,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		w.WriteHeader(499)
 		log.Printf("request canceled: %s %s", r.Method, r.URL.Path)
 	default:
+		log.Printf("internal server error: %s %s: %v", r.Method, r.URL.Path, err)
 		apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")
 	}
 }
