@@ -24,8 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// New creates an http.Server listening on addr with production-safe timeouts
-// and the full middleware/router chain wired up via NewRouter.
 const (
 	serverReadTimeout  = 15 * time.Second
 	serverWriteTimeout = 15 * time.Second

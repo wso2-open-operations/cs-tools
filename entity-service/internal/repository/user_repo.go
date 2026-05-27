@@ -22,6 +22,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -55,18 +56,14 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 	where := "WHERE 1=1"
 
 	if req.SearchQuery != "" {
-		pattern := "%" + req.SearchQuery + "%"
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.SearchQuery)
+		pattern := "%" + escaped + "%"
+		// Both branches reference the same positional parameter — PostgreSQL allows $N to appear multiple times.
 		where += fmt.Sprintf(
-			" AND (first_name ILIKE $%d OR last_name ILIKE $%d OR user_name ILIKE $%d OR email ILIKE $%d)",
-			argIdx, argIdx, argIdx, argIdx,
+			" AND (user_name ILIKE $%d ESCAPE '\\' OR email ILIKE $%d ESCAPE '\\')",
+			argIdx, argIdx,
 		)
 		filterArgs = append(filterArgs, pattern)
-		argIdx++
-	}
-
-	if req.UserType != nil {
-		where += fmt.Sprintf(" AND user_type = $%d", argIdx)
-		filterArgs = append(filterArgs, string(*req.UserType))
 		argIdx++
 	}
 
@@ -114,7 +111,7 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 			result = append(result, u)
 		}
 		if err := rows.Err(); err != nil {
-			return err
+			return fmt.Errorf("iterate users: %w", err)
 		}
 		users = result
 		return nil
