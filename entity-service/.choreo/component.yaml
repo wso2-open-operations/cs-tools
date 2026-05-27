@@ -1,0 +1,12 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: entity-service-api
+    displayName: Entity Service API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Organization
+    schemaFilePath: endpoint.yaml

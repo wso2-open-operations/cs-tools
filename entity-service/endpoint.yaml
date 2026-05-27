@@ -1,0 +1,310 @@
+openapi: 3.0.1
+info:
+  title: Entity Service API
+  version: 1.0.0
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+
+  /users/search:
+    post:
+      summary: Search users by username or email.
+      operationId: searchUsers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchUsersRequest'
+      responses:
+        "200":
+          description: Users matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchUsersResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/search:
+    post:
+      summary: Search accounts by name or Salesforce ID.
+      operationId: searchAccounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAccountsRequest'
+      responses:
+        "200":
+          description: Accounts matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAccountsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /projects/search:
+    post:
+      summary: Search projects by name, project key, or subscription type.
+      operationId: searchProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProjectsRequest'
+      responses:
+        "200":
+          description: Projects matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProjectsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: Number of results per page. Defaults to 20, capped at 100.
+        offset:
+          type: integer
+          description: Zero-based offset into the result set.
+
+    SearchUsersRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against username and email.
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        userName:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        userType:
+          type: string
+          enum: [internal, customer]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchUsersResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchAccountsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against name and sf_id.
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        tier:
+          type: string
+          enum: [basic, enterprise]
+        region:
+          type: string
+          nullable: true
+        activationDate:
+          type: string
+          format: date-time
+        deactivationDate:
+          type: string
+          format: date-time
+          nullable: true
+        ownerId:
+          type: string
+        technicalOwnerId:
+          type: string
+          nullable: true
+        agentEnabled:
+          type: boolean
+        kbReferencesEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchAccountsResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProjectsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against name, project_key, and subscription_type.
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+        projectKey:
+          type: string
+        subscriptionType:
+          type: string
+          enum:
+            - development_support
+            - managed_cloud_subscription
+            - evaluation_subscription
+            - subscription
+            - cloud_evaluation_support
+            - internal
+            - platformer_subscription
+            - cloud_support
+            - professional_services
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchProjectsResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
