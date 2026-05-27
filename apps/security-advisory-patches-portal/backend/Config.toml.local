@@ -1,5 +1,4 @@
 [security_advisories_fileshare.authorization.authorizedRoles]
-# Must exactly match a value in the ID token `groups` array (see README section 5.3).
 securityPatchesUserRole = ""
 
 # Azure File Share Configuration
