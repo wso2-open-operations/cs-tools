@@ -308,7 +308,9 @@ export function buildServiceRequestsPageCaseSearchRequest(
       caseTypes: [CaseType.SERVICE_REQUEST],
       statusIds: resolvedStatusIds,
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-      deploymentId: filters.deploymentId || undefined,
+      deploymentIds: filters.deploymentIds?.length
+        ? filters.deploymentIds
+        : undefined,
       searchQuery: searchTerm.trim() || undefined,
       createdByMe: createdByMe || undefined,
     },

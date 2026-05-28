@@ -31,9 +31,9 @@ describe("ListFilters", () => {
   const mockOnFilterChange = vi.fn();
   const defaultFilters = {
     statusIds: [] as string[],
-    severityId: "",
+    severityIds: [] as string[],
     issueTypes: "",
-    deploymentId: "",
+    deploymentIds: [] as string[],
   };
 
   beforeEach(() => {
