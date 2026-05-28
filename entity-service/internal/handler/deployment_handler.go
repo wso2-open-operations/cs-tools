@@ -25,24 +25,23 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// ProductVersionHandler handles HTTP requests for the product version resource.
-type ProductVersionHandler struct {
-	svc service.ProductVersionService
+// DeploymentHandler handles HTTP requests for the deployment resource.
+type DeploymentHandler struct {
+	svc service.DeploymentService
 }
 
-// NewProductVersionHandler constructs a ProductVersionHandler with the given service.
-func NewProductVersionHandler(svc service.ProductVersionService) *ProductVersionHandler {
-	return &ProductVersionHandler{svc: svc}
+// NewDeploymentHandler constructs a DeploymentHandler with the given service.
+func NewDeploymentHandler(svc service.DeploymentService) *DeploymentHandler {
+	return &DeploymentHandler{svc: svc}
 }
 
-// SearchProductVersions handles POST /products/{id}/versions/search.
-func (h *ProductVersionHandler) SearchProductVersions(w http.ResponseWriter, r *http.Request) {
-	var req domain.SearchProductVersionsRequest
+// SearchDeployments handles POST /deployments/search.
+func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchDeploymentsRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	req.ProductID = r.PathValue("id")
-	resp, err := h.svc.SearchProductVersions(r.Context(), req)
+	resp, err := h.svc.SearchDeployments(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

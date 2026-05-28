@@ -65,3 +65,11 @@ type ProductVersionService interface {
 	// for invalid input; any other error indicates an infrastructure failure.
 	SearchProductVersions(ctx context.Context, req domain.SearchProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
 }
+
+// DeploymentService defines the operations available on the deployment entity.
+type DeploymentService interface {
+	// SearchDeployments returns a paginated list of deployments filtered by optional
+	// project IDs, deployment type keys, and name search query. A ValidationError is
+	// returned for invalid input; any other error indicates an infrastructure failure.
+	SearchDeployments(ctx context.Context, req domain.SearchDeploymentsRequest) (domain.SearchDeploymentsResponse, error)
+}
