@@ -194,6 +194,8 @@ export const sendNativeLog = (message?: string, data?: unknown, level: LogLevel 
       data,
       level,
     });
+  } else {
+    console.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
   }
 };
 
