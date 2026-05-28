@@ -14,15 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 import { colors } from "@wso2/oxygen-ui";
-import { CircleAlert, MessageSquare } from "@wso2/oxygen-ui-icons-react";
-
-import type { ProjectMetricMeta } from "@features/projects/components";
-import type { ProjectMetricKey } from "@features/projects/types/project.model";
-
-export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
-  outstanding: { label: "Outstanding:", color: colors.red[300], icon: CircleAlert },
-  chats: { label: "Chats:", color: colors.indigo[300], icon: MessageSquare },
-};
 
 export const PROJECT_SEVERITY_PIE_COLORS: Record<string, string> = {
   "10": colors.red[500],

@@ -13,8 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import type { Comment } from "@features/case-types/cases/types/case.model";
-import type { ChatMessage } from "@features/case-types/conversations/components";
 
 export function buildEnvProducts(
   deployments: { id: string; name: string }[],
@@ -28,16 +26,4 @@ export function buildEnvProducts(
     },
     {} as Record<string, string[]>,
   );
-}
-
-export function mapCommentsToChatMessages(
-  comments: Comment[],
-  fromNow: (date: Date) => string,
-): (ChatMessage & { id: string })[] {
-  return comments.map((comment) => ({
-    id: comment.id,
-    author: comment.createdBy === "Novera" ? "assistant" : "you",
-    blocks: [{ type: "text" as const, value: comment.content || "" }],
-    timestamp: fromNow(new Date(comment.createdOn)),
-  }));
 }
