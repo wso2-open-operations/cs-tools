@@ -154,7 +154,6 @@ backend/
 
 ### Updates
 
-- `GET /updates/recommended-update-levels` — Get recommended update levels (user email sourced from JWT)
 - `GET /updates/product-update-levels` — Get product update levels
 - `POST /updates/levels/search` — Search updates between update levels
 
@@ -195,9 +194,6 @@ curl -X PATCH http://localhost:8080/users/me \
   -H "x-jwt-assertion: $JWT" \
   -H "Content-Type: application/json" \
   -d '{"phoneNumber":"+94771234567"}'
-
-# Get recommended update levels (user email is read from the JWT)
-curl -H "x-jwt-assertion: $JWT" http://localhost:8080/updates/recommended-update-levels
 
 # Get product update levels
 curl -H "x-jwt-assertion: $JWT" http://localhost:8080/updates/product-update-levels

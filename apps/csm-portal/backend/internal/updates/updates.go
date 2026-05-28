@@ -23,24 +23,6 @@ import (
 	"net/http"
 )
 
-// GetRecommendedUpdateLevels fetches recommended update levels for the given user
-// and returns them mapped to the portal camelCase response shape.
-func (c *Client) GetRecommendedUpdateLevels(ctx context.Context, userEmail string) ([]RecommendedUpdateLevel, error) {
-	raw, err := c.do(ctx, http.MethodGet, "/updates/recommended-update-levels", nil, map[string]string{
-		"user": userEmail,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var upstream []upstreamRecommendedUpdateLevel
-	if err := json.Unmarshal(raw, &upstream); err != nil {
-		return nil, fmt.Errorf("updates: decode recommended update levels: %w", err)
-	}
-
-	return mapRecommendedUpdateLevels(upstream), nil
-}
-
 // GetProductUpdateLevels fetches all product update levels and returns them
 // mapped to the portal camelCase response shape.
 func (c *Client) GetProductUpdateLevels(ctx context.Context) ([]ProductUpdateLevel, error) {

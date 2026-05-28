@@ -26,66 +26,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
-// ----- GetRecommendedUpdateLevels -----
-
-func TestGetRecommendedUpdateLevels(t *testing.T) {
-	t.Run("requires authenticated user", func(t *testing.T) {
-		h := NewUpdatesHandler(&mockUpdatesClient{})
-		r := httptest.NewRequest(http.MethodGet, "/updates/recommended-update-levels", nil)
-		w := httptest.NewRecorder()
-		h.GetRecommendedUpdateLevels(w, r)
-		assertStatus(t, w, http.StatusUnauthorized)
-		assertErrorMessage(t, w, ErrMsgUnauthorized)
-		assertContentType(t, w, "application/json")
-	})
-
-	t.Run("passes JWT email to upstream and returns 200 with levels", func(t *testing.T) {
-		var capturedEmail string
-		client := &mockUpdatesClient{
-			recommendedFn: func(_ context.Context, email string) ([]updates.RecommendedUpdateLevel, error) {
-				capturedEmail = email
-				return []updates.RecommendedUpdateLevel{
-					{ProductName: "wso2am", ProductBaseVersion: "4.3.0", RecommendedUpdateLevel: 10},
-				}, nil
-			},
-		}
-		h := NewUpdatesHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/updates/recommended-update-levels", nil))
-		w := httptest.NewRecorder()
-		h.GetRecommendedUpdateLevels(w, r)
-
-		assertStatus(t, w, http.StatusOK)
-		assertContentType(t, w, "application/json")
-		if capturedEmail != testUser.Email {
-			t.Errorf("upstream called with email %q, want %q", capturedEmail, testUser.Email)
-		}
-		resp := decodeJSON[[]updates.RecommendedUpdateLevel](t, w)
-		if len(resp) != 1 || resp[0].ProductName != "wso2am" {
-			t.Errorf("unexpected response: %+v", resp)
-		}
-	})
-
-	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
-		for _, tc := range upstreamErrors("Failed to get recommended update levels.") {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				client := &mockUpdatesClient{
-					recommendedFn: func(_ context.Context, _ string) ([]updates.RecommendedUpdateLevel, error) {
-						return nil, tc.err
-					},
-				}
-				h := NewUpdatesHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/updates/recommended-update-levels", nil))
-				w := httptest.NewRecorder()
-				h.GetRecommendedUpdateLevels(w, r)
-				assertStatus(t, w, tc.wantCode)
-				assertErrorMessage(t, w, tc.wantMsg)
-				assertContentType(t, w, "application/json")
-			})
-		}
-	})
-}
-
 // ----- GetProductUpdateLevels -----
 
 func TestGetProductUpdateLevels(t *testing.T) {
