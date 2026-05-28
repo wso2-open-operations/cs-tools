@@ -16,13 +16,13 @@ export function useStream() {
   const [animationComplete, setAnimationComplete] = useState(false); // Animation has finished rendering the text
 
   useEffect(() => {
-    if (!pending || !draft || !animationComplete) return;
+    if (!pending || (draft && !animationComplete)) return;
 
     setCommitted({
       author: MESSAGE_AUTHOR_TYPES.AGENT,
       content: pending.payload.message,
       timestamp: fromNow(new Date()),
-      animated: false,
+      animated: !draft,
       thinking: false,
     });
 
@@ -71,6 +71,9 @@ export function useStream() {
 
       case "final":
         setPending(response as FinalNoveraResponse);
+        break;
+
+      default:
         break;
     }
   };
