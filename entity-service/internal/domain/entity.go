@@ -220,11 +220,11 @@ type ProductVersion struct {
 }
 
 // SearchProductVersionsRequest is the input for a product version search operation.
-// ProductID and SearchQuery are both optional; when provided they filter by product
-// and version string respectively (case-insensitive).
+// ProductID is populated from the URL path parameter and is not part of the JSON body.
+// SearchQuery is optional and matched case-insensitively against the version string.
 type SearchProductVersionsRequest struct {
 	Pagination  Pagination `json:"pagination"`
-	ProductID   string     `json:"productId"`
+	ProductID   string     `json:"-"`
 	SearchQuery string     `json:"searchQuery"`
 }
 

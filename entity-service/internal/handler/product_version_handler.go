@@ -35,12 +35,13 @@ func NewProductVersionHandler(svc service.ProductVersionService) *ProductVersion
 	return &ProductVersionHandler{svc: svc}
 }
 
-// SearchProductVersions handles POST /product-versions/search.
+// SearchProductVersions handles POST /products/{id}/versions/search.
 func (h *ProductVersionHandler) SearchProductVersions(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchProductVersionsRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
+	req.ProductID = r.PathValue("id")
 	resp, err := h.svc.SearchProductVersions(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
