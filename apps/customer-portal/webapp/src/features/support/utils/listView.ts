@@ -43,9 +43,12 @@ export function countListSearchAndFilters(
   let n = 0;
   if (searchTerm.trim().length > 0) n += 1;
   for (const v of Object.values(
-    filters as Record<string, string | number | undefined | null>,
+    filters as Record<string, string | string[] | number | undefined | null>,
   )) {
-    if (v !== undefined && v !== null && String(v).trim() !== "") {
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v)) {
+      if (v.length > 0) n += 1;
+    } else if (String(v).trim() !== "") {
       n += 1;
     }
   }
