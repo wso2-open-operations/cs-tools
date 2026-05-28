@@ -15,7 +15,8 @@
 // under the License.
 import { useDeclareLayout } from "@context/layout";
 
-import { SupportView } from "@features/support/components";
+import { ItemList, Tabs } from "@features/support/components";
+import { useActiveTab } from "@features/support/hooks";
 
 import { Tab } from "@shared/constants";
 
@@ -30,9 +31,13 @@ export default function SupportPage() {
     },
   });
 
+  const { tab, setTab } = useActiveTab();
+
   return (
     <>
-      <SupportView />
+      <Tabs value={tab} onTabChange={setTab} />
+      <ItemList tab={tab} />
+
       <Fab />
     </>
   );
