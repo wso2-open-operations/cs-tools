@@ -58,7 +58,7 @@ export function useFilters() {
 
         if (partial.startDate !== undefined) prev.set("startDate", partial.startDate);
 
-        if (partial.endDate !== undefined) prev.set("endDate  ", partial.endDate);
+        if (partial.endDate !== undefined) prev.set("endDate", partial.endDate);
 
         return prev;
       },

@@ -36,7 +36,6 @@ export function toUser(dto: UserDto): User {
   if (dto.isSecurityContact) roles.push(ROLES.SECURITY_CONTACT);
   if (dto.isCsIntegrationUser) roles.push(ROLES.SYSTEM_USER);
   if (dto.isPortalUser) roles.push(ROLES.PORTAL_USER);
-  else roles.push(ROLES.PORTAL_USER);
 
   return {
     id: dto.id,

@@ -144,7 +144,7 @@ export function SecurityReportAnalysisItemsList() {
     {
       title: "All Security Report Analysis",
       slots: {
-        bottom: <Filters type={CASE_TYPES.SERVICE_REQUEST} />,
+        bottom: <Filters type={CASE_TYPES.SECURITY_REPORT_ANALYSIS} />,
         subtitle: <ItemsListSubtitle count={count} total={total} />,
       },
     },

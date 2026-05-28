@@ -27,7 +27,7 @@ export function TypewriterText({ tokens, pending = false, animated = true, onAni
       return;
     }
 
-    const t = setTimeout(() => setCursor((c) => c + 1), 50);
+    const t = setTimeout(() => setCursor((c) => c + 1), 30);
 
     return () => clearTimeout(t);
   }, [cursor, fullText, animated, onAnimationComplete]);

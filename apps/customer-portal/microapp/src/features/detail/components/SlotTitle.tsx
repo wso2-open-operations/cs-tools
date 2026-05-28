@@ -1,4 +1,4 @@
-import { pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
+import { Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { motion, type Transition, type Variants } from "framer-motion";
 
 import { CASE_TYPE_CONFIGS } from "@shared/constants";
@@ -70,7 +70,7 @@ function TitleRow({ title }: { title?: string }) {
 const springTransition: Transition = { type: "spring", stiffness: 300, damping: 50 };
 
 const metaRowVariants: Variants = {
-  normal: { opacity: 1, scale: 1, y: 0, transition: springTransition },
+  default: { opacity: 1, scale: 1, y: 0, transition: springTransition },
   shrunk: { opacity: 0.8, scale: 0.8, y: -2, transition: springTransition },
 };
 
