@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -14,6 +14,17 @@ dayjs.extend(relativeTime);
 export function useDateTime() {
   const { timezone } = useMe();
   const tz = timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  // Ticks every minute to force a re-render, keeping fromNow() output up to date.
+  // This causes all consumers of useDateTime to re-render every 60s.
+  // NOTE: If this causes performance issues, remove this and extract fromNow
+  // into a separate hook (e.g. useFromNow) so only components that need
+  // live relative time pay the re-render cost.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const toUtc = useCallback((date: Date | string) => {
     if (date instanceof Date) {

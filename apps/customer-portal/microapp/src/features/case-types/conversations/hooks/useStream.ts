@@ -3,13 +3,9 @@ import { useEffect, useState } from "react";
 import type { BubbleAgentProps } from "@features/case-types/conversations/components";
 import type { FinalNoveraResponse, NoveraResponse } from "@features/case-types/conversations/types";
 
-import { useDateTime } from "@shared/hooks/useDateTime";
-
 import { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 
 export function useStream() {
-  const { fromNow } = useDateTime();
-
   const [draft, setDraft] = useState<BubbleAgentProps | null>(null); // Message currently being displayed
   const [pending, setPending] = useState<FinalNoveraResponse | null>(null);
   const [committed, setCommitted] = useState<BubbleAgentProps | null>(null); // ChatMessage object awaiting to be appended
@@ -21,7 +17,7 @@ export function useStream() {
     setCommitted({
       author: MESSAGE_AUTHOR_TYPES.AGENT,
       content: pending.payload.message,
-      timestamp: fromNow(new Date()),
+      timestamp: new Date(),
       animated: !draft,
       thinking: false,
     });

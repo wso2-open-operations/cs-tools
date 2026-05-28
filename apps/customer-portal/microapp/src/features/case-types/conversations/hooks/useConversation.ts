@@ -3,12 +3,9 @@ import { useEffect, useState } from "react";
 import type { BubbleProps } from "@features/case-types/conversations/components";
 import type { MessageAuthor } from "@features/case-types/conversations/types";
 
-import { useDateTime } from "@shared/hooks/useDateTime";
-
 import { MESSAGE_AUTHOR_TYPES, NOVERA_INITIAL_MESSAGE } from "@shared/constants";
 
 export function useConversation(committed: BubbleProps | null, reset: () => void) {
-  const { fromNow } = useDateTime();
   const [messages, setMessages] = useState<BubbleProps[]>([
     { ...NOVERA_INITIAL_MESSAGE, animated: false, thinking: false },
   ]);
@@ -26,7 +23,7 @@ export function useConversation(committed: BubbleProps | null, reset: () => void
         ? {
             author,
             content: message,
-            timestamp: fromNow(new Date()),
+            timestamp: new Date(),
             animated: false,
             thinking: false,
           }

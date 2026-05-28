@@ -5,6 +5,7 @@ import type { ChatMessage } from "@features/case-types/conversations/types";
 import { TypewriterText } from "@shared/components/common";
 
 import type { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
+import { useDateTime } from "@shared/hooks";
 
 export interface BubbleAgentProps extends ChatMessage {
   author: typeof MESSAGE_AUTHOR_TYPES.AGENT;
@@ -21,6 +22,8 @@ export function BubbleAgent({
   thinking = false,
   onAnimationComplete,
 }: BubbleAgentProps) {
+  const { fromNow } = useDateTime();
+
   return (
     <Stack direction="row" justifyContent="start" width="100%">
       <Card
@@ -59,7 +62,7 @@ export function BubbleAgent({
             </Typography>
           ) : timestamp ? (
             <Typography variant="subtitle2" color="text.disabled">
-              {timestamp}
+              {fromNow(timestamp)}
             </Typography>
           ) : null}
         </Stack>
