@@ -26,20 +26,6 @@ const updateTypeRegular = "regular"
 // ---- upstream (snake-case) types ----
 // These mirror the record types defined in modules/updates/types.bal.
 
-type upstreamRecommendedUpdateLevel struct {
-	ProductName                   string `json:"product-name"`
-	ProductBaseVersion            string `json:"product-base-version"`
-	Channel                       string `json:"channel"`
-	StartingUpdateLevel           int    `json:"starting-update-level"`
-	EndingUpdateLevel             int    `json:"ending-update-level"`
-	InstalledUpdatesCount         int    `json:"installed-updates-count"`
-	InstalledSecurityUpdatesCount int    `json:"installed-security-updates-count"`
-	Timestamp                     int64  `json:"timestamp"`
-	RecommendedUpdateLevel        int    `json:"recommended-update-level"`
-	AvailableUpdatesCount         int    `json:"available-updates-count"`
-	AvailableSecurityUpdatesCount int    `json:"available-security-updates-count"`
-}
-
 type upstreamProductUpdateLevel struct {
 	ProductName         string               `json:"product-name"`
 	ProductUpdateLevels []upstreamUpdateLevel `json:"product-update-levels"`
@@ -98,21 +84,6 @@ type upstreamSecurityAdvisory struct {
 // ---- portal (camelCase) types ----
 // These mirror the types defined in modules/types/types.bal and are what the
 // CSM portal returns to its callers.
-
-// RecommendedUpdateLevel is the portal response shape for a recommended update level.
-type RecommendedUpdateLevel struct {
-	ProductName                   string `json:"productName"`
-	ProductBaseVersion            string `json:"productBaseVersion"`
-	Channel                       string `json:"channel"`
-	StartingUpdateLevel           int    `json:"startingUpdateLevel"`
-	EndingUpdateLevel             int    `json:"endingUpdateLevel"`
-	InstalledUpdatesCount         int    `json:"installedUpdatesCount"`
-	InstalledSecurityUpdatesCount int    `json:"installedSecurityUpdatesCount"`
-	Timestamp                     int64  `json:"timestamp"`
-	RecommendedUpdateLevel        int    `json:"recommendedUpdateLevel"`
-	AvailableUpdatesCount         int    `json:"availableUpdatesCount"`
-	AvailableSecurityUpdatesCount int    `json:"availableSecurityUpdatesCount"`
-}
 
 // ProductUpdateLevel is the portal response shape for a product's update levels.
 type ProductUpdateLevel struct {

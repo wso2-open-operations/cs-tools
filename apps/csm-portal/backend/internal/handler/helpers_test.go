@@ -114,16 +114,8 @@ func (m *mockEntityCaseClient) GetCase(ctx context.Context, caseID string) ([]by
 // ----- mock updates client -----
 
 type mockUpdatesClient struct {
-	recommendedFn func(ctx context.Context, email string) ([]updates.RecommendedUpdateLevel, error)
-	productFn     func(ctx context.Context) ([]updates.ProductUpdateLevel, error)
-	searchFn      func(ctx context.Context, payload updates.SearchPayload, email string) (map[string]updates.UpdateLevelGroup, error)
-}
-
-func (m *mockUpdatesClient) GetRecommendedUpdateLevels(ctx context.Context, email string) ([]updates.RecommendedUpdateLevel, error) {
-	if m.recommendedFn != nil {
-		return m.recommendedFn(ctx, email)
-	}
-	return []updates.RecommendedUpdateLevel{}, nil
+	productFn func(ctx context.Context) ([]updates.ProductUpdateLevel, error)
+	searchFn  func(ctx context.Context, payload updates.SearchPayload, email string) (map[string]updates.UpdateLevelGroup, error)
 }
 
 func (m *mockUpdatesClient) GetProductUpdateLevels(ctx context.Context) ([]updates.ProductUpdateLevel, error) {

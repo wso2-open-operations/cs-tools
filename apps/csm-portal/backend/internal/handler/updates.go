@@ -30,7 +30,6 @@ import (
 // updatesClient abstracts the updates service operations used by UpdatesHandler,
 // allowing the handler to be tested independently of the real HTTP client.
 type updatesClient interface {
-	GetRecommendedUpdateLevels(ctx context.Context, userEmail string) ([]updates.RecommendedUpdateLevel, error)
 	GetProductUpdateLevels(ctx context.Context) ([]updates.ProductUpdateLevel, error)
 	SearchUpdatesBetweenUpdateLevels(ctx context.Context, payload updates.SearchPayload, userEmail string) (map[string]updates.UpdateLevelGroup, error)
 }
@@ -44,25 +43,6 @@ type UpdatesHandler struct {
 // NewUpdatesHandler creates an UpdatesHandler backed by the given updates client.
 func NewUpdatesHandler(updates updatesClient) *UpdatesHandler {
 	return &UpdatesHandler{updates: updates}
-}
-
-// GetRecommendedUpdateLevels handles GET /updates/recommended-update-levels.
-// The user email is sourced from the JWT claims, not a query parameter.
-func (h *UpdatesHandler) GetRecommendedUpdateLevels(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	result, err := h.updates.GetRecommendedUpdateLevels(r.Context(), user.Email)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "updates GetRecommendedUpdateLevels failed", "userID", user.UserID, "err", err)
-		mapUpstreamError(w, err, "Failed to get recommended update levels.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, result)
 }
 
 // GetProductUpdateLevels handles GET /updates/product-update-levels.
