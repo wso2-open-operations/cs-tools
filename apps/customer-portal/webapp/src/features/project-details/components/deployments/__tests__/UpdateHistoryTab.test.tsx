@@ -19,13 +19,6 @@ import { describe, it, expect, vi } from "vitest";
 import UpdateHistoryTab from "@features/project-details/components/deployments/UpdateHistoryTab";
 import type { ProductUpdate } from "@features/project-details/types/products";
 
-vi.mock("@features/updates/api/useGetRecommendedUpdateLevels", () => ({
-  useGetRecommendedUpdateLevels: () => ({
-    data: [],
-    isLoading: false,
-  }),
-}));
-
 vi.mock("@features/updates/api/usePostUpdateLevelsSearch", () => ({
   usePostUpdateLevelsSearch: () => ({
     data: null,
