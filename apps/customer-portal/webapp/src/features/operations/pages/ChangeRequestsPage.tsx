@@ -27,6 +27,7 @@ import { useSessionState } from "@hooks/useSessionState";
 import { Box, Button, CircularProgress, Divider, Stack } from "@wso2/oxygen-ui";
 import { Download } from "@wso2/oxygen-ui-icons-react";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
+import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetChangeRequests, {
   useGetChangeRequestsInfinite,
@@ -95,6 +96,7 @@ export default function ChangeRequestsPage(): JSX.Element {
   const scheduledOnly = locationState?.scheduledOnly ?? false;
   const { projectId } = useParams<{ projectId: string }>();
   const navSegment = getOperationsNavSegment(location.pathname);
+  const { data: projectDetails } = useGetProjectDetails(projectId ?? "");
 
   const [viewMode, setViewMode] = useState<ChangeRequestsViewMode>(
     ChangeRequestsViewMode.List,
@@ -309,6 +311,7 @@ export default function ChangeRequestsPage(): JSX.Element {
   const downloadResultsButton = projectId ? (
     <ChangeRequestsCsvExportButton
       projectId={projectId}
+      projectName={projectDetails?.name}
       searchRequest={changeRequestSearchRequest}
       prefetchedItems={
         viewMode === ChangeRequestsViewMode.List

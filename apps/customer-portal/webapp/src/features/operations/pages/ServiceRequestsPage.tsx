@@ -302,6 +302,7 @@ export default function ServiceRequestsPage(): JSX.Element {
   const downloadResultsButton = projectId ? (
     <CaseListCsvExportButton
       projectId={projectId}
+      projectName={project?.name}
       caseSearchRequest={caseSearchRequest}
       filenamePrefix="service-requests"
       prefetchedCases={loadedCasesForExport}
