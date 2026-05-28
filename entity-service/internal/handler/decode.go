@@ -46,18 +46,43 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 }
 
 // writeServiceError maps a service-layer error to the appropriate HTTP response.
+// Full error details are logged server-side for debugging; the client always
+// receives a safe, generic message — never raw infrastructure details.
 func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
-	var ve *apierror.ValidationError
+	var (
+		ve  *apierror.ValidationError
+		nfe *apierror.NotFoundError
+		sue *apierror.ServiceUnavailableError
+	)
 	switch {
 	case errors.As(err, &ve):
-		apierror.WriteJSON(w, http.StatusBadRequest, ve.Error())
+		// 400 – caller-supplied input is invalid; the message is safe to return.
+		log.Printf("Bad request: %s %s: %s", r.Method, r.URL.Path, ve.Msg)
+		apierror.WriteJSON(w, http.StatusBadRequest, ve.Msg)
+
+	case errors.As(err, &nfe):
+		// 404 – resource not found; message is safe to return.
+		log.Printf("Not found: %s %s: %s", r.Method, r.URL.Path, nfe.Msg)
+		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
+
+	case errors.As(err, &sue):
+		// 503 – downstream dependency unavailable; log details, return generic message.
+		log.Printf("Service unavailable: %s %s: %s", r.Method, r.URL.Path, sue.Msg)
+		apierror.WriteJSON(w, http.StatusServiceUnavailable, "service temporarily unavailable, please try again later")
+
 	case errors.Is(err, context.DeadlineExceeded):
-		apierror.WriteJSON(w, http.StatusRequestTimeout, "request timeout")
+		// 408 – request timed out waiting for a downstream call or DB query.
+		log.Printf("Request timeout: %s %s", r.Method, r.URL.Path)
+		apierror.WriteJSON(w, http.StatusRequestTimeout, "request timed out")
+
 	case errors.Is(err, context.Canceled):
-		w.WriteHeader(499)
-		log.Printf("request canceled: %s %s", r.Method, r.URL.Path)
+		// Client closed the connection — log it and return nothing; the response is already gone.
+		log.Printf("Request canceled: %s %s", r.Method, r.URL.Path)
+
 	default:
-		log.Printf("internal server error: %s %s: %v", r.Method, r.URL.Path, err)
+		// 500 – unexpected infrastructure error (DB, network, etc.).
+		// Log the full error for debugging; the client only receives the generic message.
+		log.Printf("Internal error: %s %s: %v", r.Method, r.URL.Path, err)
 		apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")
 	}
 }

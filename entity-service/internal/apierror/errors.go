@@ -39,6 +39,25 @@ type ValidationError struct {
 // Error implements the error interface.
 func (e *ValidationError) Error() string { return e.Msg }
 
+// NotFoundError signals that the requested resource does not exist and should
+// be reported as HTTP 404. The Msg is safe to log and return to the caller.
+type NotFoundError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *NotFoundError) Error() string { return e.Msg }
+
+// ServiceUnavailableError signals that a downstream dependency is temporarily
+// unavailable and should be reported as HTTP 503. Log Msg server-side but
+// return only a generic message to the caller.
+type ServiceUnavailableError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *ServiceUnavailableError) Error() string { return e.Msg }
+
 // WriteJSON writes an ErrorResponse JSON body with the given HTTP status code.
 func WriteJSON(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
