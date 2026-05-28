@@ -58,3 +58,15 @@ func (c *Client) SearchAccounts(ctx context.Context, body []byte) ([]byte, error
 func (c *Client) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/projects/search", body)
 }
+
+// SearchProducts calls POST /products/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/products/search", body)
+}
+
+// SearchProductVersions calls POST /product-versions/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchProductVersions(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/product-versions/search", body)
+}

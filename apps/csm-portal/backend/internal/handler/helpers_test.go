@@ -199,3 +199,24 @@ func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byt
 	}
 	return []byte(`{}`), nil
 }
+
+// ----- mock entity product client -----
+
+type mockEntityProductClient struct {
+	searchProductsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchProductVersionsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityProductClient) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProductsFn != nil {
+		return m.searchProductsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProductVersionsFn != nil {
+		return m.searchProductVersionsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
