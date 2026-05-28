@@ -36,8 +36,8 @@ export const engagements = {
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;
-        const nextOffset = offset + 1;
-        return nextOffset >= Math.ceil(totalRecords / limit) ? undefined : nextOffset;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
       },
     }),
 
