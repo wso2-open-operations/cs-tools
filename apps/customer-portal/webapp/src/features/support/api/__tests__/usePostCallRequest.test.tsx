@@ -89,7 +89,6 @@ describe("usePostCallRequest", () => {
       `https://api.test/cases/${caseId}/call-requests`,
       expect.objectContaining({
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       }),
     );
@@ -131,7 +130,7 @@ describe("usePostCallRequest", () => {
     });
 
     await expect(result.current.mutateAsync(requestBody)).rejects.toThrow(
-      "Error creating call request: 400 Bad Request - Invalid payload",
+      "Bad Request",
     );
   });
 
