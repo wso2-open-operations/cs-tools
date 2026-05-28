@@ -27,6 +27,10 @@ describe("ImageFullscreenModal", () => {
         <ImageFullscreenModal open imageSrc="https://example.com/a.png" onClose={onClose} />
       </ThemeProvider>,
     );
+    expect(screen.getByRole("img", { name: /full size/i })).toHaveAttribute(
+      "src",
+      "https://example.com/a.png",
+    );
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

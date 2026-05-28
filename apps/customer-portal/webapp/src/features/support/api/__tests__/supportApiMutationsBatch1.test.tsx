@@ -27,6 +27,7 @@ import { usePostCaseClassifications } from "@features/support/api/usePostCaseCla
 import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostConversationMessages } from "@features/support/api/usePostConversationMessages";
 import { usePostConversations } from "@features/support/api/usePostConversations";
+import { CommentType } from "@features/support/constants/supportConstants";
 
 const mockAuthFetch = vi.fn();
 let mockIsSignedIn = true;
@@ -106,7 +107,7 @@ describe("support API mutation hooks - batch 1", () => {
       wrapper: getWrapper(queryClient),
     });
 
-    await result.current.mutateAsync({ stateKey: 2 } as never);
+    await result.current.mutateAsync({ stateKey: 2 });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/cases/case-1",
       expect.objectContaining({ method: "PATCH" }),
@@ -123,7 +124,7 @@ describe("support API mutation hooks - batch 1", () => {
       caseId: "case-1",
       attachmentId: "att-1",
       body: { name: "new.txt" },
-    } as never);
+    });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/cases/case-1/attachments/att-1",
       expect.objectContaining({ method: "PATCH" }),
@@ -139,7 +140,7 @@ describe("support API mutation hooks - batch 1", () => {
     await result.current.mutateAsync({
       caseId: "case-1",
       body: { name: "a.txt", type: "text/plain", content: "abc" },
-    } as never);
+    });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/cases/case-1/attachments",
       expect.objectContaining({ method: "POST" }),
@@ -157,7 +158,13 @@ describe("support API mutation hooks - batch 1", () => {
       wrapper: getWrapper(queryClient),
     });
 
-    await result.current.mutateAsync({ chatHistory: "h" } as never);
+    await result.current.mutateAsync({
+      chatHistory: "h",
+      projectTypeId: "project-type",
+      envProducts: {},
+      region: "us",
+      tier: "prod",
+    });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/cases/classify",
       expect.objectContaining({ method: "POST" }),
@@ -173,8 +180,11 @@ describe("support API mutation hooks - batch 1", () => {
     await expect(
       result.current.mutateAsync({
         caseId: "case-1",
-        body: { content: "x".repeat(10 * 1024 * 1024 + 200), type: "COMMENT" },
-      } as never),
+        body: {
+          content: "x".repeat(10 * 1024 * 1024 + 200),
+          type: CommentType.COMMENT,
+        },
+      }),
     ).rejects.toThrow("exceeds the 10 MB limit");
   });
 
@@ -191,7 +201,7 @@ describe("support API mutation hooks - batch 1", () => {
       envProducts: {},
       region: "us",
       tier: "prod",
-    } as never);
+    });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/projects/project-1/conversations/conv-1/messages",
       expect.objectContaining({ method: "POST" }),
@@ -210,7 +220,7 @@ describe("support API mutation hooks - batch 1", () => {
       envProducts: {},
       region: "us",
       tier: "prod",
-    } as never);
+    });
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "https://api.test/projects/project-1/conversations",
       expect.objectContaining({ method: "POST" }),

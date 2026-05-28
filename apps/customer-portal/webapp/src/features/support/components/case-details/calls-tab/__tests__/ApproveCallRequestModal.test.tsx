@@ -41,5 +41,6 @@ describe("ApproveCallRequestModal", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(onClose).toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 });

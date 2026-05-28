@@ -46,7 +46,7 @@ describe("CaseListCsvExportButton", () => {
       </ThemeProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /export/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /export to csv/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /export to csv/i }));
     await waitFor(() => {
       expect(downloadCaseListCsvMock).toHaveBeenCalled();
     });

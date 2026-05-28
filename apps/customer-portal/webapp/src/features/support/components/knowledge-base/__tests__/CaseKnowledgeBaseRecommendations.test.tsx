@@ -43,6 +43,10 @@ describe("CaseKnowledgeBaseRecommendations", () => {
       </ThemeProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /view article/i }));
-    expect(openSpy).toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(
+      expect.stringContaining("a-1"),
+      "_blank",
+      expect.stringContaining("noopener"),
+    );
   });
 });

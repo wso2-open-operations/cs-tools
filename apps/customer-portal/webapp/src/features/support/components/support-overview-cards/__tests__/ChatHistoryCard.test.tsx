@@ -39,7 +39,11 @@ describe("ChatHistoryCard", () => {
         />
       </ThemeProvider>,
     );
-    fireEvent.click(screen.getAllByRole("button", { name: /view|resume/i })[1]);
+    const actionButton = screen
+      .getAllByRole("button", { name: /view|resume/i })
+      .find((element) => element.tagName.toLowerCase() === "span");
+    expect(actionButton).toBeDefined();
+    fireEvent.click(actionButton as Element);
     expect(onItemAction).toHaveBeenCalled();
   });
 });

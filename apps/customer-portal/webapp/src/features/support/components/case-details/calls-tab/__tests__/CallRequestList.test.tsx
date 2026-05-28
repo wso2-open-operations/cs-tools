@@ -32,5 +32,7 @@ describe("CallRequestList", () => {
       </ThemeProvider>,
     );
     expect(screen.getAllByText(/reason \/ notes/i).length).toBe(2);
+    expect(screen.getByText("Discuss issue")).toBeInTheDocument();
+    expect(screen.getByText("Follow up")).toBeInTheDocument();
   });
 });

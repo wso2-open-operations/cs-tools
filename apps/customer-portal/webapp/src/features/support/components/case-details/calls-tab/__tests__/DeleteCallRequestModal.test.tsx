@@ -20,6 +20,22 @@ import { describe, expect, it, vi } from "vitest";
 import DeleteCallRequestModal from "../DeleteCallRequestModal";
 
 describe("DeleteCallRequestModal", () => {
+  it("does not submit when reason is empty", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ThemeProvider theme={createTheme()}>
+        <DeleteCallRequestModal
+          open
+          call={null}
+          onClose={vi.fn()}
+          onConfirm={onConfirm}
+        />
+      </ThemeProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("requires reason and submits it on confirm", () => {
     const onConfirm = vi.fn();
     render(

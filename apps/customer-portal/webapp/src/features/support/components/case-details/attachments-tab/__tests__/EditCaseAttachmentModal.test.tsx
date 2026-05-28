@@ -40,6 +40,10 @@ describe("EditCaseAttachmentModal", () => {
       target: { value: "new.txt" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(mutateAsync).toHaveBeenCalled();
+    expect(mutateAsync).toHaveBeenCalledWith({
+      caseId: "case-1",
+      attachmentId: "a1",
+      body: { name: "new.txt" },
+    });
   });
 });
