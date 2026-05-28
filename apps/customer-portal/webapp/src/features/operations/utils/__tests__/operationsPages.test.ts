@@ -279,13 +279,13 @@ describe("buildServiceRequestsPageCaseSearchRequest", () => {
 
   it("does not send severity filter", () => {
     const req = buildServiceRequestsPageCaseSearchRequest(
-      { severityId: "99" },
+      { severityIds: ["99"] },
       "",
       ServiceRequestCaseSortField.CreatedOn,
       SortOrder.DESC,
       false,
     );
-    expect(req.filters?.severityId).toBeUndefined();
+    expect(req.filters?.severityIds).toBeUndefined();
   });
 
   it("normalizes legacy Severity sort field to UpdatedOn in API payload", () => {
