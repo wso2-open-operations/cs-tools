@@ -228,6 +228,21 @@ export function downloadAllCasesListCsv(
  * @param filenamePrefix - Download file prefix.
  * @param projectId - Project id for filename.
  */
+// Col widths (mm) for 9-column case table on A4 landscape (269mm usable):
+// Number(22) WSO2CaseID(28) State(22) ShortDesc(72) Severity/Type(20)
+// CreatedBy(30) AssignedTo(30) Updated(23) Created(22)
+const CASE_PDF_COLUMN_STYLES = {
+  0: { cellWidth: 22 },
+  1: { cellWidth: 28 },
+  2: { cellWidth: 22 },
+  3: { cellWidth: 72 },
+  4: { cellWidth: 20 },
+  5: { cellWidth: 30 },
+  6: { cellWidth: 30 },
+  7: { cellWidth: 23 },
+  8: { cellWidth: 22 },
+} as const;
+
 export function downloadCaseListPdf(
   cases: CaseListItem[],
   variant: CaseListCsvExportVariant,
@@ -246,5 +261,5 @@ export function downloadCaseListPdf(
   const projectPart = projectId ? `-${projectId}` : "";
   const filename = `${filenamePrefix}${projectPart}-${datePart}.pdf`;
   const title = `${filenamePrefix.replace(/-/g, " ")} — ${datePart}`;
-  downloadPdfFile(filename, title, headers, rows);
+  downloadPdfFile(filename, title, headers, rows, CASE_PDF_COLUMN_STYLES);
 }

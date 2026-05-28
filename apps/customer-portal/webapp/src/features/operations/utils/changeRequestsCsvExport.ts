@@ -18,6 +18,7 @@ import type { ChangeRequestItem } from "@features/operations/types/changeRequest
 import { formatCaseCsvDateTime } from "@features/support/utils/casesCsvExport";
 import { getAssignedEngineerLabel, stripHtml } from "@features/support/utils/support";
 import { buildCsvContent, downloadCsvFile } from "@utils/csv";
+import { downloadPdfFile } from "@utils/pdf";
 
 export const CHANGE_REQUEST_EXPORT_CSV_HEADERS = [
   "Number",
@@ -102,4 +103,39 @@ export function downloadChangeRequestsCsv(
 ): void {
   const content = buildChangeRequestsExportCsv(items);
   downloadCsvFile(buildChangeRequestsCsvFilename(projectId), content);
+}
+
+/**
+ * Downloads change request list rows as a PDF file.
+ *
+ * @param items - Change requests to export.
+ * @param projectId - Project id for filename.
+ */
+// Same 9-column layout as case table on A4 landscape (269mm usable).
+const CHANGE_REQUEST_PDF_COLUMN_STYLES = {
+  0: { cellWidth: 22 },
+  1: { cellWidth: 28 },
+  2: { cellWidth: 22 },
+  3: { cellWidth: 72 },
+  4: { cellWidth: 20 },
+  5: { cellWidth: 30 },
+  6: { cellWidth: 30 },
+  7: { cellWidth: 23 },
+  8: { cellWidth: 22 },
+} as const;
+
+export function downloadChangeRequestsPdf(
+  items: ChangeRequestItem[],
+  projectId?: string,
+): void {
+  const datePart = new Date().toISOString().slice(0, 10);
+  const projectPart = projectId ? `-${projectId}` : "";
+  const filename = `change-requests${projectPart}-${datePart}.pdf`;
+  downloadPdfFile(
+    filename,
+    `change requests — ${datePart}`,
+    [...CHANGE_REQUEST_EXPORT_CSV_HEADERS],
+    mapChangeRequestsToCsvRows(items),
+    CHANGE_REQUEST_PDF_COLUMN_STYLES,
+  );
 }
