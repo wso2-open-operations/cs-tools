@@ -97,7 +97,7 @@ export function AttachmentField({ onChange }: { onChange?: (attachments: Attachm
         >
           <Paperclip />
           <Stack>
-            <Typography variant="body2">Drag and drop files here, or click to browse</Typography>
+            <Typography variant="body2">Tap to browse and upload files</Typography>
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
               Max {MAX_MB} MB
             </Typography>
