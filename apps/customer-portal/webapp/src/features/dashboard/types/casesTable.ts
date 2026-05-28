@@ -32,6 +32,7 @@ export type TableFilter = {
   type: "select";
   options?: string[] | SelectOption[];
   placeholder?: string;
+  multiSelect?: boolean;
   onLoadMore?: () => void;
   hasMore?: boolean;
   isFetchingMore?: boolean;
@@ -39,9 +40,9 @@ export type TableFilter = {
 
 // Case filters props.
 export type CasesFiltersProps = {
-  filters: Record<string, string | number | undefined>;
+  filters: Record<string, string | string[] | number | undefined>;
   filterFields: TableFilter[];
-  onFilterChange: (field: string, value: string | number) => void;
+  onFilterChange: (field: string, value: string | string[] | number) => void;
 };
 
 // Case list props.
@@ -91,8 +92,8 @@ export type CasesTableProps = {
 
 // Case table filter values.
 export type CasesTableFilterValues = {
-  [key: string]: string | number | undefined;
-  statusId?: string | number;
+  [key: string]: string | string[] | number | undefined;
+  statusIds?: string[];
   severityId?: string | number;
   issueTypes?: string | number;
   deploymentId?: string | number;

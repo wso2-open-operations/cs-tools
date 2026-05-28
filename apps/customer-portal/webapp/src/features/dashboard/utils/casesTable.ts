@@ -91,9 +91,13 @@ function isClosedCaseStatusLabel(label?: string): boolean {
 }
 
 export function countCasesTableActiveFilters(
-  filters: Record<string, string | number | undefined>,
+  filters: Record<string, string | string[] | number | undefined>,
 ): number {
-  return Object.values(filters).filter((v) => v !== "" && v != null).length;
+  return Object.values(filters).filter((v) => {
+    if (v === "" || v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  }).length;
 }
 
 export function resolveCasesTableDefaultStatusIds(
@@ -107,12 +111,12 @@ export function resolveCasesTableDefaultStatusIds(
 }
 
 export function resolveCasesTableSearchStatusIds(
-  selectedStatusId: string | number | undefined,
+  selectedStatusIds: string[] | undefined,
   defaultStatusIds: number[],
 ): number[] {
   switch (true) {
-    case Boolean(selectedStatusId):
-      return [Number(selectedStatusId)];
+    case Boolean(selectedStatusIds?.length):
+      return selectedStatusIds!.map(Number);
     case defaultStatusIds.length > 0:
       return defaultStatusIds;
     default:

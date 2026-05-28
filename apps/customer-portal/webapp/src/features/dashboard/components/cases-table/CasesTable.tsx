@@ -153,6 +153,7 @@ const CasesTable = ({
         label,
         type: "select" as const,
         options,
+        ...(def.multiSelect ? { multiSelect: true } : null),
         ...(isDeploymentFilter
           ? {
               onLoadMore: () => {
@@ -187,7 +188,7 @@ const CasesTable = ({
     return {
       filters: {
         statusIds: resolveCasesTableSearchStatusIds(
-          effectiveFilters.statusId,
+          effectiveFilters.statusIds as string[] | undefined,
           defaultStatusIds,
         ),
         caseTypes: [CaseType.DEFAULT_CASE],
@@ -281,10 +282,10 @@ const CasesTable = ({
   };
 
   // handle update filter
-  const handleUpdateFilter = (field: string, value: string | number) => {
+  const handleUpdateFilter = (field: string, value: string | string[] | number) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value,
+      [field]: Array.isArray(value) ? (value.length === 0 ? undefined : value) : value,
     }));
     setPage(0);
     setShowAll(false);
