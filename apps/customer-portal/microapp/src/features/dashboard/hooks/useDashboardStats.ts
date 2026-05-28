@@ -19,7 +19,7 @@ import { useProject } from "@context/project";
 
 import { cases } from "@features/case-types/cases/api/cases.queries";
 import { changeRequests } from "@features/case-types/change-requests/api/changes.queries";
-import { computeDashboardStats, type DashboardStats } from "@features/dashboard/services/dashboardStats.service";
+import { computeDashboardStats, type DashboardStats } from "@features/dashboard/utils";
 
 import { CASE_TYPES } from "@shared/constants";
 

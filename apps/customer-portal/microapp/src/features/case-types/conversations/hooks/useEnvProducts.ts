@@ -17,7 +17,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { useProject } from "@context/project";
 
-import { buildEnvProducts } from "@features/case-types/conversations/services/chatHistory.service";
+import { buildEnvProducts } from "@features/case-types/conversations/utils";
 import { projects } from "@features/projects/api/projects.queries";
 
 export function useEnvProducts() {
