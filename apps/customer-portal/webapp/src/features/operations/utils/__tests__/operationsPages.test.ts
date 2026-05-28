@@ -180,7 +180,7 @@ describe("buildChangeRequestSearchRequest", () => {
 
   it("resolves outstanding state IDs from metadata when outstandingOnly is true", () => {
     const req = buildChangeRequestSearchRequest({}, "", true, false, false, allStates);
-    expect(req.filters?.stateKeys).toEqual([5, -2, -1, 0, 1]);
+    expect(req.filters?.stateKeys).toEqual([-5, -4, -3, 5, -2, -1, 0, 1]);
   });
 
   it("resolves action-required state IDs from metadata", () => {
