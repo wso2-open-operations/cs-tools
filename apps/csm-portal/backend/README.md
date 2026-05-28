@@ -14,7 +14,7 @@ Backend starts at `http://localhost:8080`.
 ## Overview
 
 - Default port: `8080`
-- Runtime: Go `1.22+`
+- Runtime: Go `1.23+`
 - Entry point: `cmd/server/main.go`
 - Authentication:
   - Incoming requests: JWT Bearer token (validated by Choreo gateway + JWKS endpoint); pass as `x-jwt-assertion` header when testing locally
@@ -22,7 +22,63 @@ Backend starts at `http://localhost:8080`.
 
 ## Prerequisites
 
-- Go `1.22+` — [install](https://go.dev/doc/install)
+- Go `1.23+` — [install](https://go.dev/doc/install)
+
+## Testing
+
+Tests are pure unit tests — no running services or environment variables needed.
+
+```bash
+# Run all tests (from apps/csm-portal/backend)
+go test ./...
+
+# Run with verbose output (shows every subtest)
+go test -v ./...
+
+# Run with the race detector
+go test -race ./...
+
+# Run a specific package
+go test ./internal/handler/...
+go test ./internal/middleware/...
+
+# Run a specific test or subtest
+go test -v -run TestSearchAccounts ./internal/handler/...
+go test -v -run "TestSearchAccounts/upstream_errors" ./internal/handler/...
+
+# Check test coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+Or use `make`:
+
+```bash
+make test    # vet + test
+make build   # vet + test + compile
+```
+
+### Run tests before every push (recommended)
+
+Set up the shared git hook once from the **repo root**:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Or from the backend directory:
+
+```bash
+make setup
+```
+
+After this, `git push` automatically runs `go test ./...` whenever backend files are in the push. If any test fails, the push is aborted.
+
+To skip the hook in exceptional cases:
+
+```bash
+git push --no-verify
+```
 
 ## Configuration
 

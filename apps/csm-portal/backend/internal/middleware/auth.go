@@ -121,6 +121,12 @@ func UserInfoFromContext(ctx context.Context) *UserInfo {
 	return v
 }
 
+// WithUserInfo returns a copy of ctx carrying the given UserInfo.
+// Call this in tests to bypass JWT parsing and inject a fake authenticated user.
+func WithUserInfo(ctx context.Context, user *UserInfo) context.Context {
+	return context.WithValue(ctx, userInfoKey, user)
+}
+
 func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInfo, error) {
 	var c jwtClaims
 

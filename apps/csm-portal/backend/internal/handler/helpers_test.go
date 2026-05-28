@@ -1,0 +1,201 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
+)
+
+// testUser is the authenticated user injected into request contexts.
+var testUser = &middleware.UserInfo{
+	Email:  "agent@example.com",
+	UserID: "user-123",
+	Groups: []string{"csm-agents"},
+}
+
+// withUser returns r with testUser stored in its context.
+func withUser(r *http.Request) *http.Request {
+	return r.WithContext(middleware.WithUserInfo(r.Context(), testUser))
+}
+
+// ----- assertion helpers -----
+
+// assertStatus fails if the recorded status code differs from want.
+func assertStatus(t *testing.T, w *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if w.Code != want {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, want, w.Body.String())
+	}
+}
+
+// assertContentType fails if the Content-Type header differs from want.
+func assertContentType(t *testing.T, w *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	if ct := w.Header().Get("Content-Type"); ct != want {
+		t.Errorf("Content-Type = %q, want %q", ct, want)
+	}
+}
+
+// assertErrorMessage decodes {"message":"..."} and checks the message field.
+func assertErrorMessage(t *testing.T, w *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v; raw: %s", err, w.Body.String())
+	}
+	if body.Message != want {
+		t.Errorf("message = %q, want %q", body.Message, want)
+	}
+}
+
+// decodeJSON decodes the recorder body into T and returns it.
+func decodeJSON[T any](t *testing.T, w *httptest.ResponseRecorder) T {
+	t.Helper()
+	var v T
+	if err := json.NewDecoder(w.Body).Decode(&v); err != nil {
+		t.Fatalf("decode response body: %v; raw: %s", err, w.Body.String())
+	}
+	return v
+}
+
+// ----- mock entity case client -----
+
+type mockEntityCaseClient struct {
+	createCaseFn  func(ctx context.Context, body []byte) ([]byte, error)
+	searchCasesFn func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseFn     func(ctx context.Context, caseID string) ([]byte, error)
+}
+
+func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createCaseFn != nil {
+		return m.createCaseFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCasesFn != nil {
+		return m.searchCasesFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) GetCase(ctx context.Context, caseID string) ([]byte, error) {
+	if m.getCaseFn != nil {
+		return m.getCaseFn(ctx, caseID)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock updates client -----
+
+type mockUpdatesClient struct {
+	recommendedFn func(ctx context.Context, email string) ([]updates.RecommendedUpdateLevel, error)
+	productFn     func(ctx context.Context) ([]updates.ProductUpdateLevel, error)
+	searchFn      func(ctx context.Context, payload updates.SearchPayload, email string) (map[string]updates.UpdateLevelGroup, error)
+}
+
+func (m *mockUpdatesClient) GetRecommendedUpdateLevels(ctx context.Context, email string) ([]updates.RecommendedUpdateLevel, error) {
+	if m.recommendedFn != nil {
+		return m.recommendedFn(ctx, email)
+	}
+	return []updates.RecommendedUpdateLevel{}, nil
+}
+
+func (m *mockUpdatesClient) GetProductUpdateLevels(ctx context.Context) ([]updates.ProductUpdateLevel, error) {
+	if m.productFn != nil {
+		return m.productFn(ctx)
+	}
+	return []updates.ProductUpdateLevel{}, nil
+}
+
+func (m *mockUpdatesClient) SearchUpdatesBetweenUpdateLevels(ctx context.Context, payload updates.SearchPayload, email string) (map[string]updates.UpdateLevelGroup, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, payload, email)
+	}
+	return map[string]updates.UpdateLevelGroup{}, nil
+}
+
+// ----- mock SCIM client -----
+
+type mockSCIMClient struct {
+	searchUserFn      func(ctx context.Context, email string) (*scim.UserInfo, error)
+	updateUserPhoneFn func(ctx context.Context, userID, mobile string) (*string, error)
+}
+
+func (m *mockSCIMClient) SearchUser(ctx context.Context, email string) (*scim.UserInfo, error) {
+	if m.searchUserFn != nil {
+		return m.searchUserFn(ctx, email)
+	}
+	return nil, nil
+}
+
+func (m *mockSCIMClient) UpdateUserPhone(ctx context.Context, userID, mobile string) (*string, error) {
+	if m.updateUserPhoneFn != nil {
+		return m.updateUserPhoneFn(ctx, userID, mobile)
+	}
+	return nil, nil
+}
+
+// ----- mock entity user client -----
+
+type mockEntityUserClient struct {
+	searchUsersFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityUserClient) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchUsersFn != nil {
+		return m.searchUsersFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity account client -----
+
+type mockEntityAccountClient struct {
+	searchAccountsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityAccountClient) SearchAccounts(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchAccountsFn != nil {
+		return m.searchAccountsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+// ----- mock entity project client -----
+
+type mockEntityProjectClient struct {
+	searchProjectsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchProjectsFn != nil {
+		return m.searchProjectsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}

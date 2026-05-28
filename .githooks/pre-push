@@ -1,0 +1,30 @@
+#!/bin/sh
+# Pre-push hook: runs CSM Portal backend tests when backend files are in the push.
+#
+# One-time setup (from repo root):
+#   git config core.hooksPath .githooks
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BACKEND_DIR="apps/csm-portal/backend"
+ZERO="0000000000000000000000000000000000000000"
+TESTS_RUN=false
+
+run_backend_tests() {
+    [ "$TESTS_RUN" = "true" ] && return 0
+    TESTS_RUN=true
+    echo "[pre-push] Backend changes detected — running tests..."
+    (cd "$REPO_ROOT/$BACKEND_DIR" && go test ./...) || {
+        echo "[pre-push] Tests FAILED. Push aborted. Fix the failures and try again."
+        exit 1
+    }
+    echo "[pre-push] All tests passed."
+}
+
+while read local_ref local_sha remote_ref remote_sha; do
+    if [ "$remote_sha" = "$ZERO" ]; then
+        # New remote branch — run tests unconditionally.
+        run_backend_tests
+    elif git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null | grep -q "^$BACKEND_DIR/"; then
+        run_backend_tests
+    fi
+done
