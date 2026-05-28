@@ -133,6 +133,6 @@ export function getUpdateLevelsForProductVersion(
 ): number[] {
   const entries = getVersionEntriesForProduct(data, productName);
   const entry = entries.find((e) => e.productBaseVersion === productVersion);
-  if (!entry?.updateLevels?.length) return [];
-  return [...entry.updateLevels].sort((a, b) => a - b);
+  if (!entry?.updateLevels?.length) return [0];
+  return [...new Set([0, ...entry.updateLevels])].sort((a, b) => a - b);
 }
