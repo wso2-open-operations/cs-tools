@@ -311,6 +311,84 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /products/search:
+    post:
+      summary: Search products.
+      operationId: postProductsSearch
+      requestBody:
+        description: Product search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/search:
+    post:
+      summary: Search product versions.
+      operationId: postProductVersionsSearch
+      requestBody:
+        description: Product version search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /updates/levels/search:
     post:
       summary: Search updates between update levels.
@@ -656,6 +734,116 @@ components:
           type: string
           format: date-time
         endDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductSearchPayload:
+      type: object
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+        searchQuery:
+          type: string
+          description: Searches across name (case-insensitive); max 200 characters
+
+    ProductSearchResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+          description: Total number of matching products
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        class:
+          type: string
+          enum: [software, service]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductVersionSearchPayload:
+      type: object
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+        productId:
+          type: string
+          description: Filter by product ID (optional)
+        searchQuery:
+          type: string
+          description: Searches across version (case-insensitive); max 200 characters
+
+    ProductVersionSearchResponse:
+      type: object
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVersion'
+        total:
+          type: integer
+          description: Total number of matching product versions
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    ProductVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        version:
+          type: string
+        currentSupportStatus:
+          type: string
+          enum: [available, extended, deprecated, discontinued]
+        releaseDate:
+          type: string
+          format: date-time
+        supportEolDate:
+          type: string
+          format: date-time
+        earliestPossibleSupportEolDate:
           type: string
           format: date-time
         createdAt:
