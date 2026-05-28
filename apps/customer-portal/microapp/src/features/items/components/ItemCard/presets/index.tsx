@@ -80,7 +80,7 @@ export function ServiceRequestItemCard(props: ServiceRequestSummary) {
         timestamp={`Created ${fromNow(props.createdOn)}`}
         fields={[
           {
-            label: "Assignee",
+            label: "Type",
             value: props.issueType ?? "Unspecified",
           },
         ]}

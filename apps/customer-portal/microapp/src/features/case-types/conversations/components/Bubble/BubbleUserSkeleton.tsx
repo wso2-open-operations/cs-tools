@@ -8,7 +8,7 @@ export function BubbleUserSkeleton() {
         sx={{
           p: 1.5,
           ml: 10,
-          wdith: "fit-content",
+          width: "fit-content",
           bgcolor: "background.paper",
           borderStyle: "dashed",
           borderWidth: 1,

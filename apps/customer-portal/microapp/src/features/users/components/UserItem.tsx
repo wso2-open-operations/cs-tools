@@ -13,8 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { Link } from "react-router-dom";
-
 import { Box, Card, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { ChevronRight, Crown, Mail } from "@wso2/oxygen-ui-icons-react";
 
@@ -22,6 +20,7 @@ import { UserAvatar } from "@features/users/components";
 import type { Role, User } from "@features/users/types";
 
 import { ROLES } from "@shared/constants";
+import { useNavigation } from "@shared/hooks";
 
 export interface UserItemProps {
   name: string;
@@ -32,15 +31,10 @@ export interface UserItemProps {
 
 export function UserItem(props: User) {
   const theme = useTheme();
+  const { toEditUser } = useNavigation();
 
   return (
-    <Card
-      component={Link}
-      elevation={0}
-      to="/users/edit" // TODO:
-      state={{ user: props }}
-      sx={{ textDecoration: "none", p: 1 }}
-    >
+    <Card sx={{ textDecoration: "none", p: 1 }} onClick={() => toEditUser(props)}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>
           <UserAvatar>{props.firstName}</UserAvatar>

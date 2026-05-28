@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 
+import type { User } from "@features/users/types";
+
 import type { CaseType } from "@shared/types";
 
 export const useCoreNavigation = () => {
@@ -18,5 +20,8 @@ export const useCoreNavigation = () => {
         pathname: "/support/all",
         search: new URLSearchParams({ type }).toString(),
       }),
+
+    toInviteUser: () => navigate("/users/invite"),
+    toEditUser: (user: User) => navigate("/users/edit", { state: { user } }),
   };
 };

@@ -1,5 +1,3 @@
-import { useEffect } from "react";
-
 import type { CaseSummary } from "@features/case-types/cases/types";
 import type { ChangeRequestSummary } from "@features/case-types/change-requests/types/change.model";
 import type { Chat } from "@features/case-types/conversations/types";
@@ -59,15 +57,11 @@ export function ServiceRequestItemCard({
   number,
   internalId,
   statusId,
-  severityId,
   issueType,
   createdOn,
 }: ServiceRequestSummary) {
   const type = CASE_TYPES.SERVICE_REQUEST;
   const { icon, color } = CASE_TYPE_CONFIGS[type];
-  useEffect(() => {
-    console.log("priorityId", severityId);
-  }, [severityId]);
 
   return (
     <ItemCard.Root to={ROUTES[type].by(id)}>

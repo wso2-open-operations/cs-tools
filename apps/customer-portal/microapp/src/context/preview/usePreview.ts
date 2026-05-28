@@ -5,7 +5,7 @@ import { PreviewContext } from "./PreviewContext";
 export function usePreview() {
   const ctx = useContext(PreviewContext);
   if (!ctx) {
-    throw new Error("usePreview must be used withinPreviewProvider");
+    throw new Error("usePreview must be used within PreviewProvider");
   }
   return ctx;
 }

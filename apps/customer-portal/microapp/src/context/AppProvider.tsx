@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { useQueries } from "@tanstack/react-query";
 
@@ -34,6 +34,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ],
   });
 
+  useEffect(() => {
+    // Skip project selection and redirect directly when the user only has access to one project.
+    if (page.data?.pagination.totalRecords === 1) {
+      setAndStoreProjectId(page.data[0].id);
+    }
+  }, [page.data]);
+
   if (
     me.isPending ||
     page.isPending ||
@@ -53,11 +60,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   ) {
     if (projectId) setAndStoreProjectId(null);
     return <AuthorizationFallback />;
-  }
-
-  // Skip project selection and redirect directly when the user only has access to one project.
-  if (page.data.pagination.totalRecords === 1) {
-    setAndStoreProjectId(page.data[0].id);
   }
 
   return (

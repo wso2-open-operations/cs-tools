@@ -120,8 +120,6 @@ function ScheduledDate({ date }: { date: Date | undefined }) {
 function Footer({ timestamp, children }: { timestamp: Date; children?: ReactNode }) {
   const theme = useTheme();
   const { fromNow } = useDateTime();
-  console.log("timestamp:", timestamp);
-  console.log("timestamp from now:", fromNow(timestamp));
 
   return (
     <Stack gap={0.5} mt={1} direction="row" justifyContent="space-between">
