@@ -298,25 +298,18 @@ export default function ServiceRequestsPage(): JSX.Element {
   );
 
   const hideSearchPanel = outstandingOnly || actionRequired;
-  const showDownloadResults =
-    listHasRefinement ||
-    createdByMe ||
-    outstandingOnly ||
-    actionRequired ||
-    searchTerm.trim().length > 0;
 
-  const downloadResultsButton =
-    showDownloadResults && projectId ? (
-      <CaseListCsvExportButton
-        projectId={projectId}
-        caseSearchRequest={caseSearchRequest}
-        filenamePrefix="service-requests"
-        prefetchedCases={loadedCasesForExport}
-        totalRecords={totalItems}
-        disabled={!hasCasesResponse || isCasesError || totalItems === 0}
-        emptyMessage="No service requests to export for the current search or filters."
-      />
-    ) : null;
+  const downloadResultsButton = projectId ? (
+    <CaseListCsvExportButton
+      projectId={projectId}
+      caseSearchRequest={caseSearchRequest}
+      filenamePrefix="service-requests"
+      prefetchedCases={loadedCasesForExport}
+      totalRecords={totalItems}
+      disabled={!hasCasesResponse || isCasesError || totalItems === 0}
+      emptyMessage="No service requests to export for the current search or filters."
+    />
+  ) : null;
 
   const handleNewServiceRequest = () => {
     navigate(`/projects/${projectId}/${navSegment}/service-requests/create`);
@@ -430,7 +423,6 @@ export default function ServiceRequestsPage(): JSX.Element {
           hideSeverityFilter
           hideDeploymentFilter={!permissions.hasDeployments}
           isProjectContextLoading={isProjectContextLoading}
-          actionsBeforeClearFilters={downloadResultsButton}
         />
       )}
 
@@ -443,7 +435,7 @@ export default function ServiceRequestsPage(): JSX.Element {
         onSortFieldChange={handleSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={handleSortChange}
-        rightContent={hideSearchPanel ? downloadResultsButton : undefined}
+        rightContent={downloadResultsButton}
       />
 
       <ListItems
