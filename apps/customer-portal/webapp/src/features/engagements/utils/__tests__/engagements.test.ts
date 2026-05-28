@@ -61,12 +61,12 @@ describe("buildEngagementSearchRequest", () => {
 
   it("does not send severity filter", () => {
     const req = buildEngagementSearchRequest(
-      { severityId: "99" },
+      { severityIds: ["99"] },
       "",
       EngagementsSortField.CreatedOn,
       SortOrder.DESC,
     );
-    expect(req.filters?.severityId).toBeUndefined();
+    expect(req.filters?.severityIds).toBeUndefined();
   });
 
   it("normalizes legacy Severity sort field to UpdatedOn in API payload", () => {

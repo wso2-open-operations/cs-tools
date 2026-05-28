@@ -81,9 +81,9 @@ export function getDashboardOutstandingCasesDescription(
  */
 export function buildDashboardCaseSearchFilters(params: {
   statusIds?: string[];
-  severityId?: string;
+  severityIds?: string[];
   issueTypes?: string;
-  deploymentId?: string;
+  deploymentIds?: string[];
   searchQuery?: string;
   createdByMe?: boolean;
   caseStates?: MetadataItem[];
@@ -91,9 +91,9 @@ export function buildDashboardCaseSearchFilters(params: {
 }): CaseSearchFilters {
   const {
     statusIds,
-    severityId,
+    severityIds,
     issueTypes,
-    deploymentId,
+    deploymentIds,
     searchQuery,
     createdByMe,
     caseStates,
@@ -102,33 +102,35 @@ export function buildDashboardCaseSearchFilters(params: {
 
   const normalizedSearchQuery = searchQuery?.trim() || undefined;
   const explicitStatusIds = statusIds?.length ? statusIds.map(Number) : undefined;
-  const normalizedSeverityId = severityId ? Number(severityId) : undefined;
+  const normalizedSeverityIds = severityIds?.length
+    ? severityIds.map(Number)
+    : undefined;
   const normalizedIssueId = issueTypes ? Number(issueTypes) : undefined;
 
   switch (true) {
     case Boolean(explicitStatusIds?.length):
       return {
         statusIds: explicitStatusIds,
-        severityId: normalizedSeverityId,
+        severityIds: normalizedSeverityIds,
         issueId: normalizedIssueId,
-        deploymentId,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
       };
     case isDashboardSeverityNavigation:
       return {
         statusIds: resolveCasesTableDefaultStatusIds(caseStates),
-        severityId: normalizedSeverityId,
+        severityIds: normalizedSeverityIds,
         issueId: normalizedIssueId,
-        deploymentId,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
       };
     default:
       return {
-        severityId: normalizedSeverityId,
+        severityIds: normalizedSeverityIds,
         issueId: normalizedIssueId,
-        deploymentId,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
       };
