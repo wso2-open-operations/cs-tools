@@ -19,8 +19,6 @@ import { Form, useFormikContext } from "formik";
 
 import { useProject } from "@context/project";
 
-import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "@config/constants";
-
 import {
   AttachmentField,
   CaseReference,
@@ -36,6 +34,8 @@ import {
   useCreateCase,
   useCreateCaseFormOptions,
 } from "@features/case-types/cases/hooks";
+
+import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "@shared/constants";
 
 export function CreateCaseForm() {
   useAutoFill();

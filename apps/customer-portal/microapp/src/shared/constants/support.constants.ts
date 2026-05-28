@@ -195,3 +195,5 @@ export const PROGRESS_TIMELINE_META: Pick<ProgressStepProps, "title" | "descript
 ];
 
 export const PROGRESS_TIMELINE_RESOLVED_STAGES_FROM = PROGRESS_TIMELINE_META.length - 3;
+
+export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

@@ -21,12 +21,12 @@ import { useFormikContext } from "formik";
 import { useFilters } from "@context/filters";
 import { useProject } from "@context/project";
 
-import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "@config/constants";
-
 import type { CreateCaseFormValues } from "@features/case-types/cases/hooks";
 import { projects } from "@features/projects/api/projects.queries";
 
 import { overrideOrDefault } from "@shared/utils/string.utils";
+
+import { DEPLOYMENT_DISABLED_PROJECT_TYPES } from "@shared/constants";
 
 interface FieldOptions {
   options: { value: string | number; label: string }[];

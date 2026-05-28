@@ -30,5 +30,3 @@ export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
   "Follow up": colors.cyan[500],
   Onboarding: colors.yellow[600],
 };
-
-export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

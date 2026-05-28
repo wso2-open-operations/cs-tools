@@ -15,8 +15,6 @@
 // under the License.
 import { colors } from "@wso2/oxygen-ui";
 
-import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "@config/constants";
-
 import type { CasesStatsDto } from "@features/case-types/cases/types/case.dto";
 import type { ChangeRequestsStatsDto } from "@features/case-types/change-requests/types/change.dto";
 import type { PieDataItem } from "@features/dashboard/components";
@@ -24,7 +22,13 @@ import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
 
 import { overrideOrDefault } from "@shared/utils/string.utils";
 
-import { CASE_TYPES, CHANGE_REQUESTS_LABEL, SERVICE_REQUESTS_LABEL } from "@shared/constants";
+import {
+  CASE_TYPES,
+  CHANGE_REQUESTS_LABEL,
+  ENGAGEMENTS_TYPE_PIE_COLORS,
+  PROJECT_SEVERITY_PIE_COLORS,
+  SERVICE_REQUESTS_LABEL,
+} from "@shared/constants";
 
 export type DashboardStats = {
   actionRequired: number | undefined;
