@@ -48,10 +48,10 @@ describe("getDashboardOutstandingCasesDescription", () => {
 });
 
 describe("buildDashboardCaseSearchFilters", () => {
-  it("uses explicit statusId when selected", () => {
+  it("uses explicit statusIds when selected", () => {
     expect(
       buildDashboardCaseSearchFilters({
-        statusId: "10",
+        statusIds: ["10"],
         severityId: "11",
         searchQuery: " test ",
       }),

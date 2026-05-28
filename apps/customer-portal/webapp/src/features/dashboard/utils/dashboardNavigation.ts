@@ -80,7 +80,7 @@ export function getDashboardOutstandingCasesDescription(
  * @returns {CaseSearchFilters} Normalized case search filters.
  */
 export function buildDashboardCaseSearchFilters(params: {
-  statusId?: string;
+  statusIds?: string[];
   severityId?: string;
   issueTypes?: string;
   deploymentId?: string;
@@ -90,7 +90,7 @@ export function buildDashboardCaseSearchFilters(params: {
   isDashboardSeverityNavigation?: boolean;
 }): CaseSearchFilters {
   const {
-    statusId,
+    statusIds,
     severityId,
     issueTypes,
     deploymentId,
@@ -101,14 +101,14 @@ export function buildDashboardCaseSearchFilters(params: {
   } = params;
 
   const normalizedSearchQuery = searchQuery?.trim() || undefined;
-  const explicitStatusId = statusId ? Number(statusId) : undefined;
+  const explicitStatusIds = statusIds?.length ? statusIds.map(Number) : undefined;
   const normalizedSeverityId = severityId ? Number(severityId) : undefined;
   const normalizedIssueId = issueTypes ? Number(issueTypes) : undefined;
 
   switch (true) {
-    case Boolean(explicitStatusId):
+    case Boolean(explicitStatusIds?.length):
       return {
-        statusIds: [explicitStatusId as number],
+        statusIds: explicitStatusIds,
         severityId: normalizedSeverityId,
         issueId: normalizedIssueId,
         deploymentId,
