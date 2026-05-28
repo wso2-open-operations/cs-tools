@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -54,7 +55,8 @@ func (h *ProductHandler) SearchProducts(w http.ResponseWriter, r *http.Request) 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
 			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
 			return
 		}
@@ -91,7 +93,8 @@ func (h *ProductHandler) SearchProductVersions(w http.ResponseWriter, r *http.Re
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
 			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
 			return
 		}
