@@ -60,21 +60,6 @@ type ProjectSummaryDto = Pick<ProjectDto, "id" | "name" | "key" | "createdOn" | 
   slaStatus: string;
 };
 
-export interface ProjectStatsDto {
-  projectStats: {
-    openCases: number;
-    activeChats: number;
-    deployments: number;
-    slaStatus: string;
-  };
-  recentActivity: {
-    totalTimeLogged: number;
-    billableHours: number;
-    lastDeploymentOn: string;
-    systemHealth: string;
-  };
-}
-
 export interface ProjectDeploymentsDto extends Pagination {
   deployments: ProjectDeploymentDto[];
 }
