@@ -431,9 +431,10 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     multiSelect: true,
   },
   {
-    filterKey: "severityId",
+    filterKey: "severityIds",
     id: "severity",
     metadataKey: "severities",
+    multiSelect: true,
   },
   {
     filterKey: "issueTypes",
@@ -441,9 +442,10 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     metadataKey: "issueTypes",
   },
   {
-    filterKey: "deploymentId",
+    filterKey: "deploymentIds",
     id: "deployment",
     metadataKey: "deploymentTypes",
+    multiSelect: true,
   },
 ];
 
