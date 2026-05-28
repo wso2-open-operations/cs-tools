@@ -29,6 +29,7 @@ import {
 
 export type CaseListCsvExportButtonProps = {
   projectId: string;
+  projectName?: string;
   caseSearchRequest: Omit<CaseSearchRequest, "pagination">;
   filenamePrefix: string;
   exportVariant?: CaseListCsvExportVariant;
@@ -48,6 +49,7 @@ type ExportFormat = "csv" | "pdf";
  */
 export default function CaseListCsvExportButton({
   projectId,
+  projectName,
   caseSearchRequest,
   filenamePrefix,
   exportVariant = "withType",
@@ -93,9 +95,9 @@ export default function CaseListCsvExportButton({
         }
 
         if (format === "csv") {
-          downloadCaseListCsv(cases, exportVariant, filenamePrefix, projectId);
+          downloadCaseListCsv(cases, exportVariant, filenamePrefix, projectId, projectName);
         } else {
-          downloadCaseListPdf(cases, exportVariant, filenamePrefix, projectId);
+          downloadCaseListPdf(cases, exportVariant, filenamePrefix, projectId, projectName);
         }
       } catch (error) {
         const message =
@@ -114,6 +116,7 @@ export default function CaseListCsvExportButton({
       filenamePrefix,
       prefetchedCases,
       projectId,
+      projectName,
       showError,
       totalRecords,
     ],

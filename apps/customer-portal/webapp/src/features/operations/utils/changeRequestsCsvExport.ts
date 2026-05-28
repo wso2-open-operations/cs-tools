@@ -100,9 +100,16 @@ export function buildChangeRequestsCsvFilename(projectId?: string): string {
 export function downloadChangeRequestsCsv(
   items: ChangeRequestItem[],
   projectId?: string,
+  projectName?: string,
 ): void {
   const content = buildChangeRequestsExportCsv(items);
-  downloadCsvFile(buildChangeRequestsCsvFilename(projectId), content);
+  const datePart = new Date().toISOString().slice(0, 10);
+  const namePart = projectName
+    ? `-${projectName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`
+    : projectId
+      ? `-${projectId}`
+      : "";
+  downloadCsvFile(`change-requests${namePart}-${datePart}.csv`, content);
 }
 
 /**
@@ -127,13 +134,21 @@ const CHANGE_REQUEST_PDF_COLUMN_STYLES = {
 export function downloadChangeRequestsPdf(
   items: ChangeRequestItem[],
   projectId?: string,
+  projectName?: string,
 ): void {
   const datePart = new Date().toISOString().slice(0, 10);
-  const projectPart = projectId ? `-${projectId}` : "";
-  const filename = `change-requests${projectPart}-${datePart}.pdf`;
+  const namePart = projectName
+    ? `-${projectName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`
+    : projectId
+      ? `-${projectId}`
+      : "";
+  const filename = `change-requests${namePart}-${datePart}.pdf`;
+  const title = projectName
+    ? `change requests — ${projectName} — ${datePart}`
+    : `change requests — ${datePart}`;
   downloadPdfFile(
     filename,
-    `change requests — ${datePart}`,
+    title,
     [...CHANGE_REQUEST_EXPORT_CSV_HEADERS],
     mapChangeRequestsToCsvRows(items),
     CHANGE_REQUEST_PDF_COLUMN_STYLES,
