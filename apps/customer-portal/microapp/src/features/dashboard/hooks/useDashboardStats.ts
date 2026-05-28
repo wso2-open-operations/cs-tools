@@ -22,15 +22,8 @@ import { changeRequests } from "@features/case-types/change-requests/api/changes
 import { computeDashboardStats, type DashboardStats } from "@features/dashboard/services/dashboardStats.service";
 
 import { CASE_TYPES } from "@shared/constants";
-import { useNavigation } from "@shared/hooks";
 
-export function useDashboardStats(): {
-  stats: DashboardStats;
-  features: ReturnType<typeof useProject>["features"];
-  navigateBySeverity: (id: string | number, label: string) => void;
-  navigateByOperationsType: (id: string | number, type: string) => void;
-} {
-  const { toBySeverity, toOutstandingServiceRequests, toOutstandingChangeRequests } = useNavigation();
+export function useDashboardStats(): DashboardStats {
   const { projectId, features } = useProject();
 
   const { hasServiceRequestReadAccess, hasChangeRequestReadAccess, hasEngagementsReadAccess, hasSraReadAccess } =
@@ -64,7 +57,7 @@ export function useDashboardStats(): {
     }),
   );
 
-  const stats = computeDashboardStats(
+  return computeDashboardStats(
     multipleCaseTypesStats,
     defaultCaseTypeStats,
     engagementCaseTypeStats,
@@ -72,11 +65,4 @@ export function useDashboardStats(): {
     changeRequestCaseTypeStats,
     features,
   );
-
-  const navigateByOperationsType = (type: string | number) => {
-    if (type === CASE_TYPES.SERVICE_REQUEST) toOutstandingServiceRequests();
-    if (type === CASE_TYPES.CHANGE_REQUEST) toOutstandingChangeRequests();
-  };
-
-  return { stats, features, navigateBySeverity: toBySeverity, navigateByOperationsType };
 }

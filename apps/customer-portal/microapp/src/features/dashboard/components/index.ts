@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./DashboardView";
 export * from "./WidgetRoot";
 export * from "./WidgetMetric";
 export * from "./WidgetPieChart";
