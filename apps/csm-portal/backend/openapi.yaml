@@ -389,7 +389,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /product/{id}/versions/search:
+  /products/{id}/versions/search:
     post:
       summary: Search versions for a specific product.
       operationId: postProductVersionsSearch

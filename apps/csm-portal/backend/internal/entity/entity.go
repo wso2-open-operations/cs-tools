@@ -65,10 +65,10 @@ func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error
 	return c.do(ctx, http.MethodPost, "/products/search", body)
 }
 
-// SearchProductVersions calls POST /product/{id}/versions/search on the entity service.
+// SearchProductVersions calls POST /products/{id}/versions/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/product/%s/versions/search", url.PathEscape(productID)), body)
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/products/%s/versions/search", url.PathEscape(productID)), body)
 }
 
 // SearchDeployments calls POST /deployments/search on the entity service.

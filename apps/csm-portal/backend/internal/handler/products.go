@@ -82,7 +82,7 @@ func (h *ProductHandler) SearchProducts(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// SearchProductVersions handles POST /product/{id}/versions/search.
+// SearchProductVersions handles POST /products/{id}/versions/search.
 func (h *ProductHandler) SearchProductVersions(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
