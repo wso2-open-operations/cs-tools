@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { CASE_DETAILS_ENDPOINT, PROJECT_CASES_ENDPOINT } from "@config/endpoints";
-
 import apiClient from "@infrastructure/api/client";
+import { CASE_DETAILS_ENDPOINT, PROJECT_CASES_ENDPOINT } from "@infrastructure/api/endpoints";
 
 import { toCase, toCaseSummary } from "@features/case-types/cases/mappers/case.mapper";
 import type { CaseDto, CasesDto, GetCasesRequestDto } from "@features/case-types/cases/types/case.dto";

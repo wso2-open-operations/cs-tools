@@ -13,13 +13,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import apiClient from "@infrastructure/api/client";
 import {
   CHANGE_REQUEST_DETAILS_ENDPOINT,
   CHANGE_REQUEST_STATS_ENDPOINT,
   PROJECT_CHANGE_REQUESTS_ENDPOINT,
-} from "@config/endpoints";
-
-import apiClient from "@infrastructure/api/client";
+} from "@infrastructure/api/endpoints";
 
 import { toChangeRequest, toChangeRequestSummary } from "@features/case-types/change-requests/mappers/change.mapper";
 import type {

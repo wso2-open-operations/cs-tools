@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { PROJECT_USERS_ENDPOINT, USER_ACTIONS_ENDPOINT, USERS_ME_ENDPOINT } from "@config/endpoints";
-
 import apiClient from "@infrastructure/api/client";
+import { PROJECT_USERS_ENDPOINT, USER_ACTIONS_ENDPOINT, USERS_ME_ENDPOINT } from "@infrastructure/api/endpoints";
 
 import { toMe, toUser } from "@features/users/mappers/user.mapper";
 import type { CreateContactRequestDto, EditMeDto, MeDto, UsersDto } from "@features/users/types/user.dto";

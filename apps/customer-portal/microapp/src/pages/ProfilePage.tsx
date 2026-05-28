@@ -24,7 +24,7 @@ import { BookOpen, Bot, Clock4, Lock, Mail, Phone, User } from "@wso2/oxygen-ui-
 
 import { useDeclareLayout } from "@context/layout";
 
-import { CHANGE_PASSWORD_URL } from "@config/endpoints";
+import { CHANGE_PASSWORD_URL } from "@infrastructure/api/endpoints";
 
 import { metadata } from "@features/metadata/api/metadata.queries";
 import { ProfileTitleSlot, SettingsItem, SettingsSection } from "@features/profile/components";

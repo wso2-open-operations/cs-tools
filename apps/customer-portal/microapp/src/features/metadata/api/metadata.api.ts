@@ -13,9 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-import { METADATA_ENDPOINT } from "@config/endpoints";
-
 import apiClient from "@infrastructure/api/client";
+import { METADATA_ENDPOINT } from "@infrastructure/api/endpoints";
 
 import type { MetadataDto } from "@features/metadata/types/metadata.dto";
 

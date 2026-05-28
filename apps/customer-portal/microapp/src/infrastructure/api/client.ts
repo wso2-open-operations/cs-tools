@@ -15,9 +15,8 @@
 // under the License.
 import axios, { type InternalAxiosRequestConfig } from "axios";
 
-import { BACKEND_URL } from "@config/endpoints";
-
 import { refreshToken } from "@infrastructure/api/auth";
+import { BACKEND_URL } from "@infrastructure/api/endpoints";
 import { Logger } from "@infrastructure/logging/logger";
 
 let isRefreshing = false;

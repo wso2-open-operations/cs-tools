@@ -17,9 +17,8 @@ import { useEffect, useState } from "react";
 
 import { useMe } from "@context/me";
 
-import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "@config/endpoints";
-
 import { getAccessToken, getIdToken } from "@infrastructure/api/auth";
+import { NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT } from "@infrastructure/api/endpoints";
 
 import { useEnvProducts } from "@features/case-types/conversations/hooks";
 import type { NoveraResponse } from "@features/case-types/conversations/types/novera.dto";

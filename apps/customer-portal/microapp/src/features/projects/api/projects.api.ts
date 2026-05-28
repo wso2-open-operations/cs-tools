@@ -13,15 +13,14 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import apiClient from "@infrastructure/api/client";
 import {
   PROJECT_DEPLOYMENT_PRODUCTS_ENDPOINT,
   PROJECT_DEPLOYMENTS_ENDPOINT,
   PROJECT_DETAILS_ENDPOINT,
   PROJECT_FEATURES_ENDPOINT,
   PROJECTS_ENDPOINT,
-} from "@config/endpoints";
-
-import apiClient from "@infrastructure/api/client";
+} from "@infrastructure/api/endpoints";
 
 import { toDeployment, toProduct, toProject, toProjectSummary } from "@features/projects/mappers/project.mapper";
 import type {
