@@ -194,3 +194,46 @@ type SearchProductsResponse struct {
 	Offset   int       `json:"offset"`
 	HasMore  bool      `json:"hasMore"`
 }
+
+// SupportStatus represents the lifecycle state of a product version.
+type SupportStatus string
+
+const (
+	SupportStatusAvailable    SupportStatus = "available"
+	SupportStatusExtended     SupportStatus = "extended"
+	SupportStatusDeprecated   SupportStatus = "deprecated"
+	SupportStatusDiscontinued SupportStatus = "discontinued"
+)
+
+// ProductVersion represents a versioned release of a software product.
+// SupportEOLDate and EarliestPossibleSupportEOLDate are optional.
+type ProductVersion struct {
+	ID                             string        `json:"id"`
+	ProductID                      string        `json:"productId"`
+	Version                        string        `json:"version"`
+	CurrentSupportStatus           SupportStatus `json:"currentSupportStatus"`
+	ReleaseDate                    time.Time     `json:"releaseDate"`
+	SupportEOLDate                 *time.Time    `json:"supportEolDate,omitempty"`
+	EarliestPossibleSupportEOLDate *time.Time    `json:"earliestPossibleSupportEolDate,omitempty"`
+	CreatedAt                      time.Time     `json:"createdAt"`
+	UpdatedAt                      time.Time     `json:"updatedAt"`
+}
+
+// SearchProductVersionsRequest is the input for a product version search operation.
+// ProductID and SearchQuery are both optional; when provided they filter by product
+// and version string respectively (case-insensitive).
+type SearchProductVersionsRequest struct {
+	Pagination  Pagination `json:"pagination"`
+	ProductID   string     `json:"productId"`
+	SearchQuery string     `json:"searchQuery"`
+}
+
+// SearchProductVersionsResponse is the paginated result of a product version search.
+// HasMore is true when additional pages are available beyond the current offset.
+type SearchProductVersionsResponse struct {
+	ProductVersions []ProductVersion `json:"productVersions"`
+	Total           int              `json:"total"`
+	Limit           int              `json:"limit"`
+	Offset          int              `json:"offset"`
+	HasMore         bool             `json:"hasMore"`
+}
