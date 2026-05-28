@@ -4,10 +4,8 @@ import { Stack, Typography } from "@wso2/oxygen-ui";
 
 import { useDeclareLayout } from "@context/layout";
 
-import { CommentBar, SlotActions, SlotTitle } from "@features/detail/components";
+import { CommentBar, SlotActions, type SlotActionsOptionProps, SlotTitle } from "@features/detail/components";
 import { useTitleSlotVariant } from "@features/detail/hooks";
-
-import { type MenuOptionProps } from "@shared/components/detail";
 
 import { COMMENT_ENABLED_TYPES, Tab } from "@shared/constants";
 import type { CaseType } from "@shared/types";
@@ -19,7 +17,7 @@ type LayoutProps = {
   children: ReactNode;
 
   /** Only pass for CASE_TYPES.DEFAULT */
-  actions?: MenuOptionProps[];
+  actions?: SlotActionsOptionProps[];
 };
 
 export function Layout({ type, title, id, children, actions }: LayoutProps) {

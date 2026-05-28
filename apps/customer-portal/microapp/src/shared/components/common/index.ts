@@ -14,12 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./TabPanel";
 export * from "./SectionCard";
 export * from "./InfiniteList";
 export * from "./EmptyState";
 export * from "./ErrorState";
 export * from "./RichText";
 export * from "./TypewriterText";
-export * from "./AttachmentPreviewDialog";
 export * from "./ConfirmDialog";

@@ -4,14 +4,13 @@ import { CheckIcon, PlusIcon, RotateCcwIcon } from "@wso2/oxygen-ui-icons-react"
 import { useNotify } from "@context/snackbar";
 
 import { cases } from "@features/case-types/cases/api/cases.queries";
+import type { SlotActionsOptionProps } from "@features/detail/components";
 import { useCase, useRequiredParams } from "@features/detail/hooks";
-
-import type { MenuOptionProps } from "@shared/components/detail";
 
 import { STATUS_ALLOWING_REJECTION, STATUS_ALLOWING_RELATED_CASE, STATUS_ALLOWING_RESOLUTION } from "@shared/constants";
 import { useNavigation } from "@shared/hooks";
 
-export function useActions(): MenuOptionProps[] {
+export function useActions(): SlotActionsOptionProps[] {
   const notify = useNotify();
   const queryClient = useQueryClient();
 

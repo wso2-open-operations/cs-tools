@@ -36,7 +36,7 @@ export function Filters({ type, variant = "full" }: { type: CaseType; variant?: 
   );
 }
 
-export function FiltersSkeleton({ variant = "full" }: { variant?: FilterControlsVariant }) {
+function FiltersSkeleton({ variant = "full" }: { variant?: FilterControlsVariant }) {
   const showSearch = variant !== "tabs-only"; /** Hide the search bar */
   const showTabs = variant !== "search-only"; /** Hide the filter tabs section */
 

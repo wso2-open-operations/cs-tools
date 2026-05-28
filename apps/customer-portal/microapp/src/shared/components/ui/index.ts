@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./Timeline";
 export * from "./AuthorizationFallback";
 export * from "./Dot";
 export * from "./LoadingFallback";

@@ -28,7 +28,7 @@ import { projects } from "@features/projects/api/projects.queries";
 
 import { overrideOrDefault } from "@shared/utils/string.utils";
 
-export interface FieldOptions {
+interface FieldOptions {
   options: { value: string | number; label: string }[];
   pending: boolean;
 }

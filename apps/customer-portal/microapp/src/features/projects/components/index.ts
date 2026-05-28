@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export * from "./ProjectCard";
 export * from "./ProjectPopoverItem";
 export * from "./ProjectPopoverList";
 export * from "./ProjectSelector";

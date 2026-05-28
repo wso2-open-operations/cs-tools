@@ -60,7 +60,7 @@ export interface RoleOptionProps {
   onChange?: () => void;
 }
 
-export function RoleOption({ role, description, checked = false, onChange }: RoleOptionProps) {
+function RoleOption({ role, description, checked = false, onChange }: RoleOptionProps) {
   return (
     <Stack direction="row" alignItems="start" gap={1}>
       <Checkbox value={role} checked={checked} onChange={onChange} />

@@ -14,26 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 import { colors } from "@wso2/oxygen-ui";
-import { CircleAlert, Cloud, type LucideIcon, MessageSquare, Moon } from "@wso2/oxygen-ui-icons-react";
+import { CircleAlert, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 
 import type { ProjectMetricMeta } from "@features/projects/components";
-import type { ProjectMetricKey, ProjectStatus, ProjectType } from "@features/projects/types/project.model";
-
-export const INPUT_INVALID_MSG_GATEWAY = "INPUT_INVALID_MSG_GATEWAY";
+import type { ProjectMetricKey } from "@features/projects/types/project.model";
 
 export const PROJECT_METRIC_META: Record<ProjectMetricKey, ProjectMetricMeta> = {
   outstanding: { label: "Outstanding:", color: colors.red[300], icon: CircleAlert },
   chats: { label: "Chats:", color: colors.indigo[300], icon: MessageSquare },
-};
-
-export const PROJECT_TYPE_META: Record<ProjectType, { icon: LucideIcon }> = {
-  Regular: { icon: Moon },
-  "Managed Cloud": { icon: Cloud },
-};
-
-export const PROJECT_STATUS_META: Record<ProjectStatus, { color: "success" | "warning" }> = {
-  "All Good": { color: "success" },
-  "Needs Attention": { color: "warning" },
 };
 
 export const PROJECT_SEVERITY_PIE_COLORS: Record<string, string> = {
@@ -51,7 +39,5 @@ export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
   "Follow up": colors.cyan[500],
   Onboarding: colors.yellow[600],
 };
-
-export const LOCAL_STORAGE_LAST_VISITED_PROJECT_KEY = "last-active-project-id";
 
 export const DEPLOYMENT_DISABLED_PROJECT_TYPES = ["Cloud Support", "Cloud Evaluation Support"];

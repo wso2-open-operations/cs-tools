@@ -15,7 +15,7 @@
 // under the License.
 import { ArrowLeftRightIcon, CheckIcon, PlusIcon } from "@wso2/oxygen-ui-icons-react";
 
-import type { MenuOptionProps } from "@components/detail";
+import type { SlotActionsOptionProps } from "@features/detail/components";
 
 export function getCaseMenuOptions(
   stateKey: string,
@@ -24,7 +24,7 @@ export function getCaseMenuOptions(
     onMarkWaiting: () => void;
     onCreateRelated: () => void;
   }>,
-): MenuOptionProps[] {
+): SlotActionsOptionProps[] {
   return [
     {
       label: "Mark as Resolved",

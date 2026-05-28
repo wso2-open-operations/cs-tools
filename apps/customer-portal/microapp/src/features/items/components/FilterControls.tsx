@@ -5,7 +5,7 @@ import { useFilters } from "@features/items/hooks";
 
 export type FilterControlsVariant = "full" | "tabs-only" | "search-only";
 
-export interface FilterTab {
+interface FilterTab {
   label: string;
   value: string;
 }

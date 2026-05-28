@@ -90,7 +90,7 @@ export const IMPACT_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
   3: "success",
 };
 
-export const CASE_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+const CASE_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
   1: "info",
   10: "primary",
   18: "success",
@@ -100,7 +100,7 @@ export const CASE_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> =
   1006: "info",
 };
 
-export const CONVERSATION_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+const CONVERSATION_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
   1: "info",
   2: "success",
   3: "success",
@@ -108,7 +108,7 @@ export const CONVERSATION_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["co
   5: "default",
 };
 
-export const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
+const CHANGE_REQUEST_STATUS_CHIP_COLOR_CONFIG: Record<string, ChipProps["color"]> = {
   "-5": "default",
   "-4": "info",
   "-3": "warning",
@@ -131,10 +131,6 @@ export const STATUS_CHIP_COLOR_CONFIG: Record<CaseType, Record<string, ChipProps
   [CASE_TYPES.ENGAGEMENT]: CASE_STATUS_CHIP_COLOR_CONFIG,
   [CASE_TYPES.ANNOUNCEMENT]: CASE_STATUS_CHIP_COLOR_CONFIG,
 };
-
-export const ITEMS_LIST_FILTERABLE_CASE_TYPES: CaseType[] = (Object.values(CASE_TYPES) as CaseType[]).filter(
-  (type) => !([CASE_TYPES.ANNOUNCEMENT] as CaseType[]).includes(type),
-);
 
 export const PROGRESS_TIMELINE_META: Pick<ProgressStepProps, "title" | "description">[] = [
   {

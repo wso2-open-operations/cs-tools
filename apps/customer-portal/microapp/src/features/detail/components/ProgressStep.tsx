@@ -2,7 +2,7 @@ import { TimelineConnector, TimelineContent, TimelineItem, TimelineSeparator } f
 import { Box, pxToRem, Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Circle, CircleCheck, CircleDot } from "@wso2/oxygen-ui-icons-react";
 
-export type StepStatus = "completed" | "active" | "pending";
+type StepStatus = "completed" | "active" | "pending";
 
 export interface ProgressStepProps {
   /** The main label displayed for this step. */

@@ -15,4 +15,3 @@
 // under the License.
 
 export * from "./Chip";
-export * from "./CallRequestCard";

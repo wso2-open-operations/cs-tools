@@ -23,16 +23,6 @@ export function getAvatarInitials(name: string): string {
   return `${parts[0].charAt(0) + parts[parts.length - 1].charAt(0)}`.toUpperCase();
 }
 
-export function capitalize(text: string): string {
-  if (!text) return text;
-
-  return text
-    .trim()
-    .split(/\s+/)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-}
-
 export function stripHtmlTags(str: string): string {
   if (!str) return "";
   const txt = document.createElement("textarea");
@@ -42,26 +32,4 @@ export function stripHtmlTags(str: string): string {
 
 export function overrideOrDefault(s: string): string {
   return (STRING_OVERRIDES as Record<string, string>)[s] ?? s;
-}
-
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "0 seconds";
-
-  const totalSeconds = Math.floor(ms / 1000);
-
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  const parts: string[] = [];
-
-  if (days) parts.push(`${days} day${days !== 1 ? "s" : ""}`);
-  if (hours) parts.push(`${hours} hour${hours !== 1 ? "s" : ""}`);
-  if (minutes) parts.push(`${minutes} minute${minutes !== 1 ? "s" : ""}`);
-  if (seconds || parts.length === 0) {
-    parts.push(`${seconds} second${seconds !== 1 ? "s" : ""}`);
-  }
-
-  return parts.join(" ");
 }

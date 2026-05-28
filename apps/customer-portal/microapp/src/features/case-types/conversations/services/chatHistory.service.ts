@@ -16,19 +16,6 @@
 import type { Comment } from "@features/case-types/cases/types/case.model";
 import type { ChatMessage } from "@features/case-types/conversations/components";
 
-export function messagesToString(messages: ChatMessage[]): string {
-  return messages
-    .map((msg) => {
-      const role = msg.author === "you" ? "User" : "Assistant";
-      const textContent = msg.blocks
-        .filter((block) => block.type === "text")
-        .map((block) => block.value)
-        .join(" ");
-      return `${role}: ${textContent}`;
-    })
-    .join("\n");
-}
-
 export function buildEnvProducts(
   deployments: { id: string; name: string }[],
   productQueries: { data?: { name: string; version: string }[] | undefined }[],

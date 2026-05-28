@@ -1,14 +1,20 @@
-import { type MouseEvent, useState } from "react";
+import { type MouseEvent, type ReactNode, useState } from "react";
 
 import { Button, Divider, IconButton, Popover, Stack, Typography } from "@wso2/oxygen-ui";
 import { Ellipsis } from "@wso2/oxygen-ui-icons-react";
 
-import type { MenuOptionProps } from "@shared/components/detail";
-
 interface SlotActionsProps {
   title?: string;
-  options?: MenuOptionProps[];
+  options?: SlotActionsOptionProps[];
   disabled?: boolean;
+}
+
+export interface SlotActionsOptionProps {
+  label: string;
+  icon: ReactNode;
+  color?: "inherit" | "primary" | "secondary" | "success" | "error" | "info" | "warning";
+  hidden?: boolean;
+  onClick?: () => void;
 }
 
 export function SlotActions({ title = "More Options", options = [], disabled }: SlotActionsProps) {

@@ -15,7 +15,6 @@
 // under the License.
 
 export * from "./useDateTime";
-export * from "./usePaginationSubtitle";
 export * from "./useScrollControl";
 export * from "./useAppBarHeight";
 export * from "./useSafeAreaInsets";
