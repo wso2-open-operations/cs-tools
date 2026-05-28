@@ -25,8 +25,8 @@ export function useCaseItems(enabled: boolean = true) {
   const unfiltered = useInfiniteQuery({ ...cases.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...cases.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -37,8 +37,8 @@ export function useChatItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...chats.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...chats.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -49,8 +49,8 @@ export function useServiceRequestItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...serviceRequests.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...serviceRequests.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -61,8 +61,8 @@ export function useChangeRequestItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...changeRequests.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...changeRequests.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -73,8 +73,8 @@ export function useSecurityReportAnalysisItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...securityReportAnalysis.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...securityReportAnalysis.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -85,8 +85,8 @@ export function useEngagementItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...engagements.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...engagements.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }
@@ -97,8 +97,8 @@ export function useAnnouncementItems(enabled = true) {
   const unfiltered = useInfiniteQuery({ ...announcements.paginated(projectId!, { filters: {} }), enabled });
   const filtered = useInfiniteQuery({ ...announcements.paginated(projectId!, { filters }), enabled });
 
-  const total = unfiltered.data?.pages[0].pagination.totalRecords;
-  const count = filtered.data?.pages[0].pagination.totalRecords;
+  const total = unfiltered.isLoading ? undefined : (unfiltered.data?.pages[0].pagination.totalRecords ?? 0);
+  const count = filtered.isLoading ? undefined : (filtered.data?.pages[0].pagination.totalRecords ?? 0);
 
   return { query: filtered, total, count };
 }

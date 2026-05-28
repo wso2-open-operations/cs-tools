@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import { Box, Dialog } from "@wso2/oxygen-ui";
@@ -28,10 +28,6 @@ export function PreviewModal({ open, attachment, onClose }: PreviewModalProps) {
     const [prefix, base64] = data.content.split(",");
     return `${prefix},${base64}`;
   }, [data]);
-
-  useEffect(() => {
-    console.log("attachment type", attachment?.type);
-  }, [attachment?.type]);
 
   const isTypeImage = attachment?.type === "image";
   const isTypePdf = attachment?.type === "pdf";
