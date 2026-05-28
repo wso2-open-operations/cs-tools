@@ -37,7 +37,7 @@ vi.mock("@hooks/useLogger", () => ({
   }),
 }));
 
-vi.mock("@utils/useAuthApiClient", () => ({
+vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () =>
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
