@@ -3609,6 +3609,12 @@ components:
           type: integer
           description: Severity ID
           format: int64
+        severityIds:
+          type: array
+          description: List of case severity keys
+          items:
+            type: integer
+            format: int64
         engagementTypeKeys:
           type: array
           description: Engagement type keys (required for engagement type cases)
@@ -3622,6 +3628,11 @@ components:
         deploymentId:
           type: string
           description: Deployment ID
+        deploymentIds:
+          type: array
+          description: Deployment ID list
+          items:
+            $ref: '#/components/schemas/IdString'
         createdByMe:
           type: boolean
           description: Case created by the logged in user

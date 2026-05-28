@@ -436,6 +436,8 @@ public type CaseSearchFilters record {|
     int[] stateKeys?;
     # Severity key
     int severityKey?;
+    # List of case severity keys
+    int[] severityKeys?;
     # Engagement type keys (required for engagement type cases)
     int[] engagementTypeKeys?;
     # Start date for closed date
@@ -444,6 +446,8 @@ public type CaseSearchFilters record {|
     UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
+    # Deployment ID list
+    IdString[] deploymentIds?;
     # Case created by the logged in user
     boolean createdByMe?;
 |};

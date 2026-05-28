@@ -60,6 +60,8 @@ public type CaseSearchFilters record {|
     entity:CaseType[] caseTypes?;
     # Severity ID
     int severityId?;
+    # List of case severity keys
+    int[] severityIds?;
     # Engagement type keys (required for engagement type cases)
     int[] engagementTypeKeys?;
     # Closed start date
@@ -68,6 +70,8 @@ public type CaseSearchFilters record {|
     entity:UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
+    # Deployment ID list
+    entity:IdString[] deploymentIds?;
     # Case created by the logged in user
     boolean createdByMe?;
 |};
