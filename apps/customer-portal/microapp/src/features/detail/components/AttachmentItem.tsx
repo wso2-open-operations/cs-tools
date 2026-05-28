@@ -18,7 +18,7 @@ import { ArrowUpRight, Image, Paperclip } from "@wso2/oxygen-ui-icons-react";
 
 import { usePreview } from "@context/preview";
 
-import type { Attachment } from "@features/cases/types/case.model";
+import type { Attachment } from "@features/case-types/cases/types/case.model";
 
 import { useDateTime } from "@shared/hooks/useDateTime";
 

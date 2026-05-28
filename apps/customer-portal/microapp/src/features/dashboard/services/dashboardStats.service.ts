@@ -17,8 +17,8 @@ import { colors } from "@wso2/oxygen-ui";
 
 import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "@config/constants";
 
-import type { CasesStatsDto } from "@features/cases/types/case.dto";
-import type { ChangeRequestsStatsDto } from "@features/changes/types/change.dto";
+import type { CasesStatsDto } from "@features/case-types/cases/types/case.dto";
+import type { ChangeRequestsStatsDto } from "@features/case-types/change-requests/types/change.dto";
 import type { PieDataItem } from "@features/dashboard/components";
 import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
 

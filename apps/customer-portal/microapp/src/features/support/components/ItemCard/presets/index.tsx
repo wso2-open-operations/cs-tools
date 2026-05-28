@@ -1,10 +1,9 @@
 import { useEffect } from "react";
 
-import type { CaseSummary } from "@src/features/cases/types";
-import type { Chat } from "@src/features/chats/types";
-import type { ServiceRequestSummary } from "@src/features/service-requests/types";
-
-import type { ChangeRequestSummary } from "@features/changes/types/change.model";
+import type { CaseSummary } from "@features/case-types/cases/types";
+import type { ChangeRequestSummary } from "@features/case-types/change-requests/types/change.model";
+import type { Chat } from "@features/case-types/conversations/types";
+import type { ServiceRequestSummary } from "@features/case-types/service-requests/types";
 import { ItemCard } from "@features/support/components";
 
 import { PriorityChip, StatusChip } from "@shared/components/support";

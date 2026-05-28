@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import type { Attachment } from "@features/cases/types";
+import type { Attachment } from "@features/case-types/cases/types";
 import { PreviewModal } from "@features/preview/components";
 
 import { PreviewContext } from "./PreviewContext";

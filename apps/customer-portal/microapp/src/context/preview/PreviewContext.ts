@@ -1,6 +1,6 @@
 import { createContext } from "react";
 
-import type { Attachment } from "@features/cases/types";
+import type { Attachment } from "@features/case-types/cases/types";
 
 interface PreviewContextValue {
   open: (attachment: Attachment) => void;

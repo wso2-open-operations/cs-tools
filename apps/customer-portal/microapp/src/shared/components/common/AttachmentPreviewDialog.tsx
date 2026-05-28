@@ -16,7 +16,7 @@
 import { Box, Dialog, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 
-import type { Attachment } from "@features/cases/types/case.model";
+import type { Attachment } from "@features/case-types/cases/types/case.model";
 
 export function AttachmentPreviewDialog({
   open,

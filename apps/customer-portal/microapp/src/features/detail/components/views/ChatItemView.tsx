@@ -1,6 +1,6 @@
 import { Grid } from "@wso2/oxygen-ui";
 
-import { CalloutFeedback } from "@features/chats/components";
+import { CalloutFeedback } from "@features/case-types/conversations/components";
 import { BubbleList, InfoField, Layout } from "@features/detail/components";
 import { useChat } from "@features/detail/hooks";
 

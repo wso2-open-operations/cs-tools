@@ -22,7 +22,7 @@ import { Form, FormikContext, useFormik } from "formik";
 import { useDeclareLayout } from "@context/layout";
 import { useNotify } from "@context/snackbar";
 
-import { SelectField, TextField } from "@features/cases/components";
+import { SelectField, TextField } from "@features/case-types/cases/components";
 import { ProfileEditCallout } from "@features/profile/components";
 import { useMe, useProfileMutations } from "@features/profile/hooks";
 import { useMetadata } from "@features/profile/hooks";

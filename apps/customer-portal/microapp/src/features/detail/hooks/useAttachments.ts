@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { cases } from "@features/cases/api/cases.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
 import { useCase } from "@features/detail/hooks";
 
 export function useAttachments() {

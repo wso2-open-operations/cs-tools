@@ -17,9 +17,9 @@ import { FormikContext } from "formik";
 
 import { useDeclareLayout } from "@context/layout";
 
-import { CreateCaseForm } from "@features/cases/components";
-import { ClassificationProvider } from "@features/cases/context";
-import { useCreateCase, useCreateCaseForm } from "@features/cases/hooks";
+import { CreateCaseForm } from "@features/case-types/cases/components";
+import { ClassificationProvider } from "@features/case-types/cases/context";
+import { useCreateCase, useCreateCaseForm } from "@features/case-types/cases/hooks";
 
 import { Tab } from "@shared/constants";
 

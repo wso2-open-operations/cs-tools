@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { cases } from "@features/cases/api/cases.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
 
 import { scrollTo } from "@shared/utils";
 

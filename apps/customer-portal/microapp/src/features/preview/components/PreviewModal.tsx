@@ -3,8 +3,8 @@ import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Box, Dialog } from "@wso2/oxygen-ui";
 
-import { cases } from "@features/cases/api/cases.queries";
-import type { Attachment } from "@features/cases/types";
+import { cases } from "@features/case-types/cases/api/cases.queries";
+import type { Attachment } from "@features/case-types/cases/types";
 import {
   ImagePreview,
   PdfPreview,

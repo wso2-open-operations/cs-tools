@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { chats } from "@features/chats/api/chats.queries";
+import { chats } from "@features/case-types/conversations/api/chats.queries";
 import { useRequiredParams } from "@features/detail/hooks";
 
 export function useConversation() {

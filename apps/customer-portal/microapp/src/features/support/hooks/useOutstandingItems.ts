@@ -17,13 +17,13 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 
 import { useProject } from "@context/project";
 
-import { announcements } from "@features/announcements/api/announcements.queries";
-import { cases } from "@features/cases/api/cases.queries";
-import { changeRequests } from "@features/changes/api/changes.queries";
-import { chats } from "@features/chats/api/chats.queries";
-import { engagements } from "@features/engagements/api/engagements.queries";
-import { securityReportAnalysis } from "@features/security-report-analysis/api/sra.queries";
-import { serviceRequests } from "@features/service-requests/api/service-requests.queries";
+import { announcements } from "@features/case-types/announcements/api/announcements.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
+import { changeRequests } from "@features/case-types/change-requests/api/changes.queries";
+import { chats } from "@features/case-types/conversations/api/chats.queries";
+import { engagements } from "@features/case-types/engagements/api/engagements.queries";
+import { securityReportAnalysis } from "@features/case-types/security-report-analysis/api/sra.queries";
+import { serviceRequests } from "@features/case-types/service-requests/api/service-requests.queries";
 
 import {
   OUTSTANDING_CASE_STATUS_IDS,

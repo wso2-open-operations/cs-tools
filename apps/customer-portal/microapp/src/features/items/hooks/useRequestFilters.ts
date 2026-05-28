@@ -1,8 +1,8 @@
 import { useFilters } from "@context/filters";
 
-import type { GetCasesRequestDto } from "@features/cases/types";
-import type { GetChangeRequestsRequestDto } from "@features/changes/types";
-import type { GetChatsRequestDto } from "@features/chats/types";
+import type { GetCasesRequestDto } from "@features/case-types/cases/types";
+import type { GetChangeRequestsRequestDto } from "@features/case-types/change-requests/types";
+import type { GetChatsRequestDto } from "@features/case-types/conversations/types";
 import { useFilters as useListFilterParams } from "@features/items/hooks";
 
 export function useCaseFiltersFromParams(): GetCasesRequestDto["filters"] {

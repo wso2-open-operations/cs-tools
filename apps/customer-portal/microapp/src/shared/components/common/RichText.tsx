@@ -15,11 +15,12 @@
 // under the License.
 import { useEffect, useRef } from "react";
 
-import { cases } from "@root/src/features/cases/api/cases.queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { Box, pxToRem, styled } from "@wso2/oxygen-ui";
 
 import { openUrl } from "@bridge/index";
+
+import { cases } from "@features/case-types/cases/api/cases.queries";
 
 export const RichTextBase = styled(Box)(({ theme }) => ({
   fontSize: pxToRem(13),

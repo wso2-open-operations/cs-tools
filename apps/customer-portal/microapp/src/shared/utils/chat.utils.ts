@@ -1,4 +1,4 @@
-import type { BubbleProps } from "@features/chats/components";
+import type { BubbleProps } from "@features/case-types/conversations/components";
 
 import { MESSAGE_AUTHOR_TYPES } from "@shared/constants";
 

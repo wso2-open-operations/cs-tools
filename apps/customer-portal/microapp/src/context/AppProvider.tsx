@@ -6,7 +6,7 @@ import { FiltersContext } from "@context/filters";
 import { MeContext } from "@context/me";
 import { ProjectContext } from "@context/project";
 
-import { cases } from "@features/cases/api/cases.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
 import { projects } from "@features/projects/api/projects.queries";
 import { users } from "@features/users/api/users.queries";
 

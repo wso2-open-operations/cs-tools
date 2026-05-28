@@ -21,8 +21,14 @@ import { MessageSquareQuote } from "@wso2/oxygen-ui-icons-react";
 import { useDeclareLayout } from "@context/layout";
 import { useProject } from "@context/project";
 
-import { Bubble, PromptCreateCase } from "@features/chats/components";
-import { useClassify, useConversation, useEnvProducts, useNovera, useStream } from "@features/chats/hooks";
+import { Bubble, PromptCreateCase } from "@features/case-types/conversations/components";
+import {
+  useClassify,
+  useConversation,
+  useEnvProducts,
+  useNovera,
+  useStream,
+} from "@features/case-types/conversations/hooks";
 
 import { CommentBar } from "@shared/components/core";
 

@@ -1,7 +1,7 @@
 import { Box, Card, Chip, colors, Divider, pxToRem, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { Calendar, Clock, PhoneCall } from "@wso2/oxygen-ui-icons-react";
 
-import type { CallRequestDto } from "@features/engagements/types/engagement.dto";
+import type { CallRequestDto } from "@features/case-types/engagements/types/engagement.dto";
 
 import { useDateTime } from "@shared/hooks";
 

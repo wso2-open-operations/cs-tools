@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { cases } from "@features/cases/api/cases.queries";
-import { changeRequests } from "@features/changes/api/changes.queries";
-import { chats } from "@features/chats/api/chats.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
+import { changeRequests } from "@features/case-types/change-requests/api/changes.queries";
+import { chats } from "@features/case-types/conversations/api/chats.queries";
+import { serviceRequests } from "@features/case-types/service-requests/api/service-requests.queries";
 import { useRequiredParams } from "@features/detail/hooks";
-import { serviceRequests } from "@features/service-requests/api/service-requests.queries";
 
 import { useIssueType } from "@shared/hooks";
 

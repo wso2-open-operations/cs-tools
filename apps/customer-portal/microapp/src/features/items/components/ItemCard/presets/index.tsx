@@ -1,8 +1,8 @@
-import type { CaseSummary } from "@features/cases/types";
-import type { ChangeRequestSummary } from "@features/changes/types";
-import type { Chat } from "@features/chats/types";
+import type { CaseSummary } from "@features/case-types/cases/types";
+import type { ChangeRequestSummary } from "@features/case-types/change-requests/types";
+import type { Chat } from "@features/case-types/conversations/types";
+import type { ServiceRequestSummary } from "@features/case-types/service-requests/types";
 import { ItemCard } from "@features/items/components";
-import type { ServiceRequestSummary } from "@features/service-requests/types";
 
 import { PriorityChip, StatusChip } from "@shared/components/support";
 

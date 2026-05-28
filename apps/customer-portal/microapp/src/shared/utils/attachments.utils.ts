@@ -1,4 +1,4 @@
-import type { AttachmentFile } from "@features/cases/components";
+import type { AttachmentFile } from "@features/case-types/cases/components";
 
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";

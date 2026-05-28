@@ -2,8 +2,8 @@ import { useNavigate } from "react-router-dom";
 
 import { useProject } from "@context/project";
 
-import type { Case, CaseClassificationResponseDto } from "@features/cases/types";
-import type { BubbleProps } from "@features/chats/components";
+import type { Case, CaseClassificationResponseDto } from "@features/case-types/cases/types";
+import type { BubbleProps } from "@features/case-types/conversations/components";
 
 import { CASE_TYPES, OUTSTANDING_CASES_BY_SEVERITY_TITLE, ROUTES } from "@shared/constants";
 

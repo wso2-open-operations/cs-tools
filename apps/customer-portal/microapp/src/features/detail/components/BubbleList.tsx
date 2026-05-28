@@ -1,6 +1,6 @@
 import { Stack, Typography } from "@wso2/oxygen-ui";
 
-import { Bubble, BubbleSkeleton } from "@features/chats/components";
+import { Bubble, BubbleSkeleton } from "@features/case-types/conversations/components";
 import { useConversation } from "@features/detail/hooks";
 
 import { MESSAGE_AUTHOR_TYPES } from "@shared/constants";

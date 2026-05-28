@@ -3,7 +3,7 @@ import { CheckIcon, PlusIcon, RotateCcwIcon } from "@wso2/oxygen-ui-icons-react"
 
 import { useNotify } from "@context/snackbar";
 
-import { cases } from "@features/cases/api/cases.queries";
+import { cases } from "@features/case-types/cases/api/cases.queries";
 import { useCase, useRequiredParams } from "@features/detail/hooks";
 
 import type { MenuOptionProps } from "@shared/components/detail";
