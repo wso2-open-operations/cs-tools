@@ -76,6 +76,7 @@ export default function DeploymentUsageUploadDialog({
     reset();
     if (!isZipFile(selected)) {
       setFileError("Only ZIP files are accepted.");
+      setFile(null);
       return;
     }
     setFile(selected);
