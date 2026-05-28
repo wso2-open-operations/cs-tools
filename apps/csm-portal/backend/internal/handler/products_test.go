@@ -104,7 +104,8 @@ func TestSearchProducts(t *testing.T) {
 func TestSearchProductVersions(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewProductHandler(&mockEntityProductClient{})
-		r := httptest.NewRequest(http.MethodPost, "/product-versions/search", strings.NewReader(`{}`))
+		r := httptest.NewRequest(http.MethodPost, "/product/prod-1/versions/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", "prod-1")
 		w := httptest.NewRecorder()
 		h.SearchProductVersions(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
@@ -112,9 +113,20 @@ func TestSearchProductVersions(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects missing product id", func(t *testing.T) {
+		h := NewProductHandler(&mockEntityProductClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/product//versions/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchProductVersions(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewProductHandler(&mockEntityProductClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/product-versions/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/product/prod-1/versions/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", "prod-1")
 		w := httptest.NewRecorder()
 		h.SearchProductVersions(w, r)
 		assertStatus(t, w, http.StatusRequestEntityTooLarge)
@@ -124,7 +136,8 @@ func TestSearchProductVersions(t *testing.T) {
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewProductHandler(&mockEntityProductClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/product-versions/search", strings.NewReader(`not-json`)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/product/prod-1/versions/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", "prod-1")
 		w := httptest.NewRecorder()
 		h.SearchProductVersions(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -132,22 +145,28 @@ func TestSearchProductVersions(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+	t.Run("forwards product id and body to upstream and returns 200 with response", func(t *testing.T) {
 		const reqPayload = `{"searchQuery":"4.2","pagination":{"limit":10,"offset":0}}`
+		var capturedProductID string
 		var capturedBody []byte
 		client := &mockEntityProductClient{
-			searchProductVersionsFn: func(_ context.Context, body []byte) ([]byte, error) {
+			searchProductVersionsFn: func(_ context.Context, productID string, body []byte) ([]byte, error) {
+				capturedProductID = productID
 				capturedBody = body
 				return []byte(`{"productVersions":[{"id":"pv-1","version":"4.2.0"}],"total":1}`), nil
 			},
 		}
 		h := NewProductHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/product-versions/search", strings.NewReader(reqPayload)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/product/prod-1/versions/search", strings.NewReader(reqPayload)))
+		r.SetPathValue("id", "prod-1")
 		w := httptest.NewRecorder()
 		h.SearchProductVersions(w, r)
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
+		if capturedProductID != "prod-1" {
+			t.Errorf("upstream received productID %q, want %q", capturedProductID, "prod-1")
+		}
 		if string(capturedBody) != reqPayload {
 			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
 		}
@@ -162,12 +181,13 @@ func TestSearchProductVersions(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityProductClient{
-					searchProductVersionsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+					searchProductVersionsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}
 				h := NewProductHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/product-versions/search", strings.NewReader(`{}`)))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/product/prod-1/versions/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", "prod-1")
 				w := httptest.NewRecorder()
 				h.SearchProductVersions(w, r)
 				assertStatus(t, w, tc.wantCode)

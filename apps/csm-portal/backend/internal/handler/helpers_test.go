@@ -204,7 +204,7 @@ func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byt
 
 type mockEntityProductClient struct {
 	searchProductsFn        func(ctx context.Context, body []byte) ([]byte, error)
-	searchProductVersionsFn func(ctx context.Context, body []byte) ([]byte, error)
+	searchProductVersionsFn func(ctx context.Context, productID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityProductClient) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {
@@ -214,9 +214,9 @@ func (m *mockEntityProductClient) SearchProducts(ctx context.Context, body []byt
 	return []byte(`{}`), nil
 }
 
-func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, body []byte) ([]byte, error) {
+func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error) {
 	if m.searchProductVersionsFn != nil {
-		return m.searchProductVersionsFn(ctx, body)
+		return m.searchProductVersionsFn(ctx, productID, body)
 	}
 	return []byte(`{}`), nil
 }

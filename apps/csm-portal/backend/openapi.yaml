@@ -350,10 +350,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /product-versions/search:
+  /product/{id}/versions/search:
     post:
-      summary: Search product versions.
+      summary: Search versions for a specific product.
       operationId: postProductVersionsSearch
+      parameters:
+        - name: id
+          in: path
+          description: ID of the product
+          required: true
+          schema:
+            type: string
       requestBody:
         description: Product version search payload
         content:
@@ -801,9 +808,6 @@ components:
                 limit:
                   default: 20
                   maximum: 100
-        productId:
-          type: string
-          description: Filter by product ID (optional)
         searchQuery:
           type: string
           description: Searches across version (case-insensitive); max 200 characters

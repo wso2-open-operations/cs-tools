@@ -30,7 +30,7 @@ import (
 // entityProductClient abstracts the entity service product operations used by ProductHandler.
 type entityProductClient interface {
 	SearchProducts(ctx context.Context, body []byte) ([]byte, error)
-	SearchProductVersions(ctx context.Context, body []byte) ([]byte, error)
+	SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error)
 }
 
 // ProductHandler handles HTTP requests for product operations, delegating to the
@@ -82,11 +82,17 @@ func (h *ProductHandler) SearchProducts(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// SearchProductVersions handles POST /product-versions/search.
+// SearchProductVersions handles POST /product/{id}/versions/search.
 func (h *ProductHandler) SearchProductVersions(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	productID := r.PathValue("id")
+	if productID == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
@@ -109,7 +115,7 @@ func (h *ProductHandler) SearchProductVersions(w http.ResponseWriter, r *http.Re
 
 	// TODO: Decode into a typed SearchProductVersionsRequest and validate fields before forwarding.
 
-	result, err := h.entity.SearchProductVersions(r.Context(), body)
+	result, err := h.entity.SearchProductVersions(r.Context(), productID, body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProductVersions failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to search product versions.")
