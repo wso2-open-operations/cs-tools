@@ -17,7 +17,7 @@ import { useEffect } from "react";
 
 import { matchPath, useLocation } from "react-router-dom";
 
-import { SCROLL_OVERRIDES } from "@components/layout/scroll-config";
+import { SCROLL_OVERRIDES } from "@components/layout/config";
 
 export function useScrollControl(position: "top" | "bottom" = "top", onRouteChange = true) {
   const { pathname } = useLocation();

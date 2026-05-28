@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 export function buildEnvProducts(
   deployments: { id: string; name: string }[],
   productQueries: { data?: { name: string; version: string }[] | undefined }[],

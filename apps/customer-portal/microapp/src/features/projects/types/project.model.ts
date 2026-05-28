@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 export type ProjectStatus = "All Good" | "Needs Attention";
 export type ProjectType = "Managed Cloud" | "Regular";
 export type ProjectMetricKey = "outstanding" | "chats";

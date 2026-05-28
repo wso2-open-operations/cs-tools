@@ -13,7 +13,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-// refer: https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary
 import * as React from "react";
 
 interface ErrorBoundaryProps {
