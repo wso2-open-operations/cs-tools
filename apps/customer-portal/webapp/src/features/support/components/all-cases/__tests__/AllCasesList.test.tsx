@@ -61,16 +61,22 @@ vi.mock("@features/dashboard/utils/casesTable", () => ({
 }));
 
 // Mock the support utils
-vi.mock("@features/support/utils/support", () => ({
-  formatDateTime: vi.fn(() => "Jan 1, 2026"),
-  formatRelativeTime: vi.fn(() => "2 hours ago"),
-  getStatusIcon: vi.fn(() => () => <div data-testid="status-icon" />),
-  getStatusColor: vi.fn(() => "#000000"),
-  mapSeverityToDisplay: vi.fn((l: string) => l || "—"),
-  getAssignedEngineerLabel: vi.fn(() => null),
-  resolveColorFromTheme: vi.fn(() => "#000000"),
-  stripHtml: vi.fn((html) => html),
-}));
+vi.mock("@features/support/utils/support", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@features/support/utils/support")
+  >();
+  return {
+    ...actual,
+    formatDateTime: vi.fn(() => "Jan 1, 2026"),
+    formatRelativeTime: vi.fn(() => "2 hours ago"),
+    getStatusIcon: vi.fn(() => () => <div data-testid="status-icon" />),
+    getStatusColor: vi.fn(() => "#000000"),
+    mapSeverityToDisplay: vi.fn((l: string) => l || "—"),
+    getAssignedEngineerLabel: vi.fn(() => null),
+    resolveColorFromTheme: vi.fn(() => "#000000"),
+    stripHtml: vi.fn((html: string) => html),
+  };
+});
 
 describe("ListItems", () => {
   const theme = createTheme();
