@@ -448,6 +448,11 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     metadataKey: "deploymentTypes",
     multiSelect: true,
   },
+  {
+    filterKey: "createdBy",
+    id: "createdBy",
+    multiSelect: true,
+  },
 ];
 
 /**

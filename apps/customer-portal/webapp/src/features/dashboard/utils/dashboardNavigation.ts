@@ -87,6 +87,7 @@ export function buildDashboardCaseSearchFilters(params: {
   deploymentIds?: string[];
   searchQuery?: string;
   createdByMe?: boolean;
+  createdBy?: string[];
   caseStates?: MetadataItem[];
   isDashboardSeverityNavigation?: boolean;
 }): CaseSearchFilters {
@@ -97,6 +98,7 @@ export function buildDashboardCaseSearchFilters(params: {
     deploymentIds,
     searchQuery,
     createdByMe,
+    createdBy,
     caseStates,
     isDashboardSeverityNavigation = false,
   } = params;
@@ -107,6 +109,7 @@ export function buildDashboardCaseSearchFilters(params: {
     ? severityIds.map(Number)
     : undefined;
   const normalizedIssueIds = normalizeCaseSearchIssueIds(issueTypes);
+  const normalizedCreatedBy = createdBy?.length ? createdBy : undefined;
 
   switch (true) {
     case Boolean(explicitStatusIds?.length):
@@ -117,6 +120,7 @@ export function buildDashboardCaseSearchFilters(params: {
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
     case isDashboardSeverityNavigation:
       return {
@@ -126,6 +130,7 @@ export function buildDashboardCaseSearchFilters(params: {
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
     default:
       return {
@@ -134,6 +139,7 @@ export function buildDashboardCaseSearchFilters(params: {
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
   }
 }

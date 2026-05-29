@@ -35,6 +35,7 @@ import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import useGetProjectCases from "@api/useGetProjectCases";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
   hasListSearchOrFilters,
   getLast30DaysUtcRange,
@@ -141,6 +142,9 @@ export default function AllCasesPage(): JSX.Element {
   const deploymentsList =
     deploymentsQuery.data?.pages.flatMap((p) => p.deployments ?? []) ?? [];
 
+  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId || "");
+  const contactsList = contactsData ?? [];
+
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
@@ -154,6 +158,7 @@ export default function AllCasesPage(): JSX.Element {
             : undefined,
           searchQuery: searchTerm,
           createdByMe: createdByMe || undefined,
+          createdBy: filters.createdBy as string[] | undefined,
           caseStates: filterMetadata?.caseStates,
           isDashboardSeverityNavigation:
             (isDashboardSeverityNavigation &&
@@ -178,6 +183,7 @@ export default function AllCasesPage(): JSX.Element {
       filterMetadata?.caseStates,
       isDashboardSeverityNavigation,
       initialSeverityId,
+      contactsList,
     ],
   );
 
@@ -204,7 +210,7 @@ export default function AllCasesPage(): JSX.Element {
     (!!projectId && !hasCasesResponse) ||
     isFetchingNextPage;
 
-  const isInitialPageLoading = isCasesAreaLoading;
+  const isInitialPageLoading = isCasesAreaLoading || isContactsLoading;
 
   useEffect(() => {
     if (isInitialPageLoading) {
@@ -356,6 +362,8 @@ export default function AllCasesPage(): JSX.Element {
           onFiltersToggle={() => setIsFiltersOpen(!isFiltersOpen)}
           filters={filters}
           filterMetadata={filterMetadata}
+          contacts={contactsList}
+          isContactsLoading={isContactsLoading}
           deployments={
             projectDetailsReady && permissions.hasDeployments
               ? deploymentsList

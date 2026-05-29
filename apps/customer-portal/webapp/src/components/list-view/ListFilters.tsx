@@ -32,6 +32,7 @@ import type {
   AllCasesFilterValues,
 } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProjectContact } from "@features/settings/types/users";
 import {
   SelectMenuLoadMoreRow,
   SELECT_MENU_LOAD_MORE_ROW_VALUE,
@@ -49,6 +50,8 @@ export interface ListFiltersProps {
   filters: AllCasesFilterValues;
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
+  contacts?: ProjectContact[];
+  isContactsLoading?: boolean;
   onFilterChange: (field: string, value: string | string[]) => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
@@ -56,6 +59,7 @@ export interface ListFiltersProps {
   hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
+  hideCreatedByFilter?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
@@ -72,6 +76,8 @@ export default function ListFilters({
   filters,
   filterMetadata,
   deployments,
+  contacts,
+  isContactsLoading = false,
   onFilterChange,
   excludeS0 = false,
   restrictSeverityToLow = false,
@@ -79,6 +85,7 @@ export default function ListFilters({
   hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
+  hideCreatedByFilter = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
@@ -112,12 +119,16 @@ export default function ListFilters({
         if (hideCategoryFilter && def.id === "category") {
           return null;
         }
+        if (hideCreatedByFilter && def.id === "createdBy") {
+          return null;
+        }
         if (def.metadataKey === "severities" && restrictSeverityToLow) {
           return null;
         }
         const { label, allLabel } = deriveFilterLabels(def.id);
 
         const isDeploymentFilter = def.id === "deployment";
+        const isCreatedByFilter = def.id === "createdBy";
         const options = (() => {
           if (isDeploymentFilter) {
             return (
@@ -127,6 +138,15 @@ export default function ListFilters({
               })) ?? []
             );
           }
+          if (isCreatedByFilter) {
+            return (
+              contacts?.map((contact) => ({
+                label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+                value: contact.email,
+              })) ?? []
+            );
+          }
+          if (!def.metadataKey) return [];
           const metadataOptions = filterMetadata?.[def.metadataKey];
           if (!Array.isArray(metadataOptions)) return [];
           const filtered =
@@ -189,7 +209,11 @@ export default function ListFilters({
                     );
                   }}
                 >
-                  {hasNoOptions ? (
+                  {isCreatedByFilter && isContactsLoading ? (
+                    <MenuItem disabled>
+                      <Typography variant="body2">Loading...</Typography>
+                    </MenuItem>
+                  ) : hasNoOptions ? (
                     <MenuItem disabled>
                       <Typography variant="body2">{EMPTY_DROPDOWN_PLACEHOLDER}</Typography>
                     </MenuItem>

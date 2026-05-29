@@ -46,7 +46,7 @@ export type CaseStatusAction = {
 /** All-cases list filter field mapping. */
 export type AllCasesFilterDefinition = {
   id: string;
-  metadataKey: keyof CaseMetadataResponse;
+  metadataKey?: keyof CaseMetadataResponse;
   filterKey: string;
   useLabelAsValue?: boolean;
   multiSelect?: boolean;

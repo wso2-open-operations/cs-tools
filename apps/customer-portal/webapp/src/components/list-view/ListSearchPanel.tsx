@@ -17,6 +17,7 @@
 import type { JSX, ReactNode } from "react";
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProjectContact } from "@features/settings/types/users";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFilters from "@components/list-view/ListFilters";
 import { countListSearchAndFilters } from "@features/support/utils/support";
@@ -32,9 +33,12 @@ export interface ListSearchPanelProps {
     severityIds?: string[];
     issueTypes?: string[];
     deploymentIds?: string[];
+    createdBy?: string[];
   };
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
+  contacts?: ProjectContact[];
+  isContactsLoading?: boolean;
   onFilterChange: (field: string, value: string | string[]) => void;
   onClearFilters: () => void;
   excludeS0?: boolean;
@@ -43,6 +47,7 @@ export interface ListSearchPanelProps {
   hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
+  hideCreatedByFilter?: boolean;
   hideFiltersButton?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
@@ -67,6 +72,8 @@ export default function ListSearchPanel({
   filters,
   filterMetadata,
   deployments,
+  contacts,
+  isContactsLoading = false,
   onFilterChange,
   onClearFilters,
   excludeS0 = false,
@@ -75,6 +82,7 @@ export default function ListSearchPanel({
   hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
+  hideCreatedByFilter = false,
   hideFiltersButton = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
@@ -90,6 +98,7 @@ export default function ListSearchPanel({
     ...(hideStatusFilter ? { statusIds: undefined } : {}),
     ...(hideDeploymentFilter ? { deploymentIds: undefined } : {}),
     ...(hideCategoryFilter ? { issueTypes: undefined } : {}),
+    ...(hideCreatedByFilter ? { createdBy: undefined } : {}),
     ...excluded,
   };
   return (
@@ -112,6 +121,8 @@ export default function ListSearchPanel({
           filters={filters}
           filterMetadata={filterMetadata}
           deployments={deployments}
+          contacts={contacts}
+          isContactsLoading={isContactsLoading}
           onFilterChange={onFilterChange}
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
@@ -119,6 +130,7 @@ export default function ListSearchPanel({
           hideStatusFilter={hideStatusFilter}
           hideDeploymentFilter={hideDeploymentFilter}
           hideCategoryFilter={hideCategoryFilter}
+          hideCreatedByFilter={hideCreatedByFilter}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}
           isFetchingMoreDeployments={isFetchingMoreDeployments}

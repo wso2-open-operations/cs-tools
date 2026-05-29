@@ -791,6 +791,9 @@ export function deriveFilterLabels(id: string): {
   if (id === "caseType") {
     return { label: "Case Type", allLabel: "All Case Types" };
   }
+  if (id === "createdBy") {
+    return { label: "Created By", allLabel: "All Users" };
+  }
   const label = id.charAt(0).toUpperCase() + id.slice(1);
   const allLabel = `All ${
     label.endsWith("s")

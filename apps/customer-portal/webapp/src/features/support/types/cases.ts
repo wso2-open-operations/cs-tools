@@ -309,6 +309,7 @@ export type AllCasesFilterValues = {
   issueTypes?: string[];
   deploymentIds?: string[];
   engagementTypeKey?: string;
+  createdBy?: string[];
 };
 
 // Item type for a case attachment.
@@ -367,6 +368,7 @@ export type CaseSearchFilters = {
   searchQuery?: string;
   caseTypes?: string[];
   createdByMe?: boolean;
+  createdBy?: string[];
   closedStartDate?: string;
   closedEndDate?: string;
   engagementTypeKeys?: number[];
