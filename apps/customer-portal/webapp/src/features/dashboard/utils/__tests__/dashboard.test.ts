@@ -75,6 +75,49 @@ describe("computeCrCardIsCardLoading", () => {
       ),
     ).toBe(false);
   });
+
+  it("returns true when combined cases are loading with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardLoading(true, undefined, { total: 1 } as never, true, false, false, false),
+    ).toBe(true);
+  });
+
+  it("returns true when change request stats are loading with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardLoading(
+        true,
+        { totalCases: 1 } as never,
+        undefined,
+        false,
+        true,
+        false,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when both data sources are loaded with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardLoading(
+        true,
+        { totalCases: 1 } as never,
+        { total: 1 } as never,
+        false,
+        false,
+        false,
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when either source errored with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardLoading(true, undefined, undefined, true, true, true, false),
+    ).toBe(false);
+    expect(
+      computeCrCardIsCardLoading(true, undefined, undefined, true, true, false, true),
+    ).toBe(false);
+  });
 });
 
 describe("computeCrCardIsCardError", () => {
@@ -89,6 +132,81 @@ describe("computeCrCardIsCardError", () => {
         false,
       ),
     ).toBe(true);
+  });
+
+  it("returns true when combined cases failed with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardError(
+        true,
+        false,
+        undefined,
+        { total: 1 } as never,
+        true,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when change request stats failed with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardError(
+        true,
+        false,
+        { totalCases: 1 } as never,
+        undefined,
+        false,
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when either stats are missing with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardError(
+        true,
+        false,
+        undefined,
+        { total: 1 } as never,
+        false,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      computeCrCardIsCardError(
+        true,
+        false,
+        { totalCases: 1 } as never,
+        undefined,
+        false,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false while card is loading with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardError(
+        true,
+        true,
+        undefined,
+        undefined,
+        true,
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when both data sources loaded with includeCrStats", () => {
+    expect(
+      computeCrCardIsCardError(
+        true,
+        false,
+        { totalCases: 1 } as never,
+        { total: 1 } as never,
+        false,
+        false,
+      ),
+    ).toBe(false);
   });
 });
 
