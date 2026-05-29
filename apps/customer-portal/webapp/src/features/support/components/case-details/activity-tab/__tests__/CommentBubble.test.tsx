@@ -15,16 +15,11 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { describe, expect, it } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CommentBubble from "@case-details-activity/CommentBubble";
 import type { CaseComment } from "@features/support/types/cases";
-
-vi.mock("dompurify", () => ({
-  default: {
-    sanitize: (html: string) => html,
-  },
-}));
 
 const mockComment: CaseComment = {
   id: "comment-1",
@@ -52,10 +47,15 @@ function renderBubble(
     isCurrentUser: false,
     primaryBg: "rgba(250,123,63,0.1)",
   };
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <ThemeProvider theme={createTheme()}>
-      <CommentBubble {...defaults} {...props} />
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={createTheme()}>
+        <CommentBubble {...defaults} {...props} />
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 

@@ -16,34 +16,19 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import ChatHeader from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatHeader";
-
-// Mock @wso2/oxygen-ui components
-vi.mock("@wso2/oxygen-ui", () => ({
-  Box: ({ children }: any) => <div data-testid="box">{children}</div>,
-  Button: ({ children, onClick, startIcon }: any) => (
-    <button data-testid="button" onClick={onClick}>
-      {startIcon}
-      {children}
-    </button>
-  ),
-  Typography: ({ children }: any) => (
-    <span data-testid="typography">{children}</span>
-  ),
-}));
-
-// Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
-  Bot: () => <svg data-testid="icon-bot" />,
-  ArrowLeft: () => <svg data-testid="icon-back" />,
-}));
 
 describe("ChatHeader", () => {
   it("should call onBack when back button is clicked", () => {
     const onBackMock = vi.fn();
-    render(<ChatHeader onBack={onBackMock} />);
+    render(
+      <ThemeProvider theme={createTheme()}>
+        <ChatHeader onBack={onBackMock} />
+      </ThemeProvider>,
+    );
 
-    const backButton = screen.getByRole("button", { name: /Back to Support/i });
+    const backButton = screen.getByRole("button", { name: /^Back$/i });
     fireEvent.click(backButton);
 
     expect(onBackMock).toHaveBeenCalled();

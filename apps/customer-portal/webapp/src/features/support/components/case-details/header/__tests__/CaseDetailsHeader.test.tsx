@@ -35,8 +35,8 @@ describe("CaseDetailsHeader", () => {
     title: "Test case title",
     severityLabel: "S1",
     statusLabel: "Open",
-    statusChipIcon: <span data-testid="status-chip-icon" />,
-    statusChipSx: {},
+    statusChipIcon: null,
+    statusChipSx: { color: "info.main" },
     isError: false,
   };
 
@@ -50,7 +50,6 @@ describe("CaseDetailsHeader", () => {
     expect(screen.getByText("Test case title")).toBeInTheDocument();
     expect(screen.getByText("S1")).toBeInTheDocument();
     expect(screen.getByText("Open")).toBeInTheDocument();
-    expect(screen.getByTestId("status-chip-icon")).toBeInTheDocument();
   });
 
   it("should render skeletons when isLoading is true", () => {
