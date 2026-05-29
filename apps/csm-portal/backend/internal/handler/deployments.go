@@ -43,11 +43,17 @@ func NewDeploymentHandler(entity entityDeploymentClient) *DeploymentHandler {
 	return &DeploymentHandler{entity: entity}
 }
 
-// SearchDeployments handles POST /deployments/search.
+// SearchDeployments handles POST /projects/{id}/deployments/search.
 func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 

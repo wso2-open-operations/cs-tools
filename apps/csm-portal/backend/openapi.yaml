@@ -286,10 +286,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /deployments/search:
+  /projects/{id}/deployments/search:
     post:
-      summary: Search deployments.
-      operationId: postDeploymentsSearch
+      summary: Search deployments of a project.
+      operationId: postProjectsIdDeploymentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: ID of the project
+          required: true
+          schema:
+            type: string
       requestBody:
         description: Deployment search payload
         content:

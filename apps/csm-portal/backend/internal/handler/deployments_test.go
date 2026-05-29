@@ -27,7 +27,8 @@ import (
 func TestSearchDeployments(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
-		r := httptest.NewRequest(http.MethodPost, "/deployments/search", strings.NewReader(`{}`))
+		r := httptest.NewRequest(http.MethodPost, "/projects/proj-1/deployments/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", "proj-1")
 		w := httptest.NewRecorder()
 		h.SearchDeployments(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
@@ -35,9 +36,20 @@ func TestSearchDeployments(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects missing project id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects//deployments/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchDeployments(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/deployments/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", "proj-1")
 		w := httptest.NewRecorder()
 		h.SearchDeployments(w, r)
 		assertStatus(t, w, http.StatusRequestEntityTooLarge)
@@ -47,7 +59,8 @@ func TestSearchDeployments(t *testing.T) {
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/search", strings.NewReader(`not-json`)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/deployments/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", "proj-1")
 		w := httptest.NewRecorder()
 		h.SearchDeployments(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -56,7 +69,7 @@ func TestSearchDeployments(t *testing.T) {
 	})
 
 	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
-		const reqPayload = `{"searchQuery":"prod","projectIds":["proj-1"],"deploymentTypeKeys":["primary_production"]}`
+		const reqPayload = `{"searchQuery":"prod","deploymentTypeKeys":["primary_production"]}`
 		var capturedBody []byte
 		client := &mockEntityDeploymentClient{
 			searchDeploymentsFn: func(_ context.Context, body []byte) ([]byte, error) {
@@ -65,7 +78,8 @@ func TestSearchDeployments(t *testing.T) {
 			},
 		}
 		h := NewDeploymentHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/search", strings.NewReader(reqPayload)))
+		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/deployments/search", strings.NewReader(reqPayload)))
+		r.SetPathValue("id", "proj-1")
 		w := httptest.NewRecorder()
 		h.SearchDeployments(w, r)
 
@@ -90,7 +104,8 @@ func TestSearchDeployments(t *testing.T) {
 					},
 				}
 				h := NewDeploymentHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/search", strings.NewReader(`{}`)))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/deployments/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", "proj-1")
 				w := httptest.NewRecorder()
 				h.SearchDeployments(w, r)
 				assertStatus(t, w, tc.wantCode)
