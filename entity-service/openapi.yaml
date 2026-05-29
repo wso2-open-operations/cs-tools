@@ -109,6 +109,133 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /products/search:
+    post:
+      summary: Search products by name.
+      operationId: searchProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductsRequest'
+      responses:
+        "200":
+          description: Products matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}/versions/search:
+    post:
+      summary: Search versions of a specific product.
+      operationId: searchProductVersions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchProductVersionsRequest'
+      responses:
+        "200":
+          description: Product versions matching the search query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductVersionsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployments/search:
+    post:
+      summary: Search deployments by name, project IDs, or deployment type.
+      operationId: searchDeployments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchDeploymentsRequest'
+      responses:
+        "200":
+          description: Deployments matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchDeploymentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /deployed-products/search:
+    post:
+      summary: Search deployed products by deployment IDs.
+      operationId: searchDeployedProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchDeployedProductsRequest'
+      responses:
+        "200":
+          description: Deployed products matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchDeployedProductsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     Pagination:
@@ -292,6 +419,221 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Project'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProductsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against product name.
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        class:
+          type: string
+          enum: [software, service]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchProductsResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchProductVersionsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against version string.
+
+    ProductVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        version:
+          type: string
+        currentSupportStatus:
+          type: string
+          enum: [available, extended, deprecated, discontinued]
+        releaseDate:
+          type: string
+          format: date-time
+        supportEolDate:
+          type: string
+          format: date-time
+          nullable: true
+        earliestPossibleSupportEolDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchProductVersionsResponse:
+      type: object
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVersion'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchDeploymentsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against deployment name.
+        projectIds:
+          type: array
+          items:
+            type: string
+          description: Filter by project UUIDs.
+        deploymentTypeKeys:
+          type: array
+          items:
+            type: string
+            enum:
+              - primary_production
+              - staging
+              - qa
+              - stress
+              - uat
+              - development
+          description: Filter by deployment types.
+
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - primary_production
+            - staging
+            - qa
+            - stress
+            - uat
+            - development
+        description:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchDeploymentsResponse:
+      type: object
+      properties:
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchDeployedProductsRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        deploymentIds:
+          type: array
+          items:
+            type: string
+          description: Filter by deployment UUIDs.
+
+    DeployedProduct:
+      type: object
+      properties:
+        id:
+          type: string
+        deploymentId:
+          type: string
+        productId:
+          type: string
+        productVersionId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SearchDeployedProductsResponse:
+      type: object
+      properties:
+        deployedProducts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeployedProduct'
         total:
           type: integer
         limit:
