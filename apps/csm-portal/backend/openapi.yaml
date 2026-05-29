@@ -332,6 +332,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /deployments/{id}/products/search:
+    post:
+      summary: Search deployed products for a specific deployment.
+      operationId: postDeploymentProductsSearch
+      parameters:
+        - name: id
+          in: path
+          description: ID of the deployment
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Deployed product search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /products/search:
     post:
       summary: Search products.
@@ -948,6 +994,52 @@ components:
         earliestPossibleSupportEolDate:
           type: string
           format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeployedProductSearchPayload:
+      type: object
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    DeployedProductSearchResponse:
+      type: object
+      properties:
+        deployedProducts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeployedProduct'
+        total:
+          type: integer
+          description: Total number of matching deployed products
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    DeployedProduct:
+      type: object
+      properties:
+        id:
+          type: string
+        deploymentId:
+          type: string
+        productId:
+          type: string
+        productVersionId:
+          type: string
         createdAt:
           type: string
           format: date-time

@@ -76,3 +76,9 @@ func (c *Client) SearchProductVersions(ctx context.Context, productID string, bo
 func (c *Client) SearchDeployments(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/deployments/search", body)
 }
+
+// SearchDeployedProducts calls POST /deployed-products/search on the entity service.
+// Response is returned as raw JSON; field filtering to the portal shape is deferred.
+func (c *Client) SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/deployed-products/search", body)
+}

@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,6 +109,115 @@ func TestSearchDeployments(t *testing.T) {
 				r.SetPathValue("id", "proj-1")
 				w := httptest.NewRecorder()
 				h.SearchDeployments(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestSearchDeployedProducts(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", "dep-1")
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", "dep-1")
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", "dep-1")
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("handles JSON null body as empty object without panic", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(`null`)))
+		r.SetPathValue("id", "dep-1")
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects missing deployment id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments//products/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("injects deploymentId and returns 200 with response", func(t *testing.T) {
+		const deploymentID = "dep-1"
+		var capturedBody []byte
+		client := &mockEntityDeploymentClient{
+			searchDeployedProductsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"deployedProducts":[{"id":"dp-1","deploymentId":"dep-1"}],"total":1}`), nil
+			},
+		}
+		h := NewDeploymentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(`{"pagination":{"limit":10,"offset":0}}`)))
+		r.SetPathValue("id", deploymentID)
+		w := httptest.NewRecorder()
+		h.SearchDeployedProducts(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
+		}
+		var ids []string
+		if err := json.Unmarshal(sent["deploymentIds"], &ids); err != nil || len(ids) != 1 || ids[0] != deploymentID {
+			t.Errorf("upstream deploymentIds = %v, want [%q]", ids, deploymentID)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search deployed products.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityDeploymentClient{
+					searchDeployedProductsFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewDeploymentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/dep-1/products/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", "dep-1")
+				w := httptest.NewRecorder()
+				h.SearchDeployedProducts(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

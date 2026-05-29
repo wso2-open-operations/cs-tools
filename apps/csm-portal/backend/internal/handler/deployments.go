@@ -27,9 +27,27 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
+// injectDeploymentID merges a deployment ID into a JSON request body as deploymentIds: [id].
+func injectDeploymentID(body []byte, deploymentID string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = make(map[string]json.RawMessage)
+	}
+	ids, err := json.Marshal([]string{deploymentID})
+	if err != nil {
+		return nil, err
+	}
+	m["deploymentIds"] = ids
+	return json.Marshal(m)
+}
+
 // entityDeploymentClient abstracts the entity service deployment operations used by DeploymentHandler.
 type entityDeploymentClient interface {
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
+	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // DeploymentHandler handles HTTP requests for deployment operations, delegating to the
@@ -84,5 +102,52 @@ func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Req
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchDeployedProducts handles POST /deployments/{id}/products/search.
+func (h *DeploymentHandler) SearchDeployedProducts(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	deploymentID := r.PathValue("id")
+	if deploymentID == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectDeploymentID(body, deploymentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchDeployedProducts(r.Context(), entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchDeployedProducts failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		mapUpstreamError(w, err, "Failed to search deployed products.")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
