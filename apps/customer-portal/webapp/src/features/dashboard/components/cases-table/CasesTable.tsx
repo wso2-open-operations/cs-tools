@@ -122,7 +122,8 @@ const CasesTable = ({
       (def) =>
         def.id !== "caseType" &&
         !(restrictSeverityToLow && def.metadataKey === "severities") &&
-        (includeDeploymentFilter || def.id !== "deployment"),
+        (includeDeploymentFilter || def.id !== "deployment") &&
+        (def.id === "deployment" || !!def.metadataKey),
     ).map((def) => {
       const { label } = deriveFilterLabels(def.id);
 
@@ -140,13 +141,13 @@ const CasesTable = ({
           const metadataOptions =
             filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
           const filtered = filterCasesTableMetadataOptions(
-            def.metadataKey,
+            def.metadataKey!,
             metadataOptions,
             excludeS0,
             restrictSeverityToLow,
           );
           options = filtered.map((item) => ({
-            label: mapCasesTableFilterOptionLabel(def.metadataKey, item.label),
+            label: mapCasesTableFilterOptionLabel(def.metadataKey!, item.label),
             value: item.id,
           }));
         }
