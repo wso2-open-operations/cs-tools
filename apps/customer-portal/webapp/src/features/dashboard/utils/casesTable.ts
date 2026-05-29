@@ -39,17 +39,18 @@ import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
  * @returns The Oxygen ui color path (e.g., "error.main").
  */
 export const getSeverityColor = (label?: string): string => {
-  const normalized = label?.toUpperCase() || "";
-  switch (normalized) {
-    case CaseSeverityLevel.S0:
+  // Strip parenthetical suffix (e.g. "S4(Query)" → "S4") before comparing.
+  const token = (label ?? "").replace(/\s*\(.*$/, "").trim().toUpperCase();
+  switch (token) {
+    case "S0":
       return CaseTableSeverityColorPath.S0;
-    case CaseSeverityLevel.S1:
+    case "S1":
       return CaseTableSeverityColorPath.S1;
-    case CaseSeverityLevel.S2:
+    case "S2":
       return CaseTableSeverityColorPath.S2;
-    case CaseSeverityLevel.S3:
+    case "S3":
       return CaseTableSeverityColorPath.S3;
-    case CaseSeverityLevel.S4:
+    case "S4":
       return CaseTableSeverityColorPath.S4;
     default:
       return CaseTableSeverityColorPath.Default;

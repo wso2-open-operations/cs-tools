@@ -41,7 +41,11 @@ import {
 } from "@features/dashboard/utils/casesTable";
 import { DASHBOARD_CASES_VIEW_TABS } from "@features/dashboard/constants/casesTable";
 import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
-import { isS0Case, deriveFilterLabels } from "@features/support/utils/support";
+import {
+  deriveFilterLabels,
+  isS0Case,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/support";
 import {
   CaseType,
   ALL_CASES_FILTER_DEFINITIONS,
@@ -195,9 +199,9 @@ const CasesTable = ({
         severityId: effectiveFilters.severityId
           ? Number(effectiveFilters.severityId)
           : undefined,
-        issueId: effectiveFilters.issueTypes
-          ? Number(effectiveFilters.issueTypes)
-          : undefined,
+        issueIds: normalizeCaseSearchIssueIds(
+          effectiveFilters.issueTypes as string | string[] | undefined,
+        ),
         deploymentId: effectiveFilters.deploymentId
           ? String(effectiveFilters.deploymentId)
           : undefined,

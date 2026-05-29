@@ -63,7 +63,7 @@ export interface ListFiltersProps {
 
 /**
  * ListFilters component to display filter dropdowns for case lists.
- * The status filter renders as multi-select with checkboxes; all others are single-select.
+ * Multi-select filters (status, severity, category, deployment) use checkboxes.
  *
  * @param {ListFiltersProps} props - Filter values, metadata, and change handler.
  * @returns {JSX.Element} The rendered filter dropdowns.

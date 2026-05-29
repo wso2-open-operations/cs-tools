@@ -17,6 +17,7 @@
 import type { FilterDefinition } from "@components/list-view/ListFiltersPanel";
 import { CaseType } from "@features/support/constants/supportConstants";
 import type { AllCasesFilterValues } from "@features/support/types/cases";
+import { normalizeCaseSearchIssueIds } from "@features/support/utils/listView";
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { CaseSearchRequest } from "@features/support/types/cases";
 import { formatImpactLabel } from "@features/operations/utils/changeRequestUi";
@@ -307,7 +308,7 @@ export function buildServiceRequestsPageCaseSearchRequest(
     filters: {
       caseTypes: [CaseType.SERVICE_REQUEST],
       statusIds: resolvedStatusIds,
-      issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+      issueIds: normalizeCaseSearchIssueIds(filters.issueTypes),
       deploymentIds: filters.deploymentIds?.length
         ? filters.deploymentIds
         : undefined,

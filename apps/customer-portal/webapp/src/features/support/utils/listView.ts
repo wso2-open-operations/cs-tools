@@ -54,3 +54,26 @@ export function countListSearchAndFilters(
   }
   return n;
 }
+
+/**
+ * Normalizes category / issue-type filter values for case search API requests.
+ *
+ * @param issueTypes - Selected issue type id(s) from multi- or single-select filters.
+ * @returns Numeric issue type ids, or undefined when none are selected.
+ */
+export function normalizeCaseSearchIssueIds(
+  issueTypes?: string | string[],
+): number[] | undefined {
+  if (issueTypes == null) {
+    return undefined;
+  }
+  const raw = Array.isArray(issueTypes)
+    ? issueTypes
+    : issueTypes.trim() === ""
+      ? []
+      : [issueTypes];
+  const ids = raw
+    .map((value) => Number(value))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  return ids.length > 0 ? ids : undefined;
+}

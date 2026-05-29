@@ -1861,7 +1861,11 @@ export function computeMinScheduleDatetimeLocalForTimeZone(
   return severityStr > floorStr ? severityStr : floorStr;
 }
 
-export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";
+export {
+  countListSearchAndFilters,
+  hasListSearchOrFilters,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/listView";
 
 /** Hide terminal states from the Outstanding Cases overview list only. */
 export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {

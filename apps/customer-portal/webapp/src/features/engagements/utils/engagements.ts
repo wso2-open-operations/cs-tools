@@ -33,6 +33,7 @@ import {
   EngagementsSortField,
   type EngagementsStatKey,
 } from "@features/engagements/types/engagements";
+import { normalizeCaseSearchIssueIds } from "@features/support/utils/listView";
 
 /**
  * Maps list UI sort value to API field (guards unknown strings).
@@ -77,7 +78,7 @@ export function buildEngagementSearchRequest(
     filters: {
       caseTypes: [CaseType.ENGAGEMENT],
       statusIds: filters.statusIds?.length ? filters.statusIds.map(Number) : undefined,
-      issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+      issueIds: normalizeCaseSearchIssueIds(filters.issueTypes),
       deploymentIds: filters.deploymentIds?.length
         ? filters.deploymentIds
         : undefined,

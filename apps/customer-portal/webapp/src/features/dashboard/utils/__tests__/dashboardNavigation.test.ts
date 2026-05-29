@@ -58,9 +58,23 @@ describe("buildDashboardCaseSearchFilters", () => {
     ).toEqual({
       statusIds: [10],
       severityIds: [11],
-      issueId: undefined,
+      issueIds: undefined,
       deploymentIds: undefined,
       searchQuery: "test",
+      createdByMe: undefined,
+    });
+  });
+
+  it("maps multiple issueTypes to issueIds", () => {
+    expect(
+      buildDashboardCaseSearchFilters({
+        issueTypes: ["3", "5"],
+      }),
+    ).toEqual({
+      severityIds: undefined,
+      issueIds: [3, 5],
+      deploymentIds: undefined,
+      searchQuery: undefined,
       createdByMe: undefined,
     });
   });
@@ -79,7 +93,7 @@ describe("buildDashboardCaseSearchFilters", () => {
     ).toEqual({
       statusIds: [1, 1006],
       severityIds: [11],
-      issueId: undefined,
+      issueIds: undefined,
       deploymentIds: undefined,
       searchQuery: undefined,
       createdByMe: undefined,

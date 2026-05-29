@@ -30,7 +30,7 @@ export interface ListSearchPanelProps {
   filters: {
     statusIds?: string[];
     severityIds?: string[];
-    issueTypes?: string;
+    issueTypes?: string[];
     deploymentIds?: string[];
   };
   filterMetadata: CaseMetadataResponse | undefined;

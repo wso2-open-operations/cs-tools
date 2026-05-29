@@ -32,7 +32,7 @@ describe("ListFilters", () => {
   const defaultFilters = {
     statusIds: [] as string[],
     severityIds: [] as string[],
-    issueTypes: "",
+    issueTypes: [] as string[],
     deploymentIds: [] as string[],
   };
 

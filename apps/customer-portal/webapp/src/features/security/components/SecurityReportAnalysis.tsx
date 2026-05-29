@@ -39,7 +39,10 @@ import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListCard from "@components/list-view/ListCard";
 import CaseListCsvExportButton from "@features/support/components/list-export/CaseListCsvExportButton";
-import { countListSearchAndFilters } from "@features/support/utils/support";
+import {
+  countListSearchAndFilters,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/support";
 import type {
   AllCasesFilterValues,
   CaseListItem,
@@ -128,7 +131,7 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
           ? (fixedStatusIds.length > 0 ? fixedStatusIds : undefined)
           : (filters.statusIds?.length ? filters.statusIds.map(Number) : undefined),
         severityId: filters.severityId ? Number(filters.severityId) : undefined,
-        issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
+        issueIds: normalizeCaseSearchIssueIds(filters.issueTypes),
         deploymentId: filters.deploymentId || undefined,
         searchQuery: searchTerm.trim() || undefined,
         ...(fixedClosedDateRange ?? {}),

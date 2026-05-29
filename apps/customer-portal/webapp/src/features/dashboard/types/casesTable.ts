@@ -95,7 +95,7 @@ export type CasesTableFilterValues = {
   [key: string]: string | string[] | number | undefined;
   statusIds?: string[];
   severityId?: string | number;
-  issueTypes?: string | number;
+  issueTypes?: string | string[] | number;
   deploymentId?: string | number;
 };
 

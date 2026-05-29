@@ -15,6 +15,7 @@
 // under the License.
 
 import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
+import { normalizeCaseSearchIssueIds } from "@features/support/utils/listView";
 import type { MetadataItem } from "@/types/common";
 import type { CaseSearchFilters } from "@features/support/types/cases";
 
@@ -82,7 +83,7 @@ export function getDashboardOutstandingCasesDescription(
 export function buildDashboardCaseSearchFilters(params: {
   statusIds?: string[];
   severityIds?: string[];
-  issueTypes?: string;
+  issueTypes?: string | string[];
   deploymentIds?: string[];
   searchQuery?: string;
   createdByMe?: boolean;
@@ -105,14 +106,14 @@ export function buildDashboardCaseSearchFilters(params: {
   const normalizedSeverityIds = severityIds?.length
     ? severityIds.map(Number)
     : undefined;
-  const normalizedIssueId = issueTypes ? Number(issueTypes) : undefined;
+  const normalizedIssueIds = normalizeCaseSearchIssueIds(issueTypes);
 
   switch (true) {
     case Boolean(explicitStatusIds?.length):
       return {
         statusIds: explicitStatusIds,
         severityIds: normalizedSeverityIds,
-        issueId: normalizedIssueId,
+        issueIds: normalizedIssueIds,
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
@@ -121,7 +122,7 @@ export function buildDashboardCaseSearchFilters(params: {
       return {
         statusIds: resolveCasesTableDefaultStatusIds(caseStates),
         severityIds: normalizedSeverityIds,
-        issueId: normalizedIssueId,
+        issueIds: normalizedIssueIds,
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
@@ -129,7 +130,7 @@ export function buildDashboardCaseSearchFilters(params: {
     default:
       return {
         severityIds: normalizedSeverityIds,
-        issueId: normalizedIssueId,
+        issueIds: normalizedIssueIds,
         deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,

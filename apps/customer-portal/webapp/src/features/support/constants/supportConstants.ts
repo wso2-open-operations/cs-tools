@@ -440,6 +440,7 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     filterKey: "issueTypes",
     id: "category",
     metadataKey: "issueTypes",
+    multiSelect: true,
   },
   {
     filterKey: "deploymentIds",

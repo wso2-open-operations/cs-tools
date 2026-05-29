@@ -31,7 +31,7 @@ describe("casesTable utils", () => {
       expect(getSeverityColor(CaseSeverityLevel.S1)).toBe("warning.main");
       expect(getSeverityColor(CaseSeverityLevel.S2)).toBe("info.main");
       expect(getSeverityColor(CaseSeverityLevel.S3)).toBe("secondary.main");
-      expect(getSeverityColor(CaseSeverityLevel.S4)).toBe("text.secondary");
+      expect(getSeverityColor(CaseSeverityLevel.S4)).toBe("success.main");
       expect(getSeverityColor("S4")).toBe("success.main");
       expect(getSeverityColor("Unknown")).toBe("text.secondary");
       expect(getSeverityColor(undefined)).toBe("text.secondary");
