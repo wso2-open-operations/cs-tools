@@ -15,7 +15,7 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import AnnouncementsSearchBar from "@features/announcements/components/AnnouncementsSearchBar";
 
 vi.mock("@features/announcements/components/AnnouncementsFilters", () => ({

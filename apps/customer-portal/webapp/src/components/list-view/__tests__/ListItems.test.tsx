@@ -17,16 +17,22 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import ListItems from "@components/list-view/ListItems";
+import type { CaseListItem } from "@features/support/types/cases";
 
 const caseItem = {
   id: "case-1",
   number: "CS0001",
   title: "Test case",
-  status: "Open",
-  severity: "S1",
+  status: { id: "1", label: "Open" },
+  severity: { id: "10", label: "S1" },
   createdOn: "2026-01-01",
   description: "Details",
-} as const;
+  assignedEngineer: null,
+  project: { id: "p1", label: "Project" },
+  issueType: null,
+  deployedProduct: null,
+  deployment: null,
+} satisfies CaseListItem;
 
 describe("ListItems", () => {
   it("renders case card title", () => {

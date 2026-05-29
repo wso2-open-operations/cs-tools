@@ -18,6 +18,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ListCard from "@components/list-view/ListCard";
+import type { CaseListItem } from "@features/support/types/cases";
 
 vi.mock("@api/useAttachmentPreview", () => ({
   useAttachmentPreview: () => ({ data: null, isLoading: false }),
@@ -29,11 +30,16 @@ describe("ListCard", () => {
   id: "case-1",
   number: "CS0001",
   title: "Test case",
-  status: "Open",
-  severity: "S1",
+  status: { id: "1", label: "Open" },
+  severity: { id: "10", label: "S1" },
   createdOn: "2026-01-01",
   description: "Details",
-} as const} />);
+  assignedEngineer: null,
+  project: { id: "p1", label: "Project" },
+  issueType: null,
+  deployedProduct: null,
+  deployment: null,
+} satisfies CaseListItem} />);
     expect(screen.getByText("Test case")).toBeInTheDocument();
   });
 });
