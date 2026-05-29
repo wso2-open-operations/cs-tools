@@ -47,6 +47,7 @@ describe("changeRequests utils", () => {
     const stats = mapChangeRequestStats({
       stateCount: [{ id: "5", label: "Customer Approval", count: 4 }],
       totalCount: 10,
+      resolvedCount: { total: 0, currentMonth: 0, pastThirtyDays: 0 },
     });
     expect(stats.awaitingYourAction).toBe(4);
     expect(stats.totalRequests).toBe(10);

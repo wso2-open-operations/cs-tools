@@ -31,10 +31,20 @@ describe("serviceRequestValidation", () => {
 
   it("detects attachment and file copy path fields", () => {
     expect(
-      isAttachmentField({ questionText: "Upload vulnerability scan report", type: "Single Line Text" }),
+      isAttachmentField({
+        id: "1",
+        order: 1,
+        questionText: "Upload vulnerability scan report",
+        type: "Single Line Text",
+      }),
     ).toBe(true);
     expect(
-      isFileCopyPathField({ questionText: "File Copy Path", type: "text" }),
+      isFileCopyPathField({
+        id: "2",
+        order: 2,
+        questionText: "File Copy Path",
+        type: "text",
+      }),
     ).toBe(true);
   });
 

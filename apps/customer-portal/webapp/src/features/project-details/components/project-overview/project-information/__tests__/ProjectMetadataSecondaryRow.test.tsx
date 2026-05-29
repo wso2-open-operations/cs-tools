@@ -22,6 +22,7 @@ describe("ProjectMetadataSecondaryRow", () => {
   it("renders go live date label", () => {
     render(
       <ProjectMetadataSecondaryRow
+        slaStatus="Active"
         goLivePlanDate="Jun 1, 2024"
         onboardingStatus="In Progress"
         isLoading={false}

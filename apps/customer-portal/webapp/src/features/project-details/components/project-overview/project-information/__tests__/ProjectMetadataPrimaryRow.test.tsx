@@ -23,6 +23,7 @@ describe("ProjectMetadataPrimaryRow", () => {
     render(
       <ProjectMetadataPrimaryRow
         createdDate="Jan 1, 2024"
+        type={{ id: "1", label: "Subscription" }}
         supportTier="Premium"
         isLoading={false}
         isError={false}
