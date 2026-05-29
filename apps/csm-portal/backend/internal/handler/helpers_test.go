@@ -216,12 +216,20 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 // ----- mock entity deployment client -----
 
 type mockEntityDeploymentClient struct {
-	searchDeploymentsFn func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeploymentsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeployedProductsFn   func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityDeploymentClient) SearchDeployments(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchDeploymentsFn != nil {
 		return m.searchDeploymentsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityDeploymentClient) SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchDeployedProductsFn != nil {
+		return m.searchDeployedProductsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }
