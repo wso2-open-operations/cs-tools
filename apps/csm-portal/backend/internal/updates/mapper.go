@@ -18,28 +18,6 @@ package updates
 
 import "strconv"
 
-// mapRecommendedUpdateLevels converts the upstream snake-case response to the
-// portal camelCase response shape, mirroring processRecommendedUpdateLevels in utils.bal.
-func mapRecommendedUpdateLevels(src []upstreamRecommendedUpdateLevel) []RecommendedUpdateLevel {
-	out := make([]RecommendedUpdateLevel, len(src))
-	for i, s := range src {
-		out[i] = RecommendedUpdateLevel{
-			ProductName:                   s.ProductName,
-			ProductBaseVersion:            s.ProductBaseVersion,
-			Channel:                       s.Channel,
-			StartingUpdateLevel:           s.StartingUpdateLevel,
-			EndingUpdateLevel:             s.EndingUpdateLevel,
-			InstalledUpdatesCount:         s.InstalledUpdatesCount,
-			InstalledSecurityUpdatesCount: s.InstalledSecurityUpdatesCount,
-			Timestamp:                     s.Timestamp,
-			RecommendedUpdateLevel:        s.RecommendedUpdateLevel,
-			AvailableUpdatesCount:         s.AvailableUpdatesCount,
-			AvailableSecurityUpdatesCount: s.AvailableSecurityUpdatesCount,
-		}
-	}
-	return out
-}
-
 // mapProductUpdateLevels converts the upstream snake-case response to the
 // portal camelCase response shape, mirroring processProductUpdateLevels in utils.bal.
 func mapProductUpdateLevels(src []upstreamProductUpdateLevel) []ProductUpdateLevel {

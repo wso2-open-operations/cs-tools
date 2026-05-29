@@ -45,6 +45,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(entityClient)
 	projectHandler := handler.NewProjectHandler(entityClient)
 	productHandler := handler.NewProductHandler(entityClient)
+	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -81,7 +82,6 @@ func main() {
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
-	mux.HandleFunc("GET /updates/recommended-update-levels", updatesHandler.GetRecommendedUpdateLevels)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
@@ -90,7 +90,8 @@ func main() {
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
-	mux.HandleFunc("POST /product/{id}/versions/search", productHandler.SearchProductVersions)
+	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
+	mux.HandleFunc("POST /projects/{id}/deployments/search", deploymentHandler.SearchDeployments)
 
 	addr := envOrDefault("PORT", ":8080")
 	slog.Info("starting csm-portal backend", "addr", addr)
