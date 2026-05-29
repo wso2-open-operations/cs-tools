@@ -1,0 +1,47 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+import { Box, Card, Stack, Typography } from "@wso2/oxygen-ui";
+import { Mail } from "@wso2/oxygen-ui-icons-react";
+
+import { UserAvatar } from "@features/users/components";
+import { useMode } from "@features/users/hooks";
+
+export function UserOverview() {
+  const { initial } = useMode();
+  if (!initial) return;
+
+  const { email, firstName, lastName } = initial;
+
+  return (
+    <Card component={Stack} textAlign="center" alignItems="center" gap={1} p={3} sx={{ bgcolor: "background.paper" }}>
+      <UserAvatar size="large">{initial.firstName}</UserAvatar>
+      <Stack textAlign="center" gap={0.5}>
+        <Typography variant="h5" fontWeight="medium">
+          {firstName + " " + lastName}
+        </Typography>
+
+        <Stack direction="row" justifyContent="center" alignItems="center" gap={1}>
+          <Box sx={{ color: "text.secondary" }}>
+            <Mail size={16} />
+          </Box>
+          <Typography variant="body2" fontWeight="regular" color="text.secondary">
+            {email}
+          </Typography>
+        </Stack>
+      </Stack>
+    </Card>
+  );
+}

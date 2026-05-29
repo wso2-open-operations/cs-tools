@@ -1,0 +1,67 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+import type { RoleOptionProps } from "@features/users/components";
+import type { Role } from "@features/users/types";
+
+export const ErrorMessages = {
+  NATIVE_BRIDGE_NOT_AVAILABLE: "Native bridge is not available",
+};
+
+export const LocalStorageKeys = {
+  accessToken: "accessToken",
+  idToken: "idToken",
+  lastVisitedProjectId: "last-active-project-id",
+};
+
+export const CASE_TYPES = {
+  DEFAULT: "default_case",
+  SERVICE_REQUEST: "service_request",
+  CHANGE_REQUEST: "change_request",
+  SECURITY_REPORT_ANALYSIS: "security_report_analysis",
+  ENGAGEMENT: "engagement",
+  ANNOUNCEMENT: "announcement",
+  CHAT: "chat",
+} as const;
+
+export const ROLES = {
+  ADMIN: "Admin",
+  PORTAL_USER: "Portal User",
+  SECURITY_CONTACT: "Security Contact",
+  SYSTEM_USER: "System User",
+} as const;
+
+export const DEFAULT_USER_ROLE: Role = ROLES.PORTAL_USER;
+
+export const ROLE_OPTIONS: RoleOptionProps[] = [
+  {
+    role: ROLES.ADMIN,
+    description: "Full administrative privileges, billing control, and user management.",
+  },
+  {
+    role: ROLES.PORTAL_USER,
+    description: "Can log in to and access the Support Portal",
+  },
+  {
+    role: ROLES.SECURITY_CONTACT,
+    description: "Receives security bulletins and critical security announcements",
+  },
+  {
+    role: ROLES.SYSTEM_USER,
+    description: "Used exclusively for system to system integrations. Cannot log in to the Support Portal",
+  },
+];
+
+export const ADMIN_ROLE_ID = "sn_customerservice.customer_admin";

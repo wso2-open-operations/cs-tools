@@ -13,9 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
 import { AcrylicOrangeTheme, extendTheme } from "@wso2/oxygen-ui";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
+
 import { typography } from "@theme/typography";
 
 const theme = extendTheme(AcrylicOrangeTheme, {

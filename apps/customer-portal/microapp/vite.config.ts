@@ -13,10 +13,9 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 // https://vite.dev/config/
@@ -30,13 +29,17 @@ export default defineConfig({
     alias: {
       "@root": path.resolve(__dirname),
       "@src": path.resolve(__dirname, "src"),
-      "@components": path.resolve(__dirname, "src/components"),
+      "@app": path.resolve(__dirname, "src/app"),
+      "@components": path.resolve(__dirname, "src/shared/components"),
       "@config": path.resolve(__dirname, "src/config"),
       "@context": path.resolve(__dirname, "src/context"),
       "@icons": path.resolve(__dirname, "src/icons"),
       "@pages": path.resolve(__dirname, "src/pages"),
       "@theme": path.resolve(__dirname, "src/theme"),
-      "@utils": path.resolve(__dirname, "src/utils"),
+      "@shared": path.resolve(__dirname, "src/shared"),
+      "@infrastructure": path.resolve(__dirname, "src/infrastructure"),
+      "@features": path.resolve(__dirname, "src/features"),
+      "@bridge": path.resolve(__dirname, "src/bridge"),
     },
   },
 });

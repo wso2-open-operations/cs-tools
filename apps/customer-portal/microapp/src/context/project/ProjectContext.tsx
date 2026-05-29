@@ -13,13 +13,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import type { ProjectFeaturesDto } from "@root/src/types";
 import { createContext } from "react";
+
+import type { ProjectFeaturesDto } from "@features/projects/types/project.dto";
 
 export type ProjectContextType = {
   projectId: string | null;
-  projectName?: string;
+  projectName: string | null;
   noveraEnabled: boolean;
   kbReferencesEnabled: boolean;
   features?: ProjectFeaturesDto;

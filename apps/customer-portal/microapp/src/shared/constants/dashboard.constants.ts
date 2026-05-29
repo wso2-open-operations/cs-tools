@@ -1,0 +1,32 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+import { colors } from "@wso2/oxygen-ui";
+
+export const PROJECT_SEVERITY_PIE_COLORS: Record<string, string> = {
+  "10": colors.red[500],
+  "11": colors.orange[500],
+  "12": colors.yellow[600],
+  "13": colors.blue[500],
+  "14": colors.green[500],
+};
+
+export const ENGAGEMENTS_TYPE_PIE_COLORS: Record<string, string> = {
+  Migration: colors.blue[500],
+  Consultancy: colors.green[500],
+  "New Feature / Improvement": colors.teal[400],
+  "Follow up": colors.cyan[500],
+  Onboarding: colors.yellow[600],
+};

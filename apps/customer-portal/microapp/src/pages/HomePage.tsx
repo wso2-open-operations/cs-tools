@@ -13,215 +13,121 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-import { Grid, colors, pxToRem } from "@wso2/oxygen-ui";
+import { colors, Grid, pxToRem } from "@wso2/oxygen-ui";
 import { Activity, CircleCheck, Clock4, OctagonAlert } from "@wso2/oxygen-ui-icons-react";
-import { MetricWidget, PieChartWidget, type PieDataItem } from "@components/features/dashboard";
-import { useQuery } from "@tanstack/react-query";
-import { cases } from "@src/services/cases";
-import { useProject } from "@context/project";
-import { changeRequests } from "../services/changes";
-import { overrideOrDefault } from "../utils/others";
-import { Fab } from "../components/core";
-import { useNavigate } from "react-router-dom";
 
-import { ENGAGEMENTS_TYPE_PIE_COLORS, PROJECT_SEVERITY_PIE_COLORS } from "../config/constants";
-import type { ModeType } from "./AllItemsPage";
+import { useDeclareLayout } from "@context/layout";
+import { useProject } from "@context/project";
+
+import { WidgetMetric, WidgetPieChart } from "@features/dashboard/components";
+import { useDashboardStats } from "@features/dashboard/hooks";
+
+import {
+  CASE_TYPES,
+  DASHBOARD_METRIC_ACTION_REQUIRED,
+  DASHBOARD_METRIC_AVG_RESPONSE_TIME,
+  DASHBOARD_METRIC_CLOSED,
+  DASHBOARD_METRIC_OUTSTANDING,
+  DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS,
+  DASHBOARD_WIDGET_OUTSTANDING_OPERATIONS,
+  DASHBOARD_WIDGET_OUTSTANDING_SUPPORT_CASES,
+  Tab,
+} from "@shared/constants";
+import { useNavigation } from "@shared/hooks";
+
+import { Fab } from "@components/core";
 
 export default function HomePage() {
-  const navigate = useNavigate();
+  useDeclareLayout({
+    tabIndex: Tab.Home,
+    visibility: {
+      exitButton: true,
+      projectSelector: true,
+    },
+  });
+
+  const { features } = useProject();
   const {
-    projectId,
-    features: {
-      hasServiceRequestReadAccess,
-      hasChangeRequestReadAccess,
-      hasEngagementsReadAccess,
-      hasSraReadAccess,
-    } = {},
-  } = useProject();
-  const { data: defaultCaseTypeStats } = useQuery(cases.stats(projectId!, { caseTypes: ["default_case"] }));
-  const { data: engagementCaseTypeStats } = useQuery({
-    ...cases.stats(projectId!, { caseTypes: ["engagement"] }),
-    enabled: hasEngagementsReadAccess,
-  });
+    toActionRequiredItems,
+    toOutstandingItems,
+    toClosedItems,
+    toOutstandingServiceRequests,
+    toOutstandingChangeRequests,
+    toBySeverity,
+  } = useNavigation();
+  const stats = useDashboardStats();
 
-  const { data: serviceRequestCaseTypeStats } = useQuery({
-    ...cases.stats(projectId!, { caseTypes: ["service_request"] }),
-    enabled: hasServiceRequestReadAccess,
-  });
-
-  const { data: changeRequestCaseTypeStats } = useQuery({
-    ...changeRequests.stats(projectId!),
-    enabled: !!hasChangeRequestReadAccess,
-  });
-
-  const { data: multipleCaseTypesStats } = useQuery(
-    cases.stats(projectId!, {
-      caseTypes: [
-        "default_case",
-        ...(hasSraReadAccess ? ["security_report_analysis"] : []),
-        ...(hasEngagementsReadAccess ? ["engagement"] : []),
-        ...(hasServiceRequestReadAccess ? ["service_request"] : []),
-      ],
-    }),
-  );
-
-  const isInteractionsLoading =
-    multipleCaseTypesStats === undefined || (hasChangeRequestReadAccess && changeRequestCaseTypeStats === undefined);
-
-  const totalInteractions = isInteractionsLoading
-    ? undefined
-    : (multipleCaseTypesStats?.actionRequiredCount ?? 0) +
-      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.actionRequiredCount ?? 0) : 0);
-
-  const activeInteractions = isInteractionsLoading
-    ? undefined
-    : (multipleCaseTypesStats?.outstandingCount ?? 0) +
-      (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.outstandingCount ?? 0) : 0);
-
-  const resolvedThisMonth =
-    multipleCaseTypesStats?.resolvedCases?.pastThirtyDays === undefined &&
-    (!hasChangeRequestReadAccess || changeRequestCaseTypeStats?.resolvedCount?.pastThirtyDays === undefined)
-      ? undefined
-      : (multipleCaseTypesStats?.resolvedCases?.pastThirtyDays ?? 0) +
-        (hasChangeRequestReadAccess ? (changeRequestCaseTypeStats?.resolvedCount?.pastThirtyDays ?? 0) : 0);
-
-  const averageResponseTime = multipleCaseTypesStats?.averageResponseTime;
-
-  const outstandingSupportCasesPieData = defaultCaseTypeStats?.outstandingSeverityCount.map((item) => ({
-    id: item.id,
-    label: overrideOrDefault(item.label),
-    value: item.count,
-    color: PROJECT_SEVERITY_PIE_COLORS[item.id] || colors.grey[500],
-  }));
-
-  const outstandingEngagementsPieData: (PieDataItem & { id: string | number })[] =
-    engagementCaseTypeStats?.outstandingEngagementTypeCount.map((item) => ({
-      id: item.id,
-      label: overrideOrDefault(item.label),
-      value: item.count,
-      color: ENGAGEMENTS_TYPE_PIE_COLORS[item.label] || colors.grey[500],
-    })) ?? [];
-
-  const data: (PieDataItem & { id: string | number })[] = [];
-
-  if (hasServiceRequestReadAccess) {
-    data.push({
-      id: "service",
-      label: "Service Requests",
-      value: serviceRequestCaseTypeStats?.outstandingCount ?? 0,
-      color: colors.orange[500],
-    });
-  }
-
-  if (hasChangeRequestReadAccess) {
-    data.push({
-      id: "change",
-      label: "Change Requests",
-      value: changeRequestCaseTypeStats?.outstandingCount ?? 0,
-      color: colors.blue[500],
-    });
-  }
-
-  const outstandingOperationsPieData =
-    serviceRequestCaseTypeStats?.outstandingCount != undefined ||
-    changeRequestCaseTypeStats?.outstandingCount != undefined
-      ? data
-      : undefined;
-
-  const navigateBySeverity = (id: string | number, label: string) => {
-    navigate("/cases/all", {
-      state: { mode: { type: "severity", id, title: `Outstanding ${label} Cases` } as ModeType },
-    });
-  };
-
-  const navigateByServiceRequestOrChageRequest = (_: string | number, type: string) => {
-    if (type === "Service Requests")
-      navigate("/services/all", {
-        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Service Requests" } as ModeType },
-      });
-
-    if (type === "Change Requests")
-      navigate("/changes/all", {
-        state: { mode: { type: "status", status: "outstanding", title: "Outstanding Change Requests" } as ModeType },
-      });
+  const navigateByOperationsType = (type: string | number) => {
+    if (type === CASE_TYPES.SERVICE_REQUEST) toOutstandingServiceRequests();
+    if (type === CASE_TYPES.CHANGE_REQUEST) toOutstandingChangeRequests();
   };
 
   return (
     <>
       <Grid spacing={1.5} container>
         <Grid size={6}>
-          <MetricWidget
-            label="Action Required"
-            value={totalInteractions}
+          <WidgetMetric
+            label={DASHBOARD_METRIC_ACTION_REQUIRED}
+            value={stats.actionRequired}
             icon={<OctagonAlert size={pxToRem(18)} color={colors.orange[500]} />}
-            onClick={() =>
-              navigate("/multiple/all", {
-                state: {
-                  mode: { type: "status", status: "action_required", title: "Action Required Items" } as ModeType,
-                },
-              })
-            }
+            onClick={toActionRequiredItems}
           />
         </Grid>
+
         <Grid size={6}>
-          <MetricWidget
-            label="Outstanding"
-            value={activeInteractions}
+          <WidgetMetric
+            label={DASHBOARD_METRIC_OUTSTANDING}
+            value={stats.outstanding}
             icon={<Clock4 size={pxToRem(18)} color={colors.yellow[700]} />}
-            onClick={() =>
-              navigate("/multiple/all", {
-                state: { mode: { type: "status", status: "outstanding", title: "Outstanding Items" } as ModeType },
-              })
-            }
+            onClick={toOutstandingItems}
           />
         </Grid>
+
         <Grid size={6}>
-          <MetricWidget
-            label="Closed (30d)"
-            value={resolvedThisMonth}
+          <WidgetMetric
+            label={DASHBOARD_METRIC_CLOSED}
+            value={stats.resolvedThisMonth}
             icon={<CircleCheck size={pxToRem(18)} color={colors.green[600]} />}
-            onClick={() =>
-              navigate("/multiple/all", {
-                state: { mode: { type: "status", status: "resolved", title: "Closed Items (30d)" } as ModeType },
-              })
-            }
+            onClick={toClosedItems}
           />
         </Grid>
+
         <Grid size={6}>
-          <MetricWidget
-            label="Average Response Time"
-            value={averageResponseTime !== undefined ? `${averageResponseTime}h` : undefined}
+          <WidgetMetric
+            label={DASHBOARD_METRIC_AVG_RESPONSE_TIME}
+            value={stats.averageResponseTime !== undefined ? `${stats.averageResponseTime}h` : undefined}
             icon={<Activity size={pxToRem(18)} color={colors.cyan[500]} />}
           />
         </Grid>
 
         <Grid size={6}>
-          <PieChartWidget
-            title="Outstanding Support Cases"
-            data={outstandingSupportCasesPieData}
-            onClick={navigateBySeverity}
+          <WidgetPieChart
+            title={DASHBOARD_WIDGET_OUTSTANDING_SUPPORT_CASES}
+            data={stats.outstandingSupportCasesPieData}
+            onClick={toBySeverity}
           />
         </Grid>
 
-        {(hasServiceRequestReadAccess || hasChangeRequestReadAccess) && (
+        {(features?.hasServiceRequestReadAccess || features?.hasChangeRequestReadAccess) && (
           <Grid size={6}>
-            <PieChartWidget
-              title="Outstanding Operations"
-              data={outstandingOperationsPieData}
-              onClick={navigateByServiceRequestOrChageRequest}
+            <WidgetPieChart
+              title={DASHBOARD_WIDGET_OUTSTANDING_OPERATIONS}
+              data={stats.outstandingOperationsPieData}
+              onClick={navigateByOperationsType}
             />
           </Grid>
         )}
 
-        {hasEngagementsReadAccess && (
+        {features?.hasEngagementsReadAccess && (
           <Grid size={6}>
-            <PieChartWidget title="Outstanding Engagements" data={outstandingEngagementsPieData} />
+            <WidgetPieChart
+              title={DASHBOARD_WIDGET_OUTSTANDING_ENGAGEMENTS}
+              data={stats.outstandingEngagementsPieData}
+            />
           </Grid>
         )}
       </Grid>
 
-      {/* Floating Action Button */}
       <Fab />
     </>
   );
