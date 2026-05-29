@@ -20,7 +20,6 @@ import { attach, RaxConfig } from 'retry-axios';
 
 /**
  * Singleton Axios instance with Asgardeo ID token on each request and 401 retries (`retry-axios`).
- * Sends the Asgardeo ID token as `Authorization: Bearer` (Choreo gateway) and `x-jwt-assertion` (Ballerina).
  */
 export class APIService {
   private static _instance: AxiosInstance;
