@@ -30,7 +30,7 @@ describe("ChangeRequestsCsvExportButton", () => {
       <ChangeRequestsCsvExportButton
         projectId="proj-1"
         searchRequest={{
-          sortBy: { field: ChangeRequestSortField.CREATED_ON, order: SortOrder.DESC },
+          sortBy: { field: ChangeRequestSortField.CreatedOn, order: SortOrder.DESC },
         }}
         prefetchedItems={[]}
       />,

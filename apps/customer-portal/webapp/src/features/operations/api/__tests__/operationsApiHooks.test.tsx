@@ -58,7 +58,7 @@ function createWrapper() {
 }
 
 const baseSearchRequest = {
-  sortBy: { field: ChangeRequestSortField.CREATED_ON, order: SortOrder.DESC },
+  sortBy: { field: ChangeRequestSortField.CreatedOn, order: SortOrder.DESC },
 };
 
 describe("operations API hooks", () => {

@@ -22,7 +22,7 @@ import { SERVICE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE } from "@features/operation
 describe("ServiceRequestsList", () => {
   it("renders empty state when there are no service requests", () => {
     render(
-      <ServiceRequestsList serviceRequests={[]} isLoading={false} isError={false} />,
+      <ServiceRequestsList serviceRequests={[]} isLoading={false} />,
     );
     expect(screen.getByText(SERVICE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE)).toBeInTheDocument();
   });
