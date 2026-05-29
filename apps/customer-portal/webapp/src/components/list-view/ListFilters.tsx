@@ -105,7 +105,7 @@ export default function ListFilters({
     };
 
   return (
-    <Grid container spacing={2} sx={{ mt: 1 }}>
+    <Grid container spacing={2} sx={{ mt: 1, flexWrap: { xs: "wrap", md: "nowrap" }, overflowX: { md: "auto" } }}>
       {ALL_CASES_FILTER_DEFINITIONS.map((def) => {
         if (hideSeverityFilter && def.id === "severity") {
           return null;
@@ -177,7 +177,7 @@ export default function ListFilters({
         if (def.multiSelect) {
           const selectedValues = (filters[def.filterKey] as string[] | undefined) ?? [];
           return (
-            <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid key={def.id} size={{ xs: 12, sm: 6 }} sx={{ flex: { md: "1 1 0" }, minWidth: { md: 160 } }}>
               <FormControl fullWidth size="small">
                 <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
                 <Select
@@ -232,7 +232,7 @@ export default function ListFilters({
         }
 
         return (
-          <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
+          <Grid key={def.id} size={{ xs: 12, sm: 6 }} sx={{ flex: { md: "1 1 0" }, minWidth: { md: 160 } }}>
             <FormControl fullWidth size="small">
               <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
               <Select
