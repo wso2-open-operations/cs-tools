@@ -15,8 +15,7 @@
 // under the License.
 
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 vi.mock("@api/useAttachmentPreview", () => ({
   useAttachmentPreview: () => ({ data: null, isLoading: false }),
