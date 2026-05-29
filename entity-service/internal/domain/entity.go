@@ -283,3 +283,31 @@ type SearchDeploymentsResponse struct {
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
 }
+
+// DeployedProduct represents a product (and optional version) associated with a deployment.
+// ProductVersionID is optional and omitted from JSON when absent.
+type DeployedProduct struct {
+	ID               string     `json:"id"`
+	DeploymentID     string     `json:"deploymentId"`
+	ProductID        string     `json:"productId"`
+	ProductVersionID *string    `json:"productVersionId,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
+// SearchDeployedProductsRequest is the input for a deployed-product search operation.
+// DeploymentIDs scopes results to the given deployments; it is the only filter besides pagination.
+type SearchDeployedProductsRequest struct {
+	Pagination    Pagination `json:"pagination"`
+	DeploymentIDs []string   `json:"deploymentIds"`
+}
+
+// SearchDeployedProductsResponse is the paginated result of a deployed-product search.
+// HasMore is true when additional pages are available beyond the current offset.
+type SearchDeployedProductsResponse struct {
+	DeployedProducts []DeployedProduct `json:"deployedProducts"`
+	Total            int               `json:"total"`
+	Limit            int               `json:"limit"`
+	Offset           int               `json:"offset"`
+	HasMore          bool              `json:"hasMore"`
+}
