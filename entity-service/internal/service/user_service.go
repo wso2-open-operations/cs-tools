@@ -19,12 +19,26 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
+
+var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// validateUUIDs returns a ValidationError if any element of ids is not a valid UUID.
+func validateUUIDs(field string, ids []string) error {
+	for _, id := range ids {
+		if !uuidRE.MatchString(id) {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("%s contains invalid UUID: %q", field, id)}
+		}
+	}
+	return nil
+}
 
 const (
 	defaultLimit      = 20

@@ -38,6 +38,9 @@ func (s *deployedProductService) SearchDeployedProducts(ctx context.Context, req
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchDeployedProductsResponse{}, err
 	}
+	if err := validateUUIDs("deploymentIds", req.DeploymentIDs); err != nil {
+		return domain.SearchDeployedProductsResponse{}, err
+	}
 
 	deployedProducts, total, err := s.repo.SearchDeployedProducts(ctx, req)
 	if err != nil {
