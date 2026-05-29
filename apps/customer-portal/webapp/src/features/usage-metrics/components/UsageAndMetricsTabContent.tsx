@@ -14,7 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box } from "@wso2/oxygen-ui";
+import { Box, Button } from "@wso2/oxygen-ui";
+import { Upload } from "@wso2/oxygen-ui-icons-react";
+import type { ReactNode } from "react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { useParams } from "react-router";
@@ -22,6 +24,7 @@ import TabBar from "@components/tab-bar/TabBar";
 import UsageOverviewPanel from "@features/usage-metrics/components/UsageOverviewPanel";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
 import UsageMetricsTimeRangeSelector from "@features/usage-metrics/components/UsageMetricsTimeRangeSelector";
+import DeploymentUsageUploadDialog from "@features/usage-metrics/components/DeploymentUsageUploadDialog";
 import { UsageMetricsInnerTabId } from "@features/usage-metrics/types/usageMetrics";
 import { UsageTimeRange } from "@features/project-details/types/usage";
 import {
@@ -55,6 +58,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [customEnd, setCustomEnd] = useState<string>("");
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
+  const [uploadOpen, setUploadOpen] = useState<boolean>(false);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
@@ -127,6 +131,18 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     setTimeRange(UsageTimeRange.ONE_MONTH);
   };
 
+  const uploadButton: ReactNode = (
+    <Button
+      variant="outlined"
+      size="small"
+      startIcon={<Upload size={16} />}
+      onClick={() => setUploadOpen(true)}
+      sx={{ flexShrink: 0 }}
+    >
+      Upload
+    </Button>
+  );
+
   const timeRangeSelector = (
     <UsageMetricsTimeRangeSelector
       innerTab={innerTab}
@@ -141,6 +157,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
       onCancelCustom={handleCancelCustom}
       appliedCustomStart={appliedCustomStart}
       appliedCustomEnd={appliedCustomEnd}
+      rightAction={uploadButton}
     />
   );
 
@@ -210,6 +227,11 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
           </Box>
         </Box>
       </Box>
+
+      <DeploymentUsageUploadDialog
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+      />
 
       {innerTab !== UsageMetricsInnerTabId.OVERVIEW && timeRangeSelector}
 

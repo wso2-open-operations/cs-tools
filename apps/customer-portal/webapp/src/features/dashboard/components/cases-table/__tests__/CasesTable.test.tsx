@@ -156,7 +156,7 @@ describe("CasesTable", () => {
     expect(mockUseGetProjectCasesPage).toHaveBeenCalledWith(
       mockProjectId,
       expect.objectContaining({
-        sortBy: { field: "createdOn", order: "desc" },
+        sortBy: { field: "updatedOn", order: "desc" },
       }),
       expect.any(Number),
       expect.any(Number),

@@ -25,6 +25,23 @@ configurable types:FeatureFlags featureFlags = {
 };
 configurable string[] restrictedChangeRequestStateIds = ["-3", "-4", "-5"];
 
+# Validate deployment usage import request.
+#
+# + req - Request containing zip file binary body
+# + return - Error message if validation fails, nil otherwise
+isolated function validateDeploymentUsageImportRequest(http:Request req) returns string? {
+    string contentType = req.getContentType();
+    if contentType.trim().length() == 0 {
+        return "Content-Type header is required.";
+    }
+
+    string baseType = re `;`.split(contentType.trim().toLowerAscii())[0].trim();
+    if baseType != "application/zip" && baseType != "application/x-zip-compressed" {
+        return "Request body must be a zip file.";
+    }
+    return;
+}
+
 # Search cases for a given project.
 #
 # + idToken - ID token for authorization
@@ -41,9 +58,11 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             searchQuery: payload.filters?.searchQuery,
             issueTypeKeys: issueId != () ? [issueId] : (),
             severityKey: payload.filters?.severityId,
+            severityKeys: payload.filters?.severityIds,
             caseTypes: payload.filters?.caseTypes,
             stateKeys: payload.filters?.statusIds,
             deploymentId: payload.filters?.deploymentId,
+            deploymentIds: payload.filters?.deploymentIds,
             createdByMe: payload.filters?.createdByMe,
             engagementTypeKeys: payload.filters?.engagementTypeKeys,
             closedStartDate: payload.filters?.closedStartDate,
@@ -127,6 +146,8 @@ public isolated function mapProjectFeatures(entity:ProjectMetadataResponse proje
         hasTimeLogsReadAccess: projectMetadata.features.hasTimeLogsReadAccess,
         hasDeploymentWriteAccess: projectMetadata.features.hasDeploymentWriteAccess,
         hasDeploymentReadAccess: projectMetadata.features.hasDeploymentReadAccess,
+        hasComponentAnalysisReadAccess: projectMetadata.features.hasComponentAnalysisReadAccess,
+        hasUsageMetricsReadAccess: projectMetadata.features.hasUsageMetricsReadAccess,
         defaultCaseProductCategories: projectMetadata.features.defaultCaseProductCategories,
         srProductCategories: projectMetadata.features.srProductCategories
     };

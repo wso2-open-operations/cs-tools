@@ -32,6 +32,9 @@ export const FOOTER_HEIGHT_PX = 64;
 // Header height in pixels.
 export const HEADER_HEIGHT_PX = 64;
 
+/** Overlay sidebar drawer width; matches Oxygen Sidebar default expanded width. */
+export const SIDEBAR_DRAWER_WIDTH_PX = 250;
+
 // Vertical gap in pixels.
 export const BANNER_FOOTER_GAP_PX = 24;
 

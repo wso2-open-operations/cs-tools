@@ -155,6 +155,7 @@ export type CaseListItem = AuditMetadata & {
   assignedEngineer: string | IdLabelRef | null;
   project: IdLabelRef;
   issueType: IdLabelRef | null;
+  engagementType?: IdLabelRef | null;
   deployedProduct: IdLabelRef | null;
   deployment: IdLabelRef | null;
   severity: IdLabelRef | null;
@@ -219,6 +220,7 @@ export type CaseDetails = AuditMetadata & {
   relatedCase: IdLabelRef | null;
   conversation: IdLabelRef | null;
   issueType: IdLabelRef | null;
+  engagementType?: IdLabelRef | null;
   catalog?: IdLabelRef | null;
   catalogItem?: IdLabelRef | null;
   variables?: CaseVariable[];
@@ -301,11 +303,11 @@ export type CaseMetadataResponse = {
 
 // Model type for all cases filter values state.
 export type AllCasesFilterValues = {
-  [key: string]: string | undefined;
-  statusId?: string;
-  severityId?: string;
+  [key: string]: string | string[] | undefined;
+  statusIds?: string[];
+  severityIds?: string[];
   issueTypes?: string;
-  deploymentId?: string;
+  deploymentIds?: string[];
   engagementTypeKey?: string;
 };
 
@@ -357,8 +359,8 @@ export type CreateCaseResponse = AuditMetadata & {
 // Filter type for searching cases.
 export type CaseSearchFilters = {
   issueId?: number;
-  deploymentId?: string;
-  severityId?: number;
+  deploymentIds?: string[];
+  severityIds?: number[];
   statusId?: number;
   statusIds?: number[];
   searchQuery?: string;

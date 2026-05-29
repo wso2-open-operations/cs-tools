@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Stack, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Skeleton, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
 import type { Project } from "@src/types";
 
@@ -37,11 +37,19 @@ export function ProjectPopoverItem({ name, active = false, onClick }: ProjectPop
       onClick={onClick}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="center" width="100%" gap={1}>
-        <Typography variant="subtitle1" fontWeight="medium" color="text.primary" textAlign="left">
+        <Typography noWrap variant="subtitle1" fontWeight="medium" color="text.primary" textAlign="left">
           {name}
         </Typography>
         {active && <Check style={{ flexShrink: 0 }} color={theme.palette.primary.main} />}
       </Stack>
+    </Stack>
+  );
+}
+
+export function ProjectPopoverItemSkeleton() {
+  return (
+    <Stack sx={{ px: 2, py: 0.2 }}>
+      <Skeleton variant="text" width="100%" height={28} />
     </Stack>
   );
 }

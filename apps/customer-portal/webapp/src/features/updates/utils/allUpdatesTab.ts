@@ -119,12 +119,14 @@ export function getVersionEntriesForProduct(
 }
 
 /**
- * Returns sorted update levels for the selected product and version.
+ * Returns sorted update levels for the selected product and version, always
+ * including the baseline update level `0`.
  *
  * @param data - Product update levels response.
  * @param productName - Selected product.
  * @param productVersion - Selected version (productBaseVersion).
- * @returns {number[]} Sorted update levels.
+ * @returns {number[]} Sorted update levels with baseline `0` guaranteed; falls
+ * back to `[0]` when no update levels are available for the selected version.
  */
 export function getUpdateLevelsForProductVersion(
   data: ProductUpdateLevelsItem[] | undefined,
@@ -133,6 +135,6 @@ export function getUpdateLevelsForProductVersion(
 ): number[] {
   const entries = getVersionEntriesForProduct(data, productName);
   const entry = entries.find((e) => e.productBaseVersion === productVersion);
-  if (!entry?.updateLevels?.length) return [];
-  return [...entry.updateLevels].sort((a, b) => a - b);
+  if (!entry?.updateLevels?.length) return [0];
+  return [...new Set([0, ...entry.updateLevels])].sort((a, b) => a - b);
 }

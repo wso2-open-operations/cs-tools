@@ -376,17 +376,19 @@ export default function SettingsUserManagement({
                           justifyContent: "flex-end",
                         }}
                       >
-                        <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label="Edit user"
-                              onClick={() => setEditTarget(contact)}
-                            >
-                              <PencilLine size={16} />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
+                        {!contact.isCsIntegrationUser && (
+                          <Tooltip title={SETTINGS_USER_EDIT_TOOLTIP}>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label="Edit user"
+                                onClick={() => setEditTarget(contact)}
+                              >
+                                <PencilLine size={16} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        )}
                         <Tooltip title={SETTINGS_USER_REMOVE_TOOLTIP}>
                           <span>
                             <IconButton

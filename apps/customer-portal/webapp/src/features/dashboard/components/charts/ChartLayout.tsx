@@ -54,12 +54,11 @@ const ChartLayout = ({
   const visibleChartsCount =
     1 + (showOperationsChart ? 1 : 0) + (showEngagementsChart ? 1 : 0);
   const singleChartMode = visibleChartsCount === 1;
-  const chartSpan =
-    singleChartMode
-      ? ({ xs: 12 as const, md: 12 as const })
-      : showOperationsChart
-        ? DASHBOARD_CHART_SPAN
-        : ({ xs: 12 as const, md: 6 as const });
+  const chartSpan = singleChartMode
+    ? { xs: 12 as const, md: 12 as const }
+    : showOperationsChart
+      ? DASHBOARD_CHART_SPAN
+      : { xs: 12 as const, md: 6 as const };
 
   return (
     <Grid container spacing={3} sx={{ mb: 3 }}>

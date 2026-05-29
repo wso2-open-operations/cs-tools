@@ -69,9 +69,7 @@ export default function SettingsPage(): JSX.Element {
     () =>
       hideRestrictedTabs
         ? SETTINGS_PAGE_TABS.filter(
-            (tab) =>
-              tab.id !== SettingsPageTabId.USERS &&
-              tab.id !== SettingsPageTabId.REGISTRY_TOKENS,
+            (tab) => tab.id !== SettingsPageTabId.REGISTRY_TOKENS,
           )
         : [...SETTINGS_PAGE_TABS],
     [hideRestrictedTabs],
@@ -80,8 +78,7 @@ export default function SettingsPage(): JSX.Element {
   const safeActiveTab = useMemo(() => {
     if (
       hideRestrictedTabs &&
-      (resolveSettingsPageTabId(activeTab) === SettingsPageTabId.USERS ||
-        resolveSettingsPageTabId(activeTab) === SettingsPageTabId.REGISTRY_TOKENS)
+      resolveSettingsPageTabId(activeTab) === SettingsPageTabId.REGISTRY_TOKENS
     ) {
       return SettingsPageTabId.AI;
     }

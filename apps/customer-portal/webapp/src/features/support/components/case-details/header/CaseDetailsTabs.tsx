@@ -94,7 +94,13 @@ export default function CaseDetailsTabs({
             if (knowledgeBaseCountLoading) {
               tabLabel = (
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  Knowledge Base (<Skeleton variant="text" width={14} sx={{ display: "inline-block" }} />)
+                  Knowledge Base (
+                  <Skeleton
+                    variant="text"
+                    width={14}
+                    sx={{ display: "inline-block" }}
+                  />
+                  )
                 </Box>
               );
             } else if (knowledgeBaseCount !== undefined) {

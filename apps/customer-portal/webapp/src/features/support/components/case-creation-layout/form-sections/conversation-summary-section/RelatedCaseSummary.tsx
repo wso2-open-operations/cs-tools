@@ -19,6 +19,7 @@ import { Box, Divider, Paper, Typography } from "@wso2/oxygen-ui";
 import { FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import DOMPurify from "dompurify";
+import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 
 /**
  * Sidebar component showing related case details when creating a case from "Open Related Case".
@@ -31,7 +32,7 @@ export function RelatedCaseSummary({
   title,
   description,
 }: RelatedCaseSummaryProps): JSX.Element {
-  const sanitizedDescription = DOMPurify.sanitize(description ?? "");
+  const sanitizedDescription = DOMPurify.sanitize(description ?? "", DESCRIPTION_PURIFY_CONFIG);
 
   return (
     <Paper sx={{ p: 3, position: "sticky", top: 3 }}>

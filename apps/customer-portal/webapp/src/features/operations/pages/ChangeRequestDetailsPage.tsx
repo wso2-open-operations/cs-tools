@@ -17,6 +17,7 @@
 import { useParams, useNavigate, useLocation } from "react-router";
 import { type JSX, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
+import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 import {
   Box,
   Button,
@@ -272,7 +273,7 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           "& p:last-child": { mb: 0 },
         }}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized backend HTML content
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html, DESCRIPTION_PURIFY_CONFIG) }}
       />
     );
   };

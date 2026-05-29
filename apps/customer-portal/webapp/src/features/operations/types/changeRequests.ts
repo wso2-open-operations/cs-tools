@@ -102,6 +102,12 @@ export type ChangeRequestFilterValues = {
   impactId?: string;
 };
 
+/** Change request list sort field for search API `sortBy.field`. */
+export enum ChangeRequestSortField {
+  UpdatedOn = "updatedOn",
+  CreatedOn = "createdOn",
+}
+
 // Filter type for searching change requests.
 export type ChangeRequestSearchFilters = {
   impactKey?: number;

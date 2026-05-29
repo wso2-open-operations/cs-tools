@@ -16,7 +16,6 @@
 
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
-import type { AttachmentDownloadResponse } from "@features/support/types/attachments";
 
 function getBackendBaseUrl(): string {
   const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -46,30 +45,25 @@ async function fetchAttachmentDataUrl(
 ): Promise<string | null> {
   const baseUrl = getBackendBaseUrl();
   const response = await authFetch(
-    `${baseUrl}/attachments/${encodeURIComponent(attachmentId)}`,
+    `${baseUrl}/attachments/${encodeURIComponent(attachmentId)}/content`,
     { method: "GET" },
   );
   if (!response.ok) return null;
-  const data = (await response.json()) as AttachmentDownloadResponse;
-  if (!data.content || typeof data.content !== "string") return null;
 
-  // Backend may return a data URI directly (e.g. "data:@file/image/png;base64,..." or "data:image/png;base64,...").
-  // Parse it and re-emit with a validated safe MIME type.
-  if (data.content.startsWith("data:")) {
-    // Matches both "data:image/png;base64,..." and "data:@file/image/png;base64,..."
-    const match = data.content.match(/^data:(?:@file\/)?(image\/[^;]+|[^;/]+);base64,(.+)$/s);
-    if (!match) return null;
-    const mimeType = toSafeMimeType(match[1]);
-    const stripped = match[2].replace(/\s/g, "");
-    if (!stripped || !/^[A-Za-z0-9+/]+=*$/.test(stripped)) return null;
-    return `data:${mimeType};base64,${stripped}`;
-  }
+  const blob = await response.blob();
+  const rawType = blob.type || response.headers.get("content-type") || "";
+  const mimeType = toSafeMimeType(rawType);
+  if (!mimeType.startsWith("image/")) return null;
 
-  // Raw base64 content — construct data URL using the type field.
-  const stripped = data.content.replace(/\s/g, "");
-  if (!stripped || !/^[A-Za-z0-9+/]+=*$/.test(stripped)) return null;
-  const mimeType = toSafeMimeType(typeof data.type === "string" ? data.type : "");
-  return `data:${mimeType};base64,${stripped}`;
+  return new Promise<string | null>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      resolve(typeof result === "string" ? result : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**

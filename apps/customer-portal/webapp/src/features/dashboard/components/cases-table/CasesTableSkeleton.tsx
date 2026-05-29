@@ -19,7 +19,9 @@ import { type JSX } from "react";
 import type { CasesTableSkeletonProps } from "@/features/dashboard/types/casesTable";
 
 /**
- * Skeleton rows for the cases table loading state.
+ * Skeleton rows for the dashboard outstanding cases table.
+ * Column order matches {@link CasesList}: Updated, Details, Severity, Status,
+ * Created by, Assigned to.
  *
  * @returns {JSX.Element} Table body skeleton fragment
  */
@@ -29,7 +31,10 @@ const CasesTableSkeleton = ({
   return (
     <>
       {Array.from({ length: rowsPerPage }).map((_, index) => (
-        <TableRow key={`skeleton-${index}`}>
+        <TableRow
+          key={`skeleton-${index}`}
+          data-testid={index === 0 ? "cases-skeleton" : undefined}
+        >
           <TableCell>
             <Box>
               <Skeleton variant="text" width={80} height={20} />
@@ -43,19 +48,29 @@ const CasesTableSkeleton = ({
             </Box>
           </TableCell>
           <TableCell>
-            <Skeleton variant="text" width={150} height={20} />
-          </TableCell>
-          <TableCell>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Skeleton variant="circular" width={24} height={24} />
-              <Skeleton variant="text" width={100} height={20} />
-            </Box>
+            <Skeleton
+              variant="rounded"
+              width={56}
+              height={20}
+              sx={{ borderRadius: 0 }}
+            />
           </TableCell>
           <TableCell>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Skeleton variant="circular" width={8} height={8} />
-              <Skeleton variant="text" width={60} height={20} />
+              <Skeleton variant="text" width={88} height={20} />
             </Box>
+          </TableCell>
+          <TableCell>
+            <Skeleton variant="text" width={120} height={20} />
+          </TableCell>
+          <TableCell align="center">
+            <Skeleton
+              variant="text"
+              width={100}
+              height={20}
+              sx={{ mx: "auto" }}
+            />
           </TableCell>
         </TableRow>
       ))}

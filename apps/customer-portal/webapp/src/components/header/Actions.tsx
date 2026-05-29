@@ -28,6 +28,7 @@ import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 
 interface ActionsProps {
   showUserProfile?: boolean;
+  hideGetHelp?: boolean;
 }
 
 /**
@@ -38,6 +39,7 @@ interface ActionsProps {
  */
 export default function Actions({
   showUserProfile = true,
+  hideGetHelp = false,
 }: ActionsProps): JSX.Element {
   const location = useLocation();
   const { isProjectSuspended } = useErrorPageContext();
@@ -45,9 +47,18 @@ export default function Actions({
   const isPublicLandingPage = location.pathname === "/home";
 
   return (
-    <HeaderUI.Actions>
-      {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, or suspended project) */}
-      {!isProjectHub && !isPublicLandingPage && !isProjectSuspended && <GetHelpDropdown />}
+    <HeaderUI.Actions
+      sx={{
+        flexShrink: 0,
+        minWidth: 0,
+        gap: { xs: 0.5, sm: 0.75, lg: 0.5, xl: 1 },
+      }}
+    >
+      {/* Get Help dropdown (before theme switcher, not on project hub, public landing page, suspended project, or portal access error) */}
+      {!isProjectHub &&
+        !isPublicLandingPage &&
+        !isProjectSuspended &&
+        !hideGetHelp && <GetHelpDropdown />}
       {/* theme switcher */}
       <ColorSchemeToggle />
       {/* header action divider */}
@@ -55,7 +66,7 @@ export default function Actions({
         orientation="vertical"
         flexItem
         sx={{
-          mx: 1,
+          mx: { sm: 0.75, xl: 1 },
           display: { xs: "none", sm: "block" },
           visibility: showUserProfile ? "visible" : "hidden",
         }}

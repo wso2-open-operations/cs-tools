@@ -56,10 +56,10 @@ const ContactInfoCard = ({
 
   const renderContactSkeleton = () => (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <Skeleton variant="text" width={120} height={16} />
+      <Skeleton variant="text" width="45%" height={16} />
       <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <Skeleton variant="circular" width={40} height={40} />
-        <Skeleton variant="text" width={200} height={20} />
+        <Skeleton variant="circular" width={40} height={40} sx={{ flexShrink: 0 }} />
+        <Skeleton variant="text" width="70%" height={20} />
       </Box>
     </Box>
   );

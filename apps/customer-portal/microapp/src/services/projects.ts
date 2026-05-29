@@ -18,6 +18,7 @@ import type {
   Deployment,
   DeploymentProductDto,
   DeploymentProductsDto,
+  GetAllProjectsRequestDto,
   GetProductsRequestDto,
   PaginatedArray,
   Pagination,
@@ -42,9 +43,17 @@ import apiClient from "@src/services/apiClient";
 import { infiniteQueryOptions, mutationOptions, queryOptions } from "@tanstack/react-query";
 import { stripHtmlTags } from "@utils/others";
 
-const getAllProjects = async (): Promise<Project[]> => {
-  const projects = (await apiClient.post<ProjectsDto>(PROJECTS_ENDPOINT, {})).data.projects;
-  const projectsWithStats = await Promise.all(projects.map(mapProjectDtoToProjectSummary));
+const getAllProjects = async (body: GetAllProjectsRequestDto): Promise<PaginatedArray<Project>> => {
+  const projects = (await apiClient.post<ProjectsDto>(PROJECTS_ENDPOINT, body)).data;
+  const projectsWithStats = (await Promise.all(
+    projects.projects.map(mapProjectDtoToProjectSummary),
+  )) as PaginatedArray<Project>;
+
+  projectsWithStats.pagination = {
+    totalRecords: projects.totalRecords,
+    offset: projects.offset,
+    limit: projects.limit,
+  };
 
   return projectsWithStats;
 };
@@ -154,10 +163,22 @@ function toProduct(product: DeploymentProductDto): Product {
 
 /* Query Options */
 export const projects = {
-  all: () =>
+  all: (body: GetAllProjectsRequestDto = {}) =>
     queryOptions({
-      queryKey: ["projects"],
-      queryFn: getAllProjects,
+      queryKey: ["projects", body],
+      queryFn: () => getAllProjects(body),
+    }),
+
+  paginated: (body: GetAllProjectsRequestDto = {}) =>
+    infiniteQueryOptions({
+      queryKey: ["projects", "paginated", body],
+      queryFn: ({ pageParam }) => getAllProjects({ ...body, pagination: { ...body.pagination, offset: pageParam } }),
+      initialPageParam: 0,
+      getNextPageParam: (lastPage) => {
+        const { offset, limit, totalRecords } = lastPage.pagination;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
+      },
     }),
 
   get: (id: string) =>
@@ -190,9 +211,8 @@ export const projects = {
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;
-        const nextOffset = offset + 1;
-        const totalPages = Math.ceil(totalRecords / limit);
-        return nextOffset >= totalPages ? undefined : nextOffset;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
       },
     }),
 
@@ -210,9 +230,8 @@ export const projects = {
       initialPageParam: 0,
       getNextPageParam: (lastPage) => {
         const { offset, limit, totalRecords } = lastPage.pagination;
-        const nextOffset = offset + 1;
-        const totalPages = Math.ceil(totalRecords / limit);
-        return nextOffset >= totalPages ? undefined : nextOffset;
+        const nextOffset = offset + limit;
+        return nextOffset >= totalRecords ? undefined : nextOffset;
       },
     }),
 };

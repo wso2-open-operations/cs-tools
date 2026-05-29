@@ -188,19 +188,22 @@ export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 // Initial limit for case attachments list.
 export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
 
-/** Tooltip when delete is disabled because the case is closed. */
+// Max rows per search page when exporting.
+export const CASE_SEARCH_RESULTS_PAGE_SIZE = 50;
+
+// Tooltip when delete is disabled because the case is closed.
 export const ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED =
   "Attachments cannot be deleted on a closed case.";
 
-/** Tooltip when delete is disabled because the current user did not upload the file. */
+// Tooltip when delete is disabled because the current user did not upload the file.
 export const ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this attachment can delete it.";
 
-/** Tooltip for deployment documents when delete is disabled for non-owners. */
+// Tooltip for deployment documents when delete is disabled for non-owners.
 export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can delete it.";
 
-/** Tooltip for deployment documents when edit is disabled for non-owners. */
+// Tooltip for deployment documents when edit is disabled for non-owners.
 export const DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can edit it.";
 
@@ -422,14 +425,16 @@ export const ALL_CONVERSATIONS_FILTER_DEFINITIONS: AllConversationsFilterDefinit
  */
 export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
   {
-    filterKey: "statusId",
+    filterKey: "statusIds",
     id: "status",
     metadataKey: "caseStates",
+    multiSelect: true,
   },
   {
-    filterKey: "severityId",
+    filterKey: "severityIds",
     id: "severity",
     metadataKey: "severities",
+    multiSelect: true,
   },
   {
     filterKey: "issueTypes",
@@ -437,9 +442,10 @@ export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
     metadataKey: "issueTypes",
   },
   {
-    filterKey: "deploymentId",
+    filterKey: "deploymentIds",
     id: "deployment",
     metadataKey: "deploymentTypes",
+    multiSelect: true,
   },
 ];
 
@@ -494,9 +500,10 @@ export const ANNOUNCEMENT_STAT_CONFIGS: SupportStatConfig<AnnouncementStatKey>[]
  */
 export const ANNOUNCEMENT_FILTER_DEFINITIONS: AnnouncementFilterDefinition[] = [
   {
-    filterKey: "statusId",
+    filterKey: "statusIds",
     id: "status",
     metadataKey: "caseStates",
+    multiSelect: true,
   },
 ];
 

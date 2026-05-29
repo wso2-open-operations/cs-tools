@@ -59,3 +59,5 @@ export const NOVERA_WEBSOCKET_INITIALIZATION_ENDPOINT = (sessionId: string) =>
   );
 
 export const CHANGE_PASSWORD_URL = "https://wso2.com/user/password";
+
+export const PDF_JS_DIST_CDN = (version: string) => `https://unpkg.com/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;

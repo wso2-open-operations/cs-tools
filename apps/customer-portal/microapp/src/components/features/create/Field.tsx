@@ -33,7 +33,7 @@ import type { ReactNode } from "react";
 interface SelectFieldProps {
   name: string;
   label: string | ReactNode;
-  options: { value: number | string; label: string | ReactNode }[];
+  options?: { value: number | string; label: string | ReactNode }[];
   value?: number | string;
   required?: boolean;
   aiLabel?: string;
@@ -48,7 +48,7 @@ interface SelectFieldProps {
 export function SelectField({
   name,
   label,
-  options,
+  options = [],
   value = 0,
   disabled = false,
   required = false,

@@ -76,6 +76,6 @@ export function parseSecurityReportCaseSortField(
     case SecurityReportCaseSortField.state:
       return SecurityReportCaseSortField.state;
     default:
-      return SecurityReportCaseSortField.createdOn;
+      return SecurityReportCaseSortField.updatedOn;
   }
 }

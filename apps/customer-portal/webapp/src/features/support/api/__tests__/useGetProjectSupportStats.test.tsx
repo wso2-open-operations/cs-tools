@@ -31,7 +31,7 @@ vi.mock("@hooks/useLogger", () => ({
 
 const mockSupportStatsResponse = {
   ongoingCases: 47,
-  resolvedRecently: 10,
+  resolvedPast30DaysCasesCount: 10,
   resolvedChats: 34,
   activeChats: 3,
 };
@@ -48,6 +48,9 @@ const mockAuthFetch = vi.fn().mockResolvedValue({
   ok: true,
   json: () => Promise.resolve(mockSupportStatsResponse),
 });
+vi.mock("@/hooks/useAuthApiClient", () => ({
+  useAuthApiClient: () => mockAuthFetch,
+}));
 
 describe("useGetProjectSupportStats", () => {
   let queryClient: QueryClient;

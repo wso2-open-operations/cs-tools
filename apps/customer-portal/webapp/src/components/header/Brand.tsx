@@ -14,9 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Header as HeaderUI } from "@wso2/oxygen-ui";
+import { Box, Header as HeaderUI, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
+
+const BRAND_LOGO_HEIGHT = {
+  xs: 18,
+  sm: 20,
+  md: 24,
+  lg: 20,
+  xl: 24,
+} as const;
+
+const BRAND_TITLE_BASE_SX = {
+  whiteSpace: "nowrap",
+  lineHeight: 1.2,
+  flexShrink: 0,
+} as const;
 
 /**
  * Brand component for the header.
@@ -30,6 +44,7 @@ export default function Brand({
 }: {
   isNavigationDisabled?: boolean;
 }): JSX.Element {
+  const theme = useTheme();
   const navigate = useNavigate();
 
   // TODO : This need to remove once svg available on oxygen ui
@@ -57,22 +72,53 @@ export default function Brand({
   return (
     <HeaderUI.Brand
       onClick={() =>
-        !isNavigationDisabled &&
-        navigate("/", { state: { fromHeader: true } })
+        !isNavigationDisabled && navigate("/", { state: { fromHeader: true } })
       }
-      sx={{ cursor: isNavigationDisabled ? "default" : "pointer" }}
+      sx={{
+        cursor: isNavigationDisabled ? "default" : "pointer",
+        flexShrink: 0,
+        gap: { xs: 0.75, sm: 1, md: 1.5 },
+        [theme.breakpoints.between("lg", "xl")]: {
+          gap: 0.75,
+        },
+      }}
     >
-      {/* brand logo */}
-      <HeaderUI.BrandLogo>
-        <img
+      <HeaderUI.BrandLogo
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Box
+          component="img"
           key={logoSrc}
           src={logoSrc}
           alt="Company Logo"
-          style={{ height: "24px", width: "auto" }}
+          sx={{
+            height: BRAND_LOGO_HEIGHT,
+            width: "auto",
+            display: "block",
+          }}
         />
       </HeaderUI.BrandLogo>
-      {/* brand title */}
-      <HeaderUI.BrandTitle>Customer Portal</HeaderUI.BrandTitle>
+      <HeaderUI.BrandTitle
+        sx={{
+          ...BRAND_TITLE_BASE_SX,
+          fontSize: {
+            xs: "0.8125rem",
+            sm: "0.875rem",
+            md: "1rem",
+            lg: "0.875rem",
+            xl: "1rem",
+          },
+          [theme.breakpoints.down("xl")]: {
+            display: "inline-block",
+          },
+        }}
+      >
+        Customer Portal
+      </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );
 }

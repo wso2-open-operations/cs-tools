@@ -52,12 +52,6 @@ const baseHtmlSx: SxProps<Theme> = {
     color: "primary.main",
     textDecoration: "underline",
   },
-  "& code": {
-    display: "inline",
-    fontSize: "0.875rem",
-    whiteSpace: "pre-wrap",
-    overflowWrap: "break-word",
-  },
   // Prevent embedded rich-text images from expanding card width.
   "& img": {
     maxWidth: "100%",
@@ -114,6 +108,10 @@ export default function CaseCardDescriptionClamp({
       dangerouslySetInnerHTML={{
         __html: DOMPurify.sanitize(
           normalizeAnnouncementDescriptionHtml(description),
+          {
+            FORBID_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+            FORBID_CONTENTS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+          },
         ),
       }}
     />

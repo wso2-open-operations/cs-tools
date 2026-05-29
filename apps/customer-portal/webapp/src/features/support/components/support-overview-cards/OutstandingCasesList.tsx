@@ -260,7 +260,7 @@ export default function OutstandingCasesList({
                   color="text.secondary"
                   sx={{ flexShrink: 0 }}
                 >
-                  {formatRelativeTime(c.createdOn ?? undefined)}
+                  {formatRelativeTime(c.updatedOn ?? c.createdOn ?? undefined)}
                 </Typography>
               </Box>
             </Form.CardActions>

@@ -40,6 +40,10 @@ vi.mock(
   }),
 );
 
+vi.mock("@features/usage-metrics/components/DeploymentUsageUploadDialog", () => ({
+  default: () => null,
+}));
+
 describe("UsageAndMetricsTabContent", () => {
   it("shows overview panel by default and switches to environment products", () => {
     render(

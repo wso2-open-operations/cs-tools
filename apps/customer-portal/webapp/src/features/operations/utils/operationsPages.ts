@@ -27,6 +27,7 @@ import type {
 } from "@features/operations/types/changeRequests";
 import {
   ChangeRequestFilterDefinitionId,
+  ChangeRequestSortField,
   type ChangeRequestFilterOption,
 } from "@features/operations/types/changeRequests";
 import {
@@ -34,7 +35,8 @@ import {
   ServiceRequestCaseSortField,
 } from "@features/operations/types/serviceRequests";
 import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
-import type { MetadataItem, SortOrder } from "@/types/common";
+import { SortOrder } from "@/types/common";
+import type { MetadataItem } from "@/types/common";
 
 /**
  * Resolves `operations` vs `support` from the current pathname.
@@ -190,6 +192,8 @@ export function resolveClosedCrStateIds(
  * @param actionRequired - Restrict to action-required states.
  * @param scheduledOnly - Restrict to scheduled state.
  * @param changeRequestStates - Raw states metadata from `useGetProjectFilters`.
+ * @param sortField - Active sort field.
+ * @param sortOrder - Sort direction.
  * @returns Request body without pagination.
  */
 export function buildChangeRequestSearchRequest(
@@ -199,6 +203,8 @@ export function buildChangeRequestSearchRequest(
   actionRequired: boolean = false,
   scheduledOnly: boolean = false,
   changeRequestStates?: MetadataItem[],
+  sortField: ChangeRequestSortField = ChangeRequestSortField.UpdatedOn,
+  sortOrder: SortOrder = SortOrder.DESC,
 ): Omit<ChangeRequestSearchRequest, "pagination"> {
   const selectedStateId = filters.stateId ? Number(filters.stateId) : undefined;
   const resolvedIds = actionRequired
@@ -221,6 +227,10 @@ export function buildChangeRequestSearchRequest(
       searchQuery: searchTerm.trim() || undefined,
       stateKeys,
       impactKey: filters.impactId ? Number(filters.impactId) : undefined,
+    },
+    sortBy: {
+      field: sortField,
+      order: sortOrder,
     },
   };
 }
@@ -284,11 +294,11 @@ export function buildServiceRequestsPageCaseSearchRequest(
 ): Omit<CaseSearchRequest, "pagination"> {
   const normalizedSortField =
     sortField === ServiceRequestCaseSortField.Severity
-      ? ServiceRequestCaseSortField.CreatedOn
+      ? ServiceRequestCaseSortField.UpdatedOn
       : sortField;
 
-  const resolvedStatusIds: number[] | undefined = filters.statusId
-    ? [Number(filters.statusId)]
+  const resolvedStatusIds: number[] | undefined = filters.statusIds?.length
+    ? filters.statusIds.map(Number)
     : outstandingStatusIds?.length
       ? outstandingStatusIds
       : undefined;
@@ -298,7 +308,9 @@ export function buildServiceRequestsPageCaseSearchRequest(
       caseTypes: [CaseType.SERVICE_REQUEST],
       statusIds: resolvedStatusIds,
       issueId: filters.issueTypes ? Number(filters.issueTypes) : undefined,
-      deploymentId: filters.deploymentId || undefined,
+      deploymentIds: filters.deploymentIds?.length
+        ? filters.deploymentIds
+        : undefined,
       searchQuery: searchTerm.trim() || undefined,
       createdByMe: createdByMe || undefined,
     },

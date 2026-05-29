@@ -23,6 +23,7 @@ import {
   useTheme,
   type Theme,
 } from "@wso2/oxygen-ui";
+import CaseStateConfirmDialog from "@features/support/components/case-details/dialogs/CaseStateConfirmDialog";
 import { type JSX, useState } from "react";
 import {
   CASE_STATUS_ACTIONS,
@@ -100,6 +101,10 @@ export default function CaseDetailsActionRow({
 
   const patchCase = usePatchCase(projectId, caseId);
   const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    label: string;
+    stateKey: number;
+  } | null>(null);
 
   const availableActions = getAvailableCaseActions(statusLabel).filter(
     (label) => {
@@ -151,26 +156,7 @@ export default function CaseDetailsActionRow({
               isOpenRelatedCase
                 ? onOpenRelatedCase
                 : canPatch
-                  ? () => {
-                      setPendingActionLabel(label);
-                      patchCase.mutate(
-                        { stateKey: stateKey! },
-                        {
-                          onSuccess: () => {
-                            showSuccess("State updated successfully.");
-                          },
-                          onError: (err) => {
-                            showError(
-                              err?.message ??
-                                "Failed to update case status. Please try again.",
-                            );
-                          },
-                          onSettled: () => {
-                            setPendingActionLabel(null);
-                          },
-                        },
-                      );
-                    }
+                  ? () => setConfirmAction({ label, stateKey: stateKey! })
                   : undefined
             }
             sx={getActionButtonSx(theme, paletteIntent) as Record<string, unknown>}
@@ -181,6 +167,34 @@ export default function CaseDetailsActionRow({
           </Button>
         );
       })}
+      <CaseStateConfirmDialog
+        open={!!confirmAction}
+        actionLabel={confirmAction ? toPresentTenseActionLabel(confirmAction.label) : ""}
+        isPending={patchCase.isPending}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          const { label, stateKey } = confirmAction;
+          setPendingActionLabel(label);
+          patchCase.mutate(
+            { stateKey },
+            {
+              onSuccess: () => {
+                showSuccess("State updated successfully.");
+              },
+              onError: (err) => {
+                showError(
+                  err?.message ?? "Failed to update case status. Please try again.",
+                );
+              },
+              onSettled: () => {
+                setPendingActionLabel(null);
+                setConfirmAction(null);
+              },
+            },
+          );
+        }}
+      />
     </Stack>
   );
 }

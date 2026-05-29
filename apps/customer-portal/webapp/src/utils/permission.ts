@@ -67,6 +67,8 @@ function restrictivePermissions(): ProjectPermissions {
     showServiceHoursAllocationsCard: false,
     hasEngagements: false,
     hasUpdates: false,
+    hasComponentAnalysis: false,
+    hasUsageMetrics: false,
   };
 }
 
@@ -110,6 +112,8 @@ export function getProjectPermissions(
     showServiceHoursAllocationsCard: hasTimeLogs,
     hasEngagements: features.hasEngagementsReadAccess,
     hasUpdates: features.hasUpdatesReadAccess,
+    hasComponentAnalysis: features.hasComponentAnalysisReadAccess,
+    hasUsageMetrics: features.hasUsageMetricsReadAccess,
   };
 }
 

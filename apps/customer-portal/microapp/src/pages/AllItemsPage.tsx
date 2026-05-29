@@ -234,6 +234,7 @@ export function ItemsListContentSkeleton() {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePaginationSubtitleOverride(count?: number | null, total?: number | null) {
   const layout = useLayout();
   const disabled = count === null && total === null;

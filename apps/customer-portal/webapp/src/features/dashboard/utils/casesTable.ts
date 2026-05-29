@@ -31,6 +31,7 @@ import {
   CaseStatus,
 } from "@features/support/constants/supportConstants";
 import type { NavigateFunction } from "react-router";
+import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
 
 /**
  * Returns the Oxygen ui color path for a given severity label.
@@ -90,9 +91,13 @@ function isClosedCaseStatusLabel(label?: string): boolean {
 }
 
 export function countCasesTableActiveFilters(
-  filters: Record<string, string | number | undefined>,
+  filters: Record<string, string | string[] | number | undefined>,
 ): number {
-  return Object.values(filters).filter((v) => v !== "" && v != null).length;
+  return Object.values(filters).filter((v) => {
+    if (v === "" || v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  }).length;
 }
 
 export function resolveCasesTableDefaultStatusIds(
@@ -106,12 +111,12 @@ export function resolveCasesTableDefaultStatusIds(
 }
 
 export function resolveCasesTableSearchStatusIds(
-  selectedStatusId: string | number | undefined,
+  selectedStatusIds: string[] | undefined,
   defaultStatusIds: number[],
 ): number[] {
   switch (true) {
-    case Boolean(selectedStatusId):
-      return [Number(selectedStatusId)];
+    case Boolean(selectedStatusIds?.length):
+      return selectedStatusIds!.map(Number);
     case defaultStatusIds.length > 0:
       return defaultStatusIds;
     default:
@@ -168,4 +173,48 @@ export function navigateToProjectCaseDetail(
   caseId: string,
 ): void {
   navigate(`/projects/${projectId}/support/cases/${caseId}`);
+}
+
+/**
+ * Formats case number and WSO2 internal id for the dashboard cases table details row.
+ *
+ * @param number - Portal case number.
+ * @param internalId - WSO2 case internal id.
+ * @returns Display string such as `ID: CS-001 | INT-1`, or `ID: --` when both are missing.
+ */
+export function formatCasesTableCaseIdentifier(
+  number?: string | null,
+  internalId?: string | null,
+): string {
+  const caseNumber = number?.trim() ?? "";
+  const wso2CaseId = internalId?.trim() ?? "";
+  let identifier = "--";
+  if (caseNumber && wso2CaseId) {
+    identifier = `${caseNumber} | ${wso2CaseId}`;
+  } else if (caseNumber) {
+    identifier = caseNumber;
+  } else if (wso2CaseId) {
+    identifier = wso2CaseId;
+  }
+  return `ID: ${identifier}`;
+}
+
+/**
+ * Maps TabBar tab id to dashboard cases view mode.
+ *
+ * @param tabId - Tab id from `DASHBOARD_CASES_VIEW_TABS`.
+ * @returns {DashboardCasesViewMode} View mode for case search `createdByMe`.
+ */
+export function parseDashboardCasesViewMode(
+  tabId: string,
+): DashboardCasesViewMode {
+  switch (tabId) {
+    case DashboardCasesViewMode.MyCases:
+    case "my":
+      return DashboardCasesViewMode.MyCases;
+    case DashboardCasesViewMode.AllCases:
+    case "all":
+    default:
+      return DashboardCasesViewMode.AllCases;
+  }
 }

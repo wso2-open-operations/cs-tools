@@ -32,9 +32,10 @@ import {
   generateUpdateLevelsReportPdf,
   isSafeHttpUrl,
   parseBugFixes,
-  parseDescriptionSections,
 } from "@features/updates/utils/updateLevelsReportPdf";
 import type { UpdateLevelsReportModalProps, UpdateDescriptionLevel } from "@features/updates/types/updates";
+import { useDarkMode } from "@utils/useDarkMode";
+import { HtmlOrText } from "@features/updates/components/HtmlOrText";
 
 function isInstructionsNonEmpty(text: string | null | undefined): boolean {
   if (!text) return false;
@@ -48,17 +49,12 @@ function formatTimestamp(ts: number): string {
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }
 
-function UpdateDescriptionItem({ item }: { item: UpdateDescriptionLevel }): JSX.Element {
-  const parsed = parseDescriptionSections(item.description);
-  const displayDesc = parsed.generalDescription || parsed.implementationDetails || parsed.impact;
+function UpdateDescriptionItem({ item, isDark }: { item: UpdateDescriptionLevel; isDark: boolean }): JSX.Element {
   const bugFixUrls = parseBugFixes(item.bugFixes);
+  const desc = item.description?.trim();
   return (
     <Box sx={{ pl: 2, py: 0.5, borderLeft: "2px solid", borderColor: "divider" }}>
-      {displayDesc && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-          {displayDesc}
-        </Typography>
-      )}
+      {desc && <HtmlOrText content={desc} isDark={isDark} />}
       {bugFixUrls.length > 0 && (
         <Typography variant="caption" color="text.secondary">
           Bug fixes:{" "}
@@ -90,6 +86,7 @@ export default function UpdateLevelsReportModal({
   rawData,
 }: UpdateLevelsReportModalProps): JSX.Element | null {
   const [isDownloading, setIsDownloading] = useState(false);
+  const isDark = useDarkMode();
 
   const handleDownloadPdf = useCallback(() => {
     if (!reportData) return;
@@ -202,7 +199,7 @@ export default function UpdateLevelsReportModal({
                     </Box>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
                       {entry.updateDescriptionLevels.map((item, i) => (
-                        <UpdateDescriptionItem key={i} item={item} />
+                        <UpdateDescriptionItem key={i} item={item} isDark={isDark} />
                       ))}
                     </Box>
                   </Box>
@@ -244,7 +241,7 @@ export default function UpdateLevelsReportModal({
                     </Box>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
                       {entry.updateDescriptionLevels.map((item, i) => (
-                        <UpdateDescriptionItem key={i} item={item} />
+                        <UpdateDescriptionItem key={i} item={item} isDark={isDark} />
                       ))}
                     </Box>
                   </Box>
@@ -307,7 +304,6 @@ export default function UpdateLevelsReportModal({
             Update Details
           </Typography>
           {reportData.allEntries.map((entry, i) => {
-            const parsedDesc = parseDescriptionSections(entry.description);
             const bugFixUrls = parseBugFixes(entry.bugFixes);
             return (
               <Box key={i} sx={{ mb: 3 }}>
@@ -328,28 +324,12 @@ export default function UpdateLevelsReportModal({
                     {entry.productName}-{entry.productVersion} ({entry.channel})
                   </Typography>
                 </Box>
-                {parsedDesc.generalDescription && (
+                {entry.description?.trim() && (
                   <Box sx={{ mb: 1, pl: 1 }}>
                     <Typography variant="caption" fontWeight={700} display="block">
-                      General Description:
+                      Description:
                     </Typography>
-                    <Typography variant="body2">{parsedDesc.generalDescription}</Typography>
-                  </Box>
-                )}
-                {parsedDesc.implementationDetails && (
-                  <Box sx={{ mb: 1, pl: 1 }}>
-                    <Typography variant="caption" fontWeight={700} display="block">
-                      Implementation Details:
-                    </Typography>
-                    <Typography variant="body2">{parsedDesc.implementationDetails}</Typography>
-                  </Box>
-                )}
-                {parsedDesc.impact && (
-                  <Box sx={{ mb: 1, pl: 1 }}>
-                    <Typography variant="caption" fontWeight={700} display="block">
-                      Impact:
-                    </Typography>
-                    <Typography variant="body2">{parsedDesc.impact}</Typography>
+                    <HtmlOrText content={entry.description.trim()} isDark={isDark} />
                   </Box>
                 )}
                 {bugFixUrls.length > 0 && (
@@ -371,27 +351,11 @@ export default function UpdateLevelsReportModal({
                   </Box>
                 )}
                 {isInstructionsNonEmpty(entry.instructions) && (
-                  <Box sx={{ mb: 1 }}>
-                    <Typography variant="caption" fontWeight={700} display="block" sx={{ pl: 1, mb: 0.5 }}>
+                  <Box sx={{ mb: 1, pl: 1 }}>
+                    <Typography variant="caption" fontWeight={700} display="block" sx={{ mb: 0.5 }}>
                       Instructions:
                     </Typography>
-                    <Box
-                      component="pre"
-                      sx={{
-                        bgcolor: "grey.100",
-                        border: "1px solid",
-                        borderColor: "divider",
-                        borderRadius: 1,
-                        p: 1.5,
-                        m: 0,
-                        fontFamily: "monospace",
-                        fontSize: "0.75rem",
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                      }}
-                    >
-                      {entry.instructions?.trim()}
-                    </Box>
+                    <HtmlOrText content={entry.instructions!.trim()} isDark={isDark} />
                   </Box>
                 )}
                 {(entry.securityAdvisories?.length ?? 0) > 0 && (
@@ -405,12 +369,13 @@ export default function UpdateLevelsReportModal({
                     >
                       Security Advisories:
                     </Typography>
-                    <Box component="ul" sx={{ pl: 2, m: 0 }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                       {entry.securityAdvisories.map((adv, j) => (
-                        <Box component="li" key={j} sx={{ mb: 0.25 }}>
-                          <Typography variant="caption">
-                            <strong>{adv.id}</strong> ({adv.severity}): {adv.overview}
+                        <Box key={j} sx={{ pl: 1 }}>
+                          <Typography variant="caption" fontWeight={700}>
+                            {adv.id} ({adv.severity})
                           </Typography>
+                          {adv.overview && <HtmlOrText content={adv.overview} isDark={isDark} />}
                         </Box>
                       ))}
                     </Box>

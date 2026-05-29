@@ -15,11 +15,14 @@
 // under the License.
 
 import {
+  Box,
+  Checkbox,
   FormControl,
   Grid,
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX, UIEvent } from "react";
@@ -46,7 +49,7 @@ export interface ListFiltersProps {
   filters: AllCasesFilterValues;
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
-  onFilterChange: (field: string, value: string) => void;
+  onFilterChange: (field: string, value: string | string[]) => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
   hideSeverityFilter?: boolean;
@@ -60,6 +63,7 @@ export interface ListFiltersProps {
 
 /**
  * ListFilters component to display filter dropdowns for case lists.
+ * The status filter renders as multi-select with checkboxes; all others are single-select.
  *
  * @param {ListFiltersProps} props - Filter values, metadata, and change handler.
  * @returns {JSX.Element} The rendered filter dropdowns.
@@ -79,12 +83,18 @@ export default function ListFilters({
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
 }: ListFiltersProps): JSX.Element {
-  const handleSelectChange =
+  const handleSingleChange =
     (field: string) => (event: SelectChangeEvent<string | string[]>) => {
       const val = event.target.value;
       const resolved = Array.isArray(val) ? (val[0] ?? "") : val;
       if (resolved === SELECT_MENU_LOAD_MORE_ROW_VALUE) return;
       onFilterChange(field, resolved);
+    };
+
+  const handleMultiChange =
+    (field: string) => (event: SelectChangeEvent<string[]>) => {
+      const val = event.target.value as string[];
+      onFilterChange(field, val);
     };
 
   return (
@@ -144,6 +154,59 @@ export default function ListFilters({
 
         const hasNoOptions = (options?.length ?? 0) === 0;
 
+        if (def.multiSelect) {
+          const selectedValues = (filters[def.filterKey] as string[] | undefined) ?? [];
+          return (
+            <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
+                <Select
+                  multiple
+                  labelId={`${def.id}-label`}
+                  id={def.id}
+                  value={selectedValues}
+                  label={label}
+                  onChange={handleMultiChange(def.filterKey)}
+                  renderValue={(selected) => {
+                    if (!Array.isArray(selected) || selected.length === 0) return "";
+                    const labels = selected.map((v) => options.find((o) => o.value === v)?.label ?? v);
+                    const displayText = labels.join(", ");
+                    if (labels.length === 1) return displayText;
+                    return (
+                      <Tooltip title={displayText} placement="top">
+                        <Box
+                          component="span"
+                          sx={{
+                            display: "block",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {displayText}
+                        </Box>
+                      </Tooltip>
+                    );
+                  }}
+                >
+                  {hasNoOptions ? (
+                    <MenuItem disabled>
+                      <Typography variant="body2">{EMPTY_DROPDOWN_PLACEHOLDER}</Typography>
+                    </MenuItem>
+                  ) : (
+                    options.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        <Checkbox checked={selectedValues.includes(option.value)} size="small" />
+                        <Typography variant="body2" sx={{ ml: 1 }}>{option.label}</Typography>
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            </Grid>
+          );
+        }
+
         return (
           <Grid key={def.id} size={{ xs: 12, sm: 6, md: 3 }}>
             <FormControl fullWidth size="small">
@@ -151,9 +214,9 @@ export default function ListFilters({
               <Select
                 labelId={`${def.id}-label`}
                 id={def.id}
-                value={filters[def.filterKey] || ""}
+                value={(filters[def.filterKey] as string | undefined) || ""}
                 label={label}
-                onChange={handleSelectChange(def.filterKey)}
+                onChange={handleSingleChange(def.filterKey)}
                 MenuProps={
                   isDeploymentFilter
                     ? {

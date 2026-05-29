@@ -54,4 +54,6 @@ public type UserInfoPayload record {|
 public type AppRoles record {|
     # Role for an Admin
     string adminRole;
+    # Role for a Security Advisory Patches Admin
+    string securityAdvisoryPatchesAdminRole;
 |};

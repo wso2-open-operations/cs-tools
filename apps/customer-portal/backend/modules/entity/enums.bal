@@ -28,6 +28,12 @@ public enum CaseSortField {
     STATE = "state"
 }
 
+# Valid change request sort field values.
+public enum ChangeRequestSortField {
+    CREATED_ON = "createdOn",
+    UPDATED_ON = "updatedOn"
+}
+
 # Valid reference type values.
 public enum ReferenceType {
     CASE = "case",

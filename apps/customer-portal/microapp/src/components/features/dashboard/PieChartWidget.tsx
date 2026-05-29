@@ -48,14 +48,23 @@ export function PieChartWidget({ title, data, ...props }: PieChartWidgetProps) {
         ) : isEmpty ? (
           <Box
             sx={{
-              width: 130,
-              height: 130,
+              width: 125,
+              height: 125,
               borderRadius: "50%",
               border: "3px dashed",
               borderColor: "divider",
               my: 2,
+              display: "grid",
+              placeItems: "center",
             }}
-          />
+          >
+            <Typography
+              variant="subtitle1"
+              sx={{ fontWeight: "medium", color: "text.disabled", textAlign: "center", px: 2, opacity: 0.8 }}
+            >
+              N/A
+            </Typography>
+          </Box>
         ) : (
           <PieChart
             height={150}

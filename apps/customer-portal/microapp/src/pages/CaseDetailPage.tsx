@@ -15,8 +15,8 @@
 // under the License.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CheckIcon, CircleX, Download, Image, Paperclip, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
-import { Box, Card, Grid, IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { ArrowUpRight, CheckIcon, CircleX, Image, Paperclip, PlusIcon, User, Users } from "@wso2/oxygen-ui-icons-react";
+import { Box, Card, Grid, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
 import {
   CommentSkeleton,
   InfoField,
@@ -171,23 +171,13 @@ export default function CaseDetailPage() {
   }, [comments]);
 
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
-  const [, setIsPreviewLoading] = useState(false);
 
-  const handlePreviewOpen = async (attachment: Attachment, blob: Blob) => {
+  const handlePreviewOpen = async (attachment: Attachment) => {
     setPreviewAttachment(attachment);
-    setIsPreviewLoading(true);
-    try {
-      const url = URL.createObjectURL(blob);
-      setPreviewSrc(url);
-    } finally {
-      setIsPreviewLoading(false);
-    }
   };
 
   const handlePreviewClose = () => {
     setPreviewAttachment(null);
-    setPreviewSrc(null);
   };
 
   return (
@@ -310,10 +300,10 @@ export default function CaseDetailPage() {
       />
 
       <AttachmentPreviewDialog
+        key={previewAttachment?.id}
         open={Boolean(previewAttachment)}
         attachment={previewAttachment}
         onClose={handlePreviewClose}
-        src={previewSrc}
       />
 
       <div ref={bottomRef} />
@@ -326,62 +316,42 @@ function AttachmentCard({
   onPreview,
 }: {
   attachment: Attachment;
-  onPreview: (attachment: Attachment, blob: Blob) => void;
+  onPreview: (attachment: Attachment) => void;
 }) {
-  const queryClient = useQueryClient();
   const { fromNow } = useDateTime();
 
-  const handlePreview = async () => {
-    const data = await queryClient.fetchQuery(cases.attachment(attachment.id));
-
-    const [prefix, base64] = data.content.split(",");
-    const mimeType = prefix.split(":")[1].split(";")[0];
-
-    const byteCharacters = atob(base64);
-    const byteArray = new Uint8Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteArray[i] = byteCharacters.charCodeAt(i);
-    }
-
-    const blob = new Blob([byteArray], { type: mimeType });
-
-    onPreview(attachment, blob);
-  };
-
   return (
-    <>
-      <Card sx={{ p: 1.5 }}>
-        <Stack direction="row" alignItems="flex-start" gap={1}>
-          <Box
-            sx={{
-              flexShrink: 0,
-              width: 40,
-              height: 40,
-              borderRadius: 0.5,
-              overflow: "hidden",
-              bgcolor: "action.hover",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "text.secondary",
-            }}
-          >
-            {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
-          </Box>
-          <Stack gap={0.25} minWidth={0} flex={1}>
-            <Typography variant="subtitle2" fontWeight="medium" noWrap>
-              {attachment.fileName}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {attachment.createdBy} · {fromNow(attachment.createdOn)}
-            </Typography>
-          </Stack>
-          <IconButton onClick={handlePreview}>
-            <Download size={pxToRem(18)} />
-          </IconButton>
-        </Stack>
-      </Card>
-    </>
+    <Card
+      role="button"
+      sx={{ display: "flex", direction: "row", alignItems: "center", gap: 1.2, p: 1.5 }}
+      onClick={() => onPreview(attachment)}
+    >
+      <Box
+        sx={{
+          flexShrink: 0,
+          width: 40,
+          height: 40,
+          borderRadius: 0.5,
+          overflow: "hidden",
+          bgcolor: "action.hover",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "text.secondary",
+        }}
+      >
+        {attachment.type === "image" ? <Image size={pxToRem(18)} /> : <Paperclip size={pxToRem(18)} />}
+      </Box>
+      <Stack gap={0.25} minWidth={0} flex={1}>
+        <Typography variant="subtitle2" fontWeight="medium" noWrap>
+          {attachment.fileName}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" noWrap>
+          {attachment.createdBy} · {fromNow(attachment.createdOn)}
+        </Typography>
+      </Stack>
+      <ArrowUpRight size={pxToRem(18)} />
+    </Card>
   );
 }
 

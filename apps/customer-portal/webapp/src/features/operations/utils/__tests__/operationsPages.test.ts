@@ -30,7 +30,10 @@ import {
   resolveOutstandingCrStateIds,
   resolveScheduledCrStateIds,
 } from "@features/operations/utils/operationsPages";
-import { ChangeRequestFilterDefinitionId } from "@features/operations/types/changeRequests";
+import {
+  ChangeRequestFilterDefinitionId,
+  ChangeRequestSortField,
+} from "@features/operations/types/changeRequests";
 import {
   OperationsNavSegment,
   ServiceRequestCaseSortField,
@@ -177,7 +180,7 @@ describe("buildChangeRequestSearchRequest", () => {
 
   it("resolves outstanding state IDs from metadata when outstandingOnly is true", () => {
     const req = buildChangeRequestSearchRequest({}, "", true, false, false, allStates);
-    expect(req.filters?.stateKeys).toEqual([5, -2, -1, 0, 1]);
+    expect(req.filters?.stateKeys).toEqual([-5, -4, -3, 5, -2, -1, 0, 1]);
   });
 
   it("resolves action-required state IDs from metadata", () => {
@@ -195,6 +198,27 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(req.filters?.stateKeys).not.toContain(-5);
     expect(req.filters?.stateKeys).not.toContain(-4);
     expect(req.filters?.stateKeys).not.toContain(-3);
+  });
+
+  it("sorts by updatedOn descending by default", () => {
+    const req = buildChangeRequestSearchRequest({}, "", false, false, false, allStates);
+    expect(req.sortBy?.field).toBe("updatedOn");
+    expect(req.sortBy?.order).toBe("desc");
+  });
+
+  it("applies custom sort field and order", () => {
+    const req = buildChangeRequestSearchRequest(
+      {},
+      "",
+      false,
+      false,
+      false,
+      allStates,
+      ChangeRequestSortField.CreatedOn,
+      SortOrder.ASC,
+    );
+    expect(req.sortBy?.field).toBe("createdOn");
+    expect(req.sortBy?.order).toBe("asc");
   });
 });
 
@@ -245,26 +269,26 @@ describe("buildServiceRequestsPageCaseSearchRequest", () => {
     const req = buildServiceRequestsPageCaseSearchRequest(
       {},
       "",
-      ServiceRequestCaseSortField.CreatedOn,
+      ServiceRequestCaseSortField.UpdatedOn,
       SortOrder.DESC,
       false,
     );
     expect(req.filters?.caseTypes).toEqual([CaseType.SERVICE_REQUEST]);
-    expect(req.sortBy?.field).toBe("createdOn");
+    expect(req.sortBy?.field).toBe("updatedOn");
   });
 
   it("does not send severity filter", () => {
     const req = buildServiceRequestsPageCaseSearchRequest(
-      { severityId: "99" },
+      { severityIds: ["99"] },
       "",
       ServiceRequestCaseSortField.CreatedOn,
       SortOrder.DESC,
       false,
     );
-    expect(req.filters?.severityId).toBeUndefined();
+    expect(req.filters?.severityIds).toBeUndefined();
   });
 
-  it("normalizes legacy Severity sort field to CreatedOn in API payload", () => {
+  it("normalizes legacy Severity sort field to UpdatedOn in API payload", () => {
     const req = buildServiceRequestsPageCaseSearchRequest(
       {},
       "",
@@ -272,7 +296,7 @@ describe("buildServiceRequestsPageCaseSearchRequest", () => {
       SortOrder.DESC,
       false,
     );
-    expect(req.sortBy?.field).toBe(ServiceRequestCaseSortField.CreatedOn);
+    expect(req.sortBy?.field).toBe(ServiceRequestCaseSortField.UpdatedOn);
   });
 });
 

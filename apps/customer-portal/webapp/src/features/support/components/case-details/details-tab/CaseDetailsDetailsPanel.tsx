@@ -39,6 +39,7 @@ import {
 import { type JSX } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import DOMPurify from "dompurify";
+import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
@@ -216,20 +217,38 @@ export default function CaseDetailsDetailsPanel({
               />
             </Box>
           )}
-          {(!isServiceRequest || data?.issueType) && (
-            <Box>
-              <Typography {...labelSx}>Category</Typography>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Tag
-                  size={16}
-                  color={theme.palette.text.secondary}
-                  aria-hidden
-                />
-                <Typography {...valueSx}>
-                  {formatValue(data?.issueType)}
-                </Typography>
-              </Stack>
-            </Box>
+          {isEngagement ? (
+            data?.engagementType && (
+              <Box>
+                <Typography {...labelSx}>Engagement Type</Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Tag
+                    size={16}
+                    color={theme.palette.text.secondary}
+                    aria-hidden
+                  />
+                  <Typography {...valueSx}>
+                    {formatValue(data.engagementType)}
+                  </Typography>
+                </Stack>
+              </Box>
+            )
+          ) : (
+            (!isServiceRequest || data?.issueType) && (
+              <Box>
+                <Typography {...labelSx}>Category</Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Tag
+                    size={16}
+                    color={theme.palette.text.secondary}
+                    aria-hidden
+                  />
+                  <Typography {...valueSx}>
+                    {formatValue(data?.issueType)}
+                  </Typography>
+                </Stack>
+              </Box>
+            )
           )}
           {data?.createdBy ? (
             <Box>
@@ -376,7 +395,7 @@ export default function CaseDetailsDetailsPanel({
               }}
               // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
               dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(data.description),
+                __html: DOMPurify.sanitize(data.description, DESCRIPTION_PURIFY_CONFIG),
               }}
             />
           ) : (

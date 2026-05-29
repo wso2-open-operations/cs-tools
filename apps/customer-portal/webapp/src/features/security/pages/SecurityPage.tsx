@@ -133,11 +133,15 @@ const SecurityPage = (): JSX.Element => {
 
   const tabs = useMemo(
     () =>
-      SECURITY_PAGE_TABS.filter((tab) =>
-        tab.id === SecurityTabId.VULNERABILITIES
-          ? securityPermissions?.hasSecurityReportAnalysis ?? false
-          : true,
-      ),
+      SECURITY_PAGE_TABS.filter((tab) => {
+        if (tab.id === SecurityTabId.VULNERABILITIES) {
+          return securityPermissions?.hasSecurityReportAnalysis ?? false;
+        }
+        if (tab.id === SecurityTabId.COMPONENTS) {
+          return securityPermissions?.hasComponentAnalysis ?? false;
+        }
+        return true;
+      }),
     [securityPermissions],
   );
   const activeTab = useMemo(() => {

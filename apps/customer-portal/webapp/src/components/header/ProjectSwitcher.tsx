@@ -16,7 +16,6 @@
 
 import {
   Box,
-  Header as HeaderUI,
   MenuItem,
   Paper,
   Popover,
@@ -25,7 +24,12 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown, ChevronUp, FolderOpen, Search } from "@wso2/oxygen-ui-icons-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  FolderOpen,
+  Search,
+} from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
@@ -50,15 +54,42 @@ import {
   PROJECT_HUB_SEARCH_PLACEHOLDER,
 } from "@features/project-hub/constants/projectHubConstants";
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
+import HeaderSwitchersSlot from "@components/header/HeaderSwitchersSlot";
 
 interface ProjectSwitcherProps {
   projectId?: string;
   onProjectChange: (projectId: string) => void;
   isAuthLoading?: boolean;
+  stackedHeaderRow?: boolean;
 }
 
 const LOAD_MORE_THRESHOLD_PX = 24;
 const DROPDOWN_SKELETON_COUNT = 5;
+
+const PROJECT_NAME_ELLIPSIS_SX = {
+  flex: 1,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+} as const;
+
+const TRIGGER_CHEVRON_SX = {
+  display: "flex",
+  alignItems: "center",
+  flexShrink: 0,
+} as const;
+
+const TRIGGER_ROW_SX = {
+  display: "flex",
+  alignItems: "center",
+  gap: 1,
+  height: 40,
+  px: 1.5,
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+} as const;
 
 /**
  * Project switcher component for the header.
@@ -72,7 +103,15 @@ export default function ProjectSwitcher({
   projectId,
   onProjectChange,
   isAuthLoading = false,
+  stackedHeaderRow = false,
 }: ProjectSwitcherProps): JSX.Element {
+  const triggerSx = stackedHeaderRow
+    ? { width: "100%", maxWidth: "100%" }
+    : {
+        minWidth: { lg: 200, xl: 220 },
+        width: { lg: 200, xl: "auto" },
+        maxWidth: { lg: 280, xl: 320 },
+      };
   const [searchQuery, setSearchQuery] = useState("");
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const isMenuOpen = Boolean(anchorEl);
@@ -106,7 +145,9 @@ export default function ProjectSwitcher({
   }, [debouncedSearchQuery, isLoading, totalRecords]);
 
   // Persist the last known selected project name across search queries (projects list empties while loading)
-  const [lastFound, setLastFound] = useState<{ id: string; name: string } | undefined>(undefined);
+  const [lastFound, setLastFound] = useState<
+    { id: string; name: string } | undefined
+  >(undefined);
   useEffect(() => {
     const found = projects.find((p) => p.id === projectId);
     if (found) setLastFound({ id: found.id, name: found.name });
@@ -154,43 +195,37 @@ export default function ProjectSwitcher({
 
   if (!isMenuOpen && (isAuthLoading || isLoading)) {
     return (
-      <HeaderUI.Switchers showDivider={false}>
+      <HeaderSwitchersSlot stackedHeaderRow={stackedHeaderRow}>
         <Box
           sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            height: 40,
-            px: 1.5,
+            ...TRIGGER_ROW_SX,
             border: "1px solid",
             borderColor: "action.disabledBackground",
             borderRadius: 1,
+            ...triggerSx,
           }}
         >
-          <FolderOpen size={16} />
+          <Box sx={TRIGGER_CHEVRON_SX}>
+            <FolderOpen size={16} />
+          </Box>
           {displayName !== "Select Project" ? (
-            <Typography
-              variant="body2"
-              noWrap
-              sx={{
-                maxWidth: 220,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
+            <Typography variant="body2" sx={PROJECT_NAME_ELLIPSIS_SX}>
               {displayName}
             </Typography>
           ) : (
-            <Skeleton variant="rounded" width={150} height={20} />
+            <Skeleton
+              variant="rounded"
+              sx={{ flex: 1, minWidth: 0, maxWidth: 150, height: 20 }}
+            />
           )}
         </Box>
-      </HeaderUI.Switchers>
+      </HeaderSwitchersSlot>
     );
   }
 
   if (!isMenuOpen && isError) {
     return (
-      <HeaderUI.Switchers showDivider={false}>
+      <HeaderSwitchersSlot stackedHeaderRow={stackedHeaderRow}>
         <Box
           sx={{
             display: "flex",
@@ -198,17 +233,17 @@ export default function ProjectSwitcher({
             justifyContent: "center",
             gap: 1,
             height: 40,
-            width: 200,
             px: 1.5,
             border: "1px solid",
             borderColor: "error.main",
             borderRadius: 1,
             color: "error.main",
+            ...triggerSx,
           }}
         >
           <ErrorIndicator entityName="Projects" />
         </Box>
-      </HeaderUI.Switchers>
+      </HeaderSwitchersSlot>
     );
   }
 
@@ -216,75 +251,78 @@ export default function ProjectSwitcher({
     const project = selectedProject ?? projects[0];
 
     return (
-      <HeaderUI.Switchers showDivider={false}>
+      <HeaderSwitchersSlot stackedHeaderRow={stackedHeaderRow}>
         <Box
           sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            height: 40,
-            minWidth: 200,
-            px: 1.5,
+            ...TRIGGER_ROW_SX,
             border: "1px solid",
             borderColor: "divider",
             borderRadius: 1,
             backgroundColor: "background.paper",
+            ...triggerSx,
           }}
         >
-          <FolderOpen size={16} />
-          <Tooltip title={project ? project.name : "Select Project"}>
-            <Typography
-              variant="body2"
-              noWrap
-              sx={{
-                maxWidth: 220,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {project ? project.name : "Select Project"}
-            </Typography>
-          </Tooltip>
+          <Box sx={TRIGGER_CHEVRON_SX}>
+            <FolderOpen size={16} />
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <Tooltip title={project ? project.name : "Select Project"}>
+              <Typography
+                variant="body2"
+                component="span"
+                sx={{
+                  display: "block",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {project ? project.name : "Select Project"}
+              </Typography>
+            </Tooltip>
+          </Box>
         </Box>
-      </HeaderUI.Switchers>
+      </HeaderSwitchersSlot>
     );
   }
 
   return (
-    <HeaderUI.Switchers showDivider={false}>
+    <HeaderSwitchersSlot stackedHeaderRow={stackedHeaderRow}>
       {/* Trigger button — styled to match the other switcher states */}
       <Paper
         onClick={handleOpen}
         sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-          height: 40,
-          minWidth: 200,
-          px: 1.5,
+          ...TRIGGER_ROW_SX,
           cursor: "pointer",
           border: "1px solid",
           borderColor: isMenuOpen ? "primary.main" : "divider",
           userSelect: "none",
           "&:hover": { borderColor: "action.active" },
+          ...triggerSx,
         }}
       >
-        <FolderOpen size={16} />
-        <Tooltip title={displayName}>
-          <Typography
-            variant="body2"
-            noWrap
-            sx={{
-              flex: 1,
-              maxWidth: 220,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {displayName}
-          </Typography>
-        </Tooltip>
-        {isMenuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        <Box sx={TRIGGER_CHEVRON_SX}>
+          <FolderOpen size={16} />
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <Tooltip title={displayName}>
+            <Typography
+              variant="body2"
+              component="span"
+              sx={{
+                display: "block",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {displayName}
+            </Typography>
+          </Tooltip>
+        </Box>
+        <Box sx={TRIGGER_CHEVRON_SX} aria-hidden>
+          {isMenuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </Box>
       </Paper>
 
       {/* Dropdown — Popover gives us full layout control: fixed search bar + scrollable items */}
@@ -335,11 +373,12 @@ export default function ProjectSwitcher({
               }}
               inputProps={{ autoComplete: "off" }}
               sx={{
-                "& input:-webkit-autofill, & input:-webkit-autofill:hover, & input:-webkit-autofill:focus": {
-                  WebkitBoxShadow: "0 0 0 100px transparent inset",
-                  WebkitTextFillColor: "inherit",
-                  transition: "background-color 5000s ease-in-out 0s",
-                },
+                "& input:-webkit-autofill, & input:-webkit-autofill:hover, & input:-webkit-autofill:focus":
+                  {
+                    WebkitBoxShadow: "0 0 0 100px transparent inset",
+                    WebkitTextFillColor: "inherit",
+                    transition: "background-color 5000s ease-in-out 0s",
+                  },
               }}
             />
           </Box>
@@ -347,7 +386,10 @@ export default function ProjectSwitcher({
 
         {/* Scrollable items container — sits below the search bar */}
         <Box
-          sx={{ maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX, overflowY: "auto" }}
+          sx={{
+            maxHeight: PAGINATED_SELECT_MENU_MAX_HEIGHT_PX,
+            overflowY: "auto",
+          }}
           onScroll={handleMenuScroll}
         >
           {/* Skeleton items shown while a new search query loads */}
@@ -368,7 +410,11 @@ export default function ProjectSwitcher({
                   onProjectChange(project.id);
                   handleClose();
                 }}
-                sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                }}
               >
                 <Typography variant="body2">{project.name}</Typography>
                 <Typography variant="caption" color="text.secondary">
@@ -397,6 +443,6 @@ export default function ProjectSwitcher({
             )}
         </Box>
       </Popover>
-    </HeaderUI.Switchers>
+    </HeaderSwitchersSlot>
   );
 }

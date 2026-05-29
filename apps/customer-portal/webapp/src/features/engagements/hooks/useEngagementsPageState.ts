@@ -75,7 +75,7 @@ export function useEngagementsPageState() {
     hasListSearchOrFilters(searchTerm, filters),
   );
   const [sortField, setSortField] = useState<EngagementsSortField>(
-    EngagementsSortField.CreatedOn,
+    EngagementsSortField.UpdatedOn,
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SortOrder.DESC);
   const [page, setPage] = useState(1);
@@ -252,10 +252,12 @@ export function useEngagementsPageState() {
     setPage(1);
   };
 
-  const handleFilterChange = (field: string, value: string) => {
+  const handleFilterChange = (field: string, value: string | string[]) => {
     setFilters((prev) => ({
       ...prev,
-      [field]: value || undefined,
+      [field]: Array.isArray(value)
+        ? (value.length === 0 ? undefined : value)
+        : (value || undefined),
     }));
     setPage(1);
   };
@@ -299,7 +301,7 @@ export function useEngagementsPageState() {
     }
     setFixedStatusIds(ids);
     setActiveStatKey(key);
-    setFilters((prev) => ({ ...prev, statusId: undefined }));
+    setFilters((prev) => ({ ...prev, statusIds: undefined }));
     setPage(1);
   };
 
@@ -353,8 +355,17 @@ export function useEngagementsPageState() {
     }));
   }, [stats]);
 
+  const loadedCasesForExport = useMemo(
+    () => data?.pages.flatMap((page) => page.cases ?? []) ?? [],
+    [data],
+  );
+
   return {
     projectId,
+    projectName: project?.name,
+    engagementSearchRequest,
+    loadedCasesForExport,
+    hasCasesResponse,
     projectReady,
     restrictSeverityToLow,
     filterMetadata,

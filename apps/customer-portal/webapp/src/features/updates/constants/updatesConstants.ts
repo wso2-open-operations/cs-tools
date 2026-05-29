@@ -36,9 +36,6 @@ export const UPDATES_PAGE_TABS = [
   { id: UpdatesPageTabId.All, label: "All Updates" },
 ];
 
-export const UPDATES_RECOMMENDED_LEVELS_LOAD_ERROR =
-  "Could not load recommended update levels.";
-
 export const ALL_UPDATES_TAB_INITIAL_FILTER: AllUpdatesTabFilterState = {
   productName: "",
   productVersion: "",

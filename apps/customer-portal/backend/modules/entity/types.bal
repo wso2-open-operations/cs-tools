@@ -436,6 +436,8 @@ public type CaseSearchFilters record {|
     int[] stateKeys?;
     # Severity key
     int severityKey?;
+    # List of case severity keys
+    int[] severityKeys?;
     # Engagement type keys (required for engagement type cases)
     int[] engagementTypeKeys?;
     # Start date for closed date
@@ -444,6 +446,8 @@ public type CaseSearchFilters record {|
     UtcDateTimeString closedEndDate?;
     # Deployment ID
     string deploymentId?;
+    # Deployment ID list
+    IdString[] deploymentIds?;
     # Case created by the logged in user
     boolean createdByMe?;
 |};
@@ -564,7 +568,7 @@ public type ServiceRequestVariable record {|
 # Sort configuration.
 public type SortBy record {|
     # Field to sort by
-    CaseSortField 'field;
+    CaseSortField|ChangeRequestSortField 'field;
     # Sort order
     SortOrder 'order;
     json...;
@@ -596,6 +600,10 @@ public type ProjectFeatures record {|
     boolean hasDeploymentWriteAccess;
     # Indicates if deployment read access is enabled
     boolean hasDeploymentReadAccess;
+    # Indicates if component analysis read access is enabled
+    boolean hasComponentAnalysisReadAccess;
+    # Indicates if usage metrics read access is enabled
+    boolean hasUsageMetricsReadAccess;
     # Allowed categories for default case creation in deployed product search
     ProductCategory[]? defaultCaseProductCategories;
     # Allowed categories for service request creation in deployed product search
@@ -2032,6 +2040,8 @@ public type ChangeRequestSearchPayload record {|
         # End date for closed date filter
         UtcDateTimeString closedEndDate?;
     |} filters?;
+    # Sort configuration
+    SortBy sortBy?;
     # Pagination details
     Pagination pagination?;
 |};

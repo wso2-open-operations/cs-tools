@@ -124,8 +124,8 @@ export const SECURITY_REPORT_VIEW_TABS = [
 ] as const;
 
 export const SECURITY_REPORT_SORT_OPTIONS = [
-  { value: "createdOn", label: "Created date", kind: "chronological" },
   { value: "updatedOn", label: "Updated date", kind: "chronological" },
+  { value: "createdOn", label: "Created date", kind: "chronological" },
   { value: "state", label: "Status", kind: "ordinal" },
 ] as const;
 
@@ -134,8 +134,9 @@ export const SECURITY_REPORT_ENTITY_LABEL = "reports";
 export const SECURITY_REPORT_FILTER_DEFINITIONS: FilterDefinition[] = [
   {
     id: "status",
-    filterKey: "statusId",
+    filterKey: "statusIds",
     metadataKey: "caseStates",
+    multiSelect: true,
   },
 ];
 

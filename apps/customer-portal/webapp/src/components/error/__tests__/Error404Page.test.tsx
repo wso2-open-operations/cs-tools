@@ -14,22 +14,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
 
-/**
- * Renders an optional HTML banner above the main header, sourced from
- * CUSTOMER_PORTAL_TOP_BANNER_HTML in config.js.
- */
-export default function TopBanner(): JSX.Element | null {
-  const enabled = window.config?.CUSTOMER_PORTAL_TOP_BANNER_ENABLED;
-  const html = window.config?.CUSTOMER_PORTAL_TOP_BANNER_HTML;
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import Error404Page from "@components/error/Error404Page";
 
-  if (!enabled || !html) return null;
+vi.mock("@api/useAttachmentPreview", () => ({
+  useAttachmentPreview: () => ({ data: null, isLoading: false }),
+}));
 
-  return (
-    <div
-      style={{ display: "block", lineHeight: 0, fontSize: 0, overflow: "hidden" }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
+describe("Error404Page", () => {
+  it("renders", () => {
+    render(<Error404Page />);
+    expect(screen.getByAltText("404 not found illustration")).toBeInTheDocument();
+  });
+});

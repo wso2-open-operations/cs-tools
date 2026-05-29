@@ -18,6 +18,7 @@ import { Box } from "@wso2/oxygen-ui";
 import { useParams, useLocation } from "react-router";
 import { useCallback, useEffect, useRef, useMemo, type JSX } from "react";
 import { useModifierAwareNavigate } from "@hooks/useModifierAwareNavigate";
+import { useIsMidSizeTouchViewport } from "@hooks/useResponsiveLayout";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLogger } from "@hooks/useLogger";
 import { useLoader } from "@context/linear-loader/LoaderContext";
@@ -68,6 +69,7 @@ export default function DashboardPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useModifierAwareNavigate();
   const location = useLocation();
+  const isMidSizeTouchViewport = useIsMidSizeTouchViewport();
 
   type ChartNavAction =
     | { chart: "outstanding"; severityId: string }
@@ -514,7 +516,16 @@ export default function DashboardPage(): JSX.Element {
   }
 
   return (
-    <Box sx={{ width: "100%", pt: 0, position: "relative" }}>
+    <Box
+      sx={{
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
+        pt: 0,
+        position: "relative",
+        boxSizing: "border-box",
+      }}
+    >
       <Box sx={{ mb: 3 }}>
         <SupportStatGrid<DashboardStatKey>
           isLoading={isDashboardStatsLoading}
@@ -571,8 +582,8 @@ export default function DashboardPage(): JSX.Element {
         onOperationsClick={handleOperationsClick}
         onEngagementsClick={handleEngagementsClick}
       />
-      {/* Cases Table */}
-      {projectId && (
+      {/* Cases table hidden on mid-size touch tablets (e.g. iPad Mini) where layout is cramped */}
+      {projectId && !isMidSizeTouchViewport ? (
         <Box sx={{ mt: 3 }}>
           <CasesTable
             projectId={projectId}
@@ -582,7 +593,7 @@ export default function DashboardPage(): JSX.Element {
             includeDeploymentFilter={permissions.hasDeployments}
           />
         </Box>
-      )}
+      ) : null}
     </Box>
   );
 }

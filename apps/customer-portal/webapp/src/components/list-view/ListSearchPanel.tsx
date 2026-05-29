@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import ListSearchBar from "@components/list-view/ListSearchBar";
@@ -28,14 +28,14 @@ export interface ListSearchPanelProps {
   isFiltersOpen: boolean;
   onFiltersToggle: () => void;
   filters: {
-    statusId?: string;
-    severityId?: string;
+    statusIds?: string[];
+    severityIds?: string[];
     issueTypes?: string;
-    deploymentId?: string;
+    deploymentIds?: string[];
   };
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
-  onFilterChange: (field: string, value: string) => void;
+  onFilterChange: (field: string, value: string | string[]) => void;
   onClearFilters: () => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
@@ -49,6 +49,7 @@ export interface ListSearchPanelProps {
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
   excludeFromCount?: string[];
+  actionsBeforeClearFilters?: ReactNode;
 }
 
 /**
@@ -80,13 +81,14 @@ export default function ListSearchPanel({
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
   excludeFromCount = [],
+  actionsBeforeClearFilters,
 }: ListSearchPanelProps): JSX.Element {
   const excluded = Object.fromEntries(excludeFromCount.map((k) => [k, undefined]));
   const filtersForCount = {
     ...filters,
-    ...(hideSeverityFilter ? { severityId: undefined } : {}),
-    ...(hideStatusFilter ? { statusId: undefined } : {}),
-    ...(hideDeploymentFilter ? { deploymentId: undefined } : {}),
+    ...(hideSeverityFilter ? { severityIds: undefined } : {}),
+    ...(hideStatusFilter ? { statusIds: undefined } : {}),
+    ...(hideDeploymentFilter ? { deploymentIds: undefined } : {}),
     ...(hideCategoryFilter ? { issueTypes: undefined } : {}),
     ...excluded,
   };
@@ -104,6 +106,7 @@ export default function ListSearchPanel({
       onClearFilters={onClearFilters}
       hideFiltersButton={hideFiltersButton}
       isLoading={isProjectContextLoading}
+      actionsBeforeClearFilters={actionsBeforeClearFilters}
       filtersContent={
         <ListFilters
           filters={filters}

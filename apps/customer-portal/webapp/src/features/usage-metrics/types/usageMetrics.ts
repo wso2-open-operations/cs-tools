@@ -73,6 +73,7 @@ export type UsageMetricsTimeRangeSelectorProps = {
   onCancelCustom: () => void;
   appliedCustomStart: string;
   appliedCustomEnd: string;
+  rightAction?: ReactNode;
 };
 
 export type UsageOverviewPanelProps = {
