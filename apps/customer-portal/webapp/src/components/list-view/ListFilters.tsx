@@ -178,7 +178,7 @@ export default function ListFilters({
           const selectedValues = (filters[def.filterKey] as string[] | undefined) ?? [];
           return (
             <Grid key={def.id} size={{ xs: 12, sm: 6 }} sx={{ flex: { md: "1 1 0" }, minWidth: { md: 160 } }}>
-              <FormControl fullWidth size="small">
+              <FormControl fullWidth size="small" sx={{ marginTop: { md: 1 } }}>
                 <InputLabel id={`${def.id}-label`}>{label}</InputLabel>
                 <Select
                   multiple
