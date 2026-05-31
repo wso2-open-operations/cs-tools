@@ -81,3 +81,12 @@ type DeployedProductService interface {
 	// error indicates an infrastructure failure.
 	SearchDeployedProducts(ctx context.Context, req domain.SearchDeployedProductsRequest) (domain.SearchDeployedProductsResponse, error)
 }
+
+// CaseService defines the operations available on the cases entity.
+type CaseService interface {
+	// SearchCases returns a paginated list of cases filtered by optional project IDs,
+	// deployment IDs, deployed product IDs, state keys, priority keys, and search query.
+	// A ValidationError is returned for invalid input; any other error indicates an
+	// infrastructure failure.
+	SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error)
+}
