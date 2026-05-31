@@ -59,6 +59,10 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 	deployedProductSvc := service.NewDeployedProductService(deployedProductRepo)
 	deployedProductHandler := handler.NewDeployedProductHandler(deployedProductSvc)
 
+	caseRepo := repository.NewCaseRepository(db)
+	caseSvc := service.NewCaseService(caseRepo)
+	caseHandler := handler.NewCaseHandler(caseSvc)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
@@ -69,6 +73,7 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("POST /products/{id}/versions/search", productVersionHandler.SearchProductVersions)
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
 	mux.HandleFunc("POST /deployed-products/search", deployedProductHandler.SearchDeployedProducts)
+	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 
 	return middleware.Recovery(
 		middleware.Logger(
