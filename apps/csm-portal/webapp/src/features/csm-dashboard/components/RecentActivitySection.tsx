@@ -17,7 +17,7 @@
 import { Box, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmRecentActivity,
   CsmRecentActivityType,
@@ -88,7 +88,7 @@ export default function RecentActivitySection({
                   <strong>{a.caseNumber}</strong> · {a.summary}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {a.customer} · {a.who} · {formatRelativeTime(a.whenAt)}
+                  {a.customer} · {a.who} · <RelativeTime iso={a.whenAt} />
                 </Typography>
               </Box>
             </Box>

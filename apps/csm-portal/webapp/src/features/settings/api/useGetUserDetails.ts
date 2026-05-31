@@ -15,12 +15,106 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import type { UserDetails } from "@features/settings/types/users";
 import { useLogger } from "@hooks/useLogger";
 import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
 import { setUserPreferredTimeZone } from "@utils/dateTime";
 import { ApiError } from "@utils/ApiError";
+
+/**
+ * Pull OIDC claims out of the session token that the auth SDK persists in
+ * sessionStorage. Falls back to the Asgardeo context's `user` field, then to
+ * an awaited `getDecodedIdToken()`. Used only in mock mode (no backend exists
+ * to call). Returns an empty object if no token is available yet.
+ */
+async function readSessionClaims(
+  asgardeo: ReturnType<typeof useAsgardeo>,
+): Promise<Record<string, unknown>> {
+  // 1. Look for the id_token in sessionStorage — the SDK stores it there.
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      const key = Object.keys(sessionStorage).find((k) =>
+        k.startsWith("session_data-"),
+      );
+      if (key) {
+        const raw = sessionStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { id_token?: string };
+          if (parsed.id_token) {
+            const claims = decodeJwtPayload(parsed.id_token);
+            if (claims) return claims;
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore — try next source
+  }
+  // 2. The context's `user` field may already hold parsed claims.
+  if (asgardeo.user && typeof asgardeo.user === "object") {
+    return asgardeo.user as Record<string, unknown>;
+  }
+  // 3. Last resort: ask the SDK to decode. May reject if it isn't ready.
+  try {
+    const decoded = await asgardeo.getDecodedIdToken();
+    if (decoded && typeof decoded === "object") {
+      return decoded as Record<string, unknown>;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+  const parts = jwt.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(padded + "===".slice((padded.length + 3) % 4));
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function deriveUserDetailsFromAuth(
+  asgardeo: ReturnType<typeof useAsgardeo>,
+): Promise<UserDetails> {
+  const claims = await readSessionClaims(asgardeo);
+
+  const pick = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = claims[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+    return undefined;
+  };
+
+  const email = pick("email", "preferred_username", "username", "sub") ?? "";
+  const firstName =
+    pick("given_name", "firstName", "first_name") ??
+    (email ? email.split("@")[0]?.split(/[._-]/)[0] ?? "" : "");
+  const lastName =
+    pick("family_name", "lastName", "last_name") ??
+    (email ? email.split("@")[0]?.split(/[._-]/).slice(1).join(" ") ?? "" : "");
+  const id = pick("sub", "id", "user_id") ?? email;
+
+  return {
+    id,
+    email,
+    firstName: capitalize(firstName),
+    lastName: capitalize(lastName),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  };
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 /**
  * Hook to get user details.
@@ -30,11 +124,20 @@ import { ApiError } from "@utils/ApiError";
 const useGetUserDetails = (): UseQueryResult<UserDetails, Error> => {
   const authFetch = useAuthApiClient();
   const logger = useLogger();
+  const asgardeo = useAsgardeo();
 
   return useQuery({
     queryKey: ["userDetails"],
     queryFn: async (): Promise<UserDetails> => {
       logger.debug("[useGetUserDetails] Fetching user details...");
+
+      // Mock mode: no backend exists. Derive identity from the authenticated
+      // session's claims so the header shows the real signed-in user.
+      if (window.config?.CSM_PORTAL_USE_MOCKS) {
+        const details = await deriveUserDetailsFromAuth(asgardeo);
+        setUserPreferredTimeZone(details.timeZone);
+        return details;
+      }
 
       try {
         const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;

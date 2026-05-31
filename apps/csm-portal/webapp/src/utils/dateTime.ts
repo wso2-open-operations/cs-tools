@@ -180,3 +180,43 @@ export function formatBackendTimestampForDisplay(
   return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date);
 }
 
+/**
+ * Formats a backend (UTC) timestamp as an absolute date-time string in the
+ * user's resolved timezone, suitable for tooltip text. Format:
+ *   "2026-05-31 20:28:33 GMT+5:30"
+ *
+ * Returns `null` when the input is empty or unparseable.
+ */
+export function formatAbsoluteForUser(
+  rawTimestamp: string | null | undefined,
+  explicitTimeZone?: string,
+): string | null {
+  const date = parseBackendTimestamp(rawTimestamp);
+  if (!date) return null;
+  const timeZone = resolveDisplayTimeZone(explicitTimeZone);
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZone,
+      timeZoneName: "shortOffset",
+    }).formatToParts(date);
+    const find = (type: Intl.DateTimeFormatPartTypes): string =>
+      parts.find((p) => p.type === type)?.value ?? "";
+    const datePart = `${find("year")}-${find("month")}-${find("day")}`;
+    // hour with hour12=false in en-CA returns "00"-"24"; "24" can appear for
+    // midnight — normalize to "00".
+    const hh = find("hour") === "24" ? "00" : find("hour");
+    const timePart = `${hh}:${find("minute")}:${find("second")}`;
+    const tzPart = find("timeZoneName") || "UTC";
+    return `${datePart} ${timePart} ${tzPart}`;
+  } catch {
+    return null;
+  }
+}
+

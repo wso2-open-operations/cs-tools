@@ -78,6 +78,60 @@ import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerCont
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
 
+// Consume the saved post-login redirect with a short-window cache.
+//
+// Two competing constraints:
+//   1. StrictMode invokes state initializers / function-component bodies twice
+//      in dev. A non-idempotent reader (read + remove from sessionStorage)
+//      loses the value on the second call → user lands on /dashboard instead
+//      of the saved deep link. So we cache the resolved value.
+//   2. Clicking the logo navigates to `/`, which re-renders this component.
+//      A permanent cache would keep redirecting the user to the original
+//      deep link forever, defeating the logo. So the cache must expire.
+//
+// 500ms is comfortably longer than StrictMode's microsecond double-init and
+// far shorter than any user-initiated click.
+let cachedPostLoginRedirect: string | undefined;
+let cachedAt = 0;
+const CACHE_TTL_MS = 500;
+
+function consumePostLoginRedirect(): string {
+  const now = Date.now();
+  if (
+    cachedPostLoginRedirect !== undefined &&
+    now - cachedAt < CACHE_TTL_MS
+  ) {
+    return cachedPostLoginRedirect;
+  }
+  cachedPostLoginRedirect = undefined;
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      const saved = sessionStorage.getItem("post_login_redirect");
+      if (saved && saved !== "/") {
+        sessionStorage.removeItem("post_login_redirect");
+        cachedPostLoginRedirect = saved;
+        cachedAt = now;
+        return saved;
+      }
+    }
+  } catch {
+    // ignore — sessionStorage access can throw in sandboxed contexts
+  }
+  cachedPostLoginRedirect = "/dashboard";
+  cachedAt = now;
+  return cachedPostLoginRedirect;
+}
+
+/**
+ * Renders at the `/` route inside AuthGuard. If the IdP redirect dropped a
+ * deep-link in sessionStorage (the URL the user was originally trying to
+ * reach before being sent to the IdP), restore that URL — including its
+ * fragment. Otherwise fall back to the dashboard.
+ */
+function PostLoginRedirect(): JSX.Element {
+  return <Navigate to={consumePostLoginRedirect()} replace />;
+}
+
 export default function App(): JSX.Element {
   return (
     <LoaderProvider>
@@ -90,7 +144,7 @@ export default function App(): JSX.Element {
               <Route path="/404" element={<ErrorLayout><Error404Page /></ErrorLayout>} />
 
               <Route element={<AuthGuard />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<PostLoginRedirect />} />
 
                 {/* CSM top-level pages — mocked while csm-portal/backend catches up */}
                 <Route path="dashboard" element={<CsmDashboardPage />} />

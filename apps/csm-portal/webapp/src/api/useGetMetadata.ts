@@ -19,6 +19,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PortalMetadataResponse } from "@features/project-hub/types/projects";
+import { MOCK_TIME_ZONES } from "@utils/timeZones";
 
 /**
  * Fetches global metadata used by customer portal (time zones, etc).
@@ -35,6 +36,14 @@ export default function useGetMetadata(): UseQueryResult<
   return useQuery<PortalMetadataResponse, Error>({
     queryKey: [ApiQueryKeys.METADATA],
     queryFn: async (): Promise<PortalMetadataResponse> => {
+      if (window.config?.CSM_PORTAL_USE_MOCKS) {
+        logger.debug("[useGetMetadata] Using mock time zones");
+        return {
+          timeZones: MOCK_TIME_ZONES,
+          featureFlags: { usageMetricsEnabled: true },
+        };
+      }
+
       const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
       if (!baseUrl) {
         throw new Error("CSM_PORTAL_BACKEND_BASE_URL is not configured");

@@ -21,9 +21,9 @@ import {
   SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
   STATE_LABEL,
-  formatRelativeTime,
   formatTimeToBreach,
 } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
 interface CasesListProps {
@@ -205,7 +205,7 @@ export default function CasesList({
                 sx={{ textAlign: "right" }}
                 noWrap
               >
-                {formatRelativeTime(c.updatedAt)}
+                <RelativeTime iso={c.updatedAt} />
               </Typography>
             </Box>
           );

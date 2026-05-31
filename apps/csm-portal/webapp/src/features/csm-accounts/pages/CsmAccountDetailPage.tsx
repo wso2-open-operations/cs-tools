@@ -25,7 +25,7 @@ import {
 import ProjectsList from "@features/csm-projects/components/ProjectsList";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 
 function MetaCell({
   label,
@@ -214,7 +214,7 @@ export default function CsmAccountDetailPage(): JSX.Element {
           </MetaCell>
           <MetaCell label="Last activity">
             <Typography variant="body2">
-              {formatRelativeTime(account.lastActivityAt)}
+              <RelativeTime iso={account.lastActivityAt} />
             </Typography>
           </MetaCell>
         </Box>

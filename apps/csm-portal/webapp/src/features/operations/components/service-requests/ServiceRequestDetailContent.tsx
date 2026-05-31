@@ -48,9 +48,9 @@ import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePostComment } from "@features/support/api/usePostComment";
 import type { CaseDetails } from "@features/support/types/cases";
 import type { CaseComment } from "@features/support/types/cases";
+import RelativeTime from "@components/RelativeTime";
 import {
   formatDateTime,
-  formatRelativeTime,
   getAssignedEngineerLabel,
   getInitials,
   getStatusColor,
@@ -570,7 +570,7 @@ export default function ServiceRequestDetailContent({
                           sx={{ display: "block" }}
                         >
                           {comment.createdBy} •{" "}
-                          {formatRelativeTime(comment.createdOn ?? "")}
+                          <RelativeTime iso={comment.createdOn ?? ""} />
                         </Typography>
                         {isPlainTextComment(comment.content ?? "") ? (
                           <Box
@@ -904,7 +904,7 @@ export default function ServiceRequestDetailContent({
                       display="block"
                       sx={{ mt: 0.25 }}
                     >
-                      {entry.actor} - {formatRelativeTime(entry.date)}
+                      {entry.actor} - <RelativeTime iso={entry.date} />
                     </Typography>
                     {entry.desc && (
                       <Typography

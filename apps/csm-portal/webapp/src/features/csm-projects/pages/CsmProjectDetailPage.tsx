@@ -23,7 +23,7 @@ import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import { getMockCsmProjectById } from "@features/csm-projects/api/mocks/projectsMocks";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmProjectRow,
   CsmProjectStatus,
@@ -227,7 +227,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
             </MetaCell>
             <MetaCell label="Last activity">
               <Typography variant="body2">
-                {formatRelativeTime(project.lastActivityAt)}
+                <RelativeTime iso={project.lastActivityAt} />
               </Typography>
             </MetaCell>
           </Box>

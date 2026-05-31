@@ -14,10 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX, useEffect } from "react";
-import { useAsgardeo } from "@asgardeo/react";
+import { type JSX } from "react";
 import { ProtectedRoute } from "@asgardeo/react-router";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import AppLayout from "@layouts/AppLayout";
 
 const POST_LOGIN_REDIRECT_KEY = "post_login_redirect";
@@ -38,25 +37,17 @@ const POST_LOGIN_REDIRECT_KEY = "post_login_redirect";
  * @returns {JSX.Element} AppLayout or redirect to home.
  */
 export default function AuthGuard(): JSX.Element {
-  const { isSignedIn } = useAsgardeo();
   const location = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (isSignedIn) {
-      const redirect = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY);
-      if (redirect) {
-        sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
-        void navigate(redirect, { replace: true });
-      }
-    }
-  }, [isSignedIn, navigate]);
 
   return (
     <ProtectedRoute
       loader={<AppLayout />}
       onSignIn={(defaultSignIn, signInOptions) => {
-        const intended = location.pathname + location.search;
+        // Include hash so deep-links like `/cases/case-1001#cmt-1001-2`
+        // survive the IdP redirect round-trip. PostLoginRedirect (rendered at
+        // `/`) consumes this on the way back.
+        const intended =
+          location.pathname + location.search + (location.hash ?? "");
         if (intended !== "/") {
           sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended);
         }

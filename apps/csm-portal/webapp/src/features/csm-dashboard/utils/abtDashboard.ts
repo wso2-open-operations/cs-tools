@@ -19,6 +19,7 @@ import type {
   Severity,
   SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
+import { parseBackendTimestamp } from "@utils/dateTime";
 
 export const SEVERITY_COLOR: Record<
   Severity,
@@ -56,13 +57,24 @@ export function formatTimeToBreach(minutes: number): string {
   return minutes < 0 ? `breached ${body} ago` : `${body} left`;
 }
 
-export function formatRelativeTime(iso: string, now: number = Date.now()): string {
-  const diffMs = now - new Date(iso).getTime();
-  const diffMin = Math.round(diffMs / 60_000);
+export function formatRelativeTime(
+  iso: string | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (!iso) return "—";
+  // Backend timestamps are UTC. parseBackendTimestamp treats unzoned ISO
+  // strings (and the slash/space formats some SN APIs return) as UTC.
+  const parsed = parseBackendTimestamp(iso);
+  const epoch = parsed ? parsed.getTime() : new Date(iso).getTime();
+  if (Number.isNaN(epoch)) return "—";
+  const diffMs = now - epoch;
+  const futureSuffix = diffMs < 0 ? " from now" : " ago";
+  const abs = Math.abs(diffMs);
+  const diffMin = Math.round(abs / 60_000);
   if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return `${diffMin}m${futureSuffix}`;
   const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return `${diffHr}h${futureSuffix}`;
   const diffDay = Math.round(diffHr / 24);
-  return `${diffDay}d ago`;
+  return `${diffDay}d${futureSuffix}`;
 }

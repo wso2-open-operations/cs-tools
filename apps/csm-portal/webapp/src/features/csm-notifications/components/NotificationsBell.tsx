@@ -46,7 +46,7 @@ import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
 } from "@features/csm-notifications/api/useCsmNotifications";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmNotification,
   CsmNotificationKind,
@@ -251,7 +251,7 @@ export default function NotificationsBell(): JSX.Element {
                 {n.summary}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {formatRelativeTime(n.createdAt)}
+                <RelativeTime iso={n.createdAt} href={n.href} />
               </Typography>
             </Box>
             {!n.isRead && (

@@ -74,6 +74,8 @@ export interface PostCsmCaseCommentInput {
   bodyHtml: string;
   /** Display name of the logged-in engineer. */
   authorName: string;
+  /** If true, the entry is an internal work note (not customer-visible). */
+  internal?: boolean;
 }
 
 export function usePostCsmCaseComment(): UseMutationResult<
@@ -97,6 +99,7 @@ export function usePostCsmCaseComment(): UseMutationResult<
           bodyHtml: input.bodyHtml,
           authorName: input.authorName,
           authorRole: "wso2_engineer",
+          internal: input.internal ?? false,
         });
       }
 
@@ -110,7 +113,10 @@ export function usePostCsmCaseComment(): UseMutationResult<
       const response = await authFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bodyHtml: input.bodyHtml }),
+        body: JSON.stringify({
+          bodyHtml: input.bodyHtml,
+          internal: input.internal ?? false,
+        }),
       });
       if (!response.ok) {
         throw new Error(`Failed to post comment: ${response.statusText}`);

@@ -18,8 +18,8 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { getMockCsmCaseById } from "@features/csm-cases/api/mocks/casesMocks";
-import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
+import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
+import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 
 const MOCK_LATENCY_MS = 150;
 
@@ -31,19 +31,19 @@ const MOCK_LATENCY_MS = 150;
  */
 export function useGetCsmCaseDetail(
   caseId: string | undefined,
-): UseQueryResult<CsmCaseRow | null, Error> {
+): UseQueryResult<CsmCaseDetail | null, Error> {
   const logger = useLogger();
   const authFetch = useAuthApiClient();
 
-  return useQuery<CsmCaseRow | null, Error>({
+  return useQuery<CsmCaseDetail | null, Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_DETAIL, caseId ?? ""],
-    queryFn: async (): Promise<CsmCaseRow | null> => {
+    queryFn: async (): Promise<CsmCaseDetail | null> => {
       if (!caseId) return null;
 
       if (window.config?.CSM_PORTAL_USE_MOCKS) {
         logger.debug(`[useGetCsmCaseDetail] Returning mock case ${caseId}`);
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCaseById(caseId) ?? null;
+        return getMockCsmCaseDetailById(caseId) ?? null;
       }
 
       const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
@@ -59,7 +59,7 @@ export function useGetCsmCaseDetail(
           `Error fetching CSM case ${caseId}: ${response.statusText}`,
         );
       }
-      return (await response.json()) as CsmCaseRow;
+      return (await response.json()) as CsmCaseDetail;
     },
     enabled: !!caseId,
     staleTime: 30_000,
