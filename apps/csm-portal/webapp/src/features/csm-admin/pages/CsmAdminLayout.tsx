@@ -14,67 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Box } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router";
+import { Outlet } from "react-router";
+import AdminTabs from "@features/csm-admin/components/AdminTabs";
 
-interface AdminTab {
-  id: string;
-  label: string;
-  path: string;
-  wip?: boolean;
-}
-
-const ADMIN_TABS: AdminTab[] = [
-  { id: "users", label: "Users", path: "/admin/users" },
-  { id: "roles", label: "Roles", path: "/admin/roles", wip: true },
-  { id: "groups", label: "Groups", path: "/admin/groups", wip: true },
-  { id: "permissions", label: "Permissions", path: "/admin/permissions", wip: true },
-];
-
-function pickActiveTab(pathname: string): string {
-  for (const t of ADMIN_TABS) {
-    if (pathname === t.path || pathname.startsWith(`${t.path}/`)) {
-      return t.id;
-    }
-  }
-  return ADMIN_TABS[0].id;
-}
-
+/**
+ * Wrapper for `/admin/*` routes. Owns the single source of truth for the
+ * page header and tab strip. Child pages must NOT render `<AdminTabs />`
+ * themselves — that produces a duplicate header.
+ */
 export default function CsmAdminLayout(): JSX.Element {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const active = pickActiveTab(location.pathname);
-
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Typography variant="h5">Administration</Typography>
-
-      <Tabs
-        value={active}
-        onChange={(_, id) => {
-          const next = ADMIN_TABS.find((t) => t.id === id);
-          if (next) void navigate(next.path);
-        }}
-        variant="scrollable"
-        scrollButtons="auto"
-      >
-        {ADMIN_TABS.map((t) => (
-          <Tab
-            key={t.id}
-            value={t.id}
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                {t.label}
-                {t.wip && (
-                  <Chip size="small" label="WIP" color="warning" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
-                )}
-              </Box>
-            }
-          />
-        ))}
-      </Tabs>
-
+      <AdminTabs />
       <Outlet />
     </Box>
   );

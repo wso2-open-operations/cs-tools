@@ -18,7 +18,6 @@ import { Box, Button, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import CreateRoleDialog from "@features/csm-admin/components/CreateRoleDialog";
 import {
   useGetCsmRoles,
@@ -54,7 +53,6 @@ export default function CsmAdminRolesPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
         <Typography variant="body2" color="text.secondary">

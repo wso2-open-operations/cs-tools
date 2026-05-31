@@ -16,21 +16,48 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
+const STORAGE_STATE = "./tests/e2e/.auth/user.json";
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
-  fullyParallel: true,
+  fullyParallel: false, // Auth state is per-process; serial avoids HMR races.
   outputDir: "test-results",
+  reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
     video: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  webServer: {
+    command: "npm run dev -- --port 3000",
+    url: "http://localhost:3000/",
+    reuseExistingServer: true,
+    timeout: 60_000,
   },
   projects: [
+    // Unauthenticated smoke. Verifies the auth wall and public surfaces.
     {
-      name: "chromium",
+      name: "smoke",
+      testMatch: /.*nav-smoke\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
+    },
+    // Authenticated flows. Require a recorded OIDC storage state; see
+    // tests/e2e/README.md for the one-time capture procedure.
+    {
+      name: "auth-setup",
+      testMatch: /.*auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "authenticated",
+      testMatch: /(case-create|admin)\.spec\.ts/,
+      dependencies: ["auth-setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: STORAGE_STATE,
+      },
     },
   ],
 });
-

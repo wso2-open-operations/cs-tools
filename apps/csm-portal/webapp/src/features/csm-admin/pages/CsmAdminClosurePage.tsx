@@ -26,7 +26,6 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import type { JSX } from "react";
 
 /** Subscription Closure Management — BRD §Subscription Closure Management. */
@@ -63,7 +62,6 @@ function stageColor(s: ClosureRow["stage"]): "primary" | "info" | "warning" | "s
 export default function CsmAdminClosurePage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
       <Card variant="outlined">
         <TableContainer>
           <Table size="small">

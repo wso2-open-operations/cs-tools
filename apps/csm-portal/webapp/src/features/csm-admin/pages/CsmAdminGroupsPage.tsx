@@ -18,7 +18,6 @@ import { Box, Button, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useNavigate } from "react-router";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import CreateGroupDialog from "@features/csm-admin/components/CreateGroupDialog";
 import { useGetCsmGroups } from "@features/csm-admin/api/useCsmAdmin";
 
@@ -38,7 +37,6 @@ export default function CsmAdminGroupsPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
         <Typography variant="body2" color="text.secondary">

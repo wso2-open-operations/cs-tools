@@ -26,7 +26,6 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import type { JSX } from "react";
 
 /** Service Request catalog — items the customer can pick from when raising an SR. */
@@ -64,7 +63,6 @@ function catColor(c: CatalogRow["category"]): "primary" | "info" | "success" | "
 export default function CsmAdminCatalogPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
       <Card variant="outlined">
         <TableContainer>
           <Table size="small">

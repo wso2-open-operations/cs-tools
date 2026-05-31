@@ -25,7 +25,6 @@ import {
 import { ArrowLeft, Trash } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import AssignmentEditor, {
   type AssignmentOption,
 } from "@features/csm-admin/components/AssignmentEditor";
@@ -174,7 +173,6 @@ export default function CsmAdminRoleDetailPage(): JSX.Element {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <AdminTabs />
         <Skeleton variant="rectangular" height={140} />
       </Box>
     );
@@ -182,7 +180,6 @@ export default function CsmAdminRoleDetailPage(): JSX.Element {
   if (isError) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <AdminTabs />
         <Typography variant="body1" color="error">
           Could not load role.
         </Typography>
@@ -192,7 +189,6 @@ export default function CsmAdminRoleDetailPage(): JSX.Element {
   if (!role) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <AdminTabs />
         <Button
           variant="text"
           size="small"
@@ -209,7 +205,6 @@ export default function CsmAdminRoleDetailPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Button
           variant="text"

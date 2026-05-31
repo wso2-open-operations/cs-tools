@@ -26,7 +26,6 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import AdminTabs from "@features/csm-admin/components/AdminTabs";
 import type { JSX } from "react";
 
 /** SLA / Policy Management — BRD §SLA / Policy Management. */
@@ -78,7 +77,6 @@ function sevColor(s: SlaRow["severity"]): "error" | "warning" | "info" | "succes
 export default function CsmAdminSlaPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <AdminTabs />
       <Card variant="outlined">
         <TableContainer>
           <Table size="small">

@@ -14,24 +14,41 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Button,
+  Chip,
+  FormControl,
+  MenuItem,
+  Select,
+  Typography,
+} from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import type {
-  CsmDashboardEngineer,
-  DashboardScope,
+import {
+  DASHBOARD_OPTIONS,
+  type CsmDashboardEngineer,
+  type DashboardKey,
+  type DashboardScope,
 } from "@features/csm-dashboard/types/abtDashboard";
 
 interface AbtDashboardHeaderProps {
   engineer?: CsmDashboardEngineer;
   scope: DashboardScope;
   onScopeChange: (scope: DashboardScope) => void;
+  dashboardKey: DashboardKey;
+  onDashboardChange: (key: DashboardKey) => void;
 }
 
 export default function AbtDashboardHeader({
   engineer,
   scope,
   onScopeChange,
+  dashboardKey,
+  onDashboardChange,
 }: AbtDashboardHeaderProps): JSX.Element {
+  const currentOption = DASHBOARD_OPTIONS.find((o) => o.key === dashboardKey);
+  const showScopeButtons = currentOption?.scopeBased ?? false;
+
   return (
     <Box
       sx={{
@@ -60,23 +77,40 @@ export default function AbtDashboardHeader({
           )}
         </Box>
       </Box>
-      <Box sx={{ display: "flex", gap: 1 }}>
-        <Button
-          size="small"
-          variant={scope === "my_abt" ? "contained" : "outlined"}
-          color="primary"
-          onClick={() => onScopeChange("my_abt")}
-        >
-          My ABT
-        </Button>
-        <Button
-          size="small"
-          variant={scope === "all_customers" ? "contained" : "outlined"}
-          color="primary"
-          onClick={() => onScopeChange("all_customers")}
-        >
-          All customers
-        </Button>
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+        {showScopeButtons && (
+          <>
+            <Button
+              size="small"
+              variant={scope === "my_abt" ? "contained" : "outlined"}
+              color="primary"
+              onClick={() => onScopeChange("my_abt")}
+            >
+              My ABT
+            </Button>
+            <Button
+              size="small"
+              variant={scope === "all_customers" ? "contained" : "outlined"}
+              color="primary"
+              onClick={() => onScopeChange("all_customers")}
+            >
+              All customers
+            </Button>
+          </>
+        )}
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <Select
+            value={dashboardKey}
+            onChange={(e) => onDashboardChange(e.target.value as DashboardKey)}
+            displayEmpty
+          >
+            {DASHBOARD_OPTIONS.map((o) => (
+              <MenuItem key={o.key} value={o.key}>
+                {o.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
     </Box>
   );
