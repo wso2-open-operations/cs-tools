@@ -96,13 +96,27 @@ CREATE TRIGGER trg_case_catastrophic_priority
   BEFORE INSERT OR UPDATE ON cases
   FOR EACH ROW EXECUTE FUNCTION check_case_catastrophic_priority();
 
+-- Enable trigram extension for ILIKE '%...%' support
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- FK / equality indexes
 CREATE INDEX idx_cases_created_by          ON cases(created_by);
 CREATE INDEX idx_cases_project_id          ON cases(project_id);
 CREATE INDEX idx_cases_deployment_id       ON cases(deployment_id);
 CREATE INDEX idx_cases_deployed_product_id ON cases(deployed_product_id);
 CREATE INDEX idx_cases_priority            ON cases(priority);
 CREATE INDEX idx_cases_state               ON cases(state);
+
+-- Sort indexes
 CREATE INDEX idx_cases_created_at          ON cases(created_at);
+CREATE INDEX idx_cases_updated_at          ON cases(updated_at);
 CREATE INDEX idx_cases_closed_at           ON cases(closed_at);
+
+-- Composite indexes
 CREATE INDEX idx_cases_project_state       ON cases(project_id, state);
 CREATE INDEX idx_cases_priority_state      ON cases(priority, state);
+
+-- Trigram indexes for ILIKE search on subject, number, wso2_id
+CREATE INDEX idx_cases_subject_trgm  ON cases USING GIN (subject  gin_trgm_ops);
+CREATE INDEX idx_cases_number_trgm   ON cases USING GIN (number   gin_trgm_ops);
+CREATE INDEX idx_cases_wso2_id_trgm  ON cases USING GIN (wso2_id  gin_trgm_ops);
