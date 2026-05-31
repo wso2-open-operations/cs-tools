@@ -842,7 +842,7 @@ export default function CsmUpdatesPage(): JSX.Element {
           onClose={() => setOpenLevel(null)}
           levelKey={openEntry.key}
           updateType={openEntry.entry.updateType}
-          descriptions={openEntry.entry.updateDescriptionLevels}
+          descriptions={openEntry.entry.updateDescriptionLevels as unknown as UpdateDescription[]}
         />
       )}
 

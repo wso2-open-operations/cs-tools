@@ -2,8 +2,8 @@ window.config = {
   // OIDC IdP base URL for the configured identity provider.
   CSM_PORTAL_AUTH_BASE_URL: "<your-idp-base-url>",
   CSM_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
-  CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3001",
-  CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3001",
+  CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
+  CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
 
   // csm-portal-backend (BFF) base URL. The FE never calls entity-service
   // directly; all entity queries go through the BFF, which proxies to

@@ -47,3 +47,32 @@ export interface SearchAccountsResponse {
   offset: number;
   hasMore: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Mock-only domain types used by csm-portal-webapp-wip pages. Kept alongside
+// the entity-service types above until the BFF exposes the cross-customer
+// account model required by those views.
+// ---------------------------------------------------------------------------
+
+import type { DashboardScope } from "@features/csm-dashboard/types/abtDashboard";
+import type {
+  CsmProjectStatus,
+  CsmProjectTier,
+} from "@features/csm-projects/types/csmProjects";
+
+export interface CsmAccountRow {
+  id: string;
+  name: string;
+  tier: CsmProjectTier;
+  status: CsmProjectStatus;
+  projectCount: number;
+  openCaseCount: number;
+  s0s1Count: number;
+  breachedCount: number;
+  lastActivityAt: string;
+}
+
+export interface CsmAccountsListResponse {
+  scope: DashboardScope;
+  accounts: CsmAccountRow[];
+}

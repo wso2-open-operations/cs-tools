@@ -21,25 +21,48 @@ import {
   Header as HeaderUI,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { useAsgardeo } from "@asgardeo/react";
 import UserProfile from "@components/header/UserProfile";
 
-export default function Actions(): JSX.Element {
-  const { isSignedIn } = useAsgardeo();
+interface ActionsProps {
+  showUserProfile?: boolean;
+  /**
+   * Retained for caller compatibility (Header.tsx still passes it). The CSM
+   * portal never renders the "Get help" dropdown — CSM engineers create cases
+   * on behalf of customers from the project view or the global cases list.
+   */
+  hideGetHelp?: boolean;
+}
 
+/**
+ * Actions component for the header.
+ *
+ * @param {ActionsProps} props - The props for the component.
+ * @returns {JSX.Element} The HeaderActions component.
+ */
+export default function Actions({
+  showUserProfile = true,
+}: ActionsProps): JSX.Element {
   return (
     <HeaderUI.Actions>
+      {/* theme switcher */}
       <ColorSchemeToggle />
+      {/* header action divider */}
       <Divider
         orientation="vertical"
         flexItem
         sx={{
           mx: 1,
           display: { xs: "none", sm: "block" },
-          visibility: isSignedIn ? "visible" : "hidden",
+          visibility: showUserProfile ? "visible" : "hidden",
         }}
       />
-      {isSignedIn ? <UserProfile /> : <Box sx={{ width: 40, height: 40 }} />}
+      {showUserProfile ? (
+        /* user profile menu */
+        <UserProfile />
+      ) : (
+        /* Placeholder for user profile to prevent layout shift */
+        <Box sx={{ width: 40, height: 40 }} />
+      )}
     </HeaderUI.Actions>
   );
 }

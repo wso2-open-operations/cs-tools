@@ -16,8 +16,13 @@
 
 import { type JSX } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
+import { useLocation } from "react-router";
+import { Box } from "@wso2/oxygen-ui";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
+import CsmGlobalSearch from "@features/csm-search/components/CsmGlobalSearch";
+import NotificationsBell from "@features/csm-notifications/components/NotificationsBell";
+import RecentViewsButton from "@features/csm-recent/components/RecentViewsButton";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -25,19 +30,37 @@ interface HeaderProps {
   hideProjectControls?: boolean;
 }
 
+/**
+ * CSM portal top bar.
+ *
+ * Holds: sidebar toggle, brand, global CSM search, and the user actions
+ * (theme toggle + user menu). The legacy customer-portal project switcher,
+ * project-scoped SearchBar, and "Get help" dropdown were removed earlier;
+ * CSM uses the global search across cases/projects/accounts instead, and
+ * project selection happens via the Projects main-menu page.
+ */
 export default function Header({
   onToggleSidebar,
-  collapsed = false,
   hideProjectControls = false,
 }: HeaderProps): JSX.Element {
+  const location = useLocation();
+  const isProjectHub = location.pathname === "/";
+
   return (
     <HeaderUI>
-      {!hideProjectControls && (
-        <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
+      {!isProjectHub && !hideProjectControls && (
+        <HeaderUI.Toggle collapsed={false} onToggle={onToggleSidebar} />
       )}
       <Brand />
+      {!hideProjectControls && <CsmGlobalSearch />}
       <HeaderUI.Spacer />
-      <Actions />
+      {!hideProjectControls && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mr: 1 }}>
+          <RecentViewsButton />
+          <NotificationsBell />
+        </Box>
+      )}
+      <Actions hideGetHelp={hideProjectControls} />
     </HeaderUI>
   );
 }
