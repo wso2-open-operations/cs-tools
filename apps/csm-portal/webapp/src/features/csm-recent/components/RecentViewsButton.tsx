@@ -46,7 +46,7 @@ import {
   type RecentView,
   type RecentViewKind,
 } from "@features/csm-recent/hooks/useRecentViews";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 
 const PANEL_WIDTH = 360;
 
@@ -236,7 +236,7 @@ export default function RecentViewsButton(): JSX.Element {
                     )}
                   </Box>
                   <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                    {formatRelativeTime(entry.visitedAt)}
+                    <RelativeTime iso={entry.visitedAt} href={entry.href} />
                   </Typography>
                 </Box>
               ))}

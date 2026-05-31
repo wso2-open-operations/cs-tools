@@ -17,7 +17,7 @@
 import { Box, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type { CsmCustomerSummary } from "@features/csm-dashboard/types/abtDashboard";
 
 interface CustomerSummarySectionProps {
@@ -124,7 +124,7 @@ export default function CustomerSummarySection({
                 color="text.secondary"
                 sx={{ textAlign: "right" }}
               >
-                {formatRelativeTime(c.lastActivityAt)}
+                <RelativeTime iso={c.lastActivityAt} />
               </Typography>
             </Box>
           ))}

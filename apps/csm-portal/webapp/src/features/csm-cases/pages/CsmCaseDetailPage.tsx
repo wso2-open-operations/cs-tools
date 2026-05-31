@@ -14,25 +14,58 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import {
+  Box,
+  Button,
+  Card,
+  Chip,
+  Skeleton,
+  Tab,
+  Tabs,
+  Typography,
+} from "@wso2/oxygen-ui";
+import {
+  Activity,
+  ArrowLeft,
+  Clock,
+  Layers,
+  Link as LinkIcon,
+  ListChecks,
+} from "@wso2/oxygen-ui-icons-react";
+import { useCallback, useEffect, useState, type JSX } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
-import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
+import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import {
+  AuditTimelineWidget,
+  CustomerContextWidget,
+  LinkedItemsWidget,
+  ProductContextWidget,
+  SlaTimelineWidget,
+  TagsWidget,
+  TimeLogsWidget,
+  WatchersWidget,
+} from "@features/csm-cases/components/CaseDetailWidgets";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
   STATE_LABEL,
-  formatRelativeTime,
   formatTimeToBreach,
 } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
+import type {
+  CaseLifecycleAction,
+  CsmCaseComment,
+  CsmCaseDetail,
+} from "@features/csm-cases/types/csmCases";
 
 function MetaCell({
   label,
@@ -52,13 +85,101 @@ function MetaCell({
 }
 
 // TODO: replace with the engineer name from useGetUserDetails once the
-// `firstName`/`lastName` shape from the CSM backend is wired. For mocks we
-// match the dashboard's ABT engineer.
+// `firstName`/`lastName` shape from the CSM backend is wired.
 const CURRENT_ENGINEER_NAME = "Sajith Ekanayaka";
+
+const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
+  start_work: "Started work on this case.",
+  assign_to_me: "Assigned to you.",
+  propose_solution: "Solution proposed to the customer.",
+  request_info: "Requested additional info from the customer.",
+  wait_on_wso2: "Marked as waiting on internal WSO2 dependency.",
+  resume_work: "Resumed work on this case.",
+  close: "Case closed.",
+  close_no_response: "Closed (no response received).",
+  reopen: "Case reopened.",
+};
+
+const SECONDARY_TOAST: Record<string, string> = {
+  reassign_engineer: "Reassign engineer dialog (mock).",
+  reassign_group: "Reassign group dialog (mock).",
+  escalate: "Escalation form (mock).",
+  create_incident: "Create incident from case (mock).",
+  link_case: "Link related case picker (mock).",
+  link_incident: "Link to incident picker (mock).",
+  log_time: "Log time dialog (mock).",
+  watch: "Toggled watch state (mock).",
+  copy_link: "Case link copied to clipboard.",
+  open_in_sn: "Opening ServiceNow (mock).",
+};
+
+type CaseTabId = "activities" | "details" | "sla" | "related" | "time";
+
+/**
+ * Walk the parent chain to find the nearest vertically-scrollable element.
+ * Falls back to the document scrolling element if none is found.
+ */
+function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
+  let cur: HTMLElement | null = el.parentElement;
+  while (cur && cur !== document.body) {
+    const style = window.getComputedStyle(cur);
+    const overflowY = style.overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      cur.scrollHeight > cur.clientHeight
+    ) {
+      return cur;
+    }
+    cur = cur.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+}
+
+/**
+ * Synthesize the case description as a virtual "first comment" so it shows up
+ * in the activity stream immediately after the `created` audit event. SN does
+ * the same thing — the customer's initial problem statement reads as the
+ * opening comment of the case.
+ *
+ * Dated 1 second after `case.createdAt` so chronological sort places it
+ * AFTER the `Case created` audit entry (which is exactly at `createdAt`).
+ */
+function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
+  if (!c.description?.trim()) return null;
+  const escaped = c.description
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n\n+/g, "</p><p>")
+    .replace(/\n/g, "<br>");
+  const createdMs = new Date(c.createdAt).getTime();
+  const at = new Date(createdMs + 1000).toISOString();
+  return {
+    id: `description`,
+    caseId: c.id,
+    authorName: c.customerContext.primaryContact || c.customer,
+    authorRole: "customer",
+    bodyHtml: `<p>${escaped}</p>`,
+    createdAt: at,
+  };
+}
+
+const TAB_DEFS: Array<{
+  id: CaseTabId;
+  label: string;
+  icon: JSX.Element;
+}> = [
+  { id: "activities", label: "Activities", icon: <Activity size={16} /> },
+  { id: "details", label: "Details", icon: <ListChecks size={16} /> },
+  { id: "sla", label: "SLA", icon: <Clock size={16} /> },
+  { id: "related", label: "Related", icon: <LinkIcon size={16} /> },
+  { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
+];
 
 export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
@@ -67,6 +188,68 @@ export default function CsmCaseDetailPage(): JSX.Element {
   } = useGetCsmCaseComments(caseId);
   const postComment = usePostCsmCaseComment();
   const recordView = useRecordRecentView();
+  const { showError } = useErrorBanner();
+  const [toast, setToast] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
+
+  // Twitter-style permalinks: when the URL has a fragment matching an entry id,
+  // jump to the Activities tab, scroll the entry into view vertically, and
+  // flash it. The browser's default hash-anchor `scrollIntoView` also drags
+  // ancestors horizontally if any of them is wider than the viewport (e.g.
+  // when a comment contains a wide `<pre>` block). We zero `scrollLeft` on
+  // every ancestor to undo that horizontal shift while keeping vertical
+  // scroll in place.
+  useEffect(() => {
+    const hash = location.hash?.replace(/^#/, "");
+    if (!hash) return;
+    setActiveTab("activities");
+    const timer = setTimeout(() => {
+      const target = document.getElementById(hash);
+      if (!target) return;
+
+      // Undo any horizontal scroll the browser introduced on ancestors.
+      let cur: HTMLElement | null = target.parentElement;
+      while (cur && cur !== document.body) {
+        if (cur.scrollLeft !== 0) cur.scrollLeft = 0;
+        cur = cur.parentElement;
+      }
+      if (document.documentElement.scrollLeft !== 0) {
+        document.documentElement.scrollLeft = 0;
+      }
+      if (document.body.scrollLeft !== 0) document.body.scrollLeft = 0;
+
+      const container = findVerticalScrollAncestor(target);
+      const containerTop = container === document.documentElement
+        ? 0
+        : container.getBoundingClientRect().top;
+      const targetTop = target.getBoundingClientRect().top;
+      const offset = 96;
+      const delta = targetTop - containerTop - offset;
+      container.scrollTo({
+        top: container.scrollTop + delta,
+        behavior: "smooth",
+      });
+
+      const prevTransition = target.style.transition;
+      const prevBg = target.style.backgroundColor;
+      target.style.transition = "background-color 200ms ease-out";
+      target.style.backgroundColor = "rgba(255, 213, 79, 0.35)";
+      const reset = setTimeout(() => {
+        target.style.backgroundColor = prevBg;
+        setTimeout(() => {
+          target.style.transition = prevTransition;
+        }, 350);
+      }, 1500);
+      return () => clearTimeout(reset);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [location.hash, data, comments]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => {
     if (!data) return;
@@ -78,6 +261,23 @@ export default function CsmCaseDetailPage(): JSX.Element {
       href: `/cases/${data.id}`,
     });
   }, [data, recordView]);
+
+  const onAction = useCallback(
+    (action: CaseLifecycleAction | { secondary: string }) => {
+      const message =
+        typeof action === "string"
+          ? LIFECYCLE_TOAST[action]
+          : SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`;
+      setToast(message);
+
+      if (typeof action !== "string" && action.secondary === "copy_link" && data) {
+        navigator.clipboard
+          ?.writeText(`${window.location.origin}/cases/${data.id}`)
+          .catch(() => showError("Could not copy link."));
+      }
+    },
+    [data, showError],
+  );
 
   if (isLoading) {
     return (
@@ -130,9 +330,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const c = data;
   const isClosed = c.state === "closed";
   const breached = c.minutesToBreach < 0;
+  const rawComments = comments ?? [];
+  const descriptionComment = buildDescriptionComment(c);
+  // The description renders as the first comment in the activity stream,
+  // dated 1s after `created` so it always lands directly after that event.
+  const safeComments = descriptionComment
+    ? [descriptionComment, ...rawComments]
+    : rawComments;
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <Button
         variant="text"
         size="small"
@@ -163,101 +370,229 @@ export default function CsmCaseDetailPage(): JSX.Element {
               label={`${SLA_CLOCK_LABEL[c.slaClockType]} · ${formatTimeToBreach(c.minutesToBreach)}`}
             />
           )}
+          {c.tags.slice(0, 3).map((t) => (
+            <Chip
+              key={t.id}
+              size="small"
+              variant="outlined"
+              color={t.color ?? "default"}
+              label={t.label}
+            />
+          ))}
         </Box>
         <Typography variant="h5">{c.subject}</Typography>
         <Typography variant="body2" color="text.secondary">
-          {c.customer} · {c.projectName}
+          {c.customer} · {c.projectName} · Owner: {c.owner}
         </Typography>
       </Box>
 
-      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Typography variant="subtitle2">Summary</Typography>
+      <CaseActionBar caseDetail={c} onAction={onAction} />
+
+      {toast && (
+        <Box
+          sx={{
+            p: 1,
+            borderRadius: 1,
+            backgroundColor: "info.50",
+            border: 1,
+            borderColor: "info.main",
+            color: "info.main",
+            fontSize: "0.875rem",
+          }}
+        >
+          {toast}
+        </Box>
+      )}
+
+      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setActiveTab(v as CaseTabId)}
+          variant="scrollable"
+          scrollButtons="auto"
+        >
+          {TAB_DEFS.map((t) => (
+            <Tab
+              key={t.id}
+              value={t.id}
+              icon={t.icon}
+              iconPosition="start"
+              label={t.label}
+              sx={{ minHeight: 44, textTransform: "none" }}
+            />
+          ))}
+        </Tabs>
+      </Box>
+
+      {activeTab === "activities" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Typography variant="subtitle2">Reply</Typography>
+            <CsmCaseCommentInput
+              disabled={!caseId}
+              onSubmit={async (bodyHtml, internal) => {
+                if (!caseId) return;
+                await postComment.mutateAsync({
+                  caseId,
+                  bodyHtml,
+                  authorName: CURRENT_ENGINEER_NAME,
+                  internal,
+                });
+              }}
+            />
+          </Card>
+
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+              <Typography variant="subtitle2">Activity timeline</Typography>
+              {!isCommentsLoading && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`${safeComments.length + c.audit.length + c.attachments.length} entries`}
+                />
+              )}
+            </Box>
+
+            {isCommentsLoading ? (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} variant="rectangular" height={56} />
+                ))}
+              </Box>
+            ) : isCommentsError ? (
+              <Typography variant="body2" color="error">
+                Could not load comments.
+              </Typography>
+            ) : (
+              <CaseActivitiesFeed
+                comments={safeComments}
+                audit={c.audit}
+                attachments={c.attachments}
+              />
+            )}
+          </Card>
+        </Box>
+      )}
+
+      {activeTab === "details" && (
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: {
-              xs: "1fr 1fr",
-              md: "repeat(4, minmax(0, 1fr))",
-            },
             gap: 2,
+            gridTemplateColumns: {
+              xs: "1fr",
+              lg: "minmax(0, 7fr) minmax(0, 5fr)",
+            },
+            alignItems: "start",
           }}
         >
-          <MetaCell label="Customer">
-            <Typography variant="body2">{c.customer}</Typography>
-          </MetaCell>
-          <MetaCell label="Project">
-            <Typography variant="body2">{c.projectName}</Typography>
-          </MetaCell>
-          <MetaCell label="Owner">
-            <Typography variant="body2">
-              {c.ownerIsMe ? <strong>{c.owner}</strong> : c.owner}
-            </Typography>
-          </MetaCell>
-          <MetaCell label="State">
-            <Typography variant="body2">{STATE_LABEL[c.state]}</Typography>
-          </MetaCell>
-          <MetaCell label="Severity">
-            <Typography variant="body2">{c.severity}</Typography>
-          </MetaCell>
-          <MetaCell label="SLA clock">
-            <Typography variant="body2">{SLA_CLOCK_LABEL[c.slaClockType]}</Typography>
-          </MetaCell>
-          <MetaCell label="Created">
-            <Typography variant="body2">{formatRelativeTime(c.createdAt)}</Typography>
-          </MetaCell>
-          <MetaCell label="Last update">
-            <Typography variant="body2">{formatRelativeTime(c.updatedAt)}</Typography>
-          </MetaCell>
-        </Box>
-      </Card>
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+            <Typography variant="subtitle2">Summary</Typography>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: {
+                  xs: "1fr 1fr",
+                  md: "repeat(4, minmax(0, 1fr))",
+                },
+                gap: 2,
+              }}
+            >
+              <MetaCell label="Customer">
+                <Typography variant="body2">{c.customer}</Typography>
+              </MetaCell>
+              <MetaCell label="Project">
+                <Typography variant="body2">{c.projectName}</Typography>
+              </MetaCell>
+              <MetaCell label="Owner">
+                <Typography variant="body2">
+                  {c.ownerIsMe ? <strong>{c.owner}</strong> : c.owner}
+                </Typography>
+              </MetaCell>
+              <MetaCell label="Assignment group">
+                <Typography variant="body2">
+                  <code style={{ fontSize: "0.8rem" }}>{c.assignmentGroup}</code>
+                </Typography>
+              </MetaCell>
+              <MetaCell label="State">
+                <Typography variant="body2">{STATE_LABEL[c.state]}</Typography>
+              </MetaCell>
+              <MetaCell label="Severity">
+                <Typography variant="body2">{c.severity}</Typography>
+              </MetaCell>
+              <MetaCell label="Created">
+                <Typography variant="body2"><RelativeTime iso={c.createdAt} /></Typography>
+              </MetaCell>
+              <MetaCell label="Last update">
+                <Typography variant="body2"><RelativeTime iso={c.updatedAt} /></Typography>
+              </MetaCell>
+            </Box>
+            <Box sx={{ pt: 1, borderTop: 1, borderColor: "divider" }}>
+              <Typography variant="caption" color="text.secondary">
+                Description
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
+                {c.description}
+              </Typography>
+            </Box>
+          </Card>
 
-      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Typography variant="subtitle2">Comments &amp; activity</Typography>
-          {!isCommentsLoading && (
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`${comments?.length ?? 0} ${(comments?.length ?? 0) === 1 ? "entry" : "entries"}`}
-            />
-          )}
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <CustomerContextWidget ctx={c.customerContext} />
+            <ProductContextWidget ctx={c.productContext} />
+          </Box>
         </Box>
+      )}
 
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-          {isCommentsLoading &&
-            [0, 1].map((i) => (
-              <Skeleton key={i} variant="rectangular" height={64} />
-            ))}
-          {isCommentsError && !isCommentsLoading && (
-            <Typography variant="body2" color="error">
-              Could not load comments.
-            </Typography>
-          )}
-          {!isCommentsLoading && !isCommentsError && (comments?.length ?? 0) === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              No comments yet. Start the thread below.
-            </Typography>
-          )}
-          {!isCommentsLoading &&
-            comments?.map((c) => (
-              <CsmCaseCommentBubble key={c.id} comment={c} />
-            ))}
+      {activeTab === "sla" && (
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "1fr",
+              md: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
+          <SlaTimelineWidget clocks={c.slaClocks} />
+          <AuditTimelineWidget entries={c.audit} />
         </Box>
+      )}
 
-        <Box sx={{ pt: 1.5, borderTop: 1, borderColor: "divider" }}>
-          <CsmCaseCommentInput
-            disabled={!caseId}
-            onSubmit={async (bodyHtml) => {
-              if (!caseId) return;
-              await postComment.mutateAsync({
-                caseId,
-                bodyHtml,
-                authorName: CURRENT_ENGINEER_NAME,
-              });
-            }}
+      {activeTab === "related" && (
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "1fr",
+              md: "repeat(2, minmax(0, 1fr))",
+            },
+            alignItems: "start",
+          }}
+        >
+          <LinkedItemsWidget
+            items={c.linkedItems}
+            onLink={() => onAction({ secondary: "link_case" })}
+          />
+          <WatchersWidget
+            watchers={c.watchers}
+            onAdd={() => onAction({ secondary: "watch" })}
+          />
+          <TagsWidget tags={c.tags} />
+        </Box>
+      )}
+
+      {activeTab === "time" && (
+        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
+          <TimeLogsWidget
+            logs={c.timeLogs}
+            onAdd={() => onAction({ secondary: "log_time" })}
           />
         </Box>
-      </Card>
+      )}
     </Box>
   );
 }

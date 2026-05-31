@@ -51,8 +51,14 @@ export function usePatchUserMe(): UseMutationResult<
     ): Promise<PatchUserMeResponse> => {
       logger.debug("[usePatchUserMe] Request payload:", payload);
 
-      if (false || false) {
-        throw new Error("User must be signed in to update profile");
+      // Mock mode: no backend exists. Echo the payload back as a successful
+      // PATCH response and rely on onSuccess to update the userDetails cache.
+      if (window.config?.CSM_PORTAL_USE_MOCKS) {
+        await new Promise((r) => setTimeout(r, 150));
+        return {
+          phoneNumber: payload.phoneNumber,
+          timeZone: payload.timeZone,
+        };
       }
 
       const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;

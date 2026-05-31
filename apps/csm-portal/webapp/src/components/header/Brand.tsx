@@ -71,8 +71,12 @@ export default function Brand({
           style={{ height: "24px", width: "auto" }}
         />
       </HeaderUI.BrandLogo>
-      {/* brand title */}
-      <HeaderUI.BrandTitle>CSM Portal</HeaderUI.BrandTitle>
+      {/* brand title — `whiteSpace: nowrap` keeps "CSM Portal" on a single
+          line even when the header's available space gets tight at narrow
+          viewports. */}
+      <HeaderUI.BrandTitle sx={{ whiteSpace: "nowrap" }}>
+        CSM Portal
+      </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );
 }

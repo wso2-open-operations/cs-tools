@@ -1,0 +1,24 @@
+/* AppShell.Main is a <main> with `flex: 1 1 0%` but no `min-width: 0`. By
+ * default flex items have `min-width: auto`, which means they refuse to
+ * shrink below their content's intrinsic width. That makes the case detail
+ * page (and any other page with wide content) push the <main> wider than its
+ * flex parent — the sidebar+main row — and bleed past the right edge of the
+ * viewport. The parent has `overflow: hidden`, so the user can't see or
+ * scroll to the cut-off content.
+ *
+ * Forcing `min-width: 0` on <main> lets it shrink to its parent's width.
+ * The page-level scroll container inside AppLayout then handles the actual
+ * content overflow with `overflow-x: auto`, so users get a scrollbar when
+ * (and only when) the content genuinely can't compress further.
+ *
+ * Also clip html/body to suppress any stray horizontal scroll at the page
+ * level (defence-in-depth against rogue fixed-width content elsewhere).
+ */
+html,
+body {
+  overflow-x: clip;
+}
+
+#root main {
+  min-width: 0;
+}

@@ -17,7 +17,7 @@
 import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useNavigate } from "react-router";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmProjectRow,
   CsmProjectStatus,
@@ -211,7 +211,7 @@ export default function ProjectsList({
                 sx={{ textAlign: "right" }}
                 noWrap
               >
-                {formatRelativeTime(p.lastActivityAt)}
+                <RelativeTime iso={p.lastActivityAt} />
               </Typography>
             </Box>
           );

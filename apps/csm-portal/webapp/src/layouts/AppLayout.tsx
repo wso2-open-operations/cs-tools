@@ -111,7 +111,10 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
           display: "flex",
           flexDirection: "column",
           height: "100dvh",
-          overflow: "hidden",
+          // overflow: clip (vs hidden) also blocks programmatic/hash-anchor
+          // scroll, preventing the layout from shifting horizontally when the
+          // URL has a fragment that points to wide content.
+          overflow: "clip",
         }}
       >
         <TopBanner />
@@ -146,7 +149,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                 width: "100%",
                 flex: 1,
                 minHeight: 0,
-                overflow: "hidden",
+                overflow: "clip",
                 position: "relative",
               }}
             >
@@ -172,7 +175,12 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                   display: "flex",
                   flexDirection: "column",
                   overflowY: "auto",
-                  overflowX: "hidden",
+                  // `auto` (not `clip`) so the user gets a horizontal scrollbar
+                  // when page content can't compress further. The companion
+                  // `#root main { min-width: 0 }` rule in index.css lets the
+                  // <main> shrink to its flex parent, so this scrollbar only
+                  // appears when content is genuinely wider than the viewport.
+                  overflowX: "auto",
                   ...(isAuthLoading ? { p: 0 } : { p: 3 }),
                 }}
               >

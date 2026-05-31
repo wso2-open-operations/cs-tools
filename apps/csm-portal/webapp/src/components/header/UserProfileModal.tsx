@@ -28,7 +28,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ExternalLink, Lock, PencilLine, X } from "@wso2/oxygen-ui-icons-react";
+import { PencilLine, X } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetMetadata from "@api/useGetMetadata";
 import { usePatchUserMe } from "@features/settings/api/usePatchUserMe";
@@ -42,52 +42,7 @@ import {
   validatePhoneE164,
   type PhoneCountryOption,
 } from "@features/settings/utils/phone";
-import { resolveDisplayTimeZone } from "@utils/dateTime";
-
-const PASSWORD_RESET_URL = "https://wso2.com/user/password";
-
-/**
- * Formats epoch timestamp to localized date string in user's timezone.
- *
- * @param {string | undefined} epochMs - Epoch timestamp in milliseconds as string.
- * @param {string | undefined} timeZone - IANA timezone string.
- * @returns {string} Formatted date string or "Not Available".
- */
-const formatLastPasswordUpdate = (
-  epochMs: string | undefined,
-  timeZone: string | undefined,
-): string => {
-  if (!epochMs) return "Not Available";
-
-  try {
-    const timestamp = parseInt(epochMs, 10);
-    if (isNaN(timestamp)) return "Not Available";
-
-    const date = new Date(timestamp);
-
-    const displayTimeZone = resolveDisplayTimeZone(timeZone);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      timeZone: displayTimeZone,
-    });
-  } catch {
-    return "Not Available";
-  }
-};
-
-/**
- * Maps role strings to user-friendly labels. Returns highest role when multiple roles present.
- *
- * @param {string[]} roles - Array of role strings from users/me endpoint.
- * @returns {string} The user-friendly role label.
- */
-const getRoleLabel = (roles: string[] | undefined): string => {
-  if (!roles || roles.length === 0) return "Not Available";
-  if (roles.includes("sn_customerservice.customer_admin")) return "Admin";
-  return "System User";
-};
+import { decorateTimeZoneLabel } from "@utils/timeZones";
 
 export interface UserProfileModalProps {
   open: boolean;
@@ -253,7 +208,6 @@ export default function UserProfileModal({
       ? `${userDetails.firstName ?? ""} ${userDetails.lastName ?? ""}`.trim()
       : "--";
   const email = userDetails?.email ?? "--";
-  const role = getRoleLabel(userDetails?.roles);
 
   const initials = (() => {
     const first = userDetails?.firstName?.charAt(0) ?? "";
@@ -267,18 +221,14 @@ export default function UserProfileModal({
   }, [timeZone]);
   const timeZoneOptions = useMemo(
     () =>
-      (metadata?.timeZones ?? []).filter(
-        (tz) => !!tz.id && !!tz.label,
-      ),
+      (metadata?.timeZones ?? [])
+        .filter((tz) => !!tz.id && !!tz.label)
+        .map((tz) => ({
+          id: tz.id,
+          label: decorateTimeZoneLabel(tz.id, tz.label),
+        })),
     [metadata?.timeZones],
   );
-
-  const lastPasswordUpdate = useMemo(() => {
-    return formatLastPasswordUpdate(
-      userDetails?.lastPasswordUpdateTime,
-      userDetails?.timeZone,
-    );
-  }, [userDetails?.lastPasswordUpdateTime, userDetails?.timeZone]);
 
   return (
     <Dialog
@@ -427,7 +377,7 @@ export default function UserProfileModal({
                       {name}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {role}
+                      {email}
                     </Typography>
                   </Box>
                 </Box>
@@ -635,47 +585,6 @@ export default function UserProfileModal({
                       </Box>
                     </Box>
 
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        p: 2,
-                        bgcolor: "background.default",
-                        borderRadius: 1,
-                        border: 1,
-                        borderColor: "divider",
-                        mt: 2,
-                      }}
-                    >
-                      <Box
-                        sx={{ display: "flex", alignItems: "center", gap: 2 }}
-                      >
-                        <Box sx={{ p: 1 }}>
-                          <Lock size={20} />
-                        </Box>
-                        <Box>
-                          <Typography variant="body2" fontWeight={500}>
-                            Password
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Last changed : {lastPasswordUpdate}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Button
-                        component="a"
-                        href={PASSWORD_RESET_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        variant="outlined"
-                        size="small"
-                        startIcon={<ExternalLink size={16} />}
-                        disabled={patchUserMe.isPending}
-                      >
-                        Change Password
-                      </Button>
-                    </Box>
                   </Box>
                 </Box>
               </Box>

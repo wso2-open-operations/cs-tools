@@ -24,7 +24,7 @@ import {
   useGetCsmRoles,
   useGetCsmUsers,
 } from "@features/csm-admin/api/useCsmAdmin";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmGroup,
   CsmRole,
@@ -211,7 +211,7 @@ export default function CsmAdminUsersPage(): JSX.Element {
                   sx={{ textAlign: "right" }}
                   noWrap
                 >
-                  {formatRelativeTime(u.lastActiveAt)}
+                  <RelativeTime iso={u.lastActiveAt} />
                 </Typography>
               </Box>
             );

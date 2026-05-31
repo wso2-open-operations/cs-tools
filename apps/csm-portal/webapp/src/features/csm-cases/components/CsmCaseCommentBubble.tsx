@@ -17,7 +17,7 @@
 import { Avatar, Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import type { JSX } from "react";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 import type {
   CsmCaseComment,
   CsmCommentAuthorRole,
@@ -86,6 +86,7 @@ export default function CsmCaseCommentBubble({
   if (isSystem) {
     return (
       <Box
+        id={comment.id}
         sx={{
           display: "flex",
           alignItems: "center",
@@ -93,6 +94,7 @@ export default function CsmCaseCommentBubble({
           py: 0.5,
           px: 1,
           color: "text.secondary",
+          scrollMarginTop: 96,
         }}
       >
         <Chip size="small" color="warning" label="System" />
@@ -106,14 +108,19 @@ export default function CsmCaseCommentBubble({
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
         <Typography variant="caption" color="text.secondary">
-          {formatRelativeTime(comment.createdAt)}
+          <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
         </Typography>
       </Box>
     );
   }
 
+  const isInternal = !!comment.internal;
+
   return (
-    <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
+    <Box
+      id={comment.id}
+      sx={{ display: "flex", gap: 1.5, alignItems: "flex-start", scrollMarginTop: 96 }}
+    >
       <Avatar
         sx={{
           bgcolor:
@@ -129,7 +136,17 @@ export default function CsmCaseCommentBubble({
       </Avatar>
       <Paper
         variant="outlined"
-        sx={{ p: 1.5, flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 0.75 }}
+        sx={{
+          p: 1.5,
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 0.75,
+          backgroundColor: isInternal ? "warning.50" : undefined,
+          borderColor: isInternal ? "warning.main" : undefined,
+          borderLeft: isInternal ? 3 : undefined,
+        }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           <Typography variant="subtitle2">{comment.authorName}</Typography>
@@ -139,8 +156,16 @@ export default function CsmCaseCommentBubble({
             color={ROLE_COLOR[comment.authorRole]}
             variant="outlined"
           />
+          {isInternal && (
+            <Chip
+              size="small"
+              label="Internal work note"
+              color="warning"
+              variant="filled"
+            />
+          )}
           <Typography variant="caption" color="text.secondary">
-            {formatRelativeTime(comment.createdAt)}
+            <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
           </Typography>
         </Box>
         <Box

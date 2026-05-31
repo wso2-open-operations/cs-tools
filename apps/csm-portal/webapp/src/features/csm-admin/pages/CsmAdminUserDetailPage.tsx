@@ -39,7 +39,7 @@ import {
   useUpdateUserAssignments,
 } from "@features/csm-admin/api/useCsmAdmin";
 import type { CsmPermissionCategory } from "@features/csm-admin/types/csmAdmin";
-import { formatRelativeTime } from "@features/csm-dashboard/utils/abtDashboard";
+import RelativeTime from "@components/RelativeTime";
 
 function MetaCell({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -308,7 +308,7 @@ export default function CsmAdminUserDetailPage(): JSX.Element {
             <Typography variant="body2">{user.groupIds.length}</Typography>
           </MetaCell>
           <MetaCell label="Last active">
-            <Typography variant="body2">{formatRelativeTime(user.lastActiveAt)}</Typography>
+            <Typography variant="body2"><RelativeTime iso={user.lastActiveAt} /></Typography>
           </MetaCell>
         </Box>
       </Card>
