@@ -17,6 +17,7 @@
 import type {
   SecurityAdvisory,
   UpdateDescription,
+  UpdateDescriptionLevel,
   UpdateLevelsSearchResponse,
 } from "@features/updates/types/updates";
 
@@ -30,7 +31,7 @@ export interface ReportParams {
 export interface ReportRow {
   levelKey: string;
   updateType: string;
-  desc: UpdateDescription;
+  desc: UpdateDescription | UpdateDescriptionLevel;
   description: string;
   instructions: string;
   bugFixes: string[];

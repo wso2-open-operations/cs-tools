@@ -15,50 +15,86 @@
 // under the License.
 
 import { UserMenu } from "@wso2/oxygen-ui";
-import { LogOut, User } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, useState } from "react";
+import type { JSX } from "react";
+import { useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
+import { LogOut, User } from "@wso2/oxygen-ui-icons-react";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { useLogger } from "@hooks/useLogger";
-import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import UserProfileModal from "@components/header/UserProfileModal";
-import { resolveUserInfo } from "@utils/userClaims";
+import { ApiError } from "@utils/ApiError";
 
+/**
+ * User profile component.
+ *
+ * @returns {JSX.Element} The User profile component.
+ */
 export default function UserProfile(): JSX.Element {
-  const { signOut } = useAsgardeo();
-  const claims = useIdTokenClaims();
-  const logger = useLogger();
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const { signOut, isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
+  const { data: userDetails, isLoading, isError, error } = useGetUserDetails();
+  const logger = useLogger();
 
-  const handleSignOut = async () => {
+  const handleLogout = async () => {
     window.dispatchEvent(new CustomEvent("app:signing-out"));
     try {
       await signOut();
-    } catch (err) {
-      logger.error("Failed to sign out", err);
+    } catch (error) {
+      logger.error("Failed to sign out", error);
     }
   };
 
-  const info = resolveUserInfo(claims);
+  if (!isAuthLoading && !isSignedIn) {
+    return <></>;
+  }
+  if (
+    isError &&
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    return (
+      <button onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "inherit" }}>
+        <LogOut size={18} />
+        Log out
+      </button>
+    );
+  }
+
+  const isProfilePending = isLoading || isAuthLoading;
+  const useErrorFallback = isError && !userDetails;
+
+  const name = isProfilePending
+    ? ""
+    : useErrorFallback
+      ? "Unknown User"
+      : userDetails?.firstName || userDetails?.lastName
+        ? `${userDetails.firstName || ""} ${userDetails.lastName || ""}`.trim()
+        : "--";
+
+  const email = isProfilePending
+    ? "\u00a0"
+    : useErrorFallback
+      ? "--"
+      : userDetails?.email || "--";
+
+  const headerName = isProfilePending ? "Loading…" : name;
+  const headerEmail = isProfilePending ? "\u00a0" : email;
 
   return (
     <>
       <UserMenu>
-        <UserMenu.Trigger name={info.fullName} avatar={info.avatarUrl} />
-        <UserMenu.Header
-          name={info.fullName}
-          email={info.email}
-          avatar={info.avatarUrl}
-        />
+        <UserMenu.Trigger name={name} />
+        <UserMenu.Header name={headerName} email={headerEmail} />
         <UserMenu.Divider />
         <UserMenu.Item
-          icon={<User size={16} />}
+          icon={<User size={18} />}
           label="Profile"
           onClick={() => setProfileModalOpen(true)}
         />
         <UserMenu.Logout
-          icon={<LogOut size={16} />}
-          label="Sign out"
-          onClick={handleSignOut}
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={handleLogout}
         />
       </UserMenu>
       <UserProfileModal

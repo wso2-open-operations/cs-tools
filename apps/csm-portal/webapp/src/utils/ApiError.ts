@@ -60,6 +60,9 @@ export function getApiErrorMessage(error: unknown): string | undefined {
   return undefined;
 }
 
+/** @deprecated Use getApiErrorMessage instead. Kept for wip-page compatibility. */
+export const getForbiddenMessage = getApiErrorMessage;
+
 /**
  * Extracts a clean human-readable message from an HTTP error response body.
  * Tries JSON first (returns `body.message` when present), then falls back to

@@ -53,3 +53,35 @@ export interface SearchProjectsResponse {
   offset: number;
   hasMore: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Mock-only domain types used by csm-portal-webapp-wip pages (project detail,
+// list filters, etc.). Kept alongside the real entity-service types above
+// until the BFF exposes the cross-customer project model needed by those views.
+// ---------------------------------------------------------------------------
+
+import type { DashboardScope } from "@features/csm-dashboard/types/abtDashboard";
+
+export type CsmProjectTier = "Platinum" | "Gold" | "Silver" | "Bronze";
+
+export type CsmProjectStatus = "Active" | "Suspended" | "Onboarding";
+
+export interface CsmProjectRow {
+  id: string;
+  name: string;
+  customer: string;
+  accountId: string;
+  tier: CsmProjectTier;
+  productType: string;
+  status: CsmProjectStatus;
+  updateLevel: string;
+  openCaseCount: number;
+  s0s1Count: number;
+  breachedCount: number;
+  lastActivityAt: string;
+}
+
+export interface CsmProjectsListResponse {
+  scope: DashboardScope;
+  projects: CsmProjectRow[];
+}

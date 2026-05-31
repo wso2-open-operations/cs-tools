@@ -14,13 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Chip, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Chip, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { useNavigate } from "react-router";
 
 interface CsmComingSoonPageProps {
   title: string;
   description: string;
   blockedOn?: string;
+  primaryAction?: { label: string; to: string };
 }
 
 /**
@@ -32,19 +34,30 @@ export default function CsmComingSoonPage({
   title,
   description,
   blockedOn,
+  primaryAction,
 }: CsmComingSoonPageProps): JSX.Element {
+  const navigate = useNavigate();
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
         <Typography variant="h5">{title}</Typography>
         <Chip size="small" label="Coming soon" color="warning" variant="outlined" />
       </Box>
-      <Card sx={{ p: 3, display: "flex", flexDirection: "column", gap: 1.5 }}>
+      <Card sx={{ p: 3, display: "flex", flexDirection: "column", gap: 1.5, alignItems: "flex-start" }}>
         <Typography variant="body1">{description}</Typography>
         {blockedOn && (
           <Typography variant="body2" color="text.secondary">
             Blocked on: {blockedOn}
           </Typography>
+        )}
+        {primaryAction && (
+          <Button
+            variant="contained"
+            onClick={() => navigate(primaryAction.to)}
+            sx={{ mt: 1 }}
+          >
+            {primaryAction.label}
+          </Button>
         )}
       </Card>
     </Box>

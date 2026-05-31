@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Link, Sidebar } from "@wso2/oxygen-ui";
+import { Box, Chip, Link, Sidebar, Typography } from "@wso2/oxygen-ui";
 import {
   Briefcase,
   Building,
@@ -46,20 +46,20 @@ interface CsmNavItem {
 }
 
 const CSM_NAV_ITEMS: CsmNavItem[] = [
+  { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn },
+  { id: "cases", label: "Cases", path: "/cases", icon: Headset },
+  { id: "operations", label: "Operations", path: "/operations", icon: Cog },
+  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase },
+  { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
+  { id: "security-center", label: "Security center", path: "/security-center", icon: Shield },
+  { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
   { id: "accounts", label: "Accounts", path: "/accounts", icon: Building },
   { id: "projects", label: "Projects", path: "/projects", icon: FolderOpen },
-  { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
   { id: "admin", label: "Administration", path: "/admin", icon: Settings },
-  { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn, wip: true },
-  { id: "cases", label: "Cases", path: "/cases", icon: Headset, wip: true },
-  { id: "operations", label: "Operations", path: "/operations", icon: Cog, wip: true },
-  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase, wip: true },
-  { id: "security-center", label: "Security center", path: "/security-center", icon: Shield, wip: true },
-  { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock, wip: true },
 ];
 
 function pickActiveId(pathname: string): string {
-  if (pathname === "/" || pathname === "") return "accounts";
+  if (pathname === "/" || pathname === "") return "dashboard";
   for (const item of CSM_NAV_ITEMS) {
     if (pathname === item.path || pathname.startsWith(`${item.path}/`)) {
       return item.id;
@@ -127,6 +127,45 @@ export default function CsmSideBar({
           ))}
         </Sidebar.Category>
       </Sidebar.Nav>
+      {/* Footer (relocated from page bottom into the sidebar to free vertical space). */}
+      <Box
+        sx={{
+          mt: "auto",
+          px: 2,
+          py: 1.5,
+          borderTop: 1,
+          borderColor: "divider",
+          display: collapsed ? "none" : "flex",
+          flexDirection: "column",
+          gap: 0.5,
+        }}
+      >
+        <Typography variant="caption" color="text.secondary">
+          © {new Date().getFullYear()} WSO2 LLC.
+        </Typography>
+        <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+          <Link
+            href="https://wso2.com/terms-of-use/"
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="caption"
+            color="text.secondary"
+            underline="hover"
+          >
+            Terms
+          </Link>
+          <Link
+            href="https://wso2.com/privacy-policy/"
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="caption"
+            color="text.secondary"
+            underline="hover"
+          >
+            Privacy
+          </Link>
+        </Box>
+      </Box>
     </Sidebar>
   );
 }
