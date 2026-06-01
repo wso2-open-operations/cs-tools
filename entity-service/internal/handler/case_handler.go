@@ -35,6 +35,22 @@ func NewCaseHandler(svc service.CaseService) *CaseHandler {
 	return &CaseHandler{svc: svc}
 }
 
+// CreateCase handles POST /cases.
+func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateCaseRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	c, err := h.svc.CreateCase(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(c)
+}
+
 // SearchCases handles POST /cases/search.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchCasesRequest

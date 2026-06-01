@@ -72,6 +72,35 @@ var validCaseIssueType = map[domain.CaseIssueType]bool{
 	domain.CaseIssueTypeTotalOutage:            true,
 }
 
+// CreateCase implements CaseService.
+func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
+	if err := validateUUIDs("createdBy", []string{req.CreatedBy}); err != nil {
+		return domain.Case{}, err
+	}
+	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
+		return domain.Case{}, err
+	}
+	if err := validateUUIDs("deploymentId", []string{req.DeploymentID}); err != nil {
+		return domain.Case{}, err
+	}
+	if err := validateUUIDs("deployedProductId", []string{req.DeployedProductID}); err != nil {
+		return domain.Case{}, err
+	}
+	if req.Subject == "" {
+		return domain.Case{}, &apierror.ValidationError{Msg: "subject is required"}
+	}
+	if req.Description == "" {
+		return domain.Case{}, &apierror.ValidationError{Msg: "description is required"}
+	}
+	if !validCasePriority[req.Priority] {
+		return domain.Case{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(req.Priority)}
+	}
+	if !validCaseIssueType[req.IssueType] {
+		return domain.Case{}, &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
+	}
+	return s.repo.CreateCase(ctx, req)
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {

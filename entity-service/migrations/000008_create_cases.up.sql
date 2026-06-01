@@ -25,10 +25,13 @@ CREATE TYPE case_issue_type_enum AS ENUM (
   'total_outage'
 );
 
+CREATE SEQUENCE cases_number_seq START 1 INCREMENT 1;
+CREATE SEQUENCE cases_wso2_id_seq START 1 INCREMENT 1;
+
 CREATE TABLE cases (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  number              VARCHAR UNIQUE NOT NULL,
-  wso2_id             VARCHAR UNIQUE NOT NULL,
+  number              VARCHAR UNIQUE NOT NULL DEFAULT 'CASE-' || LPAD(nextval('cases_number_seq')::TEXT, 3, '0'),
+  wso2_id             VARCHAR UNIQUE NOT NULL DEFAULT 'WSO2-' || LPAD(nextval('cases_wso2_id_seq')::TEXT, 3, '0'),
   created_by          UUID NOT NULL REFERENCES users(id),
   project_id          UUID NOT NULL REFERENCES projects(id),
   deployment_id       UUID NOT NULL REFERENCES deployments(id),

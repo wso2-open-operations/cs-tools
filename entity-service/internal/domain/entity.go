@@ -415,3 +415,16 @@ type SearchCasesResponse struct {
 	Offset  int    `json:"offset"`
 	HasMore bool   `json:"hasMore"`
 }
+
+// CreateCaseRequest is the input for creating a new case.
+// id, number, and wso2_id are auto-generated; state defaults to open.
+type CreateCaseRequest struct {
+	CreatedBy          string        `json:"createdBy"`
+	ProjectID          string        `json:"projectId"`
+	DeploymentID       string        `json:"deploymentId"`
+	DeployedProductID  string        `json:"deployedProductId"`
+	Subject            string        `json:"subject"`
+	Description        string        `json:"description"`
+	Priority           CasePriority  `json:"priority"`
+	IssueType          CaseIssueType `json:"issueType"`
+}

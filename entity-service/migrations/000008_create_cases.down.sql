@@ -1,4 +1,6 @@
 DROP TABLE IF EXISTS cases;
+DROP SEQUENCE IF EXISTS cases_number_seq;
+DROP SEQUENCE IF EXISTS cases_wso2_id_seq;
 DROP TYPE IF EXISTS case_state_enum;
 DROP TYPE IF EXISTS case_priority_enum;
 DROP TYPE IF EXISTS case_issue_type_enum;
