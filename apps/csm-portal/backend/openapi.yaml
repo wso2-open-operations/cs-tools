@@ -561,6 +561,7 @@ components:
     CaseCreatePayload:
       type: object
       required:
+        - createdBy
         - projectId
         - deploymentId
         - deployedProductId
@@ -569,6 +570,11 @@ components:
         - priority
         - issueType
       properties:
+        createdBy:
+          type: string
+          description: >
+            UUID of the user creating the case.
+            TODO: will be removed once DB-level auth is in place and injected server-side.
         projectId:
           type: string
           description: UUID of the project this case belongs to

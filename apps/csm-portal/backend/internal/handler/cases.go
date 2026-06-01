@@ -26,24 +26,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
-// injectCreatedBy merges the authenticated user's ID into a JSON request body as createdBy.
-// Any caller-supplied createdBy is overridden to prevent spoofing.
-func injectCreatedBy(body []byte, userID string) ([]byte, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	if m == nil {
-		m = make(map[string]json.RawMessage)
-	}
-	id, err := json.Marshal(userID)
-	if err != nil {
-		return nil, err
-	}
-	m["createdBy"] = id
-	return json.Marshal(m)
-}
-
 // injectProjectID merges a project ID into a JSON request body as projectIds: [id].
 func injectProjectID(body []byte, projectID string) ([]byte, error) {
 	var m map[string]json.RawMessage
@@ -84,8 +66,9 @@ func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 const maxRequestBodyBytes = 1 << 20
 
 // CreateCase handles POST /cases.
-// The authenticated user's ID is injected as createdBy before forwarding to
-// the entity service; any caller-supplied createdBy is overridden.
+// TODO: createdBy is currently supplied by the client. Once DB-level auth is
+// in place it will be injected server-side from the authenticated user and
+// removed from the request payload.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -109,13 +92,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entityBody, err := injectCreatedBy(body, user.UserID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.CreateCase(r.Context(), entityBody)
+	result, err := h.entity.CreateCase(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateCase failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to create case.")
