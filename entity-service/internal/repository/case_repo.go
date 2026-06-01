@@ -18,10 +18,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -72,6 +75,14 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 		&c.CreatedAt, &c.UpdatedAt, &c.ClosedAt,
 	)
 	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23503": // foreign_key_violation — one of the referenced IDs does not exist
+				return domain.Case{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority)
+				return domain.Case{}, &apierror.ValidationError{Msg: pgErr.Message}
+			}
+		}
 		return domain.Case{}, fmt.Errorf("create case: %w", err)
 	}
 	return c, nil
