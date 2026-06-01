@@ -206,6 +206,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/search:
+    post:
+      summary: Search support cases.
+      operationId: searchCases
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCasesRequest'
+      responses:
+        "200":
+          description: Cases matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCasesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /deployed-products/search:
     post:
       summary: Search deployed products by deployment IDs.
@@ -634,6 +664,116 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeployedProduct'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SearchCasesRequest:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery:
+          type: string
+          description: Case-insensitive match against subject, number, and wso2_id.
+        projectIds:
+          type: array
+          items:
+            type: string
+          description: Filter by project UUIDs.
+        deploymentIds:
+          type: array
+          items:
+            type: string
+          description: Filter by deployment UUIDs.
+        deployedProductIds:
+          type: array
+          items:
+            type: string
+          description: Filter by deployed product UUIDs.
+        stateKeys:
+          type: array
+          items:
+            type: string
+            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: Filter by case states.
+        priorityKeys:
+          type: array
+          items:
+            type: string
+            enum: [catastrophic, critical, high, medium, low]
+          description: Filter by case priorities.
+        issueTypeKeys:
+          type: array
+          items:
+            type: string
+            enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+          description: Filter by case issue types.
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [created_at, updated_at, closed_at]
+              description: Column to sort by. Defaults to created_at.
+            order:
+              type: string
+              enum: [asc, desc]
+              description: Sort direction. Defaults to desc.
+
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+        number:
+          type: string
+        wso2Id:
+          type: string
+        createdBy:
+          type: string
+        projectId:
+          type: string
+        deploymentId:
+          type: string
+        deployedProductId:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+        issueType:
+          type: string
+          enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SearchCasesResponse:
+      type: object
+      properties:
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Case'
         total:
           type: integer
         limit:

@@ -311,3 +311,107 @@ type SearchDeployedProductsResponse struct {
 	Offset           int               `json:"offset"`
 	HasMore          bool              `json:"hasMore"`
 }
+
+// CaseIssueType classifies the nature of a support case.
+type CaseIssueType string
+
+const (
+	CaseIssueTypeError                  CaseIssueType = "error"
+	CaseIssueTypePartialOutage          CaseIssueType = "partial_outage"
+	CaseIssueTypePerformanceDegradation CaseIssueType = "performance_degradation"
+	CaseIssueTypeQuestion               CaseIssueType = "question"
+	CaseIssueTypeSecurityOrCompliance   CaseIssueType = "security_or_compliance"
+	CaseIssueTypeTotalOutage            CaseIssueType = "total_outage"
+)
+
+// CasePriority represents the urgency level of a support case.
+type CasePriority string
+
+const (
+	CasePriorityCatastrophic CasePriority = "catastrophic"
+	CasePriorityCritical     CasePriority = "critical"
+	CasePriorityHigh         CasePriority = "high"
+	CasePriorityMedium       CasePriority = "medium"
+	CasePriorityLow          CasePriority = "low"
+)
+
+// CaseState represents the current workflow state of a support case.
+type CaseState string
+
+const (
+	CaseStateOpen             CaseState = "open"
+	CaseStateWorkInProgress   CaseState = "work_in_progress"
+	CaseStateWaitingOnWSO2    CaseState = "waiting_on_wso2"
+	CaseStateAwaitingInfo     CaseState = "awaiting_info"
+	CaseStateReopened         CaseState = "reopened"
+	CaseStateSolutionProposed CaseState = "solution_proposed"
+	CaseStateClosed           CaseState = "closed"
+)
+
+// CaseSortField enumerates the columns available for sorting case search results.
+type CaseSortField string
+
+const (
+	CaseSortFieldCreatedAt CaseSortField = "created_at"
+	CaseSortFieldUpdatedAt CaseSortField = "updated_at"
+	CaseSortFieldClosedAt  CaseSortField = "closed_at"
+)
+
+// CaseSortOrder controls the sort direction.
+type CaseSortOrder string
+
+const (
+	CaseSortOrderAsc  CaseSortOrder = "asc"
+	CaseSortOrderDesc CaseSortOrder = "desc"
+)
+
+// CaseSort specifies the sort field and direction for case search results.
+type CaseSort struct {
+	Field CaseSortField `json:"field"`
+	Order CaseSortOrder `json:"order"`
+}
+
+// Case represents a customer support case as stored in the database.
+// Priority and ClosedAt are optional and omitted from JSON when absent.
+type Case struct {
+	ID                string       `json:"id"`
+	Number            string       `json:"number"`
+	Wso2ID            string       `json:"wso2Id"`
+	CreatedBy         string       `json:"createdBy"`
+	ProjectID         string       `json:"projectId"`
+	DeploymentID      string       `json:"deploymentId"`
+	DeployedProductID string       `json:"deployedProductId"`
+	Subject           string       `json:"subject"`
+	Description       string       `json:"description"`
+	Priority          CasePriority  `json:"priority"`
+	IssueType         CaseIssueType `json:"issueType"`
+	State             CaseState     `json:"state"`
+	CreatedAt         time.Time    `json:"createdAt"`
+	UpdatedAt         time.Time    `json:"updatedAt"`
+	ClosedAt          *time.Time   `json:"closedAt,omitempty"`
+}
+
+// SearchCasesRequest is the input for a case search operation.
+// SearchQuery is matched case-insensitively against subject, number, and wso2_id.
+// All filter slices are optional. SortBy defaults to created_at.
+type SearchCasesRequest struct {
+	Pagination          Pagination     `json:"pagination"`
+	SearchQuery         string         `json:"searchQuery"`
+	ProjectIDs          []string       `json:"projectIds"`
+	DeploymentIDs       []string       `json:"deploymentIds"`
+	DeployedProductIDs  []string       `json:"deployedProductIds"`
+	StateKeys           []CaseState     `json:"stateKeys"`
+	PriorityKeys        []CasePriority  `json:"priorityKeys"`
+	IssueTypeKeys       []CaseIssueType `json:"issueTypeKeys"`
+	SortBy              CaseSort        `json:"sortBy"`
+}
+
+// SearchCasesResponse is the paginated result of a case search.
+// HasMore is true when additional pages are available beyond the current offset.
+type SearchCasesResponse struct {
+	Cases   []Case `json:"cases"`
+	Total   int    `json:"total"`
+	Limit   int    `json:"limit"`
+	Offset  int    `json:"offset"`
+	HasMore bool   `json:"hasMore"`
+}
