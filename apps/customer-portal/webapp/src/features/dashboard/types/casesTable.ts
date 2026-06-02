@@ -97,7 +97,6 @@ export type CasesTableFilterValues = {
   statusIds?: string[];
   severityIds?: string[];
   issueTypes?: string | string[] | number;
-  deploymentId?: string | number;
   createdBy?: string[];
   deploymentIds?: string[];
 };
