@@ -58,7 +58,7 @@ test("unauthenticated visit lands at the IdP — auth wall is intact", async ({
   // is a regression.
   await page.waitForURL(
     (url) =>
-      url.host !== "localhost:3000" ||
+      url.host !== "localhost:3001" ||
       url.pathname.includes("/oauth2") ||
       url.pathname.includes("/authenticate"),
     { timeout: 15_000 },

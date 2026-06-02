@@ -22,7 +22,7 @@ npx playwright test --project=smoke
 npx playwright test --project=authenticated
 ```
 
-The Playwright config starts `npm run dev -- --port 3000` automatically (`webServer.reuseExistingServer: true`, so if you already have it running we attach instead of double-launching).
+The Playwright config starts `npm run dev -- --port 3001` automatically (`webServer.reuseExistingServer: true`, so if you already have it running we attach instead of double-launching).
 
 ## Recording the auth storage state (one-time)
 
@@ -34,7 +34,7 @@ mkdir -p tests/e2e/.auth
 npx playwright codegen \
   --output=/dev/null \
   --save-storage=tests/e2e/.auth/user.json \
-  http://localhost:3000/
+  http://localhost:3001/
 ```
 
 Add `tests/e2e/.auth/user.json` to `.gitignore` — it contains a real session token.

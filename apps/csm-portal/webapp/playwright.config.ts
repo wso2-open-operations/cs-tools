@@ -25,14 +25,14 @@ export default defineConfig({
   outputDir: "test-results",
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --port 3000",
-    url: "http://localhost:3000/",
+    command: "npm run dev -- --port 3001",
+    url: "http://localhost:3001/",
     reuseExistingServer: true,
     timeout: 60_000,
   },

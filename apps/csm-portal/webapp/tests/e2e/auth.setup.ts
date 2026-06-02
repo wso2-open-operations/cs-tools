@@ -35,7 +35,7 @@ setup("auth storage state must exist", async () => {
         "Run once:",
         "  npx playwright codegen --output=/dev/null \\",
         "    --save-storage=tests/e2e/.auth/user.json \\",
-        "    http://localhost:3000/",
+        "    http://localhost:3001/",
         "",
         "Sign in to the IdP in the opened browser, then close it.",
         "See tests/e2e/README.md for details.",

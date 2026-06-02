@@ -37,7 +37,7 @@ Internal customer-success-manager portal for WSO2. Built as a React 19 + TypeScr
 
 ### Development
 
-Dev server defaults to port `3000`:
+Dev server defaults to port `3001` (customer-portal uses 3000):
 
 ```bash
 pnpm run dev
@@ -65,8 +65,8 @@ Runtime config is read from `window.config` set by `public/config.js`. Build-tim
 |---|---|---|
 | `CSM_PORTAL_AUTH_BASE_URL` | OIDC IdP base URL for the CSM SPA application | `<your-idp-base-url>` |
 | `CSM_PORTAL_AUTH_CLIENT_ID` | OAuth2 Client ID (CSM SPA application, NOT the customer-portal one) | `<client-id>` |
-| `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | Sign-in callback URL | `http://localhost:3000` |
-| `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | Sign-out callback URL | `http://localhost:3000` |
+| `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | Sign-in callback URL | `http://localhost:3001` |
+| `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | Sign-out callback URL | `http://localhost:3001` |
 | `CSM_PORTAL_BACKEND_BASE_URL` | Backend API base URL (CSM BFF) | `http://localhost:9090` |
 | `CSM_PORTAL_THEME` | Theme (acrylicOrange, acrylicPurple, highContrast, classic) | `acrylicOrange` |
 | `CSM_PORTAL_LOG_LEVEL` | Logging level (DEBUG, INFO, WARN, ERROR) | `INFO` |
