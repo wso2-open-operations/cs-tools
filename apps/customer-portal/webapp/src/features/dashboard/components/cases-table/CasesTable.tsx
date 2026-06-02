@@ -197,15 +197,17 @@ const CasesTable = ({
           defaultStatusIds,
         ),
         caseTypes: [CaseType.DEFAULT_CASE],
-        severityId: effectiveFilters.severityId
-          ? Number(effectiveFilters.severityId)
-          : undefined,
+        severityIds:
+          (effectiveFilters.severityIds as string[] | undefined)?.length
+            ? (effectiveFilters.severityIds as string[]).map(Number)
+            : undefined,
         issueIds: normalizeCaseSearchIssueIds(
           effectiveFilters.issueTypes as string | string[] | undefined,
         ),
-        deploymentId: effectiveFilters.deploymentId
-          ? String(effectiveFilters.deploymentId)
-          : undefined,
+        deploymentIds:
+          (effectiveFilters.deploymentIds as string[] | undefined)?.length
+            ? (effectiveFilters.deploymentIds as string[])
+            : undefined,
         createdByMe:
           viewMode === DashboardCasesViewMode.MyCases ? true : undefined,
       },

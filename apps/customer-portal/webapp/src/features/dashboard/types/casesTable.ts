@@ -94,9 +94,9 @@ export type CasesTableProps = {
 export type CasesTableFilterValues = {
   [key: string]: string | string[] | number | undefined;
   statusIds?: string[];
-  severityId?: string | number;
+  severityIds?: string[];
   issueTypes?: string | string[] | number;
-  deploymentId?: string | number;
+  deploymentIds?: string[];
 };
 
 // Route params used by cases table header when `projectId` is read from the URL.
