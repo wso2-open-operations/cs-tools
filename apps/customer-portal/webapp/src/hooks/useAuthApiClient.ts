@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken } = useAsgardeo();
+  const { getIdToken, signOut } = useAsgardeo();
 
   /**
    * Builds request headers with auth and payload defaults.
@@ -63,7 +63,19 @@ export function useAuthApiClient() {
     input: RequestInfo | URL,
     options?: RequestInit,
   ): Promise<Response> => {
-    const token = await getIdToken();
+    let token: string | undefined | null;
+    try {
+      token = await getIdToken();
+    } catch (err) {
+      // SDK throws SPA-AUTH_CLIENT-VM-IV02 when token refresh fails (e.g. the
+      // refresh token has expired after a long-idle tab). Sign out so the
+      // existing ProtectedRoute bounces the user through the IdP to re-acquire
+      // a token, rather than letting the error surface as a 500 in every view.
+      if ((err as { code?: string } | null)?.code === "SPA-AUTH_CLIENT-VM-IV02") {
+        void signOut();
+      }
+      throw err;
+    }
     if (!token) {
       throw new Error("Unable to retrieve ID token");
     }
