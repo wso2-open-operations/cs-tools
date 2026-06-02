@@ -18,7 +18,7 @@ import { useAsgardeo } from "@asgardeo/react";
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken, signOut } = useAsgardeo();
+  const { getIdToken, signInSilently, signOut } = useAsgardeo();
 
   /**
    * Builds request headers with auth and payload defaults.
@@ -63,18 +63,30 @@ export function useAuthApiClient() {
     input: RequestInfo | URL,
     options?: RequestInit,
   ): Promise<Response> => {
+    // SDK throws SPA-AUTH_CLIENT-VM-IV02 from getIdToken once the access token's
+    // lifetime is up — it checks isSignedIn() and rejects without ever attempting
+    // a refresh. periodicTokenRefresh is a timer scheduled around the original
+    // expiry, so on a long-idle tab (or background-throttled timer) we land here
+    // with an expired access token but a still-valid IdP session.
+    // Fix: on that specific code, attempt silent re-auth, then retry. Only if
+    // the silent re-auth also fails do we sign out — letting ProtectedRoute
+    // bounce the user through the IdP rather than surfacing a 500 page.
     let token: string | undefined | null;
     try {
       token = await getIdToken();
     } catch (err) {
-      // SDK throws SPA-AUTH_CLIENT-VM-IV02 when token refresh fails (e.g. the
-      // refresh token has expired after a long-idle tab). Sign out so the
-      // existing ProtectedRoute bounces the user through the IdP to re-acquire
-      // a token, rather than letting the error surface as a 500 in every view.
-      if ((err as { code?: string } | null)?.code === "SPA-AUTH_CLIENT-VM-IV02") {
-        void signOut();
+      const isAuthDead =
+        (err as { code?: string } | null)?.code === "SPA-AUTH_CLIENT-VM-IV02";
+      if (!isAuthDead) {
+        throw err;
       }
-      throw err;
+      try {
+        await signInSilently();
+        token = await getIdToken();
+      } catch {
+        void signOut();
+        throw err;
+      }
     }
     if (!token) {
       throw new Error("Unable to retrieve ID token");
