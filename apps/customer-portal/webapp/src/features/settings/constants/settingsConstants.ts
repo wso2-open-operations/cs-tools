@@ -270,7 +270,7 @@ export const REGISTRY_ADMIN_ALERT_BODY =
 export const REGISTRY_PAGE_TITLE = "Registry Tokens";
 
 export const REGISTRY_PAGE_DESCRIPTION =
-  "Manage registry tokens for WSO2 Updates 2.0. User tokens are for individual access, while service tokens are for automation and CI/CD pipelines.";
+  "Manage tokens for the WSO2 container registry. User tokens are for individual access to pull Docker images, while service tokens are for automation and CI/CD pipelines.";
 
 export const REGISTRY_SUBTAB_USER_BASE = "User Tokens";
 
