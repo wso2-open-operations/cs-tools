@@ -66,6 +66,8 @@ import OperationsPage from "@features/operations/pages/OperationsPage";
 import SecurityPage from "@features/security/pages/SecurityPage";
 import VulnerabilityDetailsPage from "@features/security/pages/VulnerabilityDetailsPage";
 import EngagementsPage from "@features/engagements/pages/EngagementsPage";
+import CsmEngagementsPage from "@features/csm-engagements/pages/CsmEngagementsPage";
+import CsmEngagementDetailPage from "@features/csm-engagements/pages/CsmEngagementDetailPage";
 import UsageMetricsPage from "@features/usage-metrics/pages/UsageMetricsPage";
 import SettingsPage from "@features/settings/pages/SettingsPage";
 import ServiceNowCaseRedirectPage from "@features/project-hub/pages/ServiceNowCaseRedirectPage";
@@ -166,15 +168,10 @@ export default function App(): JSX.Element {
                     />
                   }
                 />
+                <Route path="engagements" element={<CsmEngagementsPage />} />
                 <Route
-                  path="engagements"
-                  element={
-                    <CsmComingSoonPage
-                      title="Engagements"
-                      description="Professional services engagements (migration, implementation, onboarding, training) across customers."
-                      blockedOn="csm-portal/backend engagements endpoint"
-                    />
-                  }
+                  path="engagements/:engagementId"
+                  element={<CsmEngagementDetailPage />}
                 />
 
                 <Route path="updates" element={<CsmUpdatesPage />} />

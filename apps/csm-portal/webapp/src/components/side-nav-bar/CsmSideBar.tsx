@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Link, Sidebar, Typography } from "@wso2/oxygen-ui";
+import { Box, Link, Sidebar, Typography } from "@wso2/oxygen-ui";
 import {
   Briefcase,
   Building,
@@ -99,29 +99,13 @@ export default function CsmSideBar({
                 <Sidebar.ItemIcon>
                   <item.icon size={20} />
                 </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1,
-                      width: "100%",
-                    }}
-                  >
-                    <Box component="span" sx={{ flex: 1 }}>
-                      {item.label}
-                    </Box>
-                    {item.wip && !collapsed && (
-                      <Chip
-                        size="small"
-                        label="WIP"
-                        color="warning"
-                        variant="outlined"
-                        sx={{ height: 18, fontSize: 10 }}
-                      />
-                    )}
-                  </Box>
-                </Sidebar.ItemLabel>
+                {/* `ItemLabel` children must be a plain string: oxygen-ui
+                    stringifies it for the collapsed-state tooltip. Wrapping
+                    in a Box yields "[object Object]" on hover. */}
+                <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
+                {item.wip && !collapsed && (
+                  <Sidebar.ItemBadge color="warning">WIP</Sidebar.ItemBadge>
+                )}
               </Sidebar.Item>
             </Link>
           ))}

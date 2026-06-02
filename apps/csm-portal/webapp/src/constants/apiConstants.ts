@@ -88,12 +88,18 @@ export const ApiQueryKeys = {
   CSM_ADMIN_GROUPS: "csm-admin-groups",
   CSM_ADMIN_GROUP_DETAIL: "csm-admin-group-detail",
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
+  CSM_ENGAGEMENTS: "csm-engagements",
+  CSM_ENGAGEMENT_DETAIL: "csm-engagement-detail",
+  CSM_ENGAGEMENT_COMMENTS: "csm-engagement-comments",
 } as const;
 
 // Constants for API-related mutation keys.
 export const ApiMutationKeys = {
   POST_COMMENT: ["postComment"],
   POST_CHANGE_REQUEST_COMMENT: ["postChangeRequestComment"],
+  POST_ENGAGEMENT_COMMENT: ["postEngagementComment"],
+  CREATE_ENGAGEMENT: ["createEngagement"],
+  PATCH_ENGAGEMENT: ["patchEngagement"],
 } as const;
 
 // Constants for WebSocket communication.
