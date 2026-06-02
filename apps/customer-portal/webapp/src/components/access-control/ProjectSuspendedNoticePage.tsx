@@ -127,18 +127,18 @@ export default function ProjectSuspendedNoticePage({
             <InfoRow label="Subscription End Date:" value={endDateLabel} />
           </Stack>
 
-          <Divider />
-
           {/* Suspension reasons */}
-          <Box sx={{ px: 3, py: 3 }}>
-            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, mb: 2 }}>
-              <AlertCircle size={18} style={{ marginTop: 2, flexShrink: 0, color: "var(--oxygen-palette-warning-main, #f59e0b)" }} />
-              <Typography variant="body2" color="text.secondary">
-                This project was suspended for the following reasons,
-              </Typography>
-            </Box>
+          {reasons.length > 0 && (
+            <>
+            <Divider />
+            <Box sx={{ px: 3, py: 3 }}>
+              <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, mb: 2 }}>
+                <AlertCircle size={18} style={{ marginTop: 2, flexShrink: 0, color: "var(--oxygen-palette-warning-main, #f59e0b)" }} />
+                <Typography variant="body2" color="text.secondary">
+                  This project was suspended for the following reasons,
+                </Typography>
+              </Box>
 
-            {reasons.length > 0 ? (
               <Stack spacing={1} sx={{ pl: 4 }}>
                 {reasons.map((reason, idx) => (
                   <Typography key={idx} variant="body2" fontWeight={500}>
@@ -146,12 +146,9 @@ export default function ProjectSuspendedNoticePage({
                   </Typography>
                 ))}
               </Stack>
-            ) : (
-              <Typography variant="body2" sx={{ pl: 4 }} color="text.secondary">
-                No specific reasons provided.
-              </Typography>
-            )}
-          </Box>
+            </Box>
+            </>
+          )}
 
           {/* Suspension description */}
           {(project.suspendedOn ?? project.endDate) && (
