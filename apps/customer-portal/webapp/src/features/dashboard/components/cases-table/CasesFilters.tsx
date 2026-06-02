@@ -104,7 +104,11 @@ export default function CasesFilters({
                     );
                   }}
                 >
-                  {hasNoOptions ? (
+                  {field.isLoading ? (
+                    <MenuItem disabled>
+                      <Typography variant="body2">Loading...</Typography>
+                    </MenuItem>
+                  ) : hasNoOptions ? (
                     <MenuItem disabled>
                       <Typography variant="body2">{EMPTY_DROPDOWN_PLACEHOLDER}</Typography>
                     </MenuItem>

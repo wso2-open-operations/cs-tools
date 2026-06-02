@@ -33,6 +33,7 @@ export type TableFilter = {
   options?: string[] | SelectOption[];
   placeholder?: string;
   multiSelect?: boolean;
+  isLoading?: boolean;
   onLoadMore?: () => void;
   hasMore?: boolean;
   isFetchingMore?: boolean;
@@ -97,6 +98,7 @@ export type CasesTableFilterValues = {
   severityId?: string | number;
   issueTypes?: string | string[] | number;
   deploymentId?: string | number;
+  createdBy?: string[];
 };
 
 // Route params used by cases table header when `projectId` is read from the URL.

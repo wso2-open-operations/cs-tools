@@ -28,6 +28,7 @@ import useGetProjectCases from "@api/useGetProjectCases";
 import { useGetProjectCasesPage } from "@api/useGetProjectCasesPage";
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDeploymentsSearch";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import CasesTableHeader from "@features/dashboard/components/cases-table/CasesTableHeader";
 import CasesFilters from "@features/dashboard/components/cases-table/CasesFilters";
 import CasesList from "@features/dashboard/components/cases-table/CasesList";
@@ -107,6 +108,10 @@ const CasesTable = ({
     [deploymentsQuery.data],
   );
 
+  // contacts for created by filter
+  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId);
+  const contactsList = useMemo(() => contactsData ?? [], [contactsData]);
+
   // effective filters
   const effectiveFilters: CasesTableFilterValues = useMemo(
     () =>
@@ -123,34 +128,36 @@ const CasesTable = ({
         def.id !== "caseType" &&
         !(restrictSeverityToLow && def.metadataKey === "severities") &&
         (includeDeploymentFilter || def.id !== "deployment") &&
-        (def.id === "deployment" || !!def.metadataKey),
+        (def.id === "deployment" || def.id === "createdBy" || !!def.metadataKey),
     ).map((def) => {
       const { label } = deriveFilterLabels(def.id);
 
       const isDeploymentFilter = def.id === "deployment";
+      const isCreatedByFilter = def.id === "createdBy";
       let options: { label: string; value: string }[];
-      switch (isDeploymentFilter) {
-        case true:
-          options =
-            deploymentsList.map((deployment) => ({
-              label: deployment.type?.label || deployment.name,
-              value: deployment.id,
-            })) ?? [];
-          break;
-        default: {
-          const metadataOptions =
-            filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
-          const filtered = filterCasesTableMetadataOptions(
-            def.metadataKey!,
-            metadataOptions,
-            excludeS0,
-            restrictSeverityToLow,
-          );
-          options = filtered.map((item) => ({
-            label: mapCasesTableFilterOptionLabel(def.metadataKey!, item.label),
-            value: item.id,
-          }));
-        }
+      if (isDeploymentFilter) {
+        options = deploymentsList.map((deployment) => ({
+          label: deployment.type?.label || deployment.name,
+          value: deployment.id,
+        }));
+      } else if (isCreatedByFilter) {
+        options = contactsList.map((contact) => ({
+          label: `${contact.firstName} ${contact.lastName}`.trim() || contact.email,
+          value: contact.email,
+        }));
+      } else {
+        const metadataOptions =
+          filtersMetadata?.[def.metadataKey as keyof typeof filtersMetadata];
+        const filtered = filterCasesTableMetadataOptions(
+          def.metadataKey!,
+          metadataOptions,
+          excludeS0,
+          restrictSeverityToLow,
+        );
+        options = filtered.map((item) => ({
+          label: mapCasesTableFilterOptionLabel(def.metadataKey!, item.label),
+          value: item.id,
+        }));
       }
 
       return {
@@ -159,6 +166,7 @@ const CasesTable = ({
         type: "select" as const,
         options,
         ...(def.multiSelect ? { multiSelect: true } : null),
+        ...(isCreatedByFilter ? { isLoading: isContactsLoading } : null),
         ...(isDeploymentFilter
           ? {
               onLoadMore: () => {
@@ -178,6 +186,8 @@ const CasesTable = ({
   }, [
     filtersMetadata,
     deploymentsList,
+    contactsList,
+    isContactsLoading,
     excludeS0,
     restrictSeverityToLow,
     includeDeploymentFilter,
@@ -208,6 +218,10 @@ const CasesTable = ({
           : undefined,
         createdByMe:
           viewMode === DashboardCasesViewMode.MyCases ? true : undefined,
+        createdBy:
+          (effectiveFilters.createdBy as string[] | undefined)?.length
+            ? (effectiveFilters.createdBy as string[])
+            : undefined,
       },
       sortBy: {
         field: "updatedOn",
