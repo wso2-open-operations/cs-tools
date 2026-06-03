@@ -1,4 +1,4 @@
-CREATE TYPE user_type AS ENUM ('internal', 'customer');
+CREATE TYPE user_type_enum AS ENUM ('internal', 'customer', 'system');
 
 CREATE TABLE IF NOT EXISTS users (
     id          TEXT        PRIMARY KEY,
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     email       TEXT        NOT NULL UNIQUE,
     phone       TEXT,
     timezone    TEXT,
-    user_type   user_type   NOT NULL,
+    user_type   user_type_enum   NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

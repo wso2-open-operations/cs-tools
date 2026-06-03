@@ -38,6 +38,8 @@ type CaseRepository interface {
 	// total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.Case, int, error)
+	// CreateCaseComment inserts a new comment row for the given case.
+	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error)
 }
 
 type caseRepo struct {
@@ -84,6 +86,31 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 			}
 		}
 		return domain.Case{}, fmt.Errorf("create case: %w", err)
+	}
+	return c, nil
+}
+
+// CreateCaseComment implements CaseRepository.
+func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
+	const query = `
+		INSERT INTO case_comments (case_id, comment_type, body, created_by)
+		VALUES ($1, $2::comment_type_enum, $3, $4)
+		RETURNING id, case_id, comment_type, body, created_by, created_at`
+
+	var c domain.CaseComment
+	err := r.db.QueryRow(ctx, query,
+		req.CaseID, string(req.CommentType), req.Body, req.CreatedBy,
+	).Scan(&c.ID, &c.CaseID, &c.CommentType, &c.Body, &c.CreatedBy, &c.CreatedAt)
+	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23503": // foreign_key_violation — case_id or created_by does not exist
+				return domain.CaseComment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			case "P0001": // raise_exception from user-type triggers
+				return domain.CaseComment{}, &apierror.ValidationError{Msg: pgErr.Message}
+			}
+		}
+		return domain.CaseComment{}, fmt.Errorf("create case comment: %w", err)
 	}
 	return c, nil
 }

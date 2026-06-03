@@ -51,6 +51,23 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(c)
 }
 
+// CreateCaseComment handles POST /cases/{id}/comments.
+func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateCaseCommentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = r.PathValue("id")
+	comment, err := h.svc.CreateCaseComment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(comment)
+}
+
 // SearchCases handles POST /cases/search.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchCasesRequest

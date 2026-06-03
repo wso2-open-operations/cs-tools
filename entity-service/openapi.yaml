@@ -266,6 +266,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/comments:
+    post:
+      summary: Create a comment on a support case.
+      operationId: createCaseComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseCommentRequest'
+      responses:
+        "201":
+          description: Comment created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseComment'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /deployed-products/search:
     post:
       summary: Search deployed products by deployment IDs.
@@ -338,7 +375,7 @@ components:
           nullable: true
         userType:
           type: string
-          enum: [internal, customer]
+          enum: [internal, customer, system]
         createdAt:
           type: string
           format: date-time
@@ -836,6 +873,38 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    CreateCaseCommentRequest:
+      type: object
+      required: [commentType, body, createdBy]
+      properties:
+        commentType:
+          type: string
+          enum: [work_note, comment, activity]
+          description: work_note is restricted to internal users; activity to internal and system users.
+        body:
+          type: string
+        createdBy:
+          type: string
+          description: UUID of the user creating the comment.
+
+    CaseComment:
+      type: object
+      properties:
+        id:
+          type: string
+        caseId:
+          type: string
+        commentType:
+          type: string
+          enum: [work_note, comment, activity]
+        body:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
 
     ErrorResponse:
       type: object
