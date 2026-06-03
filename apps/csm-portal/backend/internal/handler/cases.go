@@ -98,6 +98,7 @@ func injectProjectID(body []byte, projectID string) ([]byte, error) {
 type entityCaseClient interface {
 	CreateCase(ctx context.Context, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	SearchUsers(ctx context.Context, body []byte) ([]byte, error)
@@ -235,6 +236,46 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// SearchCaseComments handles POST /cases/{id}/comments/search.
+func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchCaseComments(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchCaseComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to search case comments.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SearchProjectCases handles POST /projects/{id}/cases/search.

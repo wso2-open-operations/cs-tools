@@ -47,6 +47,12 @@ func (c *Client) CreateCaseComment(ctx context.Context, caseID string, body []by
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/comments", url.PathEscape(caseID)), body)
 }
 
+// SearchCaseComments calls POST /cases/{id}/comments/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/comments/search", url.PathEscape(caseID)), body)
+}
+
 // SearchUsers calls POST /users/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {

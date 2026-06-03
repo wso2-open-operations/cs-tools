@@ -153,6 +153,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/comments/search:
+    post:
+      summary: Search comments on a case.
+      operationId: postCasesIdCommentsSearch
+      parameters:
+        - name: id
+          in: path
+          description: ID of the case
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Case comment search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCommentSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseCommentSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /updates/product-update-levels:
     get:
       summary: Get product update levels.
@@ -1351,3 +1401,33 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    CaseCommentSearchPayload:
+      type: object
+      nullable: true
+      description: Payload for paginating comments on a case. The case ID is taken from the URL path.
+      properties:
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    CaseCommentSearchResponse:
+      type: object
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseComment'
+        total:
+          type: integer
+          description: Total number of comments on the case
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
