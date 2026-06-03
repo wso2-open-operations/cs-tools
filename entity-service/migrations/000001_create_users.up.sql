@@ -1,4 +1,4 @@
-CREATE TYPE user_type AS ENUM ('internal', 'customer');
+CREATE TYPE user_type AS ENUM ('internal', 'customer', 'system');
 
 CREATE TABLE IF NOT EXISTS users (
     id          TEXT        PRIMARY KEY,
