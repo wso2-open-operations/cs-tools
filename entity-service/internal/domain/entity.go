@@ -428,3 +428,31 @@ type CreateCaseRequest struct {
 	Priority           CasePriority  `json:"priority"`
 	IssueType          CaseIssueType `json:"issueType"`
 }
+
+// CommentType classifies the type of a case comment.
+type CommentType string
+
+const (
+	CommentTypeWorkNote CommentType = "work_note"
+	CommentTypeComment  CommentType = "comment"
+	CommentTypeActivity CommentType = "activity"
+)
+
+// CaseComment represents a comment on a support case.
+type CaseComment struct {
+	ID          string      `json:"id"`
+	CaseID      string      `json:"caseId"`
+	CommentType CommentType `json:"commentType"`
+	Body        string      `json:"body"`
+	CreatedBy   string      `json:"createdBy"`
+	CreatedAt   time.Time   `json:"createdAt"`
+}
+
+// CreateCaseCommentRequest is the input for creating a new case comment.
+// CaseID is populated from the URL path parameter and is not part of the JSON body.
+type CreateCaseCommentRequest struct {
+	CaseID      string      `json:"-"`
+	CommentType CommentType `json:"commentType"`
+	Body        string      `json:"body"`
+	CreatedBy   string      `json:"createdBy"`
+}
