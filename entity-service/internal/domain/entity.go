@@ -458,3 +458,20 @@ type CreateCaseCommentRequest struct {
 	Body        string      `json:"body"`
 	CreatedBy   string      `json:"createdBy"`
 }
+
+// SearchCaseCommentsRequest is the input for listing comments on a case.
+// CaseID is populated from the URL path parameter and is not part of the JSON body.
+type SearchCaseCommentsRequest struct {
+	CaseID     string     `json:"-"`
+	Pagination Pagination `json:"pagination"`
+}
+
+// SearchCaseCommentsResponse is the paginated result of a case comment search.
+// HasMore is true when additional pages are available beyond the current offset.
+type SearchCaseCommentsResponse struct {
+	Comments []CaseComment `json:"comments"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+	HasMore  bool          `json:"hasMore"`
+}

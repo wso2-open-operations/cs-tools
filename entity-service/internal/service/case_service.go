@@ -124,6 +124,27 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 	return s.repo.CreateCaseComment(ctx, req)
 }
 
+// SearchCaseComments implements CaseService.
+func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error) {
+	if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
+		return domain.SearchCaseCommentsResponse{}, err
+	}
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchCaseCommentsResponse{}, err
+	}
+	comments, total, err := s.repo.SearchCaseComments(ctx, req)
+	if err != nil {
+		return domain.SearchCaseCommentsResponse{}, err
+	}
+	return domain.SearchCaseCommentsResponse{
+		Comments: comments,
+		Total:    total,
+		Limit:    req.Pagination.Limit,
+		Offset:   req.Pagination.Offset,
+		HasMore:  req.Pagination.Offset+len(comments) < total,
+	}, nil
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {
