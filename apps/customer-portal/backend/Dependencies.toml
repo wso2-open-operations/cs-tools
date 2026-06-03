@@ -373,3 +373,4 @@ modules = [
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.updates"},
 	{org = "wso2", packageName = "customer_portal", moduleName = "customer_portal.user_management"}
 ]
+

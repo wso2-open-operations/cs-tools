@@ -187,6 +187,20 @@ public type CaseResponse record {|
     entity:Date? engagementEndDate?;
     # Variables for service request
     entity:ServiceRequestVariable[]? variables?;
+    # Watch list users
+    WatchList[]? watchList;
+|};
+
+# Watch list information.
+public type WatchList record {|
+    # ID of the user
+    entity:IdString id;
+    # User name
+    string userName;
+    # Full name of the user
+    string? name;
+    # Email address of the user
+    string? email;
 |};
 
 # Reference item.

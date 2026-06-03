@@ -74,44 +74,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-  /users/groups:
-    post:
-      summary: Add users to a group.
-      operationId: postUsersGroups
-      requestBody:
-        description: Add users to group request payload
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddUsersToGroupRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AddUsersToGroupResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
   /projects/search:
     post:
       summary: Search projects of the logged-in user.
@@ -2589,7 +2551,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorPayload"
+                $ref: '#/components/schemas/ErrorPayload'
   /deployment-usages:
     post:
       summary: Import product consumption usage from a zip file.
@@ -2605,13 +2567,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeploymentUsageImportResponse"
+                $ref: '#/components/schemas/DeploymentUsageImportResponse'
         "400":
           description: BadRequest
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorPayload"
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
   /projects/{id}/stats/usage:
@@ -2645,7 +2607,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorPayload"
+                $ref: '#/components/schemas/ErrorPayload'
   /projects/{id}/instances/metrics/search:
     post:
       summary: Search instance metrics for a specific project based on provided filters.
@@ -3085,6 +3047,36 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /users/groups:
+    post:
+      summary: Add users to a group via the SCIM operations service.
+      operationId: postUsersGroups
+      requestBody:
+        description: Request payload containing group name and user emails
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUsersToGroupRequest'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddUsersToGroupResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
+        "404":
+          description: NotFound
 components:
   schemas:
     Account:
@@ -3111,6 +3103,39 @@ components:
           description: Whether the account is a partner or not
           nullable: true
       description: Account details record
+    AddUsersToGroupRequest:
+      required:
+      - emails
+      - group
+      type: object
+      properties:
+        group:
+          type: string
+          description: Display name of the group
+        emails:
+          type: array
+          description: Array of user email addresses to add to the group
+          items:
+            type: string
+      additionalProperties: false
+      description: Request payload for adding users to a group.
+    AddUsersToGroupResponse:
+      type: object
+      properties:
+        addedUsers:
+          type: array
+          description: Users successfully added to the group
+          items:
+            type: string
+          default: []
+        failedUsers:
+          type: array
+          description: Users that failed to be added
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+      description: Response payload for add-users-to-group operation.
     Attachment:
       required:
       - createdBy
@@ -3489,6 +3514,11 @@ components:
           description: List of attachments
           items:
             $ref: '#/components/schemas/CaseCreateAttachment'
+        watchList:
+          type: array
+          description: Watch list user emails to add to the case
+          items:
+            $ref: '#/components/schemas/Email'
       additionalProperties: false
       description: Payload for creating a case.
     CaseResponse:
@@ -3509,6 +3539,7 @@ components:
         - slaResponseTime
         - type
         - updatedOn
+        - watchList
         type: object
         properties:
           updatedOn:
@@ -3645,6 +3676,12 @@ components:
             nullable: true
             items:
               $ref: '#/components/schemas/ServiceRequestVariable'
+          watchList:
+            type: array
+            description: Watch list users
+            nullable: true
+            items:
+              $ref: '#/components/schemas/WatchList'
         additionalProperties: false
     CaseSearchFilters:
       type: object
@@ -4701,8 +4738,13 @@ components:
           type: string
           description: Response message
         result:
-          description: Response result payload
+          type: object
+          description: Response result
       description: Deployment usage import response.
+    Email:
+      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}$"
+      type: string
+      description: Email validation regex pattern.
     ErrorPayload:
       required:
       - message
@@ -6344,40 +6386,26 @@ components:
           description: Variable value
       additionalProperties: false
       description: Variable data for service request.
-    AddUsersToGroupRequest:
+    WatchList:
       required:
-      - group
-      - emails
+      - email
+      - id
+      - name
+      - userName
       type: object
       properties:
-        group:
+        id:
+          $ref: '#/components/schemas/IdString'
+        userName:
           type: string
-          description: Display name of the group
-          minLength: 1
-          pattern: "\\S+"
-        emails:
-          type: array
-          description: Array of user email addresses to add to the group
-          items:
-            type: string
-            format: email
-          minItems: 1
+          description: User name
+        name:
+          type: string
+          description: Full name of the user
+          nullable: true
+        email:
+          type: string
+          description: Email address of the user
+          nullable: true
       additionalProperties: false
-      description: Request payload for adding users to a group.
-    AddUsersToGroupResponse:
-      type: object
-      properties:
-        addedUsers:
-          type: array
-          description: Users successfully added to the group
-          items:
-            type: string
-          default: []
-        failedUsers:
-          type: array
-          description: Users that failed to be added
-          items:
-            type: string
-          default: []
-      additionalProperties: false
-      description: Response payload for add-users-to-group operation.
+      description: Watch list information.

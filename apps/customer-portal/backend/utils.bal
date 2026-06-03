@@ -637,6 +637,7 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
     entity:ServiceRequestVariable[]? variables = response?.variables;
     entity:ReferenceTableItem? product = response.product;
     entity:ChoiceListItem? engagementType = response.engagementType;
+    entity:WatchList[]? watchList = response.watchList;
 
     return {
         id: response.id,
@@ -701,7 +702,9 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
         hasAutoClosed: response?.hasAutoClosed,
         engagementStartDate: response?.engagementStartDate,
         engagementEndDate: response?.engagementEndDate,
-        variables
+        variables,
+        watchList: watchList != () ? from entity:WatchList user in watchList
+            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : ()
     };
 }
 
