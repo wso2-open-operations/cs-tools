@@ -20,10 +20,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "rea
 import { useNavigate, useSearchParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import CasesFilterBar, {
+  ASSIGNEE_ME_TOKEN,
   type CasesFilters,
 } from "@features/csm-cases/components/CasesFilterBar";
 import CasesList from "@features/csm-cases/components/CasesList";
 import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
+import { useGetCsmUsers } from "@features/csm-admin/api/useCsmAdmin";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 import {
   DEFAULT_CASES_FILTERS,
@@ -44,12 +46,16 @@ function applyFilters(cases: CsmCaseRow[], f: CasesFilters): CsmCaseRow[] {
       !(c.minutesToBreach >= 0 && c.minutesToBreach <= SLA_AT_RISK_THRESHOLD_MINUTES)
     )
       return false;
-    if (f.owner === "me" && !c.ownerIsMe) return false;
-    if (f.owner === "unassigned" && c.owner !== "Unassigned") return false;
-    if (f.customers.length && !f.customers.includes(c.customer)) return false;
+    if (f.assignees.length) {
+      const match = f.assignees.some((a) =>
+        a === ASSIGNEE_ME_TOKEN ? c.assigneeIsMe : a === c.assignee,
+      );
+      if (!match) return false;
+    }
     if (f.projects.length && !f.projects.includes(c.projectName)) return false;
+    if (f.products.length && !f.products.includes(c.product)) return false;
     if (q) {
-      const hay = `${c.caseNumber} ${c.subject} ${c.customer} ${c.projectName} ${c.owner}`.toLowerCase();
+      const hay = `${c.caseNumber} ${c.subject} ${c.customer} ${c.projectName} ${c.assignee} ${c.product}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -80,6 +86,7 @@ export default function CsmCasesPage(): JSX.Element {
   );
 
   const { data, isLoading, isError } = useGetCsmCases(filters.scope);
+  const { data: directoryUsers } = useGetCsmUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -97,15 +104,17 @@ export default function CsmCasesPage(): JSX.Element {
     return applyFilters(list, filters).slice().sort(sortBySlaUrgency);
   }, [data?.cases, filters]);
 
-  // Derive multi-select option lists from the cases currently in scope.
-  // Sorted and de-duplicated; cheap because the lists are small (~tens).
-  const availableCustomers = useMemo(() => {
-    const set = new Set<string>();
-    (data?.cases ?? []).forEach((c) => {
-      if (c.customer) set.add(c.customer);
-    });
-    return Array.from(set).sort();
-  }, [data?.cases]);
+  // Derive option lists for the searchable filters. Assignees come from the
+  // user directory (so typing finds anyone, not only owners present in the
+  // loaded cases). Projects and products are still derived from the case
+  // rows in scope. All sorted and de-duplicated; the lists are small.
+  const availableAssigneeUsers = useMemo(() => {
+    const list = (directoryUsers ?? [])
+      .filter((u) => u.name)
+      .map((u) => ({ name: u.name, email: u.email }));
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [directoryUsers]);
 
   const availableProjects = useMemo(() => {
     const set = new Set<string>();
@@ -115,9 +124,17 @@ export default function CsmCasesPage(): JSX.Element {
     return Array.from(set).sort();
   }, [data?.cases]);
 
+  const availableProducts = useMemo(() => {
+    const set = new Set<string>();
+    (data?.cases ?? []).forEach((c) => {
+      if (c.product) set.add(c.product);
+    });
+    return Array.from(set).sort();
+  }, [data?.cases]);
+
   const totalAvailable = data?.cases.length ?? 0;
   const breachedCount = filtered.filter((c) => c.minutesToBreach < 0 && c.state !== "closed").length;
-  const myCount = filtered.filter((c) => c.ownerIsMe && c.state !== "closed").length;
+  const myCount = filtered.filter((c) => c.assigneeIsMe && c.state !== "closed").length;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -174,8 +191,9 @@ export default function CsmCasesPage(): JSX.Element {
         }
         isFiltersOpen={isFiltersOpen}
         onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
-        availableCustomers={availableCustomers}
+        availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
+        availableProducts={availableProducts}
       />
 
       <CasesList cases={filtered} isLoading={isLoading} />

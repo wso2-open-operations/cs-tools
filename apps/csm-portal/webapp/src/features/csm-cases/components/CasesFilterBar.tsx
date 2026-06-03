@@ -15,9 +15,11 @@
 // under the License.
 
 import {
+  Autocomplete,
   Box,
   Button,
   Checkbox,
+  Chip,
   Divider,
   FormControl,
   Grid,
@@ -49,13 +51,19 @@ import type {
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 
 export type SlaFilter = "any" | "breached" | "at_risk";
-export type OwnerFilter = "anyone" | "me" | "unassigned";
+
+/** Sentinel used inside `assignees` to mean "the current user". */
+export const ASSIGNEE_ME_TOKEN = "@me";
+/** Literal assignee name used in mock data for unassigned cases. */
+export const ASSIGNEE_UNASSIGNED = "Unassigned";
 
 /**
- * Filter state for the CSM cases list. `severities` / `states` / `customers` /
- * `projects` are multi-select arrays; `sla` / `owner` stay single-select
- * because the option sets are mutually exclusive (a case is either at-risk
- * or breached, not both).
+ * Filter state for the CSM cases list. `severities` / `states` are multi-select
+ * arrays driven by fixed enums. `assignees` / `projects` / `products` are
+ * free-form multi-selects driven by an Autocomplete with type-to-filter:
+ * options are derived from the data currently in scope. The `assignees` list
+ * accepts the sentinel `@me` (resolves against `assigneeIsMe`) and the literal
+ * "Unassigned"; any other entries are matched against `case.assignee` by name.
  */
 export interface CasesFilters {
   scope: DashboardScope;
@@ -63,9 +71,19 @@ export interface CasesFilters {
   severities: Severity[];
   states: CaseState[];
   sla: SlaFilter;
-  owner: OwnerFilter;
-  customers: string[];
+  assignees: string[];
   projects: string[];
+  products: string[];
+}
+
+/**
+ * Lightweight user directory entry surfaced in the assignee picker. The
+ * filter still stores assignees as bare name strings (plus the `@me` /
+ * "Unassigned" sentinels) — `email` is only used for richer rendering.
+ */
+export interface AssigneeUser {
+  name: string;
+  email: string;
 }
 
 interface CasesFilterBarProps {
@@ -74,9 +92,12 @@ interface CasesFilterBarProps {
   onReset: () => void;
   isFiltersOpen: boolean;
   onFiltersToggle: () => void;
-  /** All values seen in the current data — used to populate multi-select option lists. */
-  availableCustomers: string[];
+  /** Full user directory shown in the assignee picker. */
+  availableAssigneeUsers: AssigneeUser[];
+  /** Project names seen in the current data. */
   availableProjects: string[];
+  /** Product names seen in the current data. */
+  availableProducts: string[];
 }
 
 const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -94,11 +115,6 @@ const SLA_OPTIONS: { value: SlaFilter; label: string }[] = [
   { value: "at_risk", label: "At risk" },
   { value: "breached", label: "Breached" },
 ];
-const OWNER_OPTIONS: { value: OwnerFilter; label: string }[] = [
-  { value: "anyone", label: "Anyone" },
-  { value: "me", label: "Me" },
-  { value: "unassigned", label: "Unassigned" },
-];
 
 /**
  * Count the filters that have non-default values. Search is included
@@ -110,10 +126,15 @@ function countActiveFilters(f: CasesFilters): number {
   if (f.severities.length) n += 1;
   if (f.states.length) n += 1;
   if (f.sla !== "any") n += 1;
-  if (f.owner !== "anyone") n += 1;
-  if (f.customers.length) n += 1;
+  if (f.assignees.length) n += 1;
   if (f.projects.length) n += 1;
+  if (f.products.length) n += 1;
   return n;
+}
+
+/** Pretty-print an assignee value (handle the @me sentinel). */
+function assigneeLabel(value: string): string {
+  return value === ASSIGNEE_ME_TOKEN ? "Me" : value;
 }
 
 interface MultiSelectFieldProps<T extends string> {
@@ -225,14 +246,113 @@ function SingleSelectField<T extends string>({
   );
 }
 
+interface SearchableMultiSelectProps {
+  id: string;
+  label: string;
+  placeholder?: string;
+  values: string[];
+  options: string[];
+  /** Optional renderer for option labels (e.g. the @me sentinel → "Me"). */
+  formatOption?: (value: string) => string;
+  /** Optional secondary line shown beneath each option (e.g. email). */
+  getOptionSecondary?: (value: string) => string | undefined;
+  /** Optional filter against synthetic text (e.g. include email in the query). */
+  getOptionSearchText?: (value: string) => string;
+  onChange: (next: string[]) => void;
+}
+
+/**
+ * Multi-select autocomplete. Users type to filter the option list and
+ * select multiple. Picked values render as removable chips inside the field.
+ * Internally a thin wrapper over MUI Autocomplete so we keep oxygen-ui
+ * theming via the re-exported components.
+ */
+function SearchableMultiSelect({
+  id,
+  label,
+  placeholder,
+  values,
+  options,
+  formatOption,
+  getOptionSecondary,
+  getOptionSearchText,
+  onChange,
+}: SearchableMultiSelectProps): JSX.Element {
+  const format = formatOption ?? ((v: string) => v);
+  const searchText = getOptionSearchText ?? format;
+  return (
+    <Autocomplete
+      multiple
+      size="small"
+      id={id}
+      options={options}
+      value={values}
+      onChange={(_event, next) => onChange(next as string[])}
+      disableCloseOnSelect
+      getOptionLabel={(opt) => format(opt as string)}
+      isOptionEqualToValue={(opt, val) => opt === val}
+      filterOptions={(opts, state) => {
+        const q = state.inputValue.trim().toLowerCase();
+        if (!q) return opts;
+        return opts.filter((o) => searchText(o as string).toLowerCase().includes(q));
+      }}
+      renderTags={(value, getTagProps) =>
+        value.map((option, index) => {
+          const { key, ...tagProps } = getTagProps({ index });
+          return (
+            <Chip
+              key={key}
+              size="small"
+              label={format(option as string)}
+              {...tagProps}
+            />
+          );
+        })
+      }
+      renderOption={(props, option, { selected }) => {
+        const { key, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & {
+          key: string;
+        };
+        const primary = format(option as string);
+        const secondary = getOptionSecondary?.(option as string);
+        return (
+          <li key={key} {...liProps} style={{ paddingTop: 2, paddingBottom: 2 }}>
+            <Checkbox
+              size="small"
+              checked={selected}
+              sx={{ mr: 1, p: 0.25 }}
+            />
+            <ListItemText
+              primary={primary}
+              secondary={secondary}
+              slotProps={{
+                primary: { style: { fontSize: 13 } },
+                secondary: { style: { fontSize: 11 } },
+              }}
+            />
+          </li>
+        );
+      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          placeholder={values.length ? undefined : placeholder ?? "Type to search…"}
+        />
+      )}
+    />
+  );
+}
+
 export default function CasesFilterBar({
   filters,
   onChange,
   onReset,
   isFiltersOpen,
   onFiltersToggle,
-  availableCustomers,
+  availableAssigneeUsers,
   availableProjects,
+  availableProducts,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -245,14 +365,37 @@ export default function CasesFilterBar({
     () => PRIMARY_STATES.map((s) => ({ value: s, label: STATE_LABEL[s] })),
     [],
   );
-  const customerOptions = useMemo(
-    () => availableCustomers.map((c) => ({ value: c, label: c })),
-    [availableCustomers],
-  );
-  const projectOptions = useMemo(
-    () => availableProjects.map((p) => ({ value: p, label: p })),
-    [availableProjects],
-  );
+
+  // Pin "@me" and "Unassigned" to the top of the assignee option list, then
+  // every user from the directory (sorted by name, deduped). Pulling from
+  // the user directory rather than only the owners present in loaded cases
+  // means typing a name finds anyone, not just people who happen to own one
+  // of the currently-listed cases.
+  const assigneeOptions = useMemo(() => {
+    const names = Array.from(
+      new Set(availableAssigneeUsers.map((u) => u.name).filter(Boolean)),
+    ).sort();
+    return [ASSIGNEE_ME_TOKEN, ASSIGNEE_UNASSIGNED, ...names];
+  }, [availableAssigneeUsers]);
+
+  const emailByName = useMemo(() => {
+    const m = new Map<string, string>();
+    availableAssigneeUsers.forEach((u) => {
+      if (u.name) m.set(u.name, u.email);
+    });
+    return m;
+  }, [availableAssigneeUsers]);
+
+  const assigneeSecondary = (value: string): string | undefined => {
+    if (value === ASSIGNEE_ME_TOKEN || value === ASSIGNEE_UNASSIGNED) return undefined;
+    return emailByName.get(value);
+  };
+
+  const assigneeSearchText = (value: string): string => {
+    const label = assigneeLabel(value);
+    const email = emailByName.get(value);
+    return email ? `${label} ${email}` : label;
+  };
 
   return (
     <Paper sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -282,7 +425,7 @@ export default function CasesFilterBar({
           <TextField
             fullWidth
             size="small"
-            placeholder="Search by case #, subject, customer, project, owner…"
+            placeholder="Search by case #, subject, customer, project, assignee…"
             value={filters.search}
             onChange={(e) => onChange({ ...filters, search: e.target.value })}
             slotProps={{
@@ -323,8 +466,8 @@ export default function CasesFilterBar({
         </Button>
       </Box>
 
-      {/* Collapsible filter grid. Multi-select dropdowns use checkbox menu
-          items so multiple values can be picked per field. */}
+      {/* Collapsible filter grid. Severity / state stay as fixed multi-selects;
+          assignee / project / product are type-to-search Autocompletes. */}
       {isFiltersOpen && (
         <>
           <Divider />
@@ -357,30 +500,36 @@ export default function CasesFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <SingleSelectField
-                id="cases-filter-owner"
-                label="Owner"
-                value={filters.owner}
-                options={OWNER_OPTIONS}
-                onChange={(next) => onChange({ ...filters, owner: next })}
+              <SearchableMultiSelect
+                id="cases-filter-assignee"
+                label="Assignee"
+                placeholder="Search users…"
+                values={filters.assignees}
+                options={assigneeOptions}
+                formatOption={assigneeLabel}
+                getOptionSecondary={assigneeSecondary}
+                getOptionSearchText={assigneeSearchText}
+                onChange={(next) => onChange({ ...filters, assignees: next })}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <MultiSelectField
-                id="cases-filter-customer"
-                label="Customer"
-                values={filters.customers}
-                options={customerOptions}
-                onChange={(next) => onChange({ ...filters, customers: next })}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <MultiSelectField
+              <SearchableMultiSelect
                 id="cases-filter-project"
                 label="Project"
+                placeholder="Type a project…"
                 values={filters.projects}
-                options={projectOptions}
+                options={availableProjects}
                 onChange={(next) => onChange({ ...filters, projects: next })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <SearchableMultiSelect
+                id="cases-filter-product"
+                label="Product"
+                placeholder="Type a product…"
+                values={filters.products}
+                options={availableProducts}
+                onChange={(next) => onChange({ ...filters, products: next })}
               />
             </Grid>
           </Grid>

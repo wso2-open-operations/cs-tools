@@ -18,6 +18,7 @@ import { Avatar, Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import type { JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
+import { initialsOf } from "@utils/userClaims";
 import type {
   CsmCaseComment,
   CsmCommentAuthorRole,
@@ -67,15 +68,6 @@ const PURIFY_CONFIG = {
   ],
   ALLOWED_ATTR: ["href", "target", "rel", "src", "alt"],
 };
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
 
 export default function CsmCaseCommentBubble({
   comment,
@@ -132,7 +124,7 @@ export default function CsmCaseCommentBubble({
           fontSize: "0.85rem",
         }}
       >
-        {initials(comment.authorName)}
+        {initialsOf(comment.authorName)}
       </Avatar>
       <Paper
         variant="outlined"
@@ -190,6 +182,16 @@ export default function CsmCaseCommentBubble({
             },
             "& a": { color: "primary.main" },
             "& img": { maxWidth: "100%" },
+            "& blockquote": {
+              borderLeft: 3,
+              borderColor: "divider",
+              pl: 1.5,
+              ml: 0,
+              my: 0.75,
+              color: "text.secondary",
+              fontStyle: "italic",
+            },
+            "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
           }}
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />

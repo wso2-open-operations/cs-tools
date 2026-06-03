@@ -42,13 +42,13 @@ import {
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
   AuditTimelineWidget,
   CustomerContextWidget,
   LinkedItemsWidget,
   ProductContextWidget,
   SlaTimelineWidget,
-  TagsWidget,
   TimeLogsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
@@ -56,6 +56,7 @@ import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   SEVERITY_COLOR,
+  SEVERITY_LABEL,
   SLA_CLOCK_LABEL,
   STATE_LABEL,
   formatTimeToBreach,
@@ -104,13 +105,17 @@ const SECONDARY_TOAST: Record<string, string> = {
   reassign_engineer: "Reassign engineer dialog (mock).",
   reassign_group: "Reassign group dialog (mock).",
   escalate: "Escalation form (mock).",
+  change_severity: "Severity change request (mock).",
+  hold_auto_close: "Hold auto-closure dialog (mock).",
   create_incident: "Create incident from case (mock).",
   link_case: "Link related case picker (mock).",
   link_incident: "Link to incident picker (mock).",
+  manage_watchers: "Add/remove watcher dialog (mock).",
+  raise_git_issue: "Raise internal Git issue (mock).",
+  create_task: "Create task dialog (mock).",
+  request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
-  watch: "Toggled watch state (mock).",
   copy_link: "Case link copied to clipboard.",
-  open_in_sn: "Opening ServiceNow (mock).",
 };
 
 type CaseTabId = "activities" | "details" | "sla" | "related" | "time";
@@ -157,7 +162,8 @@ function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
   return {
     id: `description`,
     caseId: c.id,
-    authorName: c.customerContext.primaryContact || c.customer,
+    authorName:
+      c.createdBy || c.customerContext.primaryContact || c.customer,
     authorRole: "customer",
     bodyHtml: `<p>${escaped}</p>`,
     createdAt: at,
@@ -191,6 +197,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const [toast, setToast] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
+  const [metaCollapsed, setMetaCollapsed] = useState(false);
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
   // jump to the Activities tab, scroll the entry into view vertically, and
@@ -350,43 +357,70 @@ export default function CsmCaseDetailPage(): JSX.Element {
         Back to cases
       </Button>
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-          <Typography variant="overline" color="text.secondary">
-            {c.caseNumber}
-          </Typography>
-          <Chip size="small" label={c.severity} color={SEVERITY_COLOR[c.severity]} />
-          <Chip
-            size="small"
-            label={STATE_LABEL[c.state]}
-            variant="outlined"
-            color={isClosed ? "success" : "primary"}
-          />
-          {!isClosed && (
+      <Box
+        sx={{
+          display: "flex",
+          gap: 2,
+          alignItems: "flex-start",
+          flexWrap: { xs: "wrap", md: "nowrap" },
+          justifyContent: "space-between",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+            <Typography variant="overline" color="text.secondary">
+              {c.caseNumber}
+            </Typography>
             <Chip
               size="small"
-              variant="outlined"
-              color={breached ? "error" : c.minutesToBreach <= 60 ? "warning" : "default"}
-              label={`${SLA_CLOCK_LABEL[c.slaClockType]} · ${formatTimeToBreach(c.minutesToBreach)}`}
+              label={`${c.severity} — ${SEVERITY_LABEL[c.severity]}`}
+              color={SEVERITY_COLOR[c.severity]}
             />
-          )}
-          {c.tags.slice(0, 3).map((t) => (
             <Chip
-              key={t.id}
               size="small"
+              label={STATE_LABEL[c.state]}
               variant="outlined"
-              color={t.color ?? "default"}
-              label={t.label}
+              color={isClosed ? "success" : "primary"}
             />
-          ))}
+            {!isClosed && (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={breached ? "error" : c.minutesToBreach <= 60 ? "warning" : "default"}
+                label={`${SLA_CLOCK_LABEL[c.slaClockType]} · ${formatTimeToBreach(c.minutesToBreach)}`}
+              />
+            )}
+            {c.tags.map((t) => (
+              <Chip
+                key={t.id}
+                size="small"
+                variant="outlined"
+                color={t.color ?? "default"}
+                label={t.label}
+              />
+            ))}
+          </Box>
+          <Typography variant="h5">{c.subject}</Typography>
         </Box>
-        <Typography variant="h5">{c.subject}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          {c.customer} · {c.projectName} · Owner: {c.owner}
-        </Typography>
+        <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+          <CaseActionBar caseDetail={c} onAction={onAction} />
+        </Box>
       </Box>
 
-      <CaseActionBar caseDetail={c} onAction={onAction} />
+      <CaseMetaBand
+        detail={c}
+        navigate={navigate}
+        collapsed={metaCollapsed}
+        onToggleCollapsed={() => setMetaCollapsed((v) => !v)}
+      />
 
       {toast && (
         <Box
@@ -482,66 +516,38 @@ export default function CsmCaseDetailPage(): JSX.Element {
             gap: 2,
             gridTemplateColumns: {
               xs: "1fr",
-              lg: "minmax(0, 7fr) minmax(0, 5fr)",
+              md: "repeat(2, minmax(0, 1fr))",
             },
             alignItems: "start",
           }}
         >
-          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-            <Typography variant="subtitle2">Summary</Typography>
+          <CustomerContextWidget ctx={c.customerContext} />
+          <ProductContextWidget ctx={c.productContext} />
+          <WatchersWidget
+            watchers={c.watchers}
+            onAdd={() => onAction({ secondary: "manage_watchers" })}
+          />
+          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Typography variant="subtitle2">Timestamps</Typography>
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: {
-                  xs: "1fr 1fr",
-                  md: "repeat(4, minmax(0, 1fr))",
-                },
+                gridTemplateColumns: "1fr 1fr",
                 gap: 2,
               }}
             >
-              <MetaCell label="Customer">
-                <Typography variant="body2">{c.customer}</Typography>
-              </MetaCell>
-              <MetaCell label="Project">
-                <Typography variant="body2">{c.projectName}</Typography>
-              </MetaCell>
-              <MetaCell label="Owner">
-                <Typography variant="body2">
-                  {c.ownerIsMe ? <strong>{c.owner}</strong> : c.owner}
-                </Typography>
-              </MetaCell>
-              <MetaCell label="Assignment group">
-                <Typography variant="body2">
-                  <code style={{ fontSize: "0.8rem" }}>{c.assignmentGroup}</code>
-                </Typography>
-              </MetaCell>
-              <MetaCell label="State">
-                <Typography variant="body2">{STATE_LABEL[c.state]}</Typography>
-              </MetaCell>
-              <MetaCell label="Severity">
-                <Typography variant="body2">{c.severity}</Typography>
-              </MetaCell>
               <MetaCell label="Created">
-                <Typography variant="body2"><RelativeTime iso={c.createdAt} /></Typography>
+                <Typography variant="body2">
+                  <RelativeTime iso={c.createdAt} />
+                </Typography>
               </MetaCell>
               <MetaCell label="Last update">
-                <Typography variant="body2"><RelativeTime iso={c.updatedAt} /></Typography>
+                <Typography variant="body2">
+                  <RelativeTime iso={c.updatedAt} />
+                </Typography>
               </MetaCell>
             </Box>
-            <Box sx={{ pt: 1, borderTop: 1, borderColor: "divider" }}>
-              <Typography variant="caption" color="text.secondary">
-                Description
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
-                {c.description}
-              </Typography>
-            </Box>
           </Card>
-
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <CustomerContextWidget ctx={c.customerContext} />
-            <ProductContextWidget ctx={c.productContext} />
-          </Box>
         </Box>
       )}
 
@@ -562,26 +568,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
       )}
 
       {activeTab === "related" && (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: {
-              xs: "1fr",
-              md: "repeat(2, minmax(0, 1fr))",
-            },
-            alignItems: "start",
-          }}
-        >
+        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <LinkedItemsWidget
             items={c.linkedItems}
             onLink={() => onAction({ secondary: "link_case" })}
           />
-          <WatchersWidget
-            watchers={c.watchers}
-            onAdd={() => onAction({ secondary: "watch" })}
-          />
-          <TagsWidget tags={c.tags} />
         </Box>
       )}
 

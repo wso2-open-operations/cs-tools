@@ -124,7 +124,7 @@ export default function SlaAtRiskSection({
                   <strong>{c.caseNumber}</strong> · {c.subject}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {c.customer} · {STATE_LABEL[c.state]} · Owner: {c.owner}
+                  {c.customer} · {STATE_LABEL[c.state]} · Assignee: {c.assignee}
                 </Typography>
               </Box>
               <Box sx={{ textAlign: "right" }}>

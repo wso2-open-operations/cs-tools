@@ -21,9 +21,19 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { isMockMode, useBackendApi } from "@api/backend/client";
+import type {
+  BeCaseComment,
+  BeCaseCommentCreatePayload,
+  BeCaseCommentSearchPayload,
+  BeCaseCommentSearchResponse,
+} from "@api/backend/types";
+import {
+  commentTypeFromInternal,
+  uiCommentFromBe,
+} from "@api/backend/mappers";
 import {
   getMockCsmCaseComments,
   postMockCsmCaseComment,
@@ -32,18 +42,27 @@ import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
 const MOCK_LATENCY_MS = 150;
 
+/** Page size used by the comments list. Capped at 100 by the BE. */
+const COMMENTS_PAGE_LIMIT = 100;
+
+/**
+ * Load all comments on a case. In LIVE mode calls
+ * `POST /cases/{id}/comments/search` with a wide page (limit=100). If a case
+ * exceeds that, switch consumers to an explicit pagination wrapper rather
+ * than chasing pages here.
+ */
 export function useGetCsmCaseComments(
   caseId: string | undefined,
 ): UseQueryResult<CsmCaseComment[], Error> {
   const logger = useLogger();
-  const authFetch = useAuthApiClient();
+  const api = useBackendApi();
 
   return useQuery<CsmCaseComment[], Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, caseId ?? ""],
     queryFn: async (): Promise<CsmCaseComment[]> => {
       if (!caseId) return [];
 
-      if (window.config?.CSM_PORTAL_USE_MOCKS) {
+      if (isMockMode()) {
         logger.debug(
           `[useGetCsmCaseComments] Returning mock comments for ${caseId}`,
         );
@@ -51,18 +70,14 @@ export function useGetCsmCaseComments(
         return getMockCsmCaseComments(caseId);
       }
 
-      const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
-      if (!baseUrl) {
-        throw new Error("CSM_PORTAL_BACKEND_BASE_URL is not configured");
-      }
-      const url = `${baseUrl}/csm/cases/${encodeURIComponent(caseId)}/comments`;
-      const response = await authFetch(url, { method: "GET" });
-      if (!response.ok) {
-        throw new Error(
-          `Error fetching comments for ${caseId}: ${response.statusText}`,
-        );
-      }
-      return (await response.json()) as CsmCaseComment[];
+      const payload: BeCaseCommentSearchPayload = {
+        pagination: { offset: 0, limit: COMMENTS_PAGE_LIMIT },
+      };
+      const response = await api.post<
+        BeCaseCommentSearchPayload,
+        BeCaseCommentSearchResponse
+      >(`/cases/${encodeURIComponent(caseId)}/comments/search`, payload);
+      return response.comments.map(uiCommentFromBe);
     },
     enabled: !!caseId,
     staleTime: 10_000,
@@ -71,6 +86,7 @@ export function useGetCsmCaseComments(
 
 export interface PostCsmCaseCommentInput {
   caseId: string;
+  /** Plain-text body. HTML is escaped on render. */
   bodyHtml: string;
   /** Display name of the logged-in engineer. */
   authorName: string;
@@ -78,18 +94,23 @@ export interface PostCsmCaseCommentInput {
   internal?: boolean;
 }
 
+/**
+ * Create a comment on a case. The backend accepts a plain-text body; the FE
+ * still passes a `bodyHtml` field for parity with the mock, but it's stored
+ * as plain text and re-rendered on read.
+ */
 export function usePostCsmCaseComment(): UseMutationResult<
   CsmCaseComment,
   Error,
   PostCsmCaseCommentInput
 > {
   const logger = useLogger();
-  const authFetch = useAuthApiClient();
+  const api = useBackendApi();
   const queryClient = useQueryClient();
 
   return useMutation<CsmCaseComment, Error, PostCsmCaseCommentInput>({
     mutationFn: async (input): Promise<CsmCaseComment> => {
-      if (window.config?.CSM_PORTAL_USE_MOCKS) {
+      if (isMockMode()) {
         logger.debug(
           `[usePostCsmCaseComment] Posting mock comment for ${input.caseId}`,
         );
@@ -103,25 +124,16 @@ export function usePostCsmCaseComment(): UseMutationResult<
         });
       }
 
-      const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
-      if (!baseUrl) {
-        throw new Error("CSM_PORTAL_BACKEND_BASE_URL is not configured");
-      }
-      const url = `${baseUrl}/csm/cases/${encodeURIComponent(
-        input.caseId,
-      )}/comments`;
-      const response = await authFetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bodyHtml: input.bodyHtml,
-          internal: input.internal ?? false,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to post comment: ${response.statusText}`);
-      }
-      return (await response.json()) as CsmCaseComment;
+      const payload: BeCaseCommentCreatePayload = {
+        commentType: commentTypeFromInternal(input.internal ?? false),
+        // BE stores plain text. Strip simple HTML so we don't double-escape on read.
+        body: input.bodyHtml.replace(/<\/?[^>]+>/g, "").trim(),
+      };
+      const created = await api.post<
+        BeCaseCommentCreatePayload,
+        BeCaseComment
+      >(`/cases/${encodeURIComponent(input.caseId)}/comments`, payload);
+      return uiCommentFromBe(created);
     },
     onSuccess: (newComment, variables) => {
       queryClient.setQueryData<CsmCaseComment[] | undefined>(

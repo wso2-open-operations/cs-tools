@@ -29,10 +29,13 @@ export interface CsmCaseRow {
   accountId: string;
   projectId: string;
   projectName: string;
+  /** Affected WSO2 product (e.g. "WSO2 Identity Server"). Used for list filtering. */
+  product: string;
   severity: Severity;
   state: CaseState;
-  owner: string;
-  ownerIsMe: boolean;
+  /** CRE / engineer working the case. "Unassigned" for cases with no one picked up yet. */
+  assignee: string;
+  assigneeIsMe: boolean;
   slaClockType: SlaClockType;
   // Minutes until breach (negative = already breached).
   minutesToBreach: number;
@@ -119,7 +122,7 @@ export interface CaseTimeLogEntry {
 
 export type CaseAuditKind =
   | "state_change"
-  | "owner_change"
+  | "assignee_change"
   | "severity_change"
   | "linked"
   | "escalated"
@@ -143,8 +146,8 @@ export interface CaseCustomerContext {
   region: string;
   primaryContact: string;
   primaryContactEmail: string;
-  csm: string;
-  asr?: string;
+  accountManager: string;
+  technicalOwner?: string;
   /** Number of currently open cases against this customer (incl. this one). */
   openCases: number;
 }
@@ -177,6 +180,8 @@ export type CaseLifecycleAction =
 export interface CsmCaseDetail extends CsmCaseRow {
   description: string;
   assignmentGroup: string;
+  /** Customer-side person who opened the case. */
+  createdBy?: string;
   customerContext: CaseCustomerContext;
   productContext: CaseProductContext;
   slaClocks: CaseSlaClock[];

@@ -36,7 +36,7 @@ const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
   { label: "Customer" },
   { label: "Severity" },
   { label: "State" },
-  { label: "Owner" },
+  { label: "Assignee" },
   { label: "SLA", align: "right" },
   { label: "Updated", align: "right" },
 ];
@@ -177,12 +177,12 @@ export default function CasesList({
                 {STATE_LABEL[c.state]}
               </Typography>
               <Typography variant="body2" noWrap>
-                {c.ownerIsMe ? (
-                  <strong>{c.owner}</strong>
-                ) : c.owner === "Unassigned" ? (
+                {c.assigneeIsMe ? (
+                  <strong>{c.assignee}</strong>
+                ) : c.assignee === "Unassigned" ? (
                   <em>Unassigned</em>
                 ) : (
-                  c.owner
+                  c.assignee
                 )}
               </Typography>
               <Box sx={{ textAlign: "right" }}>

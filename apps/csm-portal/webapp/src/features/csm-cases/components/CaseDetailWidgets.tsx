@@ -43,6 +43,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
+import { initialsOf } from "@utils/userClaims";
 import type {
   CaseAuditEntry,
   CaseCustomerContext,
@@ -188,12 +189,12 @@ export function CustomerContextWidget({
           {ctx.region}
         </Typography>
       </MetaRow>
-      <MetaRow label="CSM">
-        <Typography variant="body2">{ctx.csm}</Typography>
+      <MetaRow label="Account Manager">
+        <Typography variant="body2">{ctx.accountManager}</Typography>
       </MetaRow>
-      {ctx.asr && (
-        <MetaRow label="ASR">
-          <Typography variant="body2">{ctx.asr}</Typography>
+      {ctx.technicalOwner && (
+        <MetaRow label="Technical Owner">
+          <Typography variant="body2">{ctx.technicalOwner}</Typography>
         </MetaRow>
       )}
       <MetaRow label="Open cases">
@@ -359,15 +360,6 @@ function formatMinutes(m: number): string {
 // 4. Watchers
 // ---------------------------------------------------------------------------
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 const ROLE_LABEL: Record<CaseWatcher["role"], string> = {
   wso2_engineer: "WSO2",
   customer_contact: "Customer",
@@ -408,7 +400,7 @@ export function WatchersWidget({
             }}
           >
             <Avatar sx={{ width: 28, height: 28, fontSize: "0.75rem" }}>
-              {initials(w.name)}
+              {initialsOf(w.name)}
             </Avatar>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" sx={{ lineHeight: 1.2 }}>
@@ -662,7 +654,7 @@ export function TimeLogsWidget({
 
 const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   state_change: <CheckCircle size={14} />,
-  owner_change: <User size={14} />,
+  assignee_change: <User size={14} />,
   severity_change: <TriangleAlert size={14} />,
   linked: <LinkIcon size={14} />,
   escalated: <ArrowUpRight size={14} />,

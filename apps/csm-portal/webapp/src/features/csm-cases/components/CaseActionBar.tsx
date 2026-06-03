@@ -14,31 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Button,
-  Card,
-  Chip,
-  Menu,
-  MenuItem,
-  Tooltip,
-  Typography,
-} from "@wso2/oxygen-ui";
+import { Box, Button, Menu, MenuItem } from "@wso2/oxygen-ui";
 import {
   AlertTriangle,
-  Bell,
   CheckCircle,
   ChevronDown,
   Clock,
   Copy,
-  ExternalLink,
-  Eye,
-  EyeOff,
+  GitBranch,
   Inbox,
   Link as LinkIcon,
+  ListChecks,
+  PauseCircle,
+  Phone,
   Play,
   RotateCcw,
   Send,
+  ShieldAlert,
   TriangleAlert,
   User,
   Users,
@@ -154,37 +146,37 @@ interface SecondaryItem {
   divider?: boolean;
 }
 
-function buildSecondaryItems(c: CsmCaseDetail): SecondaryItem[] {
+/**
+ * The "More" overflow lists state-independent actions on a case. Items here
+ * map to documented use cases — see `UseCases.md`:
+ *   - Reassign / group               → ISSU-002 (self-assign generalised)
+ *   - Escalate / Severity change     → ISSU-006, ISSU-007
+ *   - Hold auto-closure              → ISSU-027
+ *   - Create incident / link incident → ISSU-021
+ *   - Raise Git issue                → ISSU-020
+ *   - Create task                    → ISSU-025
+ *   - Request a call                 → ISSU-008
+ *   - Log time                       → ISSU-017
+ *   - Copy case link                 → ISSU-010 (per-comment + per-case permalinks)
+ *
+ * Intentionally NOT here:
+ *   - Watch / unwatch  → managed via the Watchers widget in Details (ISSU-018)
+ *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
+ */
+function buildSecondaryItems(): SecondaryItem[] {
   return [
     { key: "reassign_engineer", label: "Reassign engineer…", icon: <User size={16} /> },
     { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true },
-    {
-      key: "escalate",
-      label: "Escalate to lead…",
-      icon: <TriangleAlert size={16} />,
-    },
-    {
-      key: "create_incident",
-      label: "Create incident from case…",
-      icon: <AlertTriangle size={16} />,
-      divider: true,
-    },
-    { key: "link_case", label: "Link related case…", icon: <LinkIcon size={16} /> },
-    {
-      key: "link_incident",
-      label: "Link to incident…",
-      icon: <LinkIcon size={16} />,
-      divider: true,
-    },
-    { key: "log_time", label: "Log time…", icon: <Clock size={16} /> },
-    {
-      key: "watch",
-      label: c.isWatching ? "Stop watching" : "Watch case",
-      icon: c.isWatching ? <EyeOff size={16} /> : <Eye size={16} />,
-      divider: true,
-    },
+    { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} /> },
+    { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} /> },
+    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true },
+    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} /> },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} /> },
+    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} /> },
+    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true },
+    { key: "request_call", label: "Request a call…", icon: <Phone size={16} /> },
+    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
-    { key: "open_in_sn", label: "Open in ServiceNow", icon: <ExternalLink size={16} /> },
   ];
 }
 
@@ -206,27 +198,18 @@ export default function CaseActionBar({
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const primary = PRIMARY_BY_STATE[caseDetail.state] ?? [];
-  const secondary = buildSecondaryItems(caseDetail);
+  const secondary = buildSecondaryItems();
 
   return (
-    <Card
-      variant="outlined"
+    <Box
       sx={{
-        p: 1.25,
         display: "flex",
         alignItems: "center",
         gap: 1,
         flexWrap: "wrap",
-        backgroundColor: "background.default",
+        justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ mr: 0.5, pl: 0.5, alignSelf: "center" }}
-      >
-        Lifecycle:
-      </Typography>
       {primary.map((p, idx) => (
         <Button
           key={p.action}
@@ -240,19 +223,6 @@ export default function CaseActionBar({
         </Button>
       ))}
 
-      <Box sx={{ flex: 1 }} />
-
-      <Tooltip title={caseDetail.isWatching ? "Watching" : "Not watching"}>
-        <Chip
-          size="small"
-          variant={caseDetail.isWatching ? "filled" : "outlined"}
-          color={caseDetail.isWatching ? "primary" : "default"}
-          icon={<Bell size={14} />}
-          label={`${caseDetail.watchers.length} watching`}
-          onClick={() => void onAction({ secondary: "watch" })}
-        />
-      </Tooltip>
-
       <Button
         size="small"
         variant="outlined"
@@ -260,7 +230,7 @@ export default function CaseActionBar({
         endIcon={<ChevronDown size={16} />}
         onClick={(e) => setMenuAnchor(e.currentTarget)}
       >
-        More actions
+        More
       </Button>
       <Menu
         anchorEl={menuAnchor}
@@ -287,6 +257,6 @@ export default function CaseActionBar({
           ) : null,
         ])}
       </Menu>
-    </Card>
+    </Box>
   );
 }

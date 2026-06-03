@@ -61,7 +61,7 @@ export interface CsmSlaAtRiskCase {
   subject: string;
   customer: string;
   severity: Severity;
-  owner: string;
+  assignee: string;
   slaClockType: SlaClockType;
   minutesToBreach: number;
   state: CaseState;
@@ -103,3 +103,53 @@ export interface CsmAbtDashboardData {
   customers: CsmCustomerSummary[];
   recentActivity: CsmRecentActivity[];
 }
+
+// Multi-dashboard switcher — mirrors ServiceNow Performance Analytics where
+// engineers pivot between several dashboards (Engineer / Operations / IAM /
+// Security / Team Performance). See DashboardsAndReportsProposal.md.
+export type DashboardKey =
+  | "engineer"
+  | "operations"
+  | "iam"
+  | "security"
+  | "team_performance";
+
+export interface DashboardOption {
+  key: DashboardKey;
+  name: string;
+  description: string;
+  scopeBased: boolean;
+}
+
+export const DASHBOARD_OPTIONS: DashboardOption[] = [
+  {
+    key: "engineer",
+    name: "Engineer overview",
+    description: "Personal queue, SLA at risk, customers in scope, recent activity.",
+    scopeBased: true,
+  },
+  {
+    key: "operations",
+    name: "Operations",
+    description: "Cross-team case throughput, state distribution, escalations, SLA breach trends.",
+    scopeBased: false,
+  },
+  {
+    key: "iam",
+    name: "IAM CS",
+    description: "Identity Server / Asgardeo case posture, top accounts, vulnerability links.",
+    scopeBased: false,
+  },
+  {
+    key: "security",
+    name: "Security center",
+    description: "Vulnerability posture, security report cases, response time.",
+    scopeBased: false,
+  },
+  {
+    key: "team_performance",
+    name: "Team performance",
+    description: "Per-team throughput, time-card distribution, on-call coverage gaps.",
+    scopeBased: false,
+  },
+];

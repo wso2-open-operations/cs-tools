@@ -36,6 +36,7 @@ import {
 import { useMemo, useState, type JSX } from "react";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
 import RelativeTime from "@components/RelativeTime";
+import { formatBytes } from "@utils/formatBytes";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -55,7 +56,7 @@ interface CaseActivitiesFeedProps {
 
 const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   state_change: <CheckCircle size={14} />,
-  owner_change: <User size={14} />,
+  assignee_change: <User size={14} />,
   severity_change: <TriangleAlert size={14} />,
   linked: <LinkIcon size={14} />,
   escalated: <ArrowUpRight size={14} />,
@@ -65,12 +66,6 @@ const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
   sla_breached: <TriangleAlert size={14} />,
   created: <Plus size={14} />,
 };
-
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(2)} MB`;
-}
 
 export default function CaseActivitiesFeed({
   comments,

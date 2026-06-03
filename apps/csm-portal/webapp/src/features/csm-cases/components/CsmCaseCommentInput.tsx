@@ -18,11 +18,19 @@ import {
   Box,
   Button,
   FormControlLabel,
+  IconButton,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Code, Lock, Send } from "@wso2/oxygen-ui-icons-react";
+import {
+  Code,
+  Lock,
+  Maximize2,
+  Minimize2,
+  Send,
+} from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
 import Editor from "@components/rich-text-editor/Editor";
 
@@ -46,6 +54,7 @@ export default function CsmCaseCommentInput({
   const [error, setError] = useState<string | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
   const [internal, setInternal] = useState(false);
+  const [maximized, setMaximized] = useState(false);
 
   // Incrementing this trigger clears the editor (see Editor's ResetPlugin).
   const resetTriggerRef = useRef(0);
@@ -167,6 +176,19 @@ export default function CsmCaseCommentInput({
               </Box>
             }
           />
+          <Tooltip
+            title={maximized ? "Collapse editor" : "Maximize editor"}
+          >
+            <IconButton
+              size="small"
+              onClick={() => setMaximized((m) => !m)}
+              aria-label={
+                maximized ? "Collapse comment editor" : "Maximize comment editor"
+              }
+            >
+              {maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -176,8 +198,8 @@ export default function CsmCaseCommentInput({
           onChange={(e) => setHtml(e.target.value)}
           placeholder="<p>Type HTML here…</p>"
           multiline
-          minRows={6}
-          maxRows={12}
+          minRows={maximized ? 18 : 6}
+          maxRows={maximized ? 32 : 12}
           disabled={disabled || submitting}
           inputProps={{
             style: {
@@ -199,8 +221,8 @@ export default function CsmCaseCommentInput({
           resetTrigger={resetTrigger}
           disabled={disabled || submitting}
           placeholder="Reply to this case…"
-          minHeight={96}
-          maxHeight={260}
+          minHeight={maximized ? 480 : 96}
+          maxHeight={maximized ? 720 : 260}
           toolbarVariant="full"
           showKeyboardHint
           enterToSubmit={false}
