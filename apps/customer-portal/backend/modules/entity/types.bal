@@ -257,6 +257,10 @@ public type UpdatedProject record {|
     json...;
 |};
 
+# Email validation regex pattern.
+@constraint:String { pattern: re `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$` }
+public type Email string;
+
 # Payload for creating a case.
 public type CaseCreatePayload record {|
     # Case type
@@ -287,6 +291,8 @@ public type CaseCreatePayload record {|
     Variable[] variables?;
     # List of attachments
     CaseCreateAttachment[] attachments?;
+    # Watch list user emails to add to the case
+    Email[] watchList?;
 |};
 
 # Attachment for creating a case.
@@ -556,6 +562,21 @@ public type CaseResponse record {|
     Date? engagementStartDate?;
     # Engagement end date
     Date? engagementEndDate?;
+    # Watch list users
+    WatchList[]? watchList;
+    json...;
+|};
+
+# Watch list information.
+public type WatchList record {|
+    # ID of the user
+    IdString id;
+    # User name
+    string userName;
+    # Full name of the user
+    string? name;
+    # Email address of the user
+    string? email;
     json...;
 |};
 
