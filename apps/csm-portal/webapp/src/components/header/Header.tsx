@@ -20,6 +20,7 @@ import { useLocation } from "react-router";
 import { Box } from "@wso2/oxygen-ui";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
+import MockDataToggle from "@components/header/MockDataToggle";
 import CsmGlobalSearch from "@features/csm-search/components/CsmGlobalSearch";
 import NotificationsBell from "@features/csm-notifications/components/NotificationsBell";
 import RecentViewsButton from "@features/csm-recent/components/RecentViewsButton";
@@ -56,6 +57,7 @@ export default function Header({
       <HeaderUI.Spacer />
       {!hideProjectControls && (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mr: 1 }}>
+          <MockDataToggle />
           <RecentViewsButton />
           <NotificationsBell />
         </Box>

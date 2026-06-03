@@ -18,11 +18,17 @@ import Prism from "prismjs";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import AppWithConfig from "./AppWithConfig";
+import { hydrateMockModeFromStorage } from "@context/mock-mode/MockModeContext";
 import "./index.css";
 
 if (typeof window !== "undefined") {
   (window as unknown as { Prism: typeof Prism }).Prism = Prism;
 }
+
+// Apply any persisted mock-mode override to window.config BEFORE React
+// mounts, so the first batch of hook calls (queries fired on initial render)
+// already sees the right CSM_PORTAL_USE_MOCKS value.
+hydrateMockModeFromStorage();
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
