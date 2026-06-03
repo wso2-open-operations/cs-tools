@@ -85,11 +85,12 @@ func decodeJSON[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 // ----- mock entity case client -----
 
 type mockEntityCaseClient struct {
-	createCaseFn        func(ctx context.Context, body []byte) ([]byte, error)
-	createCaseCommentFn func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCasesFn       func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseFn           func(ctx context.Context, caseID string) ([]byte, error)
-	searchUsersFn       func(ctx context.Context, body []byte) ([]byte, error)
+	createCaseFn          func(ctx context.Context, body []byte) ([]byte, error)
+	createCaseCommentFn   func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCaseCommentsFn  func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCasesFn         func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseFn             func(ctx context.Context, caseID string) ([]byte, error)
+	searchUsersFn         func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -104,6 +105,13 @@ func (m *mockEntityCaseClient) CreateCaseComment(ctx context.Context, caseID str
 		return m.createCaseCommentFn(ctx, caseID, body)
 	}
 	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.searchCaseCommentsFn != nil {
+		return m.searchCaseCommentsFn(ctx, caseID, body)
+	}
+	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
 
 func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]byte, error) {

@@ -338,6 +338,107 @@ func TestCreateCaseComment(t *testing.T) {
 	})
 }
 
+// ----- SearchCaseComments -----
+
+func TestSearchCaseComments(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/case-1/comments/search", strings.NewReader(`{}`))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//comments/search", strings.NewReader(`{}`)))
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments/search", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case ID and body to upstream and returns 200", func(t *testing.T) {
+		var capturedCaseID string
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			searchCaseCommentsFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
+				capturedCaseID = caseID
+				capturedBody = body
+				return []byte(`{"comments":[{"id":"c-1","caseId":"case-42","commentType":"comment","body":"First comment","createdBy":"user-1","createdAt":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-42/comments/search",
+			strings.NewReader(`{"pagination":{"limit":20,"offset":0}}`)))
+		r.SetPathValue("id", "case-42")
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedCaseID != "case-42" {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, "case-42")
+		}
+		if !json.Valid(capturedBody) {
+			t.Errorf("upstream received invalid JSON body: %s", capturedBody)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["total"] != float64(1) {
+			t.Errorf("total = %v, want 1", resp["total"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to search case comments.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					searchCaseCommentsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments/search", strings.NewReader(`{}`)))
+				r.SetPathValue("id", "case-1")
+				w := httptest.NewRecorder()
+				h.SearchCaseComments(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 // ----- SearchProjectCases -----
 
 func TestSearchProjectCases(t *testing.T) {
