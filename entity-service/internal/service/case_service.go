@@ -101,6 +101,29 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	return s.repo.CreateCase(ctx, req)
 }
 
+var validCommentType = map[domain.CommentType]bool{
+	domain.CommentTypeWorkNote: true,
+	domain.CommentTypeComment:  true,
+	domain.CommentTypeActivity: true,
+}
+
+// CreateCaseComment implements CaseService.
+func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
+	if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
+		return domain.CaseComment{}, err
+	}
+	if err := validateUUIDs("createdBy", []string{req.CreatedBy}); err != nil {
+		return domain.CaseComment{}, err
+	}
+	if !validCommentType[req.CommentType] {
+		return domain.CaseComment{}, &apierror.ValidationError{Msg: "commentType contains invalid value: " + string(req.CommentType)}
+	}
+	if req.Body == "" {
+		return domain.CaseComment{}, &apierror.ValidationError{Msg: "body is required"}
+	}
+	return s.repo.CreateCaseComment(ctx, req)
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {

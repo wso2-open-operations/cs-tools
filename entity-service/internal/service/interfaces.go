@@ -92,4 +92,7 @@ type CaseService interface {
 	// A ValidationError is returned for invalid input; any other error indicates an
 	// infrastructure failure.
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error)
+	// CreateCaseComment creates a new comment on the case identified by req.CaseID.
+	// A ValidationError is returned for invalid input or constraint violations.
+	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error)
 }
