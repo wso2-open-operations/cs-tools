@@ -376,7 +376,7 @@ export function formatChatHistoryForClassification(
 ): string {
   return messages
     .map((m) => {
-      const text = (m.text || "").trim();
+      const text = (m.text || "").trim().slice(-150);
       if (!text) return "";
       const role = m.sender === ChatSender.USER ? "User" : "Assistant";
       return `${role}: ${text}`;

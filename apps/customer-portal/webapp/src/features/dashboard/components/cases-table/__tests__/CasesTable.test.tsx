@@ -31,6 +31,40 @@ vi.mock("react-router", () => ({
 
 vi.mock("@api/useGetProjectCasesPage");
 vi.mock("@api/useGetProjectFilters");
+vi.mock("@api/useGetProjectCases", () => ({
+  default: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
+  usePostProjectDeploymentsSearchInfinite: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
+  usePostProjectDeploymentsSearchInfinite: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({

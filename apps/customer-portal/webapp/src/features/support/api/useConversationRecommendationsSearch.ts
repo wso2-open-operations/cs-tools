@@ -34,21 +34,16 @@ import type {
 export function useConversationRecommendationsSearch(
   payload: RecommendationSearchRequest | null,
   enabled: boolean,
+  conversationId?: string,
 ): UseQueryResult<RecommendationSearchResponse, Error> {
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
-  const msgCount = payload?.chatHistory.length ?? 0;
-  const firstTs = payload?.chatHistory[0]?.timestamp ?? "";
-  const lastTs = payload?.chatHistory[msgCount - 1]?.timestamp ?? "";
-
   return useQuery<RecommendationSearchResponse, Error>({
     queryKey: [
       ApiQueryKeys.CONVERSATION_RECOMMENDATIONS_SEARCH,
-      msgCount,
-      firstTs,
-      lastTs,
+      conversationId ?? payload?.chatHistory[0]?.timestamp ?? "",
     ],
     queryFn: async (): Promise<RecommendationSearchResponse> => {
       if (!payload) {
@@ -86,6 +81,6 @@ export function useConversationRecommendationsSearch(
       payload.chatHistory.length > 0 &&
       isSignedIn &&
       !isAuthLoading,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 45 * 60 * 1000,
   });
 }
