@@ -14,14 +14,34 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Button,
+  Card,
+  Chip,
+  Tab,
+  Tabs,
+  Typography,
+} from "@wso2/oxygen-ui";
 import { ArrowLeft, ArrowRight } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { useNavigate, useParams } from "react-router";
 import CasesList from "@features/csm-cases/components/CasesList";
+import { isMockMode } from "@api/backend/client";
 import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import { getMockCsmProjectById } from "@features/csm-projects/api/mocks/projectsMocks";
+import { getMockProjectContacts } from "@features/csm-projects/api/mocks/contactsMocks";
+import { useGetProjectDeploymentsResolved } from "@features/csm-projects/api/useSearchProjectDeployments";
+import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
+import ContactsCard from "@features/csm-projects/components/ContactsCard";
+import DeploymentsList from "@features/csm-projects/components/DeploymentsList";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import RelativeTime from "@components/RelativeTime";
 import type {
@@ -30,7 +50,7 @@ import type {
   CsmProjectTier,
 } from "@features/csm-projects/types/csmProjects";
 
-type ProjectTab = "overview" | "cases";
+type ProjectTab = "summary" | "deployments" | "cases" | "contacts";
 
 function MetaCell({
   label,
@@ -40,7 +60,9 @@ function MetaCell({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
+    <Box
+      sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}
+    >
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>
@@ -68,21 +90,65 @@ function StatusChip({ status }: { status: CsmProjectStatus }): JSX.Element {
 /**
  * CSM-native project detail page at `/projects/:projectId`.
  *
- * Sits **outside** ProjectGuard on purpose: ProjectGuard hits the
- * customer-portal backend which rejects mock project ids (path-pattern
- * validation). This page reads from the CSM mocks so the demo flow stays
- * intact. The nested legacy routes (`/projects/:id/dashboard`, etc.) remain
- * under ProjectGuard for when real backend data lands.
+ * Three tabs:
+ *  1. **Summary** — header KPIs, account-management contacts, project meta.
+ *  2. **Deployments** — environments + installed products + update levels.
+ *  3. **Cases** — cases scoped to this project, sorted by SLA urgency.
  */
 export default function CsmProjectDetailPage(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<ProjectTab>("overview");
+  const [activeTab, setActiveTab] = useState<ProjectTab>("summary");
 
-  const project: CsmProjectRow | undefined = useMemo(
-    () => (projectId ? getMockCsmProjectById(projectId) : undefined),
-    [projectId],
-  );
+  // In mock mode the seeded row carries all the rich UI fields (tier,
+  // accountManager, technicalOwner, status, openCaseCount, etc.). In LIVE
+  // mode the BE only returns a thin project record, so we build a stub
+  // CsmProjectRow with placeholders for unknown fields — the page renders
+  // with "—" rather than leaking mock data.
+  const liveProjectSearch = useSearchProjects({
+    pagination: { offset: 0, limit: 100 },
+  });
+  const project: CsmProjectRow | undefined = useMemo(() => {
+    if (!projectId) return undefined;
+    if (isMockMode()) return getMockCsmProjectById(projectId);
+    const beProject = liveProjectSearch.data?.projects.find(
+      (p) => p.id === projectId,
+    );
+    if (!beProject) return undefined;
+    return {
+      id: beProject.id,
+      name: beProject.name,
+      customer: "—",
+      accountId: beProject.accountId,
+      tier: "Silver",
+      productType: "—",
+      status: "Active",
+      updateLevel: "—",
+      openCaseCount: 0,
+      s0s1Count: 0,
+      breachedCount: 0,
+      lastActivityAt: beProject.updatedAt ?? beProject.createdAt ?? "",
+    };
+  }, [projectId, liveProjectSearch.data]);
+  const isProjectLoading = !isMockMode() && liveProjectSearch.isLoading;
+
+  const {
+    data: deployments = [],
+    isLoading: isDeploymentsLoading,
+  } = useGetProjectDeploymentsResolved(projectId);
+
+  // WSO2-side roles (Account Manager, Technical Owner) live in the Summary
+  // tab, not the Contacts list. The Contacts tab shows customer-side people
+  // only. Contacts are mock-only — no BE endpoint yet — so they're hidden
+  // entirely when the mock toggle is off.
+  const contacts = useMemo(() => {
+    if (!project || !isMockMode()) return [];
+    return getMockProjectContacts(project.id, project.accountId).filter(
+      (c) =>
+        !c.roles.includes("Account Manager") &&
+        !c.roles.includes("Technical Owner"),
+    );
+  }, [project]);
 
   const recordView = useRecordRecentView();
   useEffect(() => {
@@ -96,12 +162,8 @@ export default function CsmProjectDetailPage(): JSX.Element {
     });
   }, [project, recordView]);
 
-  // Pull all-customer cases so we can filter to this project regardless of
-  // the engineer's ABT scope.
-  const {
-    data: casesData,
-    isLoading: isCasesLoading,
-  } = useGetCsmCases("all_customers");
+  const { data: casesData, isLoading: isCasesLoading } =
+    useGetCsmCases("all_customers");
 
   const projectCases = useMemo(() => {
     if (!projectId) return [];
@@ -129,10 +191,18 @@ export default function CsmProjectDetailPage(): JSX.Element {
         >
           Back to projects
         </Button>
-        <Typography variant="h5">Project not found</Typography>
-        <Typography variant="body2" color="text.secondary">
-          No project with id <code>{projectId}</code> in the current mock dataset.
-        </Typography>
+        {isProjectLoading ? (
+          <Typography variant="body2" color="text.secondary">
+            Loading project…
+          </Typography>
+        ) : (
+          <>
+            <Typography variant="h5">Project not found</Typography>
+            <Typography variant="body2" color="text.secondary">
+              No project with id <code>{projectId}</code>.
+            </Typography>
+          </>
+        )}
       </Box>
     );
   }
@@ -190,48 +260,95 @@ export default function CsmProjectDetailPage(): JSX.Element {
           value={activeTab}
           onChange={(_, value) => setActiveTab(value as ProjectTab)}
         >
-          <Tab value="overview" label="Overview" />
+          <Tab value="summary" label="Summary" />
+          <Tab
+            value="deployments"
+            label={`Deployments${
+              deployments.length > 0 ? ` (${deployments.length})` : ""
+            }`}
+          />
           <Tab
             value="cases"
             label={`Cases${
               projectCases.length > 0 ? ` (${projectCases.length})` : ""
             }`}
           />
+          <Tab
+            value="contacts"
+            label={`Contacts${
+              contacts.length > 0 ? ` (${contacts.length})` : ""
+            }`}
+          />
         </Tabs>
       </Box>
 
-      {activeTab === "overview" && (
-        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-          <Typography variant="subtitle2">Summary</Typography>
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: {
-                xs: "1fr 1fr",
-                md: "repeat(5, minmax(0, 1fr))",
-              },
-              gap: 2,
-            }}
+      {activeTab === "summary" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+          <Card
+            sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}
           >
-            <MetaCell label="Customer">
-              <Typography variant="body2">{project.customer}</Typography>
-            </MetaCell>
-            <MetaCell label="Product">
-              <Typography variant="body2">{project.productType}</Typography>
-            </MetaCell>
-            <MetaCell label="Update level">
-              <Typography variant="body2">{project.updateLevel}</Typography>
-            </MetaCell>
-            <MetaCell label="Open cases">
-              <Typography variant="h6">{project.openCaseCount}</Typography>
-            </MetaCell>
-            <MetaCell label="Last activity">
-              <Typography variant="body2">
-                <RelativeTime iso={project.lastActivityAt} />
-              </Typography>
-            </MetaCell>
-          </Box>
-        </Card>
+            <Typography variant="subtitle2">Project</Typography>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: {
+                  xs: "1fr 1fr",
+                  md: "repeat(5, minmax(0, 1fr))",
+                },
+                gap: 2,
+              }}
+            >
+              <MetaCell label="Customer">
+                <Typography variant="body2">{project.customer}</Typography>
+              </MetaCell>
+              <MetaCell label="Primary product">
+                <Typography variant="body2">{project.productType}</Typography>
+              </MetaCell>
+              <MetaCell label="Update level">
+                <Typography variant="body2">{project.updateLevel}</Typography>
+              </MetaCell>
+              <MetaCell label="Open cases">
+                <Typography variant="h6">{project.openCaseCount}</Typography>
+              </MetaCell>
+              <MetaCell label="Last activity">
+                <Typography variant="body2">
+                  <RelativeTime iso={project.lastActivityAt} />
+                </Typography>
+              </MetaCell>
+              <MetaCell label="Account Manager">
+                <Typography variant="body2">
+                  {project.accountManager ?? "—"}
+                </Typography>
+              </MetaCell>
+              <MetaCell label="Technical Owner">
+                <Typography variant="body2">
+                  {project.technicalOwner ?? "—"}
+                </Typography>
+              </MetaCell>
+            </Box>
+          </Card>
+        </Box>
+      )}
+
+      {activeTab === "contacts" && (
+        <ContactsCard
+          contacts={contacts}
+          subtitle="Project-specific contacts shown first; the rest are inherited from the account."
+          showScope
+        />
+      )}
+
+      {activeTab === "deployments" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            {isDeploymentsLoading
+              ? "Loading deployments…"
+              : `${deployments.length} deployment${
+                  deployments.length === 1 ? "" : "s"
+                } for ${project.name}.`}
+          </Typography>
+          <DeploymentsList deployments={deployments} />
+        </Box>
       )}
 
       {activeTab === "cases" && (

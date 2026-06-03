@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { useNavigate } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchAccounts } from "@features/csm-accounts/api/useSearchAccounts";
 import type { SearchAccountsRequest } from "@features/csm-accounts/types/csmAccounts";
@@ -60,6 +61,7 @@ export default function CsmAccountsPage(): JSX.Element {
   );
 
   const { data, isLoading, isFetching, isError, error } = useSearchAccounts(request);
+  const navigate = useNavigate();
 
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
     setSearchInput(e.target.value);
@@ -107,6 +109,8 @@ export default function CsmAccountsPage(): JSX.Element {
                 <TableCell>Name</TableCell>
                 <TableCell>SF ID</TableCell>
                 <TableCell>Tier</TableCell>
+                <TableCell>Account Manager</TableCell>
+                <TableCell>Technical Owner</TableCell>
                 <TableCell>Region</TableCell>
                 <TableCell>Activated</TableCell>
                 <TableCell>Deactivated</TableCell>
@@ -115,13 +119,13 @@ export default function CsmAccountsPage(): JSX.Element {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
               ) : accounts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No accounts found.
                     </Typography>
@@ -129,7 +133,14 @@ export default function CsmAccountsPage(): JSX.Element {
                 </TableRow>
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} hover>
+                  <TableRow
+                    key={a.id}
+                    hover
+                    onClick={() => navigate(`/accounts/${a.id}`)}
+                    sx={{ cursor: "pointer" }}
+                    role="link"
+                    aria-label={`Open ${a.name}`}
+                  >
                     <TableCell>{a.name}</TableCell>
                     <TableCell>{a.sfId}</TableCell>
                     <TableCell>
@@ -140,6 +151,8 @@ export default function CsmAccountsPage(): JSX.Element {
                         variant="outlined"
                       />
                     </TableCell>
+                    <TableCell>{a.ownerId ?? "—"}</TableCell>
+                    <TableCell>{a.technicalOwnerId ?? "—"}</TableCell>
                     <TableCell>{a.region ?? "—"}</TableCell>
                     <TableCell>{formatDate(a.activationDate)}</TableCell>
                     <TableCell>{formatDate(a.deactivationDate)}</TableCell>

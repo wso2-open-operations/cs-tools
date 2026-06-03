@@ -95,8 +95,8 @@ export interface CsmEngagementRow {
   projectId: string;
   projectName: string;
   ownerId: string;
-  ownerName: string;
-  ownerIsMe: boolean;
+  assigneeName: string;
+  assigneeIsMe: boolean;
   deliveryMode: CsmEngagementDeliveryMode;
   plannedStartDate: string;
   plannedEndDate: string;
@@ -283,7 +283,7 @@ export interface CsmEngagementListFilters {
   types: CsmEngagementType[];
   states: CsmEngagementState[];
   stages: CsmEngagementStage[];
-  owner: "all" | "me" | "unassigned";
+  assignee: "all" | "me" | "unassigned";
   health: "all" | "green" | "amber" | "red";
 }
 
@@ -298,7 +298,7 @@ export interface CreateCsmEngagementInput {
   accountId: string;
   customer: string;
   ownerId?: string;
-  ownerName?: string;
+  assigneeName?: string;
   deliveryMode: CsmEngagementDeliveryMode;
   plannedStartDate: string;
   plannedEndDate: string;

@@ -99,7 +99,7 @@ export default function ProjectCard({
       }}
     >
       {/* project card badges */}
-      <ProjectCardBadges projectKey={projectKey} />
+      <ProjectCardBadges projectKey={projectKey} isSuspended={isSuspended} />
       {/* project card info */}
       <ProjectCardInfo title={title} />
       {/* project card stats */}

@@ -32,6 +32,14 @@ export const SEVERITY_COLOR: Record<
   S4: "default",
 };
 
+export const SEVERITY_LABEL: Record<Severity, string> = {
+  S0: "Catastrophic",
+  S1: "Critical",
+  S2: "High",
+  S3: "Medium",
+  S4: "Low / Query",
+};
+
 export const STATE_LABEL: Record<CaseState, string> = {
   open: "Open",
   work_in_progress: "Work in progress",

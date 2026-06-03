@@ -70,6 +70,14 @@ function backendBaseUrl(): string {
 
 // ---------- Users ----------
 
+/**
+ * In LIVE mode the backend exposes the user directory only via paginated
+ * search. To preserve the existing `CsmUser[]` shape, this hook calls
+ * `POST /users/search` with a wide page and adapts each `BeUser` to the
+ * UI's `CsmUser` shape. The fields that the v2 BE doesn't yet return
+ * (status, externalId, role/group memberships, lastActiveAt) are filled
+ * with placeholders.
+ */
 export function useGetCsmUsers(): UseQueryResult<CsmUser[], Error> {
   const logger = useLogger();
   const authFetch = useAuthApiClient();
@@ -82,9 +90,35 @@ export function useGetCsmUsers(): UseQueryResult<CsmUser[], Error> {
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
         return getMockUsers();
       }
-      const r = await authFetch(`${backendBaseUrl()}/csm/admin/users`, { method: "GET" });
+      const r = await authFetch(`${backendBaseUrl()}/users/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pagination: { offset: 0, limit: 100 } }),
+      });
       if (!r.ok) throw new Error(`Failed to load users: ${r.statusText}`);
-      return (await r.json()) as CsmUser[];
+      const body = (await r.json()) as {
+        users: Array<{
+          id?: string;
+          firstName?: string;
+          lastName?: string;
+          userName?: string;
+          email?: string;
+        }>;
+      };
+      return body.users.map((u) => ({
+        id: u.id ?? "",
+        name:
+          [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+          u.userName ||
+          u.email ||
+          "(unnamed)",
+        email: u.email ?? "",
+        status: "Active",
+        externalId: "",
+        roleIds: [],
+        groupIds: [],
+        lastActiveAt: new Date().toISOString(),
+      })) as CsmUser[];
     },
     staleTime: 30_000,
   });

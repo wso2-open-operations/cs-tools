@@ -30,10 +30,12 @@ interface AccountsListProps {
 }
 
 const GRID =
-  "minmax(220px, 2fr) auto auto auto auto auto auto auto";
+  "minmax(200px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) auto auto auto auto auto auto auto";
 
 const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
   { label: "Account" },
+  { label: "Account Manager" },
+  { label: "Technical Owner" },
   { label: "Tier" },
   { label: "Status" },
   { label: "Projects", align: "right" },
@@ -166,6 +168,12 @@ export default function AccountsList({
             >
               <Typography variant="body2" noWrap>
                 <strong>{a.name}</strong>
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {a.accountManager ?? "—"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {a.technicalOwner ?? "—"}
               </Typography>
               <TierChip tier={a.tier} />
               <StatusChip status={a.status} />

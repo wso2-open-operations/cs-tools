@@ -45,6 +45,7 @@ export type ProjectCardProps = {
 
 export type ProjectCardBadgesProps = {
   projectKey: string;
+  isSuspended?: boolean;
 };
 
 export type ProjectCardStatsProps = {

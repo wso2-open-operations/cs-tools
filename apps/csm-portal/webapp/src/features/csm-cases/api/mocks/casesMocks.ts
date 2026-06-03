@@ -33,7 +33,30 @@ import type {
 const minutesAgo = (n: number): string =>
   new Date(Date.now() - n * 60_000).toISOString();
 
-const ABT_CASES: CsmCaseRow[] = [
+/**
+ * Map a case (by subject + project name) to its affected WSO2 product. The
+ * full product context (version, update level, environment) is built off this
+ * in `deriveProduct` below; the list row only carries the product name.
+ */
+function deriveProductName(subject: string, projectName: string): string {
+  const s = subject.toLowerCase();
+  const p = projectName.toLowerCase();
+  if (s.includes("identity server") || p.includes("iam"))
+    return "WSO2 Identity Server";
+  if (p.includes("asgardeo") || s.includes("asgardeo")) return "WSO2 Asgardeo";
+  if (p.includes("api manager") || s.includes("api manager"))
+    return "WSO2 API Manager";
+  if (p.includes("choreo") || s.includes("choreo")) return "WSO2 Choreo";
+  if (p.includes("integrator") || p.includes("mi") || p.includes("streaming"))
+    return "WSO2 Micro Integrator";
+  if (p.includes("open banking") || s.includes("openbanking"))
+    return "WSO2 Open Banking";
+  return "WSO2 Platform";
+}
+
+type CaseSeed = Omit<CsmCaseRow, "product">;
+
+const ABT_CASE_SEEDS: CaseSeed[] = [
   {
     id: "case-1001",
     caseNumber: "CS-1001",
@@ -44,8 +67,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "IAM Production",
     severity: "S1",
     state: "work_in_progress",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "first_response",
     minutesToBreach: -22,
     createdAt: minutesAgo(60 * 8),
@@ -60,9 +83,9 @@ const ABT_CASES: CsmCaseRow[] = [
     projectId: "prj-initech-apim",
     projectName: "API Manager",
     severity: "S0",
-    state: "work_in_progress",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    state: "solution_proposed",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "resolution",
     minutesToBreach: 12,
     createdAt: minutesAgo(60 * 3),
@@ -77,13 +100,13 @@ const ABT_CASES: CsmCaseRow[] = [
     projectId: "prj-initech-mi",
     projectName: "Micro Integrator",
     severity: "S1",
-    state: "awaiting_info",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
-    slaClockType: "ack",
-    minutesToBreach: 47,
+    state: "solution_proposed",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
+    slaClockType: "resolution",
+    minutesToBreach: 600,
     createdAt: minutesAgo(60 * 6),
-    updatedAt: minutesAgo(48),
+    updatedAt: minutesAgo(60 + 30),
   },
   {
     id: "case-1004",
@@ -94,13 +117,13 @@ const ABT_CASES: CsmCaseRow[] = [
     projectId: "prj-acme-iam-prod",
     projectName: "IAM Production",
     severity: "S2",
-    state: "open",
-    owner: "Unassigned",
-    ownerIsMe: false,
-    slaClockType: "ack",
-    minutesToBreach: 90,
+    state: "work_in_progress",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
+    slaClockType: "first_response",
+    minutesToBreach: 180,
     createdAt: minutesAgo(75),
-    updatedAt: minutesAgo(75),
+    updatedAt: minutesAgo(60),
   },
   {
     id: "case-1005",
@@ -111,30 +134,30 @@ const ABT_CASES: CsmCaseRow[] = [
     projectId: "prj-umbrella-choreo",
     projectName: "Choreo Platform",
     severity: "S2",
-    state: "work_in_progress",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
-    slaClockType: "first_response",
-    minutesToBreach: 145,
+    state: "closed",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
+    slaClockType: "resolution",
+    minutesToBreach: 0,
     createdAt: minutesAgo(60 * 5),
-    updatedAt: minutesAgo(115),
+    updatedAt: minutesAgo(60),
   },
   {
     id: "case-1006",
     caseNumber: "CS-1006",
-    subject: "SAML logout returning 500 intermittently",
-    customer: "Acme Financial",
-    accountId: "acc-001",
-    projectId: "prj-acme-iam-prod",
-    projectName: "IAM Production",
+    subject: "SAML signature validation fails after SF cert rotation",
+    customer: "Globex Corp",
+    accountId: "acc-002",
+    projectId: "prj-globex-iam",
+    projectName: "IAM",
     severity: "S2",
-    state: "work_in_progress",
-    owner: "Priya N.",
-    ownerIsMe: false,
+    state: "closed",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "resolution",
-    minutesToBreach: 320,
+    minutesToBreach: 0,
     createdAt: minutesAgo(60 * 12),
-    updatedAt: minutesAgo(200),
+    updatedAt: minutesAgo(60 * 4 + 30),
   },
   {
     id: "case-1007",
@@ -146,8 +169,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Streaming Integrator",
     severity: "S1",
     state: "awaiting_info",
-    owner: "Priya N.",
-    ownerIsMe: false,
+    assignee: "Priya N.",
+    assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: -180,
     createdAt: minutesAgo(60 * 30),
@@ -163,8 +186,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Asgardeo Tenant",
     severity: "S2",
     state: "work_in_progress",
-    owner: "Dilan W.",
-    ownerIsMe: false,
+    assignee: "Dilan W.",
+    assigneeIsMe: false,
     slaClockType: "first_response",
     minutesToBreach: 25,
     createdAt: minutesAgo(60 * 4),
@@ -180,8 +203,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Open Banking",
     severity: "S3",
     state: "open",
-    owner: "Unassigned",
-    ownerIsMe: false,
+    assignee: "Unassigned",
+    assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 720,
     createdAt: minutesAgo(60 * 2),
@@ -197,8 +220,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Choreo Build",
     severity: "S2",
     state: "solution_proposed",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "resolution",
     minutesToBreach: 480,
     createdAt: minutesAgo(60 * 18),
@@ -213,9 +236,9 @@ const ABT_CASES: CsmCaseRow[] = [
     projectId: "prj-globex-iam",
     projectName: "IAM",
     severity: "S3",
-    state: "waiting_on_wso2",
-    owner: "Maya R.",
-    ownerIsMe: false,
+    state: "solution_proposed",
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "resolution",
     minutesToBreach: 1200,
     createdAt: minutesAgo(60 * 24),
@@ -231,8 +254,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "API Manager",
     severity: "S3",
     state: "work_in_progress",
-    owner: "Tharindu A.",
-    ownerIsMe: false,
+    assignee: "Tharindu A.",
+    assigneeIsMe: false,
     slaClockType: "first_response",
     minutesToBreach: 360,
     createdAt: minutesAgo(60 * 3),
@@ -248,8 +271,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "IAM Production",
     severity: "S3",
     state: "open",
-    owner: "Unassigned",
-    ownerIsMe: false,
+    assignee: "Unassigned",
+    assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 1080,
     createdAt: minutesAgo(60),
@@ -265,8 +288,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Choreo Platform",
     severity: "S3",
     state: "work_in_progress",
-    owner: "Priya N.",
-    ownerIsMe: false,
+    assignee: "Priya N.",
+    assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: 900,
     createdAt: minutesAgo(60 * 36),
@@ -282,8 +305,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "Choreo Runtime",
     severity: "S2",
     state: "work_in_progress",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "first_response",
     minutesToBreach: 60,
     createdAt: minutesAgo(60 * 2),
@@ -299,8 +322,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "IAM",
     severity: "S4",
     state: "open",
-    owner: "Unassigned",
-    ownerIsMe: false,
+    assignee: "Unassigned",
+    assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 2160,
     createdAt: minutesAgo(60 * 6),
@@ -316,8 +339,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "IAM",
     severity: "S3",
     state: "closed",
-    owner: "Maya R.",
-    ownerIsMe: false,
+    assignee: "Maya R.",
+    assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: 0,
     createdAt: minutesAgo(60 * 80),
@@ -333,8 +356,8 @@ const ABT_CASES: CsmCaseRow[] = [
     projectName: "IAM Production",
     severity: "S2",
     state: "reopen",
-    owner: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assignee: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     slaClockType: "ack",
     minutesToBreach: 30,
     createdAt: minutesAgo(60 * 48),
@@ -342,7 +365,7 @@ const ABT_CASES: CsmCaseRow[] = [
   },
 ];
 
-const ALL_EXTRA_CASES: CsmCaseRow[] = [
+const ALL_EXTRA_CASE_SEEDS: CaseSeed[] = [
   {
     id: "case-2001",
     caseNumber: "CS-2001",
@@ -353,8 +376,8 @@ const ALL_EXTRA_CASES: CsmCaseRow[] = [
     projectName: "Open Banking Sandbox",
     severity: "S1",
     state: "work_in_progress",
-    owner: "Tharindu A.",
-    ownerIsMe: false,
+    assignee: "Tharindu A.",
+    assigneeIsMe: false,
     slaClockType: "first_response",
     minutesToBreach: -60,
     createdAt: minutesAgo(60 * 10),
@@ -370,8 +393,8 @@ const ALL_EXTRA_CASES: CsmCaseRow[] = [
     projectName: "Choreo CI",
     severity: "S2",
     state: "open",
-    owner: "Maya R.",
-    ownerIsMe: false,
+    assignee: "Maya R.",
+    assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 75,
     createdAt: minutesAgo(60 * 3),
@@ -387,8 +410,8 @@ const ALL_EXTRA_CASES: CsmCaseRow[] = [
     projectName: "API Manager",
     severity: "S3",
     state: "work_in_progress",
-    owner: "Dilan W.",
-    ownerIsMe: false,
+    assignee: "Dilan W.",
+    assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: 600,
     createdAt: minutesAgo(60 * 24),
@@ -404,14 +427,21 @@ const ALL_EXTRA_CASES: CsmCaseRow[] = [
     projectName: "IAM",
     severity: "S4",
     state: "closed",
-    owner: "Priya N.",
-    ownerIsMe: false,
+    assignee: "Priya N.",
+    assigneeIsMe: false,
     slaClockType: "resolution",
     minutesToBreach: 0,
     createdAt: minutesAgo(60 * 100),
     updatedAt: minutesAgo(60 * 40),
   },
 ];
+
+function hydrate(seed: CaseSeed): CsmCaseRow {
+  return { ...seed, product: deriveProductName(seed.subject, seed.projectName) };
+}
+
+const ABT_CASES: CsmCaseRow[] = ABT_CASE_SEEDS.map(hydrate);
+const ALL_EXTRA_CASES: CsmCaseRow[] = ALL_EXTRA_CASE_SEEDS.map(hydrate);
 
 export function getMockCsmCases(scope: DashboardScope): CsmCasesListResponse {
   const cases =
@@ -445,8 +475,8 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "us-east-1",
     primaryContact: "Renee Park",
     primaryContactEmail: "renee.park@acmefinancial.com",
-    csm: "Lakshmi I.",
-    asr: "Chathura D.",
+    accountManager: "Lakshmi I.",
+    technicalOwner: "Chathura D.",
     openCases: 6,
   },
   "acc-002": {
@@ -455,7 +485,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "eu-west-1",
     primaryContact: "Helena Voss",
     primaryContactEmail: "h.voss@globex.com",
-    csm: "Dilan W.",
+    accountManager: "Dilan W.",
     openCases: 3,
   },
   "acc-003": {
@@ -464,8 +494,8 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "ap-southeast-1",
     primaryContact: "Peter Gibbons",
     primaryContactEmail: "peter@initech.io",
-    csm: "Lakshmi I.",
-    asr: "Tharindu A.",
+    accountManager: "Lakshmi I.",
+    technicalOwner: "Tharindu A.",
     openCases: 5,
   },
   "acc-004": {
@@ -474,7 +504,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "us-west-2",
     primaryContact: "Marie Sandwitch",
     primaryContactEmail: "marie@soylent.com",
-    csm: "Maya R.",
+    accountManager: "Maya R.",
     openCases: 2,
   },
   "acc-005": {
@@ -483,7 +513,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "us-east-1",
     primaryContact: "Albert Wesker",
     primaryContactEmail: "a.wesker@umbrella.health",
-    csm: "Priya N.",
+    accountManager: "Priya N.",
     openCases: 4,
   },
   "acc-101": {
@@ -492,7 +522,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "us-east-1",
     primaryContact: "Lucius Fox",
     primaryContactEmail: "lfox@wayne.com",
-    csm: "Maya R.",
+    accountManager: "Maya R.",
     openCases: 1,
   },
   "acc-102": {
@@ -501,8 +531,8 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "us-west-1",
     primaryContact: "Pepper Potts",
     primaryContactEmail: "pepper@stark.com",
-    csm: "Dilan W.",
-    asr: "Asanka R.",
+    accountManager: "Dilan W.",
+    technicalOwner: "Asanka R.",
     openCases: 4,
   },
   "acc-103": {
@@ -511,7 +541,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
     region: "eu-central-1",
     primaryContact: "Eldon Tyrell",
     primaryContactEmail: "eldon@tyrell.corp",
-    csm: "Priya N.",
+    accountManager: "Priya N.",
     openCases: 1,
   },
 };
@@ -522,7 +552,7 @@ const FALLBACK_CUSTOMER: CaseCustomerContext = {
   region: "unknown",
   primaryContact: "(no primary contact)",
   primaryContactEmail: "—",
-  csm: "Unassigned",
+  accountManager: "Unassigned",
   openCases: 1,
 };
 
@@ -651,11 +681,11 @@ const ALL_WATCHERS: CaseWatcher[] = [
 ];
 
 function deriveWatchers(c: CsmCaseRow): CaseWatcher[] {
-  // Always include owner if known + 2-3 more deterministically.
+  // Always include the assignee if known + 2-3 more deterministically.
   const base: CaseWatcher[] = [];
-  if (c.ownerIsMe) base.push({ id: "w-1", name: c.owner, role: "wso2_engineer", isMe: true });
-  else if (c.owner !== "Unassigned")
-    base.push({ id: `w-owner-${c.id}`, name: c.owner, role: "wso2_engineer" });
+  if (c.assigneeIsMe) base.push({ id: "w-1", name: c.assignee, role: "wso2_engineer", isMe: true });
+  else if (c.assignee !== "Unassigned")
+    base.push({ id: `w-assignee-${c.id}`, name: c.assignee, role: "wso2_engineer" });
   const seedIdx = parseInt(c.id.replace(/\D/g, ""), 10) || 0;
   const pool = ALL_WATCHERS.filter((w) => !base.some((b) => b.name === w.name));
   const extras = [
@@ -753,12 +783,12 @@ function deriveTags(c: CsmCaseRow): CaseTag[] {
 
 function deriveTimeLogs(c: CsmCaseRow): CaseTimeLogEntry[] {
   const seedIdx = parseInt(c.id.replace(/\D/g, ""), 10) || 0;
-  const owner = c.owner === "Unassigned" ? "Sajith Ekanayaka" : c.owner;
+  const assignee = c.assignee === "Unassigned" ? "Sajith Ekanayaka" : c.assignee;
   const totalMinutes = (seedIdx * 17) % 480 + 30;
   const logs: CaseTimeLogEntry[] = [
     {
       id: `tl-${c.id}-a`,
-      engineer: owner,
+      engineer: assignee,
       hours: Math.round((totalMinutes / 60) * 4) / 4,
       note: "Investigated logs, gathered customer-side traces.",
       date: new Date(Date.now() - 60 * 60 * 1000 * 6).toISOString(),
@@ -767,7 +797,7 @@ function deriveTimeLogs(c: CsmCaseRow): CaseTimeLogEntry[] {
   if (c.state !== "open") {
     logs.unshift({
       id: `tl-${c.id}-b`,
-      engineer: owner,
+      engineer: assignee,
       hours: 1.5,
       note: "Reviewed customer config and reproduction steps.",
       date: new Date(Date.now() - 60 * 60 * 1000 * 22).toISOString(),
@@ -776,7 +806,7 @@ function deriveTimeLogs(c: CsmCaseRow): CaseTimeLogEntry[] {
   if (c.state === "solution_proposed" || c.state === "closed") {
     logs.unshift({
       id: `tl-${c.id}-c`,
-      engineer: owner,
+      engineer: assignee,
       hours: 2,
       note: "Drafted proposed fix and verified in staging.",
       date: new Date(Date.now() - 60 * 60 * 1000 * 2).toISOString(),
@@ -786,7 +816,7 @@ function deriveTimeLogs(c: CsmCaseRow): CaseTimeLogEntry[] {
 }
 
 function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
-  const owner = c.owner === "Unassigned" ? "(unassigned)" : c.owner;
+  const assignee = c.assignee === "Unassigned" ? "(unassigned)" : c.assignee;
   const created: CaseAuditEntry = {
     id: `a-${c.id}-0`,
     kind: "created",
@@ -798,15 +828,15 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
   if (c.state !== "open") {
     events.push({
       id: `a-${c.id}-1`,
-      kind: "owner_change",
+      kind: "assignee_change",
       actor: "Routing",
-      description: `Assigned to ${owner}`,
+      description: `Assigned to ${assignee}`,
       createdAt: new Date(new Date(c.createdAt).getTime() + 5 * 60_000).toISOString(),
     });
     events.push({
       id: `a-${c.id}-2`,
       kind: "state_change",
-      actor: owner,
+      actor: assignee,
       description: "Moved to Work in progress",
       createdAt: new Date(new Date(c.createdAt).getTime() + 15 * 60_000).toISOString(),
     });
@@ -815,7 +845,7 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
     events.push({
       id: `a-${c.id}-3`,
       kind: "state_change",
-      actor: owner,
+      actor: assignee,
       description: "Requested additional info from customer",
       createdAt: c.updatedAt,
     });
@@ -824,7 +854,7 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
     events.push({
       id: `a-${c.id}-3`,
       kind: "state_change",
-      actor: owner,
+      actor: assignee,
       description: "Marked as waiting on internal WSO2 dependency",
       createdAt: c.updatedAt,
     });
@@ -833,7 +863,7 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
     events.push({
       id: `a-${c.id}-3`,
       kind: "state_change",
-      actor: owner,
+      actor: assignee,
       description: "Posted proposed solution to customer",
       createdAt: c.updatedAt,
     });
@@ -842,7 +872,7 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
     events.push({
       id: `a-${c.id}-3`,
       kind: "state_change",
-      actor: owner,
+      actor: assignee,
       description: "Case closed",
       createdAt: c.updatedAt,
     });
@@ -870,18 +900,164 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
 
 const DESCRIPTIONS: Record<string, string> = {
   "case-1001":
-    "Token issuance latency on the corporate IdP has spiked to >2.5s p95 since 09:30 UTC. Affecting workforce SSO across all internal apps. Mutual TLS and DB connection counts look normal.",
+    `Hi WSO2 support,
+
+Token issuance latency on our corporate IdP has spiked to ~2.5s p95 since 09:30 UTC. This is impacting workforce SSO across all internal apps — engineers can't get into Jira, GitHub, or the deployment console.
+
+What we've checked so far:
+  - Mutual TLS handshake times look normal (~40ms)
+  - JDBC userstore connection pool sits at 18/100 — not exhausted
+  - GC pauses on IS nodes are under 50ms, heap usage at 45%
+  - No deployment on our side in the last 72 hours
+  - LDAP-backed userstore latency unchanged
+
+We tried rolling restart of the IS cluster at 10:15 UTC; latency dropped for ~3 minutes then climbed back. Attaching the access log slice from 09:00–10:30 UTC and a thread dump from is-prod-2 captured during the spike.
+
+Please treat as high priority — our CISO is asking for an ETA.
+
+Thanks,
+Rohan Mehta
+Platform Engineering, Acme Financial`,
   "case-1002":
-    "Gateway returns intermittent 502 to ~3% of traffic during 11:00-13:00 UTC peak window. No backend errors visible; suspected upstream connection pool saturation.",
+    `Hi WSO2 team,
+
+API Manager gateway is returning intermittent 502s to roughly 3% of traffic during our 11:00–13:00 UTC peak window. Backend services behind the gateway are healthy (5xx-free, latency normal). Looks like the gateway itself is dropping connections.
+
+Observed pattern:
+  - 5xx rate climbs starting ~11:05 UTC, peaks around 12:20 UTC
+  - Two of three gateway pods show CPU at ~85% during the spike
+  - Heap usage steady at 60%, no OOM
+  - Suspect upstream connection pool saturation but we can't see pool metrics from outside
+
+Can you take a look at the gateway pod logs and pool config? We have the change window open if you need us to apply anything.
+
+Best regards,
+Janet Park
+Initech SRE`,
   "case-1003":
-    "Micro Integrator cluster fails to start after applying update level wso2mi-4.4.0.7. Carbon log shows ClassNotFoundException on a security extension.",
+    `Hi WSO2 support,
+
+Our Micro Integrator cluster fails to start after we applied update level wso2mi-4.4.0.7 last night. Two pods stay in CrashLoopBackOff.
+
+The carbon log shows a ClassNotFoundException on org.wso2.carbon.security.user.api.UserStoreException coming from a custom security extension we built about a year ago. The extension was working fine on wso2mi-4.4.0.4.
+
+Can you tell us what changed in 4.4.0.7 around the user-API classloader? If it's a class move or rename, we can rebuild the extension; just need to know what to retarget.
+
+We're holding the rollout to other regions until we hear back.
+
+Thanks,
+Bill Lumbergh
+Initech Platform Team`,
+  "case-1004":
+    `Hi WSO2 support,
+
+The userinfo endpoint stopped returning the "groups" claim for users authenticated via our corporate IdP. This worked last week and we haven't changed our client config.
+
+Repro:
+  1. Authenticate as bob@acmefinancial.com via the corporate IdP federation
+  2. Exchange code for tokens at /oauth2/token
+  3. Call /oauth2/userinfo with the access token
+  4. Response includes sub, email, name — but no "groups"
+
+Expected: groups should be a JSON array of LDAP DN strings.
+
+Could a federated IdP attribute mapping have been changed, or is this a known issue in 7.1.0? Happy to provide a test user account if it helps.
+
+Best regards,
+Rohan Mehta
+Acme Financial`,
+  "case-1005":
+    `Hi support,
+
+Our Choreo deployment for the "checkout-v2" component has been stuck at "Provisioning" for about 45 minutes. The component is a Go service, build succeeded, but the pod never reaches Ready.
+
+We've already tried:
+  - Deleting and redeploying — same outcome
+  - Smaller resource ask (256Mi → 128Mi) — same outcome
+  - Switching the build profile — no effect
+
+There's nothing useful in the Choreo UI beyond "Provisioning". Could you check the underlying pod state? I'll attach kubectl describe output if you can pull it from the platform side.
+
+Thanks,
+Daniel Owens
+Engineering, Acme Choreo`,
+  "case-1015":
+    `Hi WSO2 support,
+
+Our Choreo runtime is going OOM under sustained load (~120 RPS sustained, no bursts). The crash takes the whole pod down and the autoscaler can't keep up — we're seeing ~40-minute cycles of healthy / OOM / new pod.
+
+Started this morning around 05:40 UTC right after the rollout of release v4.2.1. Reverting to v4.2.0 resolves it; we've confirmed the rollback on staging.
+
+Profile so far:
+  - All pods OOM under steady-state, no specific instance pattern
+  - 2Gi memory limit, 1Gi request, 1500m CPU limit
+  - Workload is 117–122 RPS for the last 6 hours of traffic
+  - Heap dump captured (heap-prod-01.hprof, ~480MB) — attaching
+
+Need this resolved or worked around urgently — our SLO budget for the month is ~70% spent already.
+
+Thanks,
+Daniel Owens
+Engineering, Acme Choreo`,
+  "case-1006":
+    `Hi WSO2 team,
+
+We're seeing the same SAML response signature validation error on the Asgardeo tenant for our staging Salesforce SP. The error in the IS logs is:
+
+  org.wso2.carbon.identity.sso.saml.exception.IdentityException: Signature validation failed for SAML response
+
+This started after we rotated our Salesforce signing certificate yesterday. We re-uploaded the new cert into the SP configuration in Asgardeo. The new cert is RSA-2048, SHA-256 signed.
+
+Production tenant is still on the old cert and working fine; this is staging only. Can you check whether the cert metadata was actually picked up, or if there's a propagation delay we should wait through?
+
+Best regards,
+Helena Voss
+Globex IAM Team`,
+  "case-1011":
+    `Hi WSO2 support,
+
+We need help tuning the LDAP userstore for our IS deployment. Search queries against the userstore are coming back in 1.2–1.8s for queries that should be instant. We have ~85,000 user entries in the LDAP.
+
+What we've configured:
+  - ConnectionPoolingEnabled = true
+  - MaxActiveConnections = 50
+  - ConnectionPoolMinIdle = 10
+  - SearchScope = SUB on ou=people,dc=globex,dc=com
+
+Index status on the LDAP side looks fine — pres/sub/eq indexes on uid, mail, cn, member. Network RTT to the LDAP from IS pods is consistent at ~2ms.
+
+Suspect we're paginating poorly or doing redundant searches. Can you advise on the right pooling config + tracing the actual LDAP queries IS is firing?
+
+Thanks,
+Marcus Liang
+Globex Security Engineering`,
 };
 
 function describe(c: CsmCaseRow): string {
-  return (
-    DESCRIPTIONS[c.id] ??
-    `${c.subject}. Reported by ${c.customer} on project ${c.projectName}. Additional reproduction details captured in the comment thread.`
-  );
+  const seeded = DESCRIPTIONS[c.id];
+  if (seeded) return seeded;
+
+  // Fallback template: greeting + body + sign-off so every case reads like
+  // a real ticket even without a hand-written description. The greeting is
+  // intentionally generic — the customer doesn't know who will pick up the
+  // case at the time of creation.
+  const customerFirst = c.customer.split(/\s+/)[0] ?? c.customer;
+  return [
+    `Hi WSO2 support,`,
+    "",
+    `${c.subject} — reported on project ${c.projectName}.`,
+    "",
+    "What we're observing:",
+    `  - Issue first noticed earlier today during normal operations`,
+    `  - Severity ${c.severity} based on customer impact`,
+    `  - Workaround status: investigating, no permanent mitigation yet`,
+    "",
+    "Additional reproduction details and logs are captured in the comment thread below. Happy to jump on a call if it helps move things along.",
+    "",
+    "Thanks,",
+    `${customerFirst}`,
+    `${c.customer}`,
+  ].join("\n");
 }
 
 function deriveAttachments(c: CsmCaseRow): CaseAttachment[] {
@@ -911,7 +1087,7 @@ function deriveAttachments(c: CsmCaseRow): CaseAttachment[] {
         filename: "carbon.log",
         size: 982_133,
         contentType: "text/plain",
-        uploadedBy: c.owner === "Unassigned" ? "Sajith Ekanayaka" : c.owner,
+        uploadedBy: c.assignee === "Unassigned" ? "Sajith Ekanayaka" : c.assignee,
         uploadedAt: new Date(Date.now() - 60 * 60 * 1000 * 2).toISOString(),
       },
     ],
@@ -944,6 +1120,7 @@ export function getMockCsmCaseDetailById(
       : row.projectName.toLowerCase().includes("asgardeo")
         ? "grp.asgardeo_sre"
         : "grp.cre_team",
+    createdBy: customerContext.primaryContact,
     customerContext,
     productContext: deriveProduct(row),
     slaClocks: deriveSlaClocks(row),
@@ -953,6 +1130,6 @@ export function getMockCsmCaseDetailById(
     timeLogs: deriveTimeLogs(row),
     audit: deriveAudit(row),
     attachments: deriveAttachments(row),
-    isWatching: row.ownerIsMe,
+    isWatching: row.assigneeIsMe,
   };
 }

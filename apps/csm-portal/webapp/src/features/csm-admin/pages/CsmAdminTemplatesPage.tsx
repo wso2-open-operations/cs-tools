@@ -37,20 +37,20 @@ interface TemplateRow {
   category: string;
   language: string;
   lastUpdated: string;
-  owner: string;
+  author: string;
 }
 
 const TEMPLATES: TemplateRow[] = [
-  { id: "tpl.ack_s1", name: "S1 acknowledgement", scope: "Acknowledgement", category: "Severity P1", language: "EN", lastUpdated: "2026-04-18", owner: "Priya N." },
-  { id: "tpl.ack_s0", name: "S0 acknowledgement + escalation notice", scope: "Acknowledgement", category: "Severity P0", language: "EN", lastUpdated: "2026-05-03", owner: "Sajith Ekanayaka" },
-  { id: "tpl.req_info", name: "Awaiting customer info — generic", scope: "Case reply", category: "Information request", language: "EN", lastUpdated: "2026-03-29", owner: "Priya N." },
-  { id: "tpl.req_logs", name: "Awaiting logs / heap dump", scope: "Case reply", category: "Information request", language: "EN", lastUpdated: "2026-02-11", owner: "Sajith Ekanayaka" },
-  { id: "tpl.sol_proposed", name: "Solution proposed — verify and accept", scope: "Case reply", category: "Resolution", language: "EN", lastUpdated: "2026-04-22", owner: "Sajith Ekanayaka" },
-  { id: "tpl.closure_resolved", name: "Closure — resolved", scope: "Closure", category: "Closure", language: "EN", lastUpdated: "2026-04-22", owner: "Sajith Ekanayaka" },
-  { id: "tpl.closure_no_response", name: "Closure — no customer response", scope: "Closure", category: "Closure", language: "EN", lastUpdated: "2026-03-04", owner: "Priya N." },
-  { id: "tpl.escalation_tl", name: "Escalation to Team Lead", scope: "Escalation", category: "Internal", language: "EN", lastUpdated: "2026-04-01", owner: "Nadeesha S." },
-  { id: "tpl.escalation_rnd", name: "Escalation to R&D", scope: "Escalation", category: "Internal", language: "EN", lastUpdated: "2026-04-01", owner: "Nadeesha S." },
-  { id: "tpl.cust_eol", name: "Product EOL announcement", scope: "Customer email", category: "Announcement", language: "EN", lastUpdated: "2026-01-15", owner: "Nadeesha S." },
+  { id: "tpl.ack_s1", name: "S1 acknowledgement", scope: "Acknowledgement", category: "Severity P1", language: "EN", lastUpdated: "2026-04-18", author: "Priya N." },
+  { id: "tpl.ack_s0", name: "S0 acknowledgement + escalation notice", scope: "Acknowledgement", category: "Severity P0", language: "EN", lastUpdated: "2026-05-03", author: "Sajith Ekanayaka" },
+  { id: "tpl.req_info", name: "Awaiting customer info — generic", scope: "Case reply", category: "Information request", language: "EN", lastUpdated: "2026-03-29", author: "Priya N." },
+  { id: "tpl.req_logs", name: "Awaiting logs / heap dump", scope: "Case reply", category: "Information request", language: "EN", lastUpdated: "2026-02-11", author: "Sajith Ekanayaka" },
+  { id: "tpl.sol_proposed", name: "Solution proposed — verify and accept", scope: "Case reply", category: "Resolution", language: "EN", lastUpdated: "2026-04-22", author: "Sajith Ekanayaka" },
+  { id: "tpl.closure_resolved", name: "Closure — resolved", scope: "Closure", category: "Closure", language: "EN", lastUpdated: "2026-04-22", author: "Sajith Ekanayaka" },
+  { id: "tpl.closure_no_response", name: "Closure — no customer response", scope: "Closure", category: "Closure", language: "EN", lastUpdated: "2026-03-04", author: "Priya N." },
+  { id: "tpl.escalation_tl", name: "Escalation to Team Lead", scope: "Escalation", category: "Internal", language: "EN", lastUpdated: "2026-04-01", author: "Nadeesha S." },
+  { id: "tpl.escalation_rnd", name: "Escalation to R&D", scope: "Escalation", category: "Internal", language: "EN", lastUpdated: "2026-04-01", author: "Nadeesha S." },
+  { id: "tpl.cust_eol", name: "Product EOL announcement", scope: "Customer email", category: "Announcement", language: "EN", lastUpdated: "2026-01-15", author: "Nadeesha S." },
 ];
 
 function scopeColor(s: TemplateRow["scope"]): "primary" | "info" | "success" | "warning" | "default" {
@@ -75,7 +75,7 @@ export default function CsmAdminTemplatesPage(): JSX.Element {
                 <TableCell>Scope</TableCell>
                 <TableCell>Category</TableCell>
                 <TableCell>Language</TableCell>
-                <TableCell>Owner</TableCell>
+                <TableCell>Author</TableCell>
                 <TableCell>Last updated</TableCell>
               </TableRow>
             </TableHead>
@@ -92,7 +92,7 @@ export default function CsmAdminTemplatesPage(): JSX.Element {
                       <Chip size="small" label={t.language} variant="outlined" />
                     </Stack>
                   </TableCell>
-                  <TableCell>{t.owner}</TableCell>
+                  <TableCell>{t.author}</TableCell>
                   <TableCell>{t.lastUpdated}</TableCell>
                 </TableRow>
               ))}

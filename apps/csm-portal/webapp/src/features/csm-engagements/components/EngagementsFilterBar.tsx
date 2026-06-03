@@ -56,7 +56,7 @@ export default function EngagementsFilterBar({
     filters.types.length > 0 ||
     filters.states.length > 0 ||
     filters.stages.length > 0 ||
-    filters.owner !== "all" ||
+    filters.assignee !== "all" ||
     filters.health !== "all";
 
   return (
@@ -79,14 +79,14 @@ export default function EngagementsFilterBar({
         <TextField
           select
           size="small"
-          label="Owner"
-          value={filters.owner}
+          label="Assignee"
+          value={filters.assignee}
           onChange={(e) =>
-            onChange({ ...filters, owner: e.target.value as CsmEngagementListFilters["owner"] })
+            onChange({ ...filters, assignee: e.target.value as CsmEngagementListFilters["assignee"] })
           }
           sx={{ minWidth: 140 }}
         >
-          <MenuItem value="all">Any owner</MenuItem>
+          <MenuItem value="all">Any assignee</MenuItem>
           <MenuItem value="me">Owned by me</MenuItem>
           <MenuItem value="unassigned">Unassigned</MenuItem>
         </TextField>

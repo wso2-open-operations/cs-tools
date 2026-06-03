@@ -30,12 +30,14 @@ interface ProjectsListProps {
 }
 
 const GRID =
-  "minmax(220px, 2fr) minmax(160px, 1.4fr) minmax(140px, 1fr) auto auto auto auto auto auto";
+  "minmax(220px, 2fr) minmax(160px, 1.4fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto auto auto auto auto auto";
 
 const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
   { label: "Project" },
   { label: "Customer" },
   { label: "Product" },
+  { label: "Account Manager" },
+  { label: "Technical Owner" },
   { label: "Tier" },
   { label: "Status" },
   { label: "Open", align: "right" },
@@ -185,6 +187,12 @@ export default function ProjectsList({
               </Typography>
               <Typography variant="body2" noWrap>
                 {p.productType}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {p.accountManager ?? "—"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {p.technicalOwner ?? "—"}
               </Typography>
               <TierChip tier={p.tier} />
               <StatusChip status={p.status} />

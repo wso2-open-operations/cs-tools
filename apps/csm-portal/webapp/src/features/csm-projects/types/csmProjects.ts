@@ -75,10 +75,71 @@ export interface CsmProjectRow {
   productType: string;
   status: CsmProjectStatus;
   updateLevel: string;
+  /** WSO2-side sales / account-management contact for this project. */
+  accountManager?: string;
+  /**
+   * WSO2-side sales-engineering contact for the project. Not a customer-side
+   * role — customer technical leads are tagged as "Primary Contact".
+   */
+  technicalOwner?: string;
   openCaseCount: number;
   s0s1Count: number;
   breachedCount: number;
   lastActivityAt: string;
+}
+
+export type CsmDeploymentEnvironment =
+  | "dev"
+  | "qa"
+  | "staging"
+  | "prod"
+  | "uat"
+  | "stress";
+
+export interface CsmDeploymentProduct {
+  /** Product family name, e.g. "WSO2 Identity Server". */
+  product: string;
+  version: string;
+  /** Latest patch / update level applied. */
+  updateLevel: string;
+  supportStatus: "available" | "extended" | "deprecated" | "discontinued";
+}
+
+export interface CsmDeploymentRow {
+  id: string;
+  projectId: string;
+  name: string;
+  environment: CsmDeploymentEnvironment;
+  region: string;
+  /** Products installed on this deployment (typical: 1-3 entries). */
+  products: CsmDeploymentProduct[];
+  lastUpdatedAt: string;
+}
+
+/** A person associated with an account or project. */
+export type CsmContactStatus = "Active" | "Invited" | "Inactive";
+
+export type CsmContactRole =
+  | "Account Manager"
+  | "Technical Owner"
+  | "Primary Contact"
+  | "Billing Contact"
+  | "Security Contact"
+  | "Other";
+
+export interface CsmContact {
+  id: string;
+  name: string;
+  email: string;
+  /** A contact can wear more than one hat (e.g. AM + Primary Contact). */
+  roles: CsmContactRole[];
+  status: CsmContactStatus;
+  /** Optional phone in E.164. */
+  phone?: string;
+  /** Source scope where the contact is defined. */
+  scope: "account" | "project";
+  /** When scope=project, the project id. */
+  projectId?: string;
 }
 
 export interface CsmProjectsListResponse {

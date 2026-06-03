@@ -38,7 +38,7 @@ const DEFAULT_FILTERS: CsmEngagementListFilters = {
   types: [],
   states: [],
   stages: [],
-  owner: "all",
+  assignee: "all",
   health: "all",
 };
 
@@ -54,11 +54,11 @@ function applyFilters(
     if (f.types.length && !f.types.includes(e.type)) return false;
     if (f.states.length && !f.states.includes(e.state)) return false;
     if (f.stages.length && !f.stages.includes(e.stage)) return false;
-    if (f.owner === "me" && !e.ownerIsMe) return false;
-    if (f.owner === "unassigned" && e.ownerName !== "Unassigned") return false;
+    if (f.assignee === "me" && !e.assigneeIsMe) return false;
+    if (f.assignee === "unassigned" && e.assigneeName !== "Unassigned") return false;
     if (f.health !== "all" && e.health !== f.health) return false;
     if (q) {
-      const hay = `${e.reference} ${e.name} ${e.customer} ${e.projectName ?? ""} ${e.ownerName}`.toLowerCase();
+      const hay = `${e.reference} ${e.name} ${e.customer} ${e.projectName ?? ""} ${e.assigneeName}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     // Stat card secondary filter

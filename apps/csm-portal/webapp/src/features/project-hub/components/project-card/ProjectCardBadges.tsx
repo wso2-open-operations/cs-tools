@@ -26,6 +26,7 @@ import type { ProjectCardBadgesProps } from "@features/project-hub/types/project
  */
 export default function ProjectCardBadges({
   projectKey,
+  isSuspended = false,
 }: ProjectCardBadgesProps): JSX.Element {
   return (
     <Form.CardContent sx={{ width: "100%", pt: 2, pb: 0 }}>
@@ -36,6 +37,14 @@ export default function ProjectCardBadges({
         gap={1}
       >
         <Chip label={projectKey} variant="outlined" size="small" />
+        {isSuspended && (
+          <Chip
+            label="Suspended"
+            color="warning"
+            size="small"
+            sx={{ fontWeight: 600 }}
+          />
+        )}
       </Box>
     </Form.CardContent>
   );

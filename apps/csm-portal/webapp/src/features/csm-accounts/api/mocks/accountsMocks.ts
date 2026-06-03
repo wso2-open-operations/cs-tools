@@ -15,6 +15,7 @@
 // under the License.
 
 import { getMockCsmProjects } from "@features/csm-projects/api/mocks/projectsMocks";
+import { getMockAccountContacts } from "@features/csm-projects/api/mocks/contactsMocks";
 import type { DashboardScope } from "@features/csm-dashboard/types/abtDashboard";
 import type {
   CsmAccountRow,
@@ -25,6 +26,18 @@ import type {
   CsmProjectStatus,
   CsmProjectTier,
 } from "@features/csm-projects/types/csmProjects";
+
+/**
+ * Pick a contact name by role from the account's contact list. Returns
+ * undefined when there is no contact carrying that role.
+ */
+function contactByRole(
+  accountId: string,
+  role: "Account Manager" | "Technical Owner",
+): string | undefined {
+  const contacts = getMockAccountContacts(accountId);
+  return contacts.find((c) => c.roles.includes(role))?.name;
+}
 
 const TIER_RANK: Record<CsmProjectTier, number> = {
   Platinum: 3,
@@ -88,6 +101,8 @@ function aggregateAccounts(projects: CsmProjectRow[]): CsmAccountRow[] {
       name: b.name,
       tier: b.tier,
       status: pickWorstStatus(b.statuses),
+      accountManager: contactByRole(b.id, "Account Manager"),
+      technicalOwner: contactByRole(b.id, "Technical Owner"),
       projectCount: b.projectCount,
       openCaseCount: b.openCaseCount,
       s0s1Count: b.s0s1Count,

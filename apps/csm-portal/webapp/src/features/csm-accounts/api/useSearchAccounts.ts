@@ -18,10 +18,14 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { apiConfig } from "@config/apiConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
+import { isMockMode } from "@api/backend/client";
+import { getMockBackendAccountsResponse } from "@features/csm-accounts/api/mocks/accountsBeMocks";
 import type {
   SearchAccountsRequest,
   SearchAccountsResponse,
 } from "@features/csm-accounts/types/csmAccounts";
+
+const MOCK_LATENCY_MS = 150;
 
 export function useSearchAccounts(request: SearchAccountsRequest) {
   const authFetch = useAuthApiClient();
@@ -29,6 +33,10 @@ export function useSearchAccounts(request: SearchAccountsRequest) {
   return useQuery<SearchAccountsResponse, Error>({
     queryKey: ["csm-accounts-search", request],
     queryFn: async () => {
+      if (isMockMode()) {
+        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
+        return getMockBackendAccountsResponse(request);
+      }
       const res = await authFetch(`${apiConfig.backendUrl}/accounts/search`, {
         method: "POST",
         body: JSON.stringify(request),

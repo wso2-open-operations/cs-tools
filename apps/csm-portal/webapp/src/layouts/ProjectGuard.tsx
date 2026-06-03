@@ -19,7 +19,7 @@ import { Box, LinearProgress } from "@wso2/oxygen-ui";
 import { Outlet, useParams } from "react-router";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import ApiErrorState from "@components/error/ApiErrorState";
-import ProjectSuspendedNoticePage from "@/components/access-control/ProjectSuspendedNoticePage";
+import SuspendedProjectBanner from "@features/project-hub/components/SuspendedProjectBanner";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 import { ProjectClosureState } from "@/types/permission";
 
@@ -28,15 +28,15 @@ import { ProjectClosureState } from "@/types/permission";
  *
  * It fetches project details once at the layout boundary. If the API
  * returns an error (400, 401, 403, 404, 5xx, etc.) the guard renders
- * {@link ApiErrorState} instead of the child route. If the project has
- * closureState "Suspended" it renders the Project Suspension Notice.
+ * {@link ApiErrorState} instead of the child route. Suspended projects are
+ * still accessible — internal teams need to investigate suspended accounts
+ * — so we render the normal outlet with a non-blocking banner on top.
  *
- * @returns {JSX.Element} The child outlet or an error/suspension page.
+ * @returns {JSX.Element} The child outlet or an error page.
  */
 function ProjectGuardContent(): JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
-  const { setIsErrorPageDisplayed, setIsProjectSuspended } =
-    useErrorPageContext();
+  const { setIsErrorPageDisplayed } = useErrorPageContext();
 
   const { data, error, isLoading } = useGetProjectDetails(projectId ?? "");
 
@@ -44,20 +44,10 @@ function ProjectGuardContent(): JSX.Element {
   const isProjectSuspended =
     !isLoading && data?.closureState === ProjectClosureState.SUSPENDED;
 
-  const isErrorPageDisplayed = hasError || isProjectSuspended;
-
   useEffect(() => {
-    setIsErrorPageDisplayed(isErrorPageDisplayed);
-    // Reset on unmount so leaving a project that errored doesn't leak the
-    // error flag into sibling routes (e.g. /dashboard, /cases) where AppLayout
-    // uses it to gate the sidebar.
+    setIsErrorPageDisplayed(hasError);
     return () => setIsErrorPageDisplayed(false);
-  }, [isErrorPageDisplayed, setIsErrorPageDisplayed]);
-
-  useEffect(() => {
-    setIsProjectSuspended(isProjectSuspended);
-    return () => setIsProjectSuspended(false);
-  }, [isProjectSuspended, setIsProjectSuspended]);
+  }, [hasError, setIsErrorPageDisplayed]);
 
   if (isLoading) {
     return (
@@ -85,11 +75,12 @@ function ProjectGuardContent(): JSX.Element {
     );
   }
 
-  if (isProjectSuspended) {
-    return <ProjectSuspendedNoticePage project={data!} />;
-  }
-
-  return <Outlet />;
+  return (
+    <>
+      {isProjectSuspended && data && <SuspendedProjectBanner project={data} />}
+      <Outlet />
+    </>
+  );
 }
 
 export default function ProjectGuard(): JSX.Element {

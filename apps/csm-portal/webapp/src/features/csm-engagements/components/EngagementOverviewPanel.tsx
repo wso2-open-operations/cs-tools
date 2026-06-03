@@ -99,9 +99,9 @@ export default function EngagementOverviewPanel({
           <Meta label="Project">
             <Typography variant="body2">{e.projectName ?? "—"}</Typography>
           </Meta>
-          <Meta label="Owner">
+          <Meta label="Assignee">
             <Typography variant="body2">
-              {e.ownerIsMe ? <strong>{e.ownerName}</strong> : e.ownerName}
+              {e.assigneeIsMe ? <strong>{e.assigneeName}</strong> : e.assigneeName}
             </Typography>
           </Meta>
           <Meta label="Delivery">

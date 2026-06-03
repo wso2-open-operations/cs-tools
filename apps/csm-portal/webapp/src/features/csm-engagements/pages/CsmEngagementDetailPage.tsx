@@ -227,7 +227,7 @@ export default function CsmEngagementDetailPage(): JSX.Element {
         </Box>
         <Typography variant="h5">{e.name}</Typography>
         <Typography variant="body2" color="text.secondary">
-          {e.customer} · {e.projectName} · Owner: {e.ownerName} · Updated{" "}
+          {e.customer} · {e.projectName} · Assignee: {e.assigneeName} · Updated{" "}
           <RelativeTime iso={e.updatedAt} />
         </Typography>
       </Box>

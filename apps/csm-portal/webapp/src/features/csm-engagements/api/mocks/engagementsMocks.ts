@@ -69,8 +69,8 @@ interface EngagementSeed {
   accountId: string;
   projectId: string;
   projectName: string;
-  ownerName: string;
-  ownerIsMe?: boolean;
+  assigneeName: string;
+  assigneeIsMe?: boolean;
   deliveryMode: CsmEngagementRow["deliveryMode"];
   plannedStartDate: string;
   plannedEndDate: string;
@@ -97,8 +97,8 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-initech",
     projectId: "proj-initech-choreo",
     projectName: "Choreo Runtime",
-    ownerName: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assigneeName: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysAgo(28),
     plannedEndDate: dateOnlyDaysFromNow(35),
@@ -123,7 +123,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-wayne",
     projectId: "proj-wayne-am",
     projectName: "API Manager",
-    ownerName: "Priya Mendis",
+    assigneeName: "Priya Mendis",
     deliveryMode: "onsite",
     plannedStartDate: dateOnlyDaysAgo(10),
     plannedEndDate: dateOnlyDaysFromNow(11),
@@ -148,7 +148,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-cyberdyne",
     projectId: "proj-cyberdyne-is",
     projectName: "Identity Server federation",
-    ownerName: "Hiruni Perera",
+    assigneeName: "Hiruni Perera",
     deliveryMode: "hybrid",
     plannedStartDate: dateOnlyDaysAgo(180),
     plannedEndDate: dateOnlyDaysFromNow(185),
@@ -173,7 +173,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-acme",
     projectId: "proj-acme-mi",
     projectName: "Micro Integrator",
-    ownerName: "Devin Kularatne",
+    assigneeName: "Devin Kularatne",
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysAgo(14),
     plannedEndDate: dateOnlyDaysFromNow(45),
@@ -198,7 +198,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-stark",
     projectId: "proj-stark-choreo",
     projectName: "Choreo Runtime",
-    ownerName: "Priya Mendis",
+    assigneeName: "Priya Mendis",
     deliveryMode: "onsite",
     plannedStartDate: dateOnlyDaysAgo(38),
     plannedEndDate: dateOnlyDaysAgo(35),
@@ -223,7 +223,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-soylent",
     projectId: "proj-soylent-is",
     projectName: "Identity Server",
-    ownerName: "Unassigned",
+    assigneeName: "Unassigned",
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysFromNow(7),
     plannedEndDate: dateOnlyDaysFromNow(28),
@@ -246,8 +246,8 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-vandelay",
     projectId: "proj-vandelay-am",
     projectName: "API Manager",
-    ownerName: "Sajith Ekanayaka",
-    ownerIsMe: true,
+    assigneeName: "Sajith Ekanayaka",
+    assigneeIsMe: true,
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysAgo(2),
     plannedEndDate: dateOnlyDaysFromNow(5),
@@ -281,7 +281,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-hooli",
     projectId: "proj-hooli-multi",
     projectName: "Multi-product",
-    ownerName: "Hiruni Perera",
+    assigneeName: "Hiruni Perera",
     deliveryMode: "hybrid",
     plannedStartDate: dateOnlyDaysAgo(7),
     plannedEndDate: dateOnlyDaysFromNow(80),
@@ -306,7 +306,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-piedpiper",
     projectId: "proj-piedpiper-ms",
     projectName: "Micro Integrator",
-    ownerName: "Devin Kularatne",
+    assigneeName: "Devin Kularatne",
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysAgo(90),
     plannedEndDate: dateOnlyDaysAgo(50),
@@ -331,7 +331,7 @@ const SEEDS: EngagementSeed[] = [
     accountId: "acc-massive",
     projectId: "proj-massive-choreo",
     projectName: "Choreo platform fit",
-    ownerName: "Unassigned",
+    assigneeName: "Unassigned",
     deliveryMode: "remote",
     plannedStartDate: dateOnlyDaysAgo(45),
     plannedEndDate: dateOnlyDaysAgo(15),
@@ -345,8 +345,8 @@ const SEEDS: EngagementSeed[] = [
   },
 ];
 
-const COMMON_WATCHERS = (ownerName: string): CsmEngagementWatcher[] => [
-  { id: "w-1", name: ownerName, role: "wso2_engineer", isMe: ownerName === CURRENT_USER.name },
+const COMMON_WATCHERS = (assigneeName: string): CsmEngagementWatcher[] => [
+  { id: "w-1", name: assigneeName, role: "wso2_engineer", isMe: assigneeName === CURRENT_USER.name },
   { id: "w-2", name: "Ramith Jayasinghe", role: "manager" },
   { id: "w-3", name: "Layla Davis", role: "customer_contact" },
 ];
@@ -356,8 +356,8 @@ function buildAllocations(seed: EngagementSeed): CsmEngagementAllocation[] {
     {
       id: `${seed.id}-alloc-1`,
       engagementId: seed.id,
-      userId: "u-owner",
-      userName: seed.ownerName,
+      userId: "u-assignee",
+      userName: seed.assigneeName,
       allocationPct: 80,
       startDate: seed.plannedStartDate,
       endDate: seed.plannedEndDate,
@@ -458,7 +458,7 @@ function buildTasks(seed: EngagementSeed): CsmEngagementTask[] {
       title: t.title,
       stage: t.stage,
       state,
-      assigneeName: i % 2 === 0 ? seed.ownerName : "Priya Mendis",
+      assigneeName: i % 2 === 0 ? seed.assigneeName : "Priya Mendis",
       dueDate: dateOnlyDaysFromNow(
         Math.round(((i + 1) / tasks.length) * 30) - (seed.state === "completed" ? 30 : 0),
       ),
@@ -535,8 +535,8 @@ function buildStatusUpdates(seed: EngagementSeed): CsmEngagementStatusUpdate[] {
   return headlines.slice(0, limit).map((h, i, arr) => ({
     id: `${seed.id}-su-${i + 1}`,
     engagementId: seed.id,
-    authorId: "u-owner",
-    authorName: seed.ownerName,
+    authorId: "u-assignee",
+    authorName: seed.assigneeName,
     health: seed.state === "on_hold" ? "amber" : seed.health ?? h.health,
     headline: h.headline,
     bodyHtml: h.body,
@@ -549,7 +549,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
   out.push({
     id: `${seed.id}-a-created`,
     kind: "created",
-    actor: seed.ownerName,
+    actor: seed.assigneeName,
     description: `Engagement ${seed.reference} created.`,
     createdAt: isoDaysAgo(seed.createdDaysAgo),
   });
@@ -557,7 +557,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
     out.push({
       id: `${seed.id}-a-state-1`,
       kind: "state_change",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: "State moved to Requested.",
       createdAt: isoDaysAgo(seed.createdDaysAgo - 1),
     });
@@ -570,7 +570,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
     out.push({
       id: `${seed.id}-a-state-2`,
       kind: "state_change",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: "Work started.",
       createdAt: isoDaysAgo(seed.createdDaysAgo - 3),
     });
@@ -579,7 +579,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
     out.push({
       id: `${seed.id}-a-state-3`,
       kind: "state_change",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: "Put on hold per customer request.",
       createdAt: isoDaysAgo(seed.updatedDaysAgo),
     });
@@ -588,7 +588,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
     out.push({
       id: `${seed.id}-a-state-4`,
       kind: "state_change",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: "Engagement marked complete.",
       createdAt: isoDaysAgo(seed.updatedDaysAgo),
     });
@@ -597,7 +597,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
     out.push({
       id: `${seed.id}-a-state-5`,
       kind: "state_change",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: "Engagement cancelled.",
       createdAt: isoDaysAgo(seed.updatedDaysAgo),
     });
@@ -609,7 +609,7 @@ function buildAudit(seed: EngagementSeed, tasks: CsmEngagementTask[]): CsmEngage
       out.push({
         id: `${seed.id}-a-task-${i + 1}`,
         kind: "task_completed",
-        actor: t.assigneeName ?? seed.ownerName,
+        actor: t.assigneeName ?? seed.assigneeName,
         description: `Task completed: ${t.title}`,
         createdAt: t.completedAt ?? isoDaysAgo(5),
       }),
@@ -650,7 +650,7 @@ function buildComments(seed: EngagementSeed): CsmEngagementComment[] {
     {
       id: `${seed.id}-c-2`,
       engagementId: seed.id,
-      authorName: seed.ownerName,
+      authorName: seed.assigneeName,
       authorRole: "wso2_engineer",
       bodyHtml:
         "<p>Yes that works for us. I've moved the cutover to the following Friday and updated the plan.</p>",
@@ -659,7 +659,7 @@ function buildComments(seed: EngagementSeed): CsmEngagementComment[] {
     {
       id: `${seed.id}-c-3`,
       engagementId: seed.id,
-      authorName: seed.ownerName,
+      authorName: seed.assigneeName,
       authorRole: "wso2_engineer",
       internal: true,
       bodyHtml:
@@ -677,7 +677,7 @@ function buildAttachments(seed: EngagementSeed): CsmEngagementAttachment[] {
       filename: "scope-statement.pdf",
       size: 184_320,
       contentType: "application/pdf",
-      uploadedBy: seed.ownerName,
+      uploadedBy: seed.assigneeName,
       uploadedAt: isoDaysAgo(Math.max(1, seed.createdDaysAgo - 2)),
     },
     {
@@ -685,7 +685,7 @@ function buildAttachments(seed: EngagementSeed): CsmEngagementAttachment[] {
       filename: "stakeholder-map.png",
       size: 72_104,
       contentType: "image/png",
-      uploadedBy: seed.ownerName,
+      uploadedBy: seed.assigneeName,
       uploadedAt: isoDaysAgo(Math.max(1, seed.createdDaysAgo - 4)),
     },
   ];
@@ -714,9 +714,9 @@ function rowFromSeed(seed: EngagementSeed): CsmEngagementRow {
     accountId: seed.accountId,
     projectId: seed.projectId,
     projectName: seed.projectName,
-    ownerId: seed.ownerIsMe ? CURRENT_USER.id : `u-${seed.ownerName.toLowerCase().replace(/\s+/g, "-")}`,
-    ownerName: seed.ownerName,
-    ownerIsMe: !!seed.ownerIsMe,
+    ownerId: seed.assigneeIsMe ? CURRENT_USER.id : `u-${seed.assigneeName.toLowerCase().replace(/\s+/g, "-")}`,
+    assigneeName: seed.assigneeName,
+    assigneeIsMe: !!seed.assigneeIsMe,
     deliveryMode: seed.deliveryMode,
     plannedStartDate: seed.plannedStartDate,
     plannedEndDate: seed.plannedEndDate,
@@ -753,7 +753,7 @@ function detailFromSeed(seed: EngagementSeed): CsmEngagementDetail {
     audit.push({
       id: `${seed.id}-a-link-${i + 1}`,
       kind: "case_linked",
-      actor: seed.ownerName,
+      actor: seed.assigneeName,
       description: `Linked case ${c.caseNumber}: ${c.subject}.`,
       createdAt: isoDaysAgo(Math.max(0, seed.updatedDaysAgo - 1)),
     }),
@@ -769,7 +769,7 @@ function detailFromSeed(seed: EngagementSeed): CsmEngagementDetail {
       paymentType: seed.paymentType,
       opportunityRef: seed.opportunityRef,
     },
-    watchers: COMMON_WATCHERS(seed.ownerName),
+    watchers: COMMON_WATCHERS(seed.assigneeName),
     allocations: buildAllocations(seed),
     stages: ENGAGEMENT_STAGE_ORDER,
     stageStatus,
@@ -779,7 +779,7 @@ function detailFromSeed(seed: EngagementSeed): CsmEngagementDetail {
     audit,
     attachments,
     linkedCases,
-    isWatching: !!seed.ownerIsMe,
+    isWatching: !!seed.assigneeIsMe,
   };
 }
 
@@ -826,8 +826,8 @@ export function createMockCsmEngagement(
     accountId: input.accountId,
     projectId: input.projectId,
     projectName: input.projectName,
-    ownerName: input.ownerName ?? CURRENT_USER.name,
-    ownerIsMe: !input.ownerId || input.ownerId === CURRENT_USER.id,
+    assigneeName: input.assigneeName ?? CURRENT_USER.name,
+    assigneeIsMe: !input.ownerId || input.ownerId === CURRENT_USER.id,
     deliveryMode: input.deliveryMode,
     plannedStartDate: input.plannedStartDate,
     plannedEndDate: input.plannedEndDate,
@@ -851,7 +851,7 @@ export function patchMockCsmEngagement(
   patch: Partial<
     Pick<
       CsmEngagementDetail,
-      "state" | "stage" | "ownerName" | "ownerId" | "plannedEndDate" | "isWatching"
+      "state" | "stage" | "assigneeName" | "ownerId" | "plannedEndDate" | "isWatching"
     >
   >,
 ): CsmEngagementDetail | null {
@@ -869,7 +869,7 @@ export function patchMockCsmEngagement(
       ...ROWS[rowIdx],
       state: next.state,
       stage: next.stage,
-      ownerName: next.ownerName,
+      assigneeName: next.assigneeName,
       ownerId: next.ownerId,
       plannedEndDate: next.plannedEndDate,
       updatedAt: next.updatedAt,

@@ -36,6 +36,7 @@ import {
 import DOMPurify from "dompurify";
 import { useMemo, useState, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
+import { formatBytes } from "@utils/formatBytes";
 import type {
   CsmEngagementAttachment,
   CsmEngagementAuditEntry,
@@ -81,12 +82,6 @@ const AUDIT_ICON: Partial<Record<CsmEngagementAuditKind, JSX.Element>> = {
   attachment_added: <Paperclip size={14} />,
   case_linked: <LinkIcon size={14} />,
 };
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function initials(name: string): string {
   return name

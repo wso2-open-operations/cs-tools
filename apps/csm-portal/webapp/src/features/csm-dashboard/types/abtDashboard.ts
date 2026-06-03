@@ -61,7 +61,7 @@ export interface CsmSlaAtRiskCase {
   subject: string;
   customer: string;
   severity: Severity;
-  owner: string;
+  assignee: string;
   slaClockType: SlaClockType;
   minutesToBreach: number;
   state: CaseState;

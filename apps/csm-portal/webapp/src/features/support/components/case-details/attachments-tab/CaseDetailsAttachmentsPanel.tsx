@@ -246,13 +246,13 @@ export default function CaseDetailsAttachmentsPanel({
               <AttachmentsListSkeleton />
             ) : (
               paginatedAttachments.map((att) => {
-                const isOwner =
+                const isUploader =
                   currentUserEmail &&
                   att.createdBy?.trim().toLowerCase() === currentUserEmail;
-                const deleteDisabled = isCaseClosed || !isOwner;
+                const deleteDisabled = isCaseClosed || !isUploader;
                 const deleteTooltip = isCaseClosed
                   ? undefined
-                  : !isOwner
+                  : !isUploader
                     ? "Only the uploader can delete this attachment"
                     : undefined;
                 return (
@@ -263,7 +263,7 @@ export default function CaseDetailsAttachmentsPanel({
                     onDelete={handleDeleteClick}
                     deleteDisabled={deleteDisabled}
                     deleteTooltip={deleteTooltip}
-                    onEdit={isCaseClosed || !isOwner ? undefined : handleEditClick}
+                    onEdit={isCaseClosed || !isUploader ? undefined : handleEditClick}
                     hideDescription
                     isDownloadLoading={isDownloading && downloadingId === att.id}
                   />

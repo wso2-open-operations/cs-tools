@@ -26,8 +26,6 @@ import {
 interface ErrorPageContextType {
   isErrorPageDisplayed: boolean;
   setIsErrorPageDisplayed: (isDisplayed: boolean) => void;
-  isProjectSuspended: boolean;
-  setIsProjectSuspended: (isSuspended: boolean) => void;
 }
 
 const ErrorPageContext = createContext<ErrorPageContextType | undefined>(undefined);
@@ -50,16 +48,13 @@ export function ErrorPageProvider({
   children,
 }: ErrorPageProviderProps): JSX.Element {
   const [isErrorPageDisplayed, setIsErrorPageDisplayed] = useState(false);
-  const [isProjectSuspended, setIsProjectSuspended] = useState(false);
 
   const value = useMemo(
     () => ({
       isErrorPageDisplayed,
       setIsErrorPageDisplayed,
-      isProjectSuspended,
-      setIsProjectSuspended,
     }),
-    [isErrorPageDisplayed, isProjectSuspended],
+    [isErrorPageDisplayed],
   );
 
   return (
@@ -68,4 +63,3 @@ export function ErrorPageProvider({
     </ErrorPageContext.Provider>
   );
 }
-

@@ -25,6 +25,7 @@ import {
   formatTimeToBreach,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
 import type { CsmQueueSummary } from "@features/csm-dashboard/types/abtDashboard";
 
 interface MyQueueSectionProps {
@@ -103,25 +104,25 @@ export default function MyQueueSection({
         <StatPill
           label="Action required"
           value={isLoading ? "—" : (queue?.actionRequiredCount ?? 0)}
-          href={casesHref({ owner: "me", states: ["open", "reopen"] })}
+          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN], states: ["open", "reopen"] })}
           onNavigate={go}
         />
         <StatPill
           label="In progress"
           value={isLoading ? "—" : (queue?.inProgressCount ?? 0)}
-          href={casesHref({ owner: "me", states: ["work_in_progress"] })}
+          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN], states: ["work_in_progress"] })}
           onNavigate={go}
         />
         <StatPill
           label="Awaiting info"
           value={isLoading ? "—" : (queue?.awaitingInfoCount ?? 0)}
-          href={casesHref({ owner: "me", states: ["awaiting_info"] })}
+          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN], states: ["awaiting_info"] })}
           onNavigate={go}
         />
         <StatPill
           label="Total open"
           value={isLoading ? "—" : (queue?.totalOpenCount ?? 0)}
-          href={casesHref({ owner: "me" })}
+          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN] })}
           onNavigate={go}
         />
       </Box>

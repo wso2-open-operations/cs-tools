@@ -65,6 +65,13 @@ export interface CsmAccountRow {
   name: string;
   tier: CsmProjectTier;
   status: CsmProjectStatus;
+  /** WSO2-side sales / account-management contact for this customer. */
+  accountManager?: string;
+  /**
+   * WSO2-side sales-engineering contact responsible for the technical
+   * relationship. Not a customer-side contact — that role is "Primary Contact".
+   */
+  technicalOwner?: string;
   projectCount: number;
   openCaseCount: number;
   s0s1Count: number;

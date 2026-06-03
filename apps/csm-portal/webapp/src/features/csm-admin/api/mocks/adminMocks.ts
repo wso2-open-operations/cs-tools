@@ -30,7 +30,7 @@ const SEED_PERMISSIONS: CsmPermission[] = [
   { id: "perm.cases.view_all", name: "View all cases", description: "Read access to every customer's cases.", category: "cases" },
   { id: "perm.cases.comment", name: "Comment on cases", description: "Reply on the case comment trail.", category: "cases" },
   { id: "perm.cases.edit_state", name: "Change case state", description: "Move cases between open / WIP / awaiting / closed.", category: "cases" },
-  { id: "perm.cases.reassign", name: "Reassign cases", description: "Change a case's owner to another engineer.", category: "cases" },
+  { id: "perm.cases.reassign", name: "Reassign cases", description: "Change a case's assignee to another engineer.", category: "cases" },
   { id: "perm.cases.create", name: "Create case on behalf of customer", description: "Open a case in a customer's name from inside the portal.", category: "cases" },
 
   { id: "perm.projects.view", name: "View projects", description: "Read project records and metadata.", category: "projects" },
@@ -291,7 +291,7 @@ const SEED_ROLES: CsmRole[] = [
   {
     id: "role.sales_engineer",
     name: "Sales Engineer",
-    description: "Technical owner of a set of customer accounts.",
+    description: "Technical contact for a set of customer accounts.",
     builtIn: true,
     permissionIds: [
       "perm.cases.view_all",

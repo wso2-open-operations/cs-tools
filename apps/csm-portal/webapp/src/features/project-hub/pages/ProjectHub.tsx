@@ -42,7 +42,6 @@ import { ChevronUp, FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import SearchNoResultsIcon from "@components/empty-state/SearchNoResultsIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
-import AccountSuspendedPage from "@/components/access-control/AccountSuspendedPage";
 import {
   PROJECT_HUB_EMPTY_DEFAULT_SUBTITLE,
   PROJECT_HUB_EMPTY_DEFAULT_TITLE,
@@ -56,7 +55,6 @@ import {
   PROJECT_HUB_SEARCH_PLACEHOLDER,
 } from "@features/project-hub/constants/projectHubConstants";
 import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
-import { ProjectClosureState } from "@/types/permission";
 import {
   resolveProjectHubContentView,
   resolveProjectHubHeaderSubtitle,
@@ -147,52 +145,14 @@ export default function ProjectHub(): JSX.Element {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEffect(() => {
-    const allLoadedAreSuspended =
-      projects.length > 0 &&
-      debouncedSearchQuery === "" &&
-      projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
-    if (allLoadedAreSuspended && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [
-    projects,
-    debouncedSearchQuery,
-    hasNextPage,
-    isFetchingNextPage,
-    fetchNextPage,
-  ]);
-
-  useEffect(() => {
     if (isLoading) {
       showLoader();
       return () => hideLoader();
     }
   }, [isLoading, showLoader, hideLoader]);
 
-  const isCheckingAllSuspended =
-    !isLoading &&
-    !isError &&
-    projects.length > 0 &&
-    !debouncedSearchQuery &&
-    hasNextPage === true &&
-    projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
-
-  const allProjectsSuspended =
-    !isLoading &&
-    !isError &&
-    projects.length > 0 &&
-    debouncedSearchQuery === "" &&
-    hasNextPage === false &&
-    !isFetchingNextPage &&
-    projects.every((p) => p.closureState === ProjectClosureState.SUSPENDED);
-
   const isRedirectingToSingleProject =
-    !isLoading &&
-    !isError &&
-    projects.length === 1 &&
-    !searchQuery &&
-    !allProjectsSuspended &&
-    !isCheckingAllSuspended;
+    !isLoading && !isError && projects.length === 1 && !searchQuery;
 
   useEffect(() => {
     if (isRedirectingToSingleProject) {
@@ -230,16 +190,8 @@ export default function ProjectHub(): JSX.Element {
         isLoading,
         isError,
         projects.length,
-        isCheckingAllSuspended,
       ),
-    [
-      false,
-      isCheckingAllSuspended,
-      isError,
-      isLoading,
-      isRedirectingToSingleProject,
-      projects.length,
-    ],
+    [isError, isLoading, isRedirectingToSingleProject, projects.length],
   );
 
   const showSearchBar = shouldShowProjectHubSearchBar(
@@ -462,10 +414,6 @@ export default function ProjectHub(): JSX.Element {
         return null;
     }
   };
-
-  if (allProjectsSuspended) {
-    return <AccountSuspendedPage />;
-  }
 
   return (
     <Box

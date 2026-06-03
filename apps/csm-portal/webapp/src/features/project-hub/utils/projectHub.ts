@@ -25,11 +25,10 @@ import { ProjectHubContentView } from "@features/project-hub/types/projectHub";
  * Resolves which main content block to render under the hub header.
  *
  * @param isRedirectingToSingleProject - Auto-redirect when exactly one project and no search.
- * @param false - Asgardeo still loading.
+ * @param isAuthLoading - SSO session still loading.
  * @param isLoading - Projects query loading.
  * @param isError - Projects query failed.
  * @param projectsLength - Length of the current flattened projects list.
- * @param isCheckingAllSuspended - Background-paginating to confirm all projects are suspended.
  * @returns {ProjectHubContentView} View id for the hub body.
  */
 export function resolveProjectHubContentView(
@@ -38,7 +37,6 @@ export function resolveProjectHubContentView(
   isLoading: boolean,
   isError: boolean,
   projectsLength: number,
-  isCheckingAllSuspended: boolean = false,
 ): ProjectHubContentView {
   if (isRedirectingToSingleProject) {
     return ProjectHubContentView.REDIRECT_LOADER;
@@ -46,7 +44,7 @@ export function resolveProjectHubContentView(
   if (isAuthLoading) {
     return ProjectHubContentView.AUTH_PENDING;
   }
-  if (isLoading || isCheckingAllSuspended) {
+  if (isLoading) {
     return ProjectHubContentView.LOADING_SKELETONS;
   }
   if (isError) {

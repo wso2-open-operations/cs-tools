@@ -61,8 +61,8 @@ import {
   PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
 } from "@features/project-details/constants/projectDetailsConstants";
 import {
-  DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER,
-  DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER,
+  DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_UPLOADER,
+  DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_UPLOADER,
 } from "@features/support/constants/supportConstants";
 import type {
   DeploymentDocumentListProps,
@@ -287,7 +287,7 @@ function DocumentRow({
     doc.uploadedBy ?? doc.createdBy,
     PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
   );
-  const isOwner = Boolean(
+  const isUploader = Boolean(
     currentUserEmail &&
       doc.createdBy?.trim().toLowerCase() === currentUserEmail,
   );
@@ -441,9 +441,9 @@ function DocumentRow({
 
         {/* action buttons — always in a single row beside the content */}
         <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0, alignItems: "center" }}>
-          {!isOwner ? (
+          {!isUploader ? (
             <Tooltip
-              title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER}
+              title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_UPLOADER}
               arrow
             >
               <span>
@@ -467,9 +467,9 @@ function DocumentRow({
               <PencilLine size={16} aria-hidden />
             </IconButton>
           )}
-          {!isOwner ? (
+          {!isUploader ? (
             <Tooltip
-              title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER}
+              title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_UPLOADER}
               arrow
             >
               <span>

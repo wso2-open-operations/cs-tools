@@ -91,6 +91,13 @@ export const ApiQueryKeys = {
   CSM_ENGAGEMENTS: "csm-engagements",
   CSM_ENGAGEMENT_DETAIL: "csm-engagement-detail",
   CSM_ENGAGEMENT_COMMENTS: "csm-engagement-comments",
+  // backend direct query keys (do not collide with the CSM-native keys above)
+  BACKEND_PROJECT_CASES_SEARCH: "backend-project-cases-search",
+  BACKEND_USERS_SEARCH: "backend-users-search",
+  BACKEND_USERS_ME: "backend-users-me",
+  BACKEND_PRODUCTS_SEARCH: "backend-products-search",
+  BACKEND_PRODUCT_VERSIONS_SEARCH: "backend-product-versions-search",
+  BACKEND_DEPLOYMENT_PRODUCTS_SEARCH: "backend-deployment-products-search",
 } as const;
 
 // Constants for API-related mutation keys.

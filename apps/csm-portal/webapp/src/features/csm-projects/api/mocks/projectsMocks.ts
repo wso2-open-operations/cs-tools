@@ -28,6 +28,10 @@ interface ProjectMetaSeed {
   productType: string;
   status: CsmProjectStatus;
   updateLevel: string;
+  /** WSO2-side sales / account-management contact (the "Account Manager"). */
+  accountManager: string;
+  /** WSO2-side sales-engineering contact (the "Technical Owner"). */
+  technicalOwner: string;
 }
 
 const PROJECT_META: Record<string, ProjectMetaSeed> = {
@@ -36,72 +40,98 @@ const PROJECT_META: Record<string, ProjectMetaSeed> = {
     productType: "Identity Server",
     status: "Active",
     updateLevel: "IS-7.0.0 / U231",
+    accountManager: "Erin Walters",
+    technicalOwner: "Sanjay K.",
+    // NOTE: Sanjay K. is a project-level override (see contactsMocks). Other
+    // Acme projects fall back to the account-level TO (Naveen P.).
   },
   "prj-acme-openbanking": {
     tier: "Platinum",
     productType: "Open Banking",
     status: "Active",
     updateLevel: "OB-4.0.0 / U118",
+    accountManager: "Erin Walters",
+    technicalOwner: "Naveen P.",
   },
   "prj-initech-apim": {
     tier: "Platinum",
     productType: "API Manager",
     status: "Active",
     updateLevel: "APIM-4.3.0 / U92",
+    accountManager: "Sashika H.",
+    technicalOwner: "Chathura D.",
   },
   "prj-initech-mi": {
     tier: "Platinum",
     productType: "Micro Integrator",
     status: "Active",
     updateLevel: "MI-4.3.0 / U67",
+    accountManager: "Sashika H.",
+    technicalOwner: "Chathura D.",
   },
   "prj-initech-si": {
     tier: "Platinum",
     productType: "Streaming Integrator",
     status: "Active",
     updateLevel: "SI-4.2.0 / U43",
+    accountManager: "Sashika H.",
+    technicalOwner: "Chathura D.",
   },
   "prj-initech-choreo": {
     tier: "Platinum",
     productType: "Choreo",
     status: "Active",
     updateLevel: "Choreo Cloud",
+    accountManager: "Sashika H.",
+    technicalOwner: "Chathura D.",
   },
   "prj-umbrella-choreo": {
     tier: "Gold",
     productType: "Choreo",
     status: "Active",
     updateLevel: "Choreo Cloud",
+    accountManager: "Anya Kovac",
+    technicalOwner: "Dilshan A.",
   },
   "prj-umbrella-asgardeo": {
     tier: "Gold",
     productType: "Asgardeo",
     status: "Active",
     updateLevel: "Asgardeo Cloud",
+    accountManager: "Anya Kovac",
+    technicalOwner: "Dilshan A.",
   },
   "prj-globex-choreo": {
     tier: "Gold",
     productType: "Choreo",
     status: "Active",
     updateLevel: "Choreo Cloud",
+    accountManager: "Bilal R.",
+    technicalOwner: "Ramesh M.",
   },
   "prj-globex-iam": {
     tier: "Gold",
     productType: "Identity Server",
     status: "Active",
     updateLevel: "IS-6.1.0 / U195",
+    accountManager: "Bilal R.",
+    technicalOwner: "Ramesh M.",
   },
   "prj-soylent-apim": {
     tier: "Silver",
     productType: "API Manager",
     status: "Active",
     updateLevel: "APIM-4.2.0 / U88",
+    accountManager: "Tom Marvolo",
+    technicalOwner: "Ishara K.",
   },
   "prj-soylent-iam": {
     tier: "Silver",
     productType: "Identity Server",
     status: "Onboarding",
     updateLevel: "IS-7.0.0 / U231",
+    accountManager: "Tom Marvolo",
+    technicalOwner: "Ishara K.",
   },
   // All-customer extras (only visible at scope=all_customers via the cases mocks)
   "prj-wayne-openbanking": {
@@ -109,24 +139,32 @@ const PROJECT_META: Record<string, ProjectMetaSeed> = {
     productType: "Open Banking",
     status: "Active",
     updateLevel: "OB-4.0.0 / U118",
+    accountManager: "Erin Walters",
+    technicalOwner: "Naveen P.",
   },
   "prj-stark-choreo": {
     tier: "Gold",
     productType: "Choreo",
     status: "Active",
     updateLevel: "Choreo Cloud",
+    accountManager: "Sashika H.",
+    technicalOwner: "Asanka R.",
   },
   "prj-stark-iam": {
     tier: "Gold",
     productType: "Identity Server",
     status: "Active",
     updateLevel: "IS-7.0.0 / U231",
+    accountManager: "Sashika H.",
+    technicalOwner: "Asanka R.",
   },
   "prj-tyrell-apim": {
     tier: "Silver",
     productType: "API Manager",
     status: "Suspended",
     updateLevel: "APIM-4.1.0 / U54",
+    accountManager: "Tom Marvolo",
+    technicalOwner: "Ishara K.",
   },
 };
 
@@ -135,6 +173,8 @@ const FALLBACK_META: ProjectMetaSeed = {
   productType: "—",
   status: "Active",
   updateLevel: "—",
+  accountManager: "—",
+  technicalOwner: "—",
 };
 
 interface Aggregates {
@@ -211,6 +251,8 @@ export function getMockCsmProjects(
       productType: meta.productType,
       status: meta.status,
       updateLevel: meta.updateLevel,
+      accountManager: meta.accountManager,
+      technicalOwner: meta.technicalOwner,
       openCaseCount: agg.openCaseCount,
       s0s1Count: agg.s0s1Count,
       breachedCount: agg.breachedCount,

@@ -49,7 +49,7 @@ const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
   { label: "Type" },
   { label: "State" },
   { label: "Customer" },
-  { label: "Owner" },
+  { label: "Assignee" },
   { label: "Health" },
   { label: "Timeline", align: "right" },
   { label: "Progress", align: "right" },
@@ -191,7 +191,7 @@ export default function EngagementsList({
                 {e.customer}
               </Typography>
               <Typography variant="body2" noWrap>
-                {e.ownerIsMe ? <strong>{e.ownerName}</strong> : e.ownerName}
+                {e.assigneeIsMe ? <strong>{e.assigneeName}</strong> : e.assigneeName}
               </Typography>
               <Box sx={{ display: "flex", justifyContent: "center" }}>
                 {e.health ? (

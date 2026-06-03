@@ -35,7 +35,7 @@ export interface PatchCsmEngagementVariables {
   /** Or pass an explicit state to set. */
   state?: CsmEngagementState;
   ownerId?: string;
-  ownerName?: string;
+  assigneeName?: string;
   plannedEndDate?: string;
   isWatching?: boolean;
 }
@@ -64,7 +64,7 @@ export function usePatchCsmEngagement(): UseMutationResult<
       const patch = {
         state: vars.state ?? (vars.action ? ACTION_TO_STATE[vars.action] : undefined),
         ownerId: vars.ownerId,
-        ownerName: vars.ownerName,
+        assigneeName: vars.assigneeName,
         plannedEndDate: vars.plannedEndDate,
         isWatching: vars.isWatching,
       };

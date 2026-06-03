@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { useNavigate } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
 import type { SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
@@ -64,6 +65,7 @@ export default function CsmProjectsPage(): JSX.Element {
   );
 
   const { data, isLoading, isFetching, isError, error } = useSearchProjects(request);
+  const navigate = useNavigate();
 
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
     setSearchInput(e.target.value);
@@ -132,7 +134,14 @@ export default function CsmProjectsPage(): JSX.Element {
                 </TableRow>
               ) : (
                 projects.map((p) => (
-                  <TableRow key={p.id} hover>
+                  <TableRow
+                    key={p.id}
+                    hover
+                    onClick={() => navigate(`/projects/${p.id}`)}
+                    sx={{ cursor: "pointer" }}
+                    role="link"
+                    aria-label={`Open ${p.name}`}
+                  >
                     <TableCell>{p.name}</TableCell>
                     <TableCell>{p.projectKey}</TableCell>
                     <TableCell>
