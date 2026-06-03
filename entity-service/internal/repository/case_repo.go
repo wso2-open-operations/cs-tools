@@ -40,6 +40,9 @@ type CaseRepository interface {
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.Case, int, error)
 	// CreateCaseComment inserts a new comment row for the given case.
 	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error)
+	// SearchCaseComments returns a paginated slice of comments for the given case
+	// together with the total count of matching rows before pagination.
+	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
 }
 
 type caseRepo struct {
@@ -113,6 +116,57 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 		return domain.CaseComment{}, fmt.Errorf("create case comment: %w", err)
 	}
 	return c, nil
+}
+
+// SearchCaseComments implements CaseRepository.
+func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+	const countQuery = `SELECT COUNT(*) FROM case_comments WHERE case_id = $1`
+	const dataQuery = `
+		SELECT id, case_id, comment_type, body, created_by, created_at
+		FROM case_comments
+		WHERE case_id = $1
+		ORDER BY created_at DESC, id
+		LIMIT $2 OFFSET $3`
+
+	var total int
+	var comments []domain.CaseComment
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		if err := r.db.QueryRow(egCtx, countQuery, req.CaseID).Scan(&total); err != nil {
+			return fmt.Errorf("count case comments: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		rows, err := r.db.Query(egCtx, dataQuery, req.CaseID, req.Pagination.Limit, req.Pagination.Offset)
+		if err != nil {
+			return fmt.Errorf("query case comments: %w", err)
+		}
+		defer rows.Close()
+
+		result := make([]domain.CaseComment, 0, req.Pagination.Limit)
+		for rows.Next() {
+			var c domain.CaseComment
+			if err := rows.Scan(&c.ID, &c.CaseID, &c.CommentType, &c.Body, &c.CreatedBy, &c.CreatedAt); err != nil {
+				return fmt.Errorf("scan case comment: %w", err)
+			}
+			result = append(result, c)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate case comments: %w", err)
+		}
+		comments = result
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
+	}
+
+	return comments, total, nil
 }
 
 // SearchCases implements CaseRepository.
