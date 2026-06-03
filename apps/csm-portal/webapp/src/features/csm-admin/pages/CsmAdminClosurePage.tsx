@@ -27,6 +27,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /** Subscription Closure Management — BRD §Subscription Closure Management. */
 interface ClosureRow {
@@ -60,6 +62,8 @@ function stageColor(s: ClosureRow["stage"]): "primary" | "info" | "warning" | "s
 }
 
 export default function CsmAdminClosurePage(): JSX.Element {
+  if (!isMockMode())
+    return <AdminTabEmpty resource="subscription closures" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">

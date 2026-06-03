@@ -27,6 +27,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /** Service Request catalog — items the customer can pick from when raising an SR. */
 interface CatalogRow {
@@ -61,6 +63,7 @@ function catColor(c: CatalogRow["category"]): "primary" | "info" | "success" | "
 }
 
 export default function CsmAdminCatalogPage(): JSX.Element {
+  if (!isMockMode()) return <AdminTabEmpty resource="service catalog items" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">

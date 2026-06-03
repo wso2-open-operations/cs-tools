@@ -28,6 +28,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /**
  * Mocked Teams view. Per BRD §Team Management — teams group engineers by
@@ -70,6 +72,7 @@ function functionColor(fn: TeamRow["function"]): "primary" | "info" | "success" 
 }
 
 export default function CsmAdminTeamsPage(): JSX.Element {
+  if (!isMockMode()) return <AdminTabEmpty resource="teams" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">

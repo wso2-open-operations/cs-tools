@@ -27,6 +27,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /** Reports — BRD §Reports. */
 interface ReportRow {
@@ -61,6 +63,7 @@ function catColor(c: ReportRow["category"]): "primary" | "info" | "success" | "w
 }
 
 export default function CsmAdminReportsPage(): JSX.Element {
+  if (!isMockMode()) return <AdminTabEmpty resource="reports" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">

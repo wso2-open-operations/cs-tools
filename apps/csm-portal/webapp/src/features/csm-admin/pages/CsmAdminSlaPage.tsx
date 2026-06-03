@@ -27,6 +27,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /** SLA / Policy Management — BRD §SLA / Policy Management. */
 interface SlaRow {
@@ -75,6 +77,7 @@ function sevColor(s: SlaRow["severity"]): "error" | "warning" | "info" | "succes
 }
 
 export default function CsmAdminSlaPage(): JSX.Element {
+  if (!isMockMode()) return <AdminTabEmpty resource="SLA policies" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">

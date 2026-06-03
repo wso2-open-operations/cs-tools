@@ -29,6 +29,8 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { isMockMode } from "@api/backend/client";
+import AdminTabEmpty from "@features/csm-admin/components/AdminTabEmpty";
 
 /** Skill Management — BRD §Skill management. Feeds case routing. */
 interface SkillRow {
@@ -54,6 +56,7 @@ const SKILLS: SkillRow[] = [
 ];
 
 export default function CsmAdminSkillsPage(): JSX.Element {
+  if (!isMockMode()) return <AdminTabEmpty resource="skills" />;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Card variant="outlined">
