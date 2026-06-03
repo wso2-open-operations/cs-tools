@@ -9,14 +9,14 @@ CREATE TABLE case_comments (
   case_id      UUID NOT NULL REFERENCES cases(id),
   comment_type comment_type_enum NOT NULL,
   body         TEXT NOT NULL,
-  created_by   UUID NOT NULL REFERENCES users(id),
+  created_by   TEXT NOT NULL REFERENCES users(id),
   created_at   TIMESTAMP DEFAULT NOW()
 );
 
 -- This function checks if a user has one of the allowed user types. It can be used in triggers or other functions to enforce access control based on user type.
 
 CREATE OR REPLACE FUNCTION assert_user_type(
-  p_user_id   UUID,
+  p_user_id   TEXT,
   p_allowed   user_type_enum[],
   p_context   TEXT
 )
