@@ -32,6 +32,8 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   states: [],
   sla: "any",
   owner: "anyone",
+  customers: [],
+  projects: [],
 };
 
 const VALID_SCOPES: DashboardScope[] = ["my_abt", "all_customers"];
@@ -56,6 +58,19 @@ function parseCsv<T extends string>(raw: string | null, allowed: T[]): T[] {
     .filter((s): s is T => (allowed as string[]).includes(s));
 }
 
+/**
+ * Parse a CSV of free-form strings (used for customer / project names that
+ * aren't part of a fixed enum). Empties stripped, length-capped per entry
+ * to avoid pathological URL growth.
+ */
+function parseFreeFormCsv(raw: string | null, maxEntryLen = 120): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.length <= maxEntryLen);
+}
+
 function parseEnum<T extends string>(
   raw: string | null,
   allowed: T[],
@@ -74,6 +89,8 @@ export function readCasesFiltersFromUrl(
     states: parseCsv(params.get("states"), VALID_STATES),
     sla: parseEnum(params.get("sla"), VALID_SLA, "any"),
     owner: parseEnum(params.get("owner"), VALID_OWNERS, "anyone"),
+    customers: parseFreeFormCsv(params.get("customers")),
+    projects: parseFreeFormCsv(params.get("projects")),
   };
 }
 
@@ -89,6 +106,8 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.states.length) out.set("states", f.states.join(","));
   if (f.sla !== "any") out.set("sla", f.sla);
   if (f.owner !== "anyone") out.set("owner", f.owner);
+  if (f.customers.length) out.set("customers", f.customers.join(","));
+  if (f.projects.length) out.set("projects", f.projects.join(","));
   return out;
 }
 

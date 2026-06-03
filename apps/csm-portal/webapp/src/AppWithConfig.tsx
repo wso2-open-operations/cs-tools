@@ -23,6 +23,7 @@ import { AsgardeoProvider } from "@asgardeo/react";
 import { themeConfig } from "@config/themeConfig";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
+import { MockModeProvider } from "@context/mock-mode/MockModeContext";
 import { authConfig } from "@config/authConfig";
 
 // React-Query devtools ship from a devDependency and must not enter the
@@ -88,12 +89,14 @@ export default function AppWithConfig(): JSX.Element {
         <LoggerProvider config={loggerConfig}>
           <OxygenUIThemeProvider theme={themeConfig}>
             <QueryClientProvider client={queryClient}>
-              <App />
-              {ReactQueryDevtools && (
-                <Suspense fallback={null}>
-                  <ReactQueryDevtools initialIsOpen={false} />
-                </Suspense>
-              )}
+              <MockModeProvider>
+                <App />
+                {ReactQueryDevtools && (
+                  <Suspense fallback={null}>
+                    <ReactQueryDevtools initialIsOpen={false} />
+                  </Suspense>
+                )}
+              </MockModeProvider>
             </QueryClientProvider>
           </OxygenUIThemeProvider>
         </LoggerProvider>

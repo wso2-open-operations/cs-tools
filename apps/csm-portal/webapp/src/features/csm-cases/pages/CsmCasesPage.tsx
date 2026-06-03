@@ -16,7 +16,7 @@
 
 import { Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useEffect, useMemo, useRef, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import CasesFilterBar, {
@@ -46,6 +46,8 @@ function applyFilters(cases: CsmCaseRow[], f: CasesFilters): CsmCaseRow[] {
       return false;
     if (f.owner === "me" && !c.ownerIsMe) return false;
     if (f.owner === "unassigned" && c.owner !== "Unassigned") return false;
+    if (f.customers.length && !f.customers.includes(c.customer)) return false;
+    if (f.projects.length && !f.projects.includes(c.projectName)) return false;
     if (q) {
       const hay = `${c.caseNumber} ${c.subject} ${c.customer} ${c.projectName} ${c.owner}`.toLowerCase();
       if (!hay.includes(q)) return false;
@@ -80,6 +82,7 @@ export default function CsmCasesPage(): JSX.Element {
   const { data, isLoading, isError } = useGetCsmCases(filters.scope);
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
@@ -93,6 +96,24 @@ export default function CsmCasesPage(): JSX.Element {
     const list = data?.cases ?? [];
     return applyFilters(list, filters).slice().sort(sortBySlaUrgency);
   }, [data?.cases, filters]);
+
+  // Derive multi-select option lists from the cases currently in scope.
+  // Sorted and de-duplicated; cheap because the lists are small (~tens).
+  const availableCustomers = useMemo(() => {
+    const set = new Set<string>();
+    (data?.cases ?? []).forEach((c) => {
+      if (c.customer) set.add(c.customer);
+    });
+    return Array.from(set).sort();
+  }, [data?.cases]);
+
+  const availableProjects = useMemo(() => {
+    const set = new Set<string>();
+    (data?.cases ?? []).forEach((c) => {
+      if (c.projectName) set.add(c.projectName);
+    });
+    return Array.from(set).sort();
+  }, [data?.cases]);
 
   const totalAvailable = data?.cases.length ?? 0;
   const breachedCount = filtered.filter((c) => c.minutesToBreach < 0 && c.state !== "closed").length;
@@ -151,6 +172,10 @@ export default function CsmCasesPage(): JSX.Element {
         onReset={() =>
           setFilters({ ...DEFAULT_CASES_FILTERS, scope: filters.scope })
         }
+        isFiltersOpen={isFiltersOpen}
+        onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
+        availableCustomers={availableCustomers}
+        availableProjects={availableProjects}
       />
 
       <CasesList cases={filtered} isLoading={isLoading} />
