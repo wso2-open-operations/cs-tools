@@ -1538,6 +1538,8 @@ public type ChangeRequestSearchPayload record {|
         int[] stateKeys?;
         # Change request impact key
         int impactKey?;
+        # Change request impact keys
+        int[] impactKeys?;
         # Start date for closed date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
         entity:UtcDateTimeString closedStartDate?;
         # End date for closed date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)

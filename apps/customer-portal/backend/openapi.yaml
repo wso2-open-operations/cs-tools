@@ -4000,6 +4000,12 @@ components:
               type: integer
               description: Change request impact key
               format: int64
+            impactKeys:
+              type: array
+              description: Change request impact keys
+              items:
+                type: integer
+                format: int64
             closedStartDate:
               $ref: '#/components/schemas/UtcDateTimeString'
             closedEndDate:
@@ -4742,7 +4748,7 @@ components:
           description: Response result
       description: Deployment usage import response.
     Email:
-      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}$"
+      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
       type: string
       description: Email validation regex pattern.
     ErrorPayload:

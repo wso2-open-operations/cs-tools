@@ -4194,6 +4194,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                         searchQuery: payload.filters?.searchQuery,
                         stateKeys: payload.filters?.stateKeys,
                         impactKey: payload.filters?.impactKey,
+                        impactKeys: payload.filters?.impactKeys,
                         closedStartDate: payload.filters?.closedStartDate,
                         closedEndDate: payload.filters?.closedEndDate
                     },
