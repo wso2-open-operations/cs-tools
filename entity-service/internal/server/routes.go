@@ -67,6 +67,7 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 	mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
+	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)

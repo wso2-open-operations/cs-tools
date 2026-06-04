@@ -40,6 +40,9 @@ type AccountService interface {
 	// in req. A ValidationError is returned for invalid input; any other error
 	// indicates an infrastructure failure.
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchAccountsResponse, error)
+	// GetAccountByID returns the account with the given UUID. A ValidationError is
+	// returned for a malformed UUID; a NotFoundError if no account matches.
+	GetAccountByID(ctx context.Context, id string) (domain.Account, error)
 }
 
 // ProjectService defines the operations available on the project entity.
