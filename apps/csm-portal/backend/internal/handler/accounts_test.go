@@ -24,6 +24,75 @@ import (
 	"testing"
 )
 
+func TestGetAccount(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := httptest.NewRequest(http.MethodGet, "/accounts/acc-1", nil)
+		r.SetPathValue("id", "acc-1")
+		w := httptest.NewRecorder()
+		h.GetAccount(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty account ID", func(t *testing.T) {
+		h := NewAccountHandler(&mockEntityAccountClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/accounts/", nil))
+		w := httptest.NewRecorder()
+		h.GetAccount(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("passes ID to upstream and returns 200 with response", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityAccountClient{
+			getAccountFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"id":"acc-42","name":"WSO2"}`), nil
+			},
+		}
+		h := NewAccountHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/accounts/acc-42", nil))
+		r.SetPathValue("id", "acc-42")
+		w := httptest.NewRecorder()
+		h.GetAccount(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != "acc-42" {
+			t.Errorf("upstream received id %q, want %q", capturedID, "acc-42")
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["id"] != "acc-42" {
+			t.Errorf("response id = %v, want acc-42", resp["id"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to retrieve account.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityAccountClient{
+					getAccountFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewAccountHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/accounts/acc-1", nil))
+				r.SetPathValue("id", "acc-1")
+				w := httptest.NewRecorder()
+				h.GetAccount(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchAccounts(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewAccountHandler(&mockEntityAccountClient{})

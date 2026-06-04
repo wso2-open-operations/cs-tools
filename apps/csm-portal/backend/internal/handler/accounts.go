@@ -28,6 +28,7 @@ import (
 
 // entityAccountClient abstracts the entity service account operations used by AccountHandler.
 type entityAccountClient interface {
+	GetAccount(ctx context.Context, id string) ([]byte, error)
 	SearchAccounts(ctx context.Context, body []byte) ([]byte, error)
 }
 
@@ -40,6 +41,30 @@ type AccountHandler struct {
 // NewAccountHandler creates an AccountHandler backed by the given entity client.
 func NewAccountHandler(entity entityAccountClient) *AccountHandler {
 	return &AccountHandler{entity: entity}
+}
+
+// GetAccount handles GET /accounts/{id}.
+func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.GetAccount(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetAccount failed", "userID", user.UserID, "accountID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve account.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SearchAccounts handles POST /accounts/search.

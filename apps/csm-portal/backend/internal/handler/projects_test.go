@@ -24,6 +24,75 @@ import (
 	"testing"
 )
 
+func TestGetProject(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := httptest.NewRequest(http.MethodGet, "/projects/proj-1", nil)
+		r.SetPathValue("id", "proj-1")
+		w := httptest.NewRecorder()
+		h.GetProject(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects/", nil))
+		w := httptest.NewRecorder()
+		h.GetProject(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("passes ID to upstream and returns 200 with response", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityProjectClient{
+			getProjectFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"id":"proj-42","name":"platform"}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects/proj-42", nil))
+		r.SetPathValue("id", "proj-42")
+		w := httptest.NewRecorder()
+		h.GetProject(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != "proj-42" {
+			t.Errorf("upstream received id %q, want %q", capturedID, "proj-42")
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["id"] != "proj-42" {
+			t.Errorf("response id = %v, want proj-42", resp["id"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to retrieve project.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProjectClient{
+					getProjectFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProjectHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/projects/proj-1", nil))
+				r.SetPathValue("id", "proj-1")
+				w := httptest.NewRecorder()
+				h.GetProject(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchProjects(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewProjectHandler(&mockEntityProjectClient{})

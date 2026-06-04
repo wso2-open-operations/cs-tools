@@ -28,6 +28,7 @@ import (
 
 // entityProjectClient abstracts the entity service project operations used by ProjectHandler.
 type entityProjectClient interface {
+	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchProjects(ctx context.Context, body []byte) ([]byte, error)
 }
 
@@ -40,6 +41,30 @@ type ProjectHandler struct {
 // NewProjectHandler creates a ProjectHandler backed by the given entity client.
 func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 	return &ProjectHandler{entity: entity}
+}
+
+// GetProject handles GET /projects/{id}.
+func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.GetProject(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProject failed", "userID", user.UserID, "projectID", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve project.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SearchProjects handles POST /projects/search.

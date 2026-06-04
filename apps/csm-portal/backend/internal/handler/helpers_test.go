@@ -193,7 +193,15 @@ func (m *mockEntityUserClient) SearchUsers(ctx context.Context, body []byte) ([]
 // ----- mock entity account client -----
 
 type mockEntityAccountClient struct {
+	getAccountFn     func(ctx context.Context, id string) ([]byte, error)
 	searchAccountsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityAccountClient) GetAccount(ctx context.Context, id string) ([]byte, error) {
+	if m.getAccountFn != nil {
+		return m.getAccountFn(ctx, id)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityAccountClient) SearchAccounts(ctx context.Context, body []byte) ([]byte, error) {
@@ -206,7 +214,15 @@ func (m *mockEntityAccountClient) SearchAccounts(ctx context.Context, body []byt
 // ----- mock entity project client -----
 
 type mockEntityProjectClient struct {
+	getProjectFn     func(ctx context.Context, id string) ([]byte, error)
 	searchProjectsFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityProjectClient) GetProject(ctx context.Context, id string) ([]byte, error) {
+	if m.getProjectFn != nil {
+		return m.getProjectFn(ctx, id)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityProjectClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
