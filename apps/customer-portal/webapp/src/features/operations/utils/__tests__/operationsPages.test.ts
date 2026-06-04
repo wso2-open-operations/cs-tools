@@ -163,13 +163,13 @@ describe("buildChangeRequestSearchRequest", () => {
 
   it("maps filters and search using allowed states from metadata", () => {
     const req = buildChangeRequestSearchRequest(
-      { stateId: "2", impactId: "1" },
+      { stateIds: ["2"], impactIds: ["1"] },
       " q ",
       false, false, false,
       allStates,
     );
     expect(req.filters?.stateKeys).toEqual([2]);
-    expect(req.filters?.impactKey).toBe(1);
+    expect(req.filters?.impactKeys).toEqual([1]);
     expect(req.filters?.searchQuery).toBe("q");
   });
 
@@ -227,7 +227,7 @@ describe("resolveChangeRequestFilterListOptions", () => {
     const options = resolveChangeRequestFilterListOptions(
       {
         id: ChangeRequestFilterDefinitionId.Impact,
-        filterKey: "impactId",
+        filterKey: "impactIds",
         metadataKey: "changeRequestImpacts",
       },
       {
@@ -242,7 +242,7 @@ describe("resolveChangeRequestFilterListOptions", () => {
     const options = resolveChangeRequestFilterListOptions(
       {
         id: ChangeRequestFilterDefinitionId.State,
-        filterKey: "stateId",
+        filterKey: "stateIds",
         metadataKey: "changeRequestStates",
       },
       {

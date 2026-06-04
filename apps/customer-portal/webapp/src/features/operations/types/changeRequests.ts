@@ -98,8 +98,8 @@ export type PatchChangeRequestResponse = AuditMetadata & {
 
 // Model type for change request filters state.
 export type ChangeRequestFilterValues = {
-  stateId?: string;
-  impactId?: string;
+  stateIds?: string[];
+  impactIds?: string[];
 };
 
 /** Change request list sort field for search API `sortBy.field`. */
@@ -110,7 +110,7 @@ export enum ChangeRequestSortField {
 
 // Filter type for searching change requests.
 export type ChangeRequestSearchFilters = {
-  impactKey?: number;
+  impactKeys?: number[];
   searchQuery?: string;
   stateKeys?: number[];
   closedStartDate?: string;
@@ -190,7 +190,7 @@ export type ChangeRequestsSearchBarProps = {
   onFiltersToggle: () => void;
   filters: ChangeRequestFilterValues;
   filterMetadata: CaseMetadataResponse | undefined;
-  onFilterChange: (field: string, value: string) => void;
+  onFilterChange: (field: string, value: string | string[]) => void;
   onClearFilters: () => void;
 };
 

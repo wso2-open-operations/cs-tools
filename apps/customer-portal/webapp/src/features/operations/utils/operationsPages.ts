@@ -207,7 +207,7 @@ export function buildChangeRequestSearchRequest(
   sortField: ChangeRequestSortField = ChangeRequestSortField.UpdatedOn,
   sortOrder: SortOrder = SortOrder.DESC,
 ): Omit<ChangeRequestSearchRequest, "pagination"> {
-  const selectedStateId = filters.stateId ? Number(filters.stateId) : undefined;
+  const selectedStateIds = filters.stateIds?.map(Number) ?? [];
   const resolvedIds = actionRequired
     ? resolveActionRequiredCrStateIds(changeRequestStates)
     : scheduledOnly
@@ -217,17 +217,17 @@ export function buildChangeRequestSearchRequest(
         : resolveAllowedCrStateIds(changeRequestStates);
   const allowedStateIds = resolvedIds ?? [];
   const stateKeys =
-    selectedStateId === undefined
+    selectedStateIds.length === 0
       ? allowedStateIds
-      : allowedStateIds.includes(selectedStateId)
-        ? [selectedStateId]
-        : [];
+      : selectedStateIds.filter((id) => allowedStateIds.includes(id));
+
+  const selectedImpactIds = filters.impactIds?.map(Number) ?? [];
 
   return {
     filters: {
       searchQuery: searchTerm.trim() || undefined,
       stateKeys,
-      impactKey: filters.impactId ? Number(filters.impactId) : undefined,
+      impactKeys: selectedImpactIds.length > 0 ? selectedImpactIds : undefined,
     },
     sortBy: {
       field: sortField,

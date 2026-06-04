@@ -183,16 +183,19 @@ export const CHANGE_REQUEST_FILTER_DEFINITIONS: Array<{
   filterKey: keyof ChangeRequestFilterValues;
   id: string;
   metadataKey: keyof CaseMetadataResponse;
+  multiSelect?: boolean;
 }> = [
   {
-    filterKey: "stateId",
+    filterKey: "stateIds",
     id: "state",
     metadataKey: "changeRequestStates",
+    multiSelect: true,
   },
   {
-    filterKey: "impactId",
+    filterKey: "impactIds",
     id: "impact",
     metadataKey: "changeRequestImpacts",
+    multiSelect: true,
   },
 ];
 
