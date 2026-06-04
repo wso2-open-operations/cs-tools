@@ -18,10 +18,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -32,6 +35,9 @@ type ProjectRepository interface {
 	// with the total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
 	SearchProjects(ctx context.Context, req domain.SearchProjectsRequest) ([]domain.Project, int, error)
+	// GetProjectByID returns the project with the given UUID, or a NotFoundError
+	// if no such project exists.
+	GetProjectByID(ctx context.Context, id string) (domain.Project, error)
 }
 
 type projectRepo struct {
@@ -117,4 +123,24 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 	}
 
 	return projects, total, nil
+}
+
+// GetProjectByID implements ProjectRepository.
+func (r *projectRepo) GetProjectByID(ctx context.Context, id string) (domain.Project, error) {
+	var p domain.Project
+	err := r.db.QueryRow(ctx,
+		`SELECT id, account_id, sf_id, name, project_key, subscription_type,
+		        start_date, end_date, created_at, updated_at
+		 FROM projects WHERE id = $1`, id,
+	).Scan(
+		&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.ProjectKey, &p.SubscriptionType,
+		&p.StartDate, &p.EndDate, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Project{}, &apierror.NotFoundError{Msg: "project not found"}
+	}
+	if err != nil {
+		return domain.Project{}, fmt.Errorf("get project by id: %w", err)
+	}
+	return p, nil
 }

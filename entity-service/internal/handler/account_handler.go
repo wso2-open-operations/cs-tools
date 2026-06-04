@@ -49,3 +49,15 @@ func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// GetAccount handles GET /accounts/{id}.
+func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	account, err := h.svc.GetAccountByID(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(account)
+}

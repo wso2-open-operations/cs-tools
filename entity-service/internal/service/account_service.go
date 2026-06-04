@@ -54,3 +54,11 @@ func (s *accountService) SearchAccounts(ctx context.Context, req domain.SearchAc
 		HasMore:  req.Pagination.Offset+len(accounts) < total,
 	}, nil
 }
+
+// GetAccountByID implements AccountService.
+func (s *accountService) GetAccountByID(ctx context.Context, id string) (domain.Account, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.Account{}, err
+	}
+	return s.repo.GetAccountByID(ctx, id)
+}

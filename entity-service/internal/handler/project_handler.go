@@ -49,3 +49,15 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// GetProject handles GET /projects/{id}.
+func (h *ProjectHandler) GetProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	project, err := h.svc.GetProjectByID(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(project)
+}
