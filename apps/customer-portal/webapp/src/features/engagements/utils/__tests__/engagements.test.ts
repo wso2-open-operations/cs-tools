@@ -91,7 +91,7 @@ describe("buildEngagementSearchRequest", () => {
 
   it("maps status and engagement type filters", () => {
     const req = buildEngagementSearchRequest(
-      { statusIds: ["1", "2"], engagementTypeKey: "10,20" },
+      { statusIds: ["1", "2"], engagementTypeKey: ["10,20"] },
       "  query ",
       EngagementsSortField.State,
       SortOrder.ASC,

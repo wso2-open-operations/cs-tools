@@ -308,7 +308,7 @@ export type AllCasesFilterValues = {
   severityIds?: string[];
   issueTypes?: string[];
   deploymentIds?: string[];
-  engagementTypeKey?: string;
+  engagementTypeKey?: string[];
   createdBy?: string[];
 };
 

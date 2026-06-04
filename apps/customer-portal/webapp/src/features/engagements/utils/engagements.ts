@@ -83,8 +83,8 @@ export function buildEngagementSearchRequest(
         ? filters.deploymentIds
         : undefined,
       searchQuery: searchTerm.trim() || undefined,
-      engagementTypeKeys: filters.engagementTypeKey
-        ? filters.engagementTypeKey.split(",").map(Number).filter(Boolean)
+      engagementTypeKeys: filters.engagementTypeKey?.length
+        ? filters.engagementTypeKey.flatMap((k) => k.split(",").map(Number).filter(Boolean))
         : undefined,
     },
     sortBy: {

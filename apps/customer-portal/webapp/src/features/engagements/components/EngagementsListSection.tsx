@@ -147,20 +147,42 @@ export default function EngagementsListSection({
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="eng-type-label">Engagement Type</InputLabel>
-                    <Select
+                    <Select<string[]>
+                      multiple
                       labelId="eng-type-label"
-                      value={filters.engagementTypeKey ?? ""}
+                      value={filters.engagementTypeKey ?? []}
                       label="Engagement Type"
-                      onChange={(e: SelectChangeEvent<string>) =>
-                        onFilterChange("engagementTypeKey", e.target.value)
+                      onChange={(e: SelectChangeEvent<string[]>) =>
+                        onFilterChange("engagementTypeKey", e.target.value as string[])
                       }
+                      renderValue={(selected) => {
+                        if (!Array.isArray(selected) || selected.length === 0) return "";
+                        const labels = selected.map(
+                          (v) => engagementTypeOptions.find((o) => o.value === v)?.label ?? v,
+                        );
+                        const displayText = labels.join(", ");
+                        if (labels.length === 1) return displayText;
+                        return (
+                          <Tooltip title={displayText} placement="top">
+                            <Box
+                              component="span"
+                              sx={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {displayText}
+                            </Box>
+                          </Tooltip>
+                        );
+                      }}
                     >
-                      <MenuItem value="">
-                        <Typography variant="body2">All Types</Typography>
-                      </MenuItem>
                       {engagementTypeOptions.map((opt) => (
                         <MenuItem key={opt.value} value={opt.value}>
-                          <Typography variant="body2">{opt.label}</Typography>
+                          <Checkbox checked={(filters.engagementTypeKey ?? []).includes(opt.value)} size="small" />
+                          <Typography variant="body2" sx={{ ml: 1 }}>{opt.label}</Typography>
                         </MenuItem>
                       ))}
                     </Select>
