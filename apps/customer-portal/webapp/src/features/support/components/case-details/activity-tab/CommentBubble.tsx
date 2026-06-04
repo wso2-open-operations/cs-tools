@@ -109,7 +109,7 @@ export default function CommentBubble({
     INLINE_COMMENT_HTML_PURIFY,
   );
   const { resolvedHtml: htmlContent, isLoading: isImagesLoading } =
-    useResolvedInlineImageHtml(sanitizedHtml, comment.inlineAttachments);
+    useResolvedInlineImageHtml(sanitizedHtml);
   const displayName = useMemo(() => {
     if (isCurrentUser && userDetails) {
       const { firstName, lastName, email } = userDetails;
@@ -148,9 +148,12 @@ export default function CommentBubble({
     comment.fileName ?? "",
     comment.contentType ?? "",
   );
+  const isPreviewableImage =
+    attachmentCategory === "image" &&
+    /\.(png|jpe?g|webp)$/i.test(comment.fileName ?? "");
   const { data: imageDataUrl, isLoading: isImagePreviewLoading } =
     useAttachmentPreview(
-      isAttachmentEntry && attachmentCategory === "image" ? comment.id : null,
+      isAttachmentEntry && isPreviewableImage ? comment.id : null,
     );
 
   const renderAttachmentIcon = () => {
@@ -349,7 +352,7 @@ export default function CommentBubble({
                 {formatCommentDate(comment.createdOn)}
               </Typography>
             </Stack>
-            {attachmentCategory === "image" &&
+            {isPreviewableImage &&
               (isImagePreviewLoading ? (
                 <Skeleton
                   variant="rectangular"
