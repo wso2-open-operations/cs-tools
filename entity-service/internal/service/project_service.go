@@ -55,3 +55,11 @@ func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchPr
 		HasMore:  req.Pagination.Offset+len(projects) < total,
 	}, nil
 }
+
+// GetProjectByID implements ProjectService.
+func (s *projectService) GetProjectByID(ctx context.Context, id string) (domain.Project, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.Project{}, err
+	}
+	return s.repo.GetProjectByID(ctx, id)
+}
