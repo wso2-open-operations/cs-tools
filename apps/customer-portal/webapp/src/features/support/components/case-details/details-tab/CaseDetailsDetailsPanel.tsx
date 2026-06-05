@@ -86,6 +86,7 @@ export default function CaseDetailsDetailsPanel({
 
   const [isEditingWatchList, setIsEditingWatchList] = useState(false);
   const [pendingWatchList, setPendingWatchList] = useState<string[]>([]);
+  const [savedWatchList, setSavedWatchList] = useState<string[] | null>(null);
 
   const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
   const contactOptions = useMemo(
@@ -101,15 +102,17 @@ export default function CaseDetailsDetailsPanel({
   const { mutate: patchCase, isPending: isPatchPending } = usePatchCase(projectId, caseId);
 
   const handleEditWatchList = () => {
-    setPendingWatchList(
-      (data?.watchList ?? []).map((w) => w.email ?? w.userName ?? w.name ?? "").filter(Boolean),
-    );
+    const current = savedWatchList ?? (data?.watchList ?? [])
+      .map((w) => w.email ?? w.userName ?? w.name ?? "")
+      .filter(Boolean);
+    setPendingWatchList(current);
     setIsEditingWatchList(true);
   };
 
   const handleSaveWatchList = () => {
     patchCase({ watchList: pendingWatchList }, {
       onSuccess: () => {
+        setSavedWatchList(pendingWatchList);
         setIsEditingWatchList(false);
         showSuccess("Watch list updated successfully");
       },
@@ -668,30 +671,34 @@ export default function CaseDetailsDetailsPanel({
               />
             )}
           />
-        ) : data?.watchList && data.watchList.length > 0 ? (
-          <Stack direction="row" flexWrap="wrap" gap={1}>
-            {data.watchList.map((watcher) => {
-              const label = watcher.name ?? watcher.userName ?? watcher.email ?? "";
-              const key = watcher.id ?? watcher.email ?? watcher.userName ?? label;
-              return (
-                <Chip
-                  key={key}
-                  label={label}
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    borderColor: "transparent",
-                    bgcolor: "action.hover",
-                    height: 24,
-                    fontSize: "0.75rem",
-                  }}
-                />
-              );
-            })}
-          </Stack>
-        ) : (
-          <Typography variant="body2" color="text.secondary">No watchers added</Typography>
-        )}
+        ) : (() => {
+          const displayEmails = savedWatchList ?? (data?.watchList ?? []).map(
+            (w) => w.email ?? w.userName ?? w.name ?? ""
+          ).filter(Boolean);
+          return displayEmails.length > 0 ? (
+            <Stack direction="row" flexWrap="wrap" gap={1}>
+              {displayEmails.map((email) => {
+                const label = contactOptions.find((o) => o.value === email)?.label ?? email;
+                return (
+                  <Chip
+                    key={email}
+                    label={label}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      borderColor: "transparent",
+                      bgcolor: "action.hover",
+                      height: 24,
+                      fontSize: "0.75rem",
+                    }}
+                  />
+                );
+              })}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">No watchers added</Typography>
+          );
+        })()}
       </CaseDetailsCard>
     </Stack>
   );
