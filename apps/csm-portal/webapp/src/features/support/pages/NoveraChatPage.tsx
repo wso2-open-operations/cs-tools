@@ -56,7 +56,7 @@ import {
   buildEnvProducts,
 } from "@features/support/utils/caseCreation";
 import { filterDeploymentsForCaseCreation } from "@utils/permission";
-import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { htmlToPlainText } from "@components/rich-text-editor/richTextEditor";
 import { ChatSender } from "@features/support/types/conversations";
 import type {
   ChatNavState,

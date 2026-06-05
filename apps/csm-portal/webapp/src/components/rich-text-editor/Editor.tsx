@@ -35,7 +35,7 @@ import {
   getFileIcon,
   scrollElement,
   INSERT_IMAGE_COMMAND,
-} from "@features/support/utils/richTextEditor";
+} from "@components/rich-text-editor/richTextEditor";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Toolbar, {

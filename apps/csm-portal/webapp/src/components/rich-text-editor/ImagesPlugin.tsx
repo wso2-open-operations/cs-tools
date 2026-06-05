@@ -30,7 +30,7 @@ import {
   INSERT_IMAGE_COMMAND,
   deriveAltFromFilename,
   type InsertImagePayload,
-} from "@features/support/utils/richTextEditor";
+} from "@components/rich-text-editor/richTextEditor";
 
 function getPayloadSrc(payload: string | InsertImagePayload): string {
   return typeof payload === "string" ? payload : payload.src;

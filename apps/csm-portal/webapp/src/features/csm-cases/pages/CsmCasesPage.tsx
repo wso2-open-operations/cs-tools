@@ -25,7 +25,7 @@ import CasesFilterBar, {
 } from "@features/csm-cases/components/CasesFilterBar";
 import CasesList from "@features/csm-cases/components/CasesList";
 import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
-import { useGetCsmUsers } from "@features/csm-admin/api/useCsmAdmin";
+import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 import {
   DEFAULT_CASES_FILTERS,
@@ -86,7 +86,7 @@ export default function CsmCasesPage(): JSX.Element {
   );
 
   const { data, isLoading, isError } = useGetCsmCases(filters.scope);
-  const { data: directoryUsers } = useGetCsmUsers();
+  const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);

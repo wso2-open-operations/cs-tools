@@ -47,7 +47,7 @@ import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects"
 import { useSearchDeployments } from "@features/support/api/useSearchDeployments";
 import { useSearchDeployedProducts } from "@features/support/api/useSearchDeployedProducts";
 import { useSearchProducts } from "@features/support/api/useSearchProducts";
-import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { htmlToPlainText } from "@components/rich-text-editor/richTextEditor";
 import {
   CASE_SEVERITY,
   type CaseCreatePayload,

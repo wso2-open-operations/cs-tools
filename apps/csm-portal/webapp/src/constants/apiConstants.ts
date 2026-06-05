@@ -17,6 +17,7 @@
 // Constants for API-related query keys.
 export const ApiQueryKeys = {
   PROJECTS: "projects",
+  BACKEND_PROJECT_CASES_SEARCH: "backend-project-cases-search",
   PROJECT_DETAILS: "project-details",
   PROJECT_FEATURES: "project-features",
   SUPPORT_STATS: "support-stats",

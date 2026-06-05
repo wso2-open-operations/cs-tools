@@ -77,13 +77,13 @@ import { mergeRegister } from "@lexical/utils";
 import {
   MAX_IMAGE_SIZE_BYTES,
   RICH_TEXT_BLOCK_TAGS,
-} from "@features/support/constants/supportConstants";
+} from "@components/rich-text-editor/richTextConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
   scrollElement,
   sanitizeUrl,
-} from "@features/support/utils/richTextEditor";
+} from "@components/rich-text-editor/richTextEditor";
 import { $createCodeNode, $isCodeNode } from "@lexical/code";
 import { $patchStyleText, $setBlocksType } from "@lexical/selection";
 import { TOGGLE_LINK_COMMAND, $isLinkNode } from "@lexical/link";

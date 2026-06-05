@@ -24,9 +24,12 @@ import {
   FileText,
 } from "@wso2/oxygen-ui-icons-react";
 import { createCommand, type LexicalCommand } from "lexical";
-import type { InsertImagePayload } from "@features/support/types/supportRichText";
 
-export type { InsertImagePayload } from "@features/support/types/supportRichText";
+/** Payload for `INSERT_IMAGE_COMMAND` in the shared rich text editor. */
+export type InsertImagePayload = {
+  src: string;
+  altText?: string;
+};
 
 /**
  * Derives alt text from a URL or filename (e.g. "image.png" -> "image", "/path/to/photo.jpg" -> "photo").

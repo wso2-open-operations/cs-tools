@@ -26,7 +26,7 @@ import {
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import type { JSX } from "react";
-import { deriveAltFromFilename, sanitizeUrl } from "@features/support/utils/richTextEditor";
+import { deriveAltFromFilename, sanitizeUrl } from "@components/rich-text-editor/richTextEditor";
 
 function ImageComponent({
   src,

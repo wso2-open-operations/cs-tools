@@ -72,7 +72,7 @@ import {
   getProjectPermissions,
   shouldRestrictToPrimaryProductionDeployments,
 } from "@utils/permission";
-import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { htmlToPlainText } from "@components/rich-text-editor/richTextEditor";
 import type { CreateServiceRequestPayload } from "@features/operations/types/serviceRequests";
 import CatalogSelector from "@features/operations/components/service-requests/CatalogSelector";
 import VariableFormFields from "@features/operations/components/service-requests/VariableFormFields";

@@ -81,7 +81,7 @@ import {
 import { useChatWebSocket } from "@features/support/api/useChatWebSocket";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
-import { htmlToPlainText } from "@features/support/utils/richTextEditor";
+import { htmlToPlainText } from "@components/rich-text-editor/richTextEditor";
 import {
   getFinalMessageFromPayload,
   sanitizeStreamToken,
