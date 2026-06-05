@@ -38,6 +38,7 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 
 export interface VariableFormFieldsProps {
   variables: CatalogItemVariable[] | undefined;
@@ -209,6 +210,7 @@ export default function VariableFormFields({
   onAttachmentAdd,
   userTimeZone,
 }: VariableFormFieldsProps): JSX.Element {
+  const { showError } = useErrorBanner();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
   const sortedVariables = useMemo(
@@ -350,6 +352,13 @@ export default function VariableFormFields({
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={onAttachmentRemove}
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
+                  : "Image exceeds the maximum allowed size of 10 MB.",
+              )
+            }
           />
         </Grid>
       );

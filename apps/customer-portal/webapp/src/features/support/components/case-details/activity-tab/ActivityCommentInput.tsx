@@ -240,8 +240,12 @@ export default function ActivityCommentInput({
             onAttachmentRemove={handleAttachmentRemove}
             showKeyboardHint={true}
             maxHeight="310px"
-            onPasteError={() =>
-              showError("Image exceeds the maximum allowed size of 10 MB.")
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
+                  : "Image exceeds the maximum allowed size of 10 MB.",
+              )
             }
             overlayElement={
               <Tooltip title="Send comment">

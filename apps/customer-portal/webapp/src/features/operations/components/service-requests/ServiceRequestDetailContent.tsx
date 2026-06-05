@@ -659,6 +659,13 @@ export default function ServiceRequestDetailContent({
                 showToolbar
                 placeholder="Add a comment..."
                 onSubmitKeyDown={handleAddComment}
+                onPasteError={(reason) =>
+                  showError(
+                    reason === "type"
+                      ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
+                      : "Image exceeds the maximum allowed size of 10 MB.",
+                  )
+                }
               />
               <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <Button

@@ -32,6 +32,7 @@ import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 
 /**
  * Renders the Case Details section for case creation.
@@ -66,6 +67,7 @@ export function CaseDetailsSection({
   isTitleFromChat = false,
   isDescriptionFromConversation = false,
 }: CaseDetailsSectionProps): JSX.Element {
+  const { showError } = useErrorBanner();
   const titleReadOnly = isTitleDisabled;
   const titleLength = title.trim().length;
   const isTitleTooLong = titleLength > 160;
@@ -242,6 +244,13 @@ export function CaseDetailsSection({
             value={description}
             onChange={setDescription}
             maxHeight="210px"
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
+                  : "Image exceeds the maximum allowed size of 10 MB.",
+              )
+            }
           />
 
           {!isRelatedCaseMode && isDescriptionFromConversation && (
