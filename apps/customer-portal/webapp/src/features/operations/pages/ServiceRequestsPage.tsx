@@ -424,6 +424,7 @@ export default function ServiceRequestsPage(): JSX.Element {
           onClearFilters={handleClearFilters}
           restrictSeverityToLow={restrictSeverityToLow}
           hideSeverityFilter
+          hideCategoryFilter
           hideDeploymentFilter={!permissions.hasDeployments}
           isProjectContextLoading={isProjectContextLoading}
         />

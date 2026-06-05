@@ -129,11 +129,12 @@ export default function ListFilters({
 
         const isDeploymentFilter = def.id === "deployment";
         const isCreatedByFilter = def.id === "createdBy";
-        const options = (() => {
+        const options = ((): { label: string | undefined; sublabel?: string; value: string }[] => {
           if (isDeploymentFilter) {
             return (
               deployments?.map((deployment) => ({
-                label: deployment.type?.label || deployment.name,
+                label: deployment.name || deployment.type?.label,
+                sublabel: deployment.name && deployment.type?.label ? deployment.type.label : undefined,
                 value: deployment.id,
               })) ?? []
             );
@@ -221,7 +222,12 @@ export default function ListFilters({
                     options.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
                         <Checkbox checked={selectedValues.includes(option.value)} size="small" />
-                        <Typography variant="body2" sx={{ ml: 1 }}>{option.label}</Typography>
+                        <Box sx={{ ml: 1, display: "flex", alignItems: "baseline", gap: 0.5 }}>
+                          <Typography variant="body2">{option.label}</Typography>
+                          {option.sublabel && (
+                            <Typography variant="caption" color="text.secondary">- {option.sublabel}</Typography>
+                          )}
+                        </Box>
                       </MenuItem>
                     ))
                   )}
