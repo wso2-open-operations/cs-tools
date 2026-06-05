@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Box, Button, Chip, Grid, TextField, Typography } from "@wso2/oxygen-ui";
+import { Autocomplete, Box, Button, Chip, Grid, TextField } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
