@@ -333,7 +333,9 @@ public type CreatedCase record {|
 # Request payload for updating a case.
 public type CaseUpdatePayload record {|
     # State key to update
-    int stateKey;
+    int stateKey?;
+    # Watch list user emails to update on the case
+    Email[] watchList?;
 |};
 
 # Response from updating a case.
@@ -356,6 +358,8 @@ public type UpdatedCase record {|
     ChoiceListItem state;
     # Case type information
     ReferenceTableItem? 'type;
+    # Watch list users
+    WatchList[]? watchList;
     json...;
 |};
 

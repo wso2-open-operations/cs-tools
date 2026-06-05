@@ -1127,12 +1127,15 @@ public isolated function mapTimeCardSearchResponseGroupedByCases(entity:CaseTime
 public isolated function mapUpdatedCaseResponse(entity:UpdatedCase updatedCase) returns types:UpdatedCase {
     entity:ChoiceListItem state = updatedCase.state;
     entity:ReferenceTableItem? 'type = updatedCase.'type;
+    entity:WatchList[]? watchList = updatedCase.watchList;
     return {
         id: updatedCase.id,
         updatedOn: updatedCase.updatedOn,
         state: {id: state.id.toString(), label: state.label},
         'type: 'type != () ? {id: 'type.id, label: 'type.name} : (),
-        updatedBy: updatedCase.updatedBy
+        updatedBy: updatedCase.updatedBy,
+        watchList: watchList != () ? from entity:WatchList user in watchList
+            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : ()
     };
 }
 

@@ -288,6 +288,8 @@ public type UpdatedCase record {|
     ReferenceItem state;
     # Case type information
     ReferenceItem? 'type;
+    # Watch list users
+    WatchList[]? watchList;
 |};
 
 # Updated user information.

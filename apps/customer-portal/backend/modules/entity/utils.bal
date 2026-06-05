@@ -168,6 +168,13 @@ public isolated function validateDeploymentUpdatePayload(DeploymentUpdatePayload
 # + payload - Case update payload
 # + return - Error message if validation fails, nil otherwise
 public isolated function validateCaseUpdatePayload(CaseUpdatePayload payload) returns string? {
+    boolean hasStateKey = payload.stateKey !is ();
+    boolean hasWatchList = payload.watchList !is ();
+
+    if !hasStateKey && !hasWatchList {
+        return "Invalid payload. At least one of status or watch list should be provided for case update.";
+    }
+
     if payload.stateKey != caseStateIds.closed && payload.stateKey != caseStateIds.reopened &&
     payload.stateKey != caseStateIds.waitingOnWso2 {
         return "Invalid status. Allowed values are Waiting on WSO2, Closed, or Reopened.";

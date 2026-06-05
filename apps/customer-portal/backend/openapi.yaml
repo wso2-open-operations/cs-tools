@@ -3777,14 +3777,17 @@ components:
       - service_request
       - default_case
     CaseUpdatePayload:
-      required:
-      - stateKey
       type: object
       properties:
         stateKey:
           type: integer
           description: State key to update
           format: int64
+        watchList:
+          type: array
+          description: Watch list user emails to update on the case
+          items:
+            $ref: '#/components/schemas/Email'
       additionalProperties: false
       description: Request payload for updating a case.
     CasesTrend:
@@ -6192,6 +6195,7 @@ components:
       - type
       - updatedBy
       - updatedOn
+      - watchList
       type: object
       properties:
         id:
@@ -6209,6 +6213,12 @@ components:
           nullable: true
           allOf:
           - $ref: '#/components/schemas/ReferenceItem'
+        watchList:
+          type: array
+          description: Watch list users
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WatchList'
       additionalProperties: false
       description: Updated case details.
     UpdatedChangeRequest:
