@@ -28,6 +28,8 @@ import { parseApiResponseMessage } from "@utils/ApiError";
 export interface PatchUserMeResponse {
   phoneNumber?: string;
   timeZone?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 /**
@@ -58,6 +60,8 @@ export function usePatchUserMe(): UseMutationResult<
         return {
           phoneNumber: payload.phoneNumber,
           timeZone: payload.timeZone,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
         };
       }
 
@@ -99,6 +103,22 @@ export function usePatchUserMe(): UseMutationResult<
                   data.phoneNumber !== undefined
                     ? data.phoneNumber
                     : variables.phoneNumber,
+              }
+            : {}),
+          ...(variables.firstName !== undefined
+            ? {
+                firstName:
+                  data.firstName !== undefined
+                    ? data.firstName
+                    : variables.firstName,
+              }
+            : {}),
+          ...(variables.lastName !== undefined
+            ? {
+                lastName:
+                  data.lastName !== undefined
+                    ? data.lastName
+                    : variables.lastName,
               }
             : {}),
         };

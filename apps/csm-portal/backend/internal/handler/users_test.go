@@ -203,6 +203,56 @@ func TestPatchMe(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts and echoes trimmed first/last name without calling SCIM", func(t *testing.T) {
+		phoneCalled := false
+		scimClient := &mockSCIMClient{
+			updateUserPhoneFn: func(_ context.Context, _, _ string) (*string, error) {
+				phoneCalled = true
+				return nil, nil
+			},
+		}
+		h := NewUsersHandler(scimClient, &mockEntityUserClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"firstName":"  Ada ","lastName":" Lovelace "}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if phoneCalled {
+			t.Error("SCIM UpdateUserPhone should not be called for a name-only update")
+		}
+		type patchResp struct {
+			FirstName *string `json:"firstName"`
+			LastName  *string `json:"lastName"`
+		}
+		resp := decodeJSON[patchResp](t, w)
+		if resp.FirstName == nil || *resp.FirstName != "Ada" {
+			t.Errorf("firstName = %v, want %q", resp.FirstName, "Ada")
+		}
+		if resp.LastName == nil || *resp.LastName != "Lovelace" {
+			t.Errorf("lastName = %v, want %q", resp.LastName, "Lovelace")
+		}
+	})
+
+	t.Run("rejects blank first name", func(t *testing.T) {
+		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"firstName":"   "}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "First name cannot be empty.")
+	})
+
+	t.Run("rejects last name exceeding max length", func(t *testing.T) {
+		long := strings.Repeat("x", maxNameLen+1)
+		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"lastName":"`+long+`"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "Last name must be at most 100 characters.")
+	})
+
 	t.Run("upstream errors from SCIM are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to update phone number.") {
 			t.Run(tc.name, func(t *testing.T) {

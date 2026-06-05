@@ -32,6 +32,7 @@ import { PencilLine, X } from "@wso2/oxygen-ui-icons-react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetMetadata from "@api/useGetMetadata";
 import { usePatchUserMe } from "@features/settings/api/usePatchUserMe";
+import type { PatchUserMeRequest } from "@features/settings/types/users";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
@@ -65,6 +66,8 @@ export default function UserProfileModal({
   const { data: metadata } = useGetMetadata();
   const patchUserMe = usePatchUserMe();
 
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [countryCode, setCountryCode] = useState("US");
   const [nationalNumber, setNationalNumber] = useState("");
@@ -78,6 +81,8 @@ export default function UserProfileModal({
       const { countryCode: cc, nationalNumber: nn } =
         parseE164ToCountryCode(raw);
       queueMicrotask(() => {
+        setFirstName(userDetails.firstName ?? "");
+        setLastName(userDetails.lastName ?? "");
         setPhoneNumber(raw);
         setCountryCode(cc);
         setNationalNumber(nn);
@@ -86,6 +91,17 @@ export default function UserProfileModal({
       });
     }
   }, [open, userDetails]);
+
+  const handleFirstNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setFirstName(e.target.value.slice(0, 100)),
+    [],
+  );
+  const handleLastNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setLastName(e.target.value.slice(0, 100)),
+    [],
+  );
 
   const handlePhoneCountryChange = useCallback(
     (e: { target: { value: unknown } }) =>
@@ -122,7 +138,26 @@ export default function UserProfileModal({
       return;
     }
 
-    const payload: { phoneNumber?: string; timeZone?: string } = {};
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+    const firstChanged = String(userDetails.firstName ?? "") !== trimmedFirst;
+    const lastChanged = String(userDetails.lastName ?? "") !== trimmedLast;
+    if (firstChanged && trimmedFirst === "") {
+      showError("First name cannot be empty");
+      return;
+    }
+    if (lastChanged && trimmedLast === "") {
+      showError("Last name cannot be empty");
+      return;
+    }
+
+    const payload: PatchUserMeRequest = {};
+    if (firstChanged) {
+      payload.firstName = trimmedFirst;
+    }
+    if (lastChanged) {
+      payload.lastName = trimmedLast;
+    }
     if (String(userDetails.phoneNumber ?? "") !== e164) {
       payload.phoneNumber = e164;
     }
@@ -137,26 +172,34 @@ export default function UserProfileModal({
 
     patchUserMe.mutate(payload, {
       onSuccess: (response) => {
+        const hasFirstInPayload = payload.firstName !== undefined;
+        const hasLastInPayload = payload.lastName !== undefined;
         const hasPhoneInPayload = payload.phoneNumber !== undefined;
         const hasTimeZoneInPayload = payload.timeZone !== undefined;
+        const isFirstUpdated =
+          !hasFirstInPayload || response?.firstName === payload.firstName;
+        const isLastUpdated =
+          !hasLastInPayload || response?.lastName === payload.lastName;
         const isPhoneUpdated =
           !hasPhoneInPayload || response?.phoneNumber === payload.phoneNumber;
         const isTimeZoneUpdated =
           !hasTimeZoneInPayload || response?.timeZone === payload.timeZone;
-        const isSuccessfulUpdate = isPhoneUpdated && isTimeZoneUpdated;
+        const isSuccessfulUpdate =
+          isFirstUpdated && isLastUpdated && isPhoneUpdated && isTimeZoneUpdated;
         const shouldReloadForTimeZone =
           hasTimeZoneInPayload && isTimeZoneUpdated;
 
         if (!isSuccessfulUpdate) {
-          if (hasPhoneInPayload && hasTimeZoneInPayload) {
-            showError("Failed to update phone number and time zone.");
-          } else if (hasPhoneInPayload) {
-            showError("Failed to update phone number.");
-          } else if (hasTimeZoneInPayload) {
-            showError("Failed to update time zone.");
-          } else {
-            showError("Failed to update profile.");
-          }
+          const failed: string[] = [];
+          if (!isFirstUpdated) failed.push("first name");
+          if (!isLastUpdated) failed.push("last name");
+          if (!isPhoneUpdated) failed.push("phone number");
+          if (!isTimeZoneUpdated) failed.push("time zone");
+          showError(
+            failed.length > 0
+              ? `Failed to update ${failed.join(", ")}.`
+              : "Failed to update profile.",
+          );
           return;
         }
 
@@ -188,6 +231,8 @@ export default function UserProfileModal({
     });
   }, [
     userDetails,
+    firstName,
+    lastName,
     countryCode,
     nationalNumber,
     timeZone,
@@ -396,15 +441,41 @@ export default function UserProfileModal({
                         }}
                       >
                         <Typography variant="body2" fontWeight={500}>
-                          Full Name
+                          First Name
                         </Typography>
                         <TextField
-                          value={name}
+                          value={firstName}
+                          onChange={handleFirstNameChange}
                           size="small"
-                          disabled
                           fullWidth
-                          InputProps={{
-                            readOnly: true,
+                          disabled={patchUserMe.isPending}
+                          inputProps={{
+                            "aria-label": "First name",
+                            maxLength: 100,
+                          }}
+                        />
+                      </Box>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 1,
+                          flex: "1 1 45%",
+                          minWidth: 200,
+                        }}
+                      >
+                        <Typography variant="body2" fontWeight={500}>
+                          Last Name
+                        </Typography>
+                        <TextField
+                          value={lastName}
+                          onChange={handleLastNameChange}
+                          size="small"
+                          fullWidth
+                          disabled={patchUserMe.isPending}
+                          inputProps={{
+                            "aria-label": "Last name",
+                            maxLength: 100,
                           }}
                         />
                       </Box>

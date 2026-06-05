@@ -17,12 +17,15 @@
 package handler
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
@@ -67,13 +70,35 @@ type userMeResponse struct {
 // userUpdateRequest is the PATCH /users/me request shape.
 type userUpdateRequest struct {
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
+	FirstName   *string `json:"firstName,omitempty"`
+	LastName    *string `json:"lastName,omitempty"`
 	// TODO: TimeZone *string `json:"timeZone,omitempty"` — requires entity
 }
 
 // userUpdateResponse is the PATCH /users/me response shape.
 type userUpdateResponse struct {
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
+	FirstName   *string `json:"firstName,omitempty"`
+	LastName    *string `json:"lastName,omitempty"`
 	// TODO: TimeZone *string `json:"timeZone,omitempty"` — requires entity
+}
+
+// maxNameLen bounds first/last name length on PATCH /users/me.
+const maxNameLen = 100
+
+// validateName checks a first/last name supplied on PATCH /users/me. It returns
+// a user-facing error message and false when invalid. An empty/whitespace-only
+// value is rejected: clients should omit the field to leave a name unchanged
+// rather than send a blank string.
+func validateName(label, value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return label + " cannot be empty.", false
+	}
+	if utf8.RuneCountInString(trimmed) > maxNameLen {
+		return fmt.Sprintf("%s must be at most %d characters.", label, maxNameLen), false
+	}
+	return "", true
 }
 
 // GetMe handles GET /users/me.
@@ -136,9 +161,24 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: add timeZone nil-check here once entity is available.
-	if payload.PhoneNumber == nil {
+	if payload.PhoneNumber == nil && payload.FirstName == nil && payload.LastName == nil {
 		writeError(w, http.StatusBadRequest, "At least one field must be provided for update.")
 		return
+	}
+
+	// Validate names up front so a bad name doesn't leave a half-applied update
+	// (e.g. phone written to SCIM, then name rejected).
+	if payload.FirstName != nil {
+		if msg, ok := validateName("First name", *payload.FirstName); !ok {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
+	if payload.LastName != nil {
+		if msg, ok := validateName("Last name", *payload.LastName); !ok {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 
 	resp := userUpdateResponse{}
@@ -151,6 +191,22 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp.PhoneNumber = updatedPhone
+	}
+
+	// STUB: first/last name are NOT yet persisted. The entity service that owns
+	// user name records does not exist yet, and SCIM only exposes a phone-update
+	// path. We accept and echo the trimmed values so the frontend contract is
+	// final, but they will NOT survive a reload (GET /users/me sources the name
+	// from OIDC claims, not from here). Replace this echo with a real write
+	// (entity service or SCIM name PATCH) once available.
+	// TODO(entity): persist firstName/lastName instead of echoing.
+	if payload.FirstName != nil {
+		trimmed := strings.TrimSpace(*payload.FirstName)
+		resp.FirstName = &trimmed
+	}
+	if payload.LastName != nil {
+		trimmed := strings.TrimSpace(*payload.LastName)
+		resp.LastName = &trimmed
 	}
 
 	// TODO: update timeZone via entity once available.
