@@ -174,15 +174,14 @@ public isolated function validateCaseUpdatePayload(CaseUpdatePayload payload) re
     if !hasStateKey && !hasWatchList {
         return "Either stateKey or watchList must be provided.";
     }
-    if hasStateKey && hasWatchList {
-        return "Only one of stateKey or watchList must be provided at a time.";
+
+    if hasStateKey && payload.stateKey != caseStateIds.closed && payload.stateKey != caseStateIds.reopened &&
+    payload.stateKey != caseStateIds.waitingOnWso2 {
+        return "Invalid status. Allowed values are Waiting on WSO2, Closed, or Reopened.";
     }
-    if hasStateKey {
-        int stateKey = <int>payload.stateKey;
-        if stateKey != caseStateIds.closed && stateKey != caseStateIds.reopened &&
-        stateKey != caseStateIds.waitingOnWso2 {
-            return "Invalid status. Allowed values are Waiting on WSO2, Closed, or Reopened.";
-        }
+
+    if hasStateKey && hasWatchList {
+        return "Both status and watch list cannot be updated together. Please provide only one of the fields.";
     }
     return;
 }
