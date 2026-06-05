@@ -33,6 +33,10 @@ import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/sup
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 /**
  * Renders the Case Details section for case creation.
@@ -247,8 +251,8 @@ export function CaseDetailsSection({
             onPasteError={(reason) =>
               showError(
                 reason === "type"
-                  ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
-                  : "Image exceeds the maximum allowed size of 10 MB.",
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
               )
             }
           />

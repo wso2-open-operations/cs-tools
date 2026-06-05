@@ -39,6 +39,10 @@ import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/ut
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 export interface VariableFormFieldsProps {
   variables: CatalogItemVariable[] | undefined;
@@ -355,8 +359,8 @@ export default function VariableFormFields({
             onPasteError={(reason) =>
               showError(
                 reason === "type"
-                  ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
-                  : "Image exceeds the maximum allowed size of 10 MB.",
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
               )
             }
           />

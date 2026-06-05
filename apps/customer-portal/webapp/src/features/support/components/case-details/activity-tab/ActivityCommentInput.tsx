@@ -33,11 +33,10 @@ import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
 import { CommentType } from "@features/support/constants/supportConstants";
-
-const PASTE_ERROR_UNSUPPORTED_TYPE =
-  "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment.";
-const PASTE_ERROR_SIZE_EXCEEDED =
-  "Image exceeds the maximum allowed size of 10 MB.";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 /**
  * Input row with rich-text editor and send button.
@@ -248,8 +247,8 @@ export default function ActivityCommentInput({
             onPasteError={(reason) =>
               showError(
                 reason === "type"
-                  ? PASTE_ERROR_UNSUPPORTED_TYPE
-                  : PASTE_ERROR_SIZE_EXCEEDED,
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
               )
             }
             overlayElement={

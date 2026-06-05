@@ -42,6 +42,10 @@ import {
 import useGetProjectFilters from "@api/useGetProjectFilters";
 import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
@@ -662,8 +666,8 @@ export default function ServiceRequestDetailContent({
                 onPasteError={(reason) =>
                   showError(
                     reason === "type"
-                      ? "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment."
-                      : "Image exceeds the maximum allowed size of 10 MB.",
+                      ? ERROR_UNSUPPORTED_TYPE
+                      : ERROR_SIZE_EXCEEDED,
                   )
                 }
               />
