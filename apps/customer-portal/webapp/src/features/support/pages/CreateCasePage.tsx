@@ -232,7 +232,7 @@ export default function CreateCasePage(): JSX.Element {
     });
   }, [baseProductOptions]);
 
-  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId || "");
+  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId || "");
   const contactOptions = useMemo(
     () =>
       (contactsData ?? []).map((c) => ({
@@ -1176,9 +1176,6 @@ export default function CreateCasePage(): JSX.Element {
             excludeS0={excludeS0}
             isSeverityDisabled={forceSeverityS4}
           >
-            <Box sx={{ mb: 1 }}>
-              <Typography variant="caption">Watch List</Typography>
-            </Box>
             <Autocomplete
               multiple
               loading={isContactsLoading}
@@ -1199,7 +1196,14 @@ export default function CreateCasePage(): JSX.Element {
                 })
               }
               renderInput={(params) => (
-                <TextField {...params} placeholder="Add watchers..." size="small" />
+                <TextField
+                  {...params}
+                  label="Watch List"
+                  placeholder="Add watchers..."
+                  size="small"
+                  error={isContactsError}
+                  helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
+                />
               )}
             />
           </CaseDetailsSection>

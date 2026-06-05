@@ -340,7 +340,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
     return item?.label;
   }, [catalogsData, selectedCatalogId, selectedCatalogItemId]);
 
-  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId || "");
+  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId || "");
   const contactOptions = useMemo(
     () =>
       (contactsData ?? []).map((c) => ({
@@ -713,8 +713,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
             renderInput={(params) => (
               <TextField
                 {...params}
+                label="Watch List"
                 placeholder="Add watchers..."
                 size="small"
+                error={isContactsError}
+                helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
               />
             )}
           />

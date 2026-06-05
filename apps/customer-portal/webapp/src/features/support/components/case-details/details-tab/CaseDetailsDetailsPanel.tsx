@@ -87,7 +87,7 @@ export default function CaseDetailsDetailsPanel({
   const [isEditingWatchList, setIsEditingWatchList] = useState(false);
   const [pendingWatchList, setPendingWatchList] = useState<string[]>([]);
 
-  const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId);
+  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
   const contactOptions = useMemo(
     () => (contactsData ?? []).map((c) => ({
       label: `${c.firstName} ${c.lastName}`.trim() || c.email,
@@ -658,14 +658,21 @@ export default function CaseDetailsDetailsPanel({
               })
             }
             renderInput={(params) => (
-              <TextField {...params} placeholder="Add watchers..." size="small" />
+              <TextField
+                {...params}
+                label="Watch List"
+                placeholder="Add watchers..."
+                size="small"
+                error={isContactsError}
+                helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
+              />
             )}
           />
         ) : data?.watchList && data.watchList.length > 0 ? (
           <Stack direction="row" flexWrap="wrap" gap={1}>
-            {data.watchList.map((watcher, index) => {
+            {data.watchList.map((watcher) => {
               const label = watcher.name ?? watcher.userName ?? watcher.email ?? "";
-              const key = watcher.id ?? watcher.email ?? watcher.userName ?? String(index);
+              const key = watcher.id ?? watcher.email ?? watcher.userName ?? label;
               return (
                 <Chip
                   key={key}
