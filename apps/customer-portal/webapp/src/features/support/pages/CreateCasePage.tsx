@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, Box, Button, Chip, Grid, TextField } from "@wso2/oxygen-ui";
+import { Box, Button, Grid } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
@@ -46,8 +46,10 @@ import type { CreateCaseRequest } from "@features/support/types/cases";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { CaseDetailsSection } from "@features/support/components/case-creation-layout/form-sections/case-details-section/CaseDetailsSection";
+import { WatchListSection } from "@features/support/components/case-creation-layout/form-sections/watch-list-section/WatchListSection";
 import { ConversationSummary } from "@features/support/components/case-creation-layout/form-sections/conversation-summary-section/ConversationSummary";
 import { RelatedCaseSummary } from "@features/support/components/case-creation-layout/form-sections/conversation-summary-section/RelatedCaseSummary";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
   buildClassificationProductLabel,
   findMatchingDeploymentLabel,
@@ -147,6 +149,9 @@ export default function CreateCasePage(): JSX.Element {
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
   );
+  const { data: projectContacts, isLoading: isContactsLoading } =
+    useGetProjectContacts(projectId || "");
+  const { data: currentUser } = useGetUserDetails();
   const [title, setTitle] = useState(() => relatedCase?.title ?? "");
   const [description, setDescription] = useState(() =>
     relatedCase ? buildRelatedCaseDescriptionHtml(relatedCase.description) : "",
@@ -155,11 +160,11 @@ export default function CreateCasePage(): JSX.Element {
   const [product, setProduct] = useState("");
   const [deployment, setDeployment] = useState("");
   const [severity, setSeverity] = useState("");
+  const [watchList, setWatchList] = useState<string[]>([]);
   const [classificationProductLabel, setClassificationProductLabel] =
     useState("");
   type AttachmentItem = { id: string; file: File };
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [watchList, setWatchList] = useState<string[]>([]);
   const attachmentNamesRef = useRef<Map<string, string>>(new Map());
   const attachmentIdCounterRef = useRef(0);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
@@ -232,16 +237,6 @@ export default function CreateCasePage(): JSX.Element {
     });
   }, [baseProductOptions]);
 
-  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId || "");
-  const contactOptions = useMemo(
-    () =>
-      (contactsData ?? []).map((c) => ({
-        label: `${c.firstName} ${c.lastName}`.trim() || c.email,
-        value: c.email,
-      })),
-    [contactsData],
-  );
-
   const { showError } = useErrorBanner();
   const { showSuccess } = useSuccessBanner();
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
@@ -256,6 +251,18 @@ export default function CreateCasePage(): JSX.Element {
       );
     }
   }, [deploymentProductsError, showError]);
+
+  useEffect(() => {
+    if (!projectContacts) return;
+    const eligibleEmails = projectContacts
+      .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
+      .map((c) => c.email);
+    const creatorEmail = currentUser?.email;
+    const merged = creatorEmail
+      ? Array.from(new Set([creatorEmail, ...eligibleEmails]))
+      : Array.from(new Set(eligibleEmails));
+    setWatchList(merged);
+  }, [projectContacts, currentUser?.email]);
 
   const hasInitializedRef = useRef(false);
   const hasClassificationAppliedRef = useRef(false);
@@ -1175,38 +1182,16 @@ export default function CreateCasePage(): JSX.Element {
             isSecurityReport={isSecurityReport}
             excludeS0={excludeS0}
             isSeverityDisabled={forceSeverityS4}
-          >
-            <Autocomplete
-              multiple
-              loading={isContactsLoading}
-              loadingText="Loading..."
-              options={contactOptions}
-              getOptionLabel={(option) => option.label}
-              value={contactOptions.filter((o) => watchList.includes(o.value))}
-              onChange={(_event, newValue) => {
-                setWatchList(newValue.map((o) => o.value));
-              }}
-              isOptionEqualToValue={(option, val) => option.value === val.value}
-              renderTags={(tagValue, getTagProps) =>
-                tagValue.map((option, index) => {
-                  const { key, ...tagProps } = getTagProps({ index });
-                  return (
-                    <Chip key={key} label={option.label} size="small" {...tagProps} />
-                  );
-                })
-              }
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Watch List"
-                  placeholder="Add watchers..."
-                  size="small"
-                  error={isContactsError}
-                  helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
-                />
-              )}
-            />
-          </CaseDetailsSection>
+          />
+
+          <WatchListSection
+            contacts={(projectContacts ?? []).filter(
+              (c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact,
+            )}
+            selectedEmails={watchList}
+            onChange={setWatchList}
+            isLoading={isContactsLoading}
+          />
 
           {/* form actions container */}
           <Box sx={{ display: "flex", justifyContent: "right" }}>

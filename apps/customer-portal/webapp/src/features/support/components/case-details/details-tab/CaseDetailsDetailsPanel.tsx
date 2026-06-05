@@ -19,6 +19,7 @@ import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   Chip,
   Stack,
   TextField,
@@ -90,10 +91,13 @@ export default function CaseDetailsDetailsPanel({
 
   const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
   const contactOptions = useMemo(
-    () => (contactsData ?? []).map((c) => ({
-      label: `${c.firstName} ${c.lastName}`.trim() || c.email,
-      value: c.email,
-    })),
+    () =>
+      (contactsData ?? [])
+        .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
+        .map((c) => ({
+          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          value: c.email,
+        })),
     [contactsData],
   );
 
@@ -645,6 +649,7 @@ export default function CaseDetailsDetailsPanel({
         {isEditingWatchList ? (
           <Autocomplete
             multiple
+            disableCloseOnSelect
             loading={isContactsLoading}
             loadingText="Loading..."
             options={contactOptions}
@@ -654,6 +659,19 @@ export default function CaseDetailsDetailsPanel({
               setPendingWatchList(newValue.map((o) => o.value));
             }}
             isOptionEqualToValue={(option, val) => option.value === val.value}
+            renderOption={(props, option, { selected }) => {
+              const { key, ...rest } = props;
+              return (
+                <li key={key} {...rest}>
+                  <Checkbox
+                    size="small"
+                    checked={selected}
+                    sx={{ mr: 1, p: 0.5 }}
+                  />
+                  {option.label}
+                </li>
+              );
+            }}
             renderTags={(tagValue, getTagProps) =>
               tagValue.map((option, index) => {
                 const { key, ...tagProps } = getTagProps({ index });
