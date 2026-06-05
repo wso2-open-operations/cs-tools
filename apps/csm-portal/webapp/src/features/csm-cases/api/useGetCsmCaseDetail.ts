@@ -55,6 +55,7 @@ function detailFromBeCase(
   return {
     id: c.id,
     caseNumber: c.number ?? c.id,
+    wso2CaseId: c.wso2Id ?? c.id,
     subject: c.subject ?? "(no subject)",
     customer,
     accountId: project?.accountId ?? account?.id ?? "",

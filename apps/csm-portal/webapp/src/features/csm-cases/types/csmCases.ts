@@ -23,7 +23,17 @@ import type {
 
 export interface CsmCaseRow {
   id: string;
+  /**
+   * ServiceNow-style case number (e.g. "CS-1007"). The number engineers and
+   * customers quote day to day.
+   */
   caseNumber: string;
+  /**
+   * Project/subscription-scoped WSO2 case reference (e.g. "ACMESUB-123").
+   * Distinct from {@link caseNumber}; shown alongside it as `wso2CaseId/caseNumber`.
+   * Mirrors the customer portal's `internalId` / BE `wso2Id`.
+   */
+  wso2CaseId: string;
   subject: string;
   customer: string;
   accountId: string;
@@ -152,11 +162,27 @@ export interface CaseCustomerContext {
   openCases: number;
 }
 
+/**
+ * Deployment classification from the fixed deployment-type list. Mirrors the
+ * backend `DeploymentTypeKey` enum (`@features/support/types/case`); kept local
+ * so the case product context stays self-contained.
+ */
+export type DeploymentCategory =
+  | "primary_production"
+  | "staging"
+  | "qa"
+  | "stress"
+  | "uat"
+  | "development";
+
 export interface CaseProductContext {
   product: string;
   version: string;
   updateLevel?: string;
+  /** Customer-provided deployment name (set by the customer in the project). */
   deployment: string;
+  /** Fixed-list classification of the deployment (e.g. Primary Production). */
+  deploymentCategory?: DeploymentCategory;
   environment: "dev" | "qa" | "staging" | "prod";
   region?: string;
 }

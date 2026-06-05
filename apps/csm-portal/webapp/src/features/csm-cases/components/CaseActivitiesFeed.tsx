@@ -14,14 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Box,
-  Chip,
-  FormControlLabel,
-  Paper,
-  Switch,
-  Typography,
-} from "@wso2/oxygen-ui";
+import { Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
 import {
   Activity,
   ArrowUpRight,
@@ -127,47 +120,26 @@ export default function CaseActivitiesFeed({
         <Typography variant="caption" color="text.secondary">
           Filter:
         </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={showWorkNotes}
-              onChange={(e) => setShowWorkNotes(e.target.checked)}
-            />
-          }
-          label={
-            <Typography variant="caption">
-              Work notes ({counts.workNotes})
-            </Typography>
-          }
+        <Chip
+          size="small"
+          variant={showWorkNotes ? "filled" : "outlined"}
+          color={showWorkNotes ? "primary" : "default"}
+          label={`Work notes (${counts.workNotes})`}
+          onClick={() => setShowWorkNotes((v) => !v)}
         />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={showLifecycle}
-              onChange={(e) => setShowLifecycle(e.target.checked)}
-            />
-          }
-          label={
-            <Typography variant="caption">
-              State changes ({counts.lifecycle})
-            </Typography>
-          }
+        <Chip
+          size="small"
+          variant={showLifecycle ? "filled" : "outlined"}
+          color={showLifecycle ? "primary" : "default"}
+          label={`State changes (${counts.lifecycle})`}
+          onClick={() => setShowLifecycle((v) => !v)}
         />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={showAttachments}
-              onChange={(e) => setShowAttachments(e.target.checked)}
-            />
-          }
-          label={
-            <Typography variant="caption">
-              Attachments ({counts.attachments})
-            </Typography>
-          }
+        <Chip
+          size="small"
+          variant={showAttachments ? "filled" : "outlined"}
+          color={showAttachments ? "primary" : "default"}
+          label={`Attachments (${counts.attachments})`}
+          onClick={() => setShowAttachments((v) => !v)}
         />
         <Box sx={{ flex: 1 }} />
         <Chip

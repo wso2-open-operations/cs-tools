@@ -54,7 +54,7 @@ function deriveProductName(subject: string, projectName: string): string {
   return "WSO2 Platform";
 }
 
-type CaseSeed = Omit<CsmCaseRow, "product">;
+type CaseSeed = Omit<CsmCaseRow, "product" | "wso2CaseId">;
 
 const ABT_CASE_SEEDS: CaseSeed[] = [
   {
@@ -436,8 +436,26 @@ const ALL_EXTRA_CASE_SEEDS: CaseSeed[] = [
   },
 ];
 
+/**
+ * Build the project/subscription-scoped WSO2 case reference (e.g.
+ * "ACMESUB-123") from the customer name + the numeric part of the case id.
+ * Illustrative only — the real value comes from the BE `wso2Id` field.
+ */
+function deriveWso2CaseId(seed: CaseSeed): string {
+  const prefix = (seed.customer.split(/\s+/)[0] ?? "WSO2")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 4);
+  const num = seed.id.replace(/\D/g, "") || "0";
+  return `${prefix}SUB-${num}`;
+}
+
 function hydrate(seed: CaseSeed): CsmCaseRow {
-  return { ...seed, product: deriveProductName(seed.subject, seed.projectName) };
+  return {
+    ...seed,
+    product: deriveProductName(seed.subject, seed.projectName),
+    wso2CaseId: deriveWso2CaseId(seed),
+  };
 }
 
 const ABT_CASES: CsmCaseRow[] = ABT_CASE_SEEDS.map(hydrate);
@@ -556,7 +574,24 @@ const FALLBACK_CUSTOMER: CaseCustomerContext = {
   openCases: 1,
 };
 
+// Map the coarse environment lane to a fixed-list deployment category. Prod
+// deployments are treated as primary production in the mock.
+const CATEGORY_FROM_ENV: Record<
+  CaseProductContext["environment"],
+  NonNullable<CaseProductContext["deploymentCategory"]>
+> = {
+  prod: "primary_production",
+  staging: "staging",
+  qa: "qa",
+  dev: "development",
+};
+
 function deriveProduct(c: CsmCaseRow): CaseProductContext {
+  const base = deriveProductBase(c);
+  return { ...base, deploymentCategory: CATEGORY_FROM_ENV[base.environment] };
+}
+
+function deriveProductBase(c: CsmCaseRow): CaseProductContext {
   const subject = c.subject.toLowerCase();
   const project = c.projectName.toLowerCase();
   if (subject.includes("identity server") || project.includes("iam")) {

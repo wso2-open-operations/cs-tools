@@ -19,6 +19,8 @@ import {
   Button,
   Card,
   Chip,
+  Divider,
+  IconButton,
   Skeleton,
   Tab,
   Tabs,
@@ -29,8 +31,11 @@ import {
   ArrowLeft,
   Clock,
   Layers,
-  Link as LinkIcon,
   ListChecks,
+  MessageSquarePlus,
+  Paperclip,
+  TriangleAlert,
+  X,
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
@@ -44,6 +49,7 @@ import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
+  AttachmentsWidget,
   AuditTimelineWidget,
   CustomerContextWidget,
   LinkedItemsWidget,
@@ -52,7 +58,9 @@ import {
   TimeLogsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
+import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   SEVERITY_COLOR,
@@ -89,6 +97,16 @@ function MetaCell({
 // `firstName`/`lastName` shape from the CSM backend is wired.
 const CURRENT_ENGINEER_NAME = "Sajith Ekanayaka";
 
+// Reopening a closed case is a lead-only override. We match the lead role from
+// the ID-token group claims.
+// TODO(authz): confirm the exact Asgardeo group(s)/role(s) that designate a
+// "lead" with the gateway/permission model — these identifiers are provisional.
+const LEAD_REOPEN_ROLES = new Set([
+  "cre_lead",
+  "CRE_LEADS_GROUP",
+  "leadership",
+]);
+
 const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   start_work: "Started work on this case.",
   assign_to_me: "Assigned to you.",
@@ -99,6 +117,40 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
   reopen: "Case reopened.",
+};
+
+type FeedbackSeverity = "success" | "info" | "warning" | "error";
+
+interface Feedback {
+  message: string;
+  severity: FeedbackSeverity;
+  /** Sticky feedback (state transitions) stays until dismissed; transient
+   * feedback (copy link, downloads) auto-dismisses. */
+  sticky: boolean;
+}
+
+// Lifecycle transitions carry semantic weight — closure/resolution reads as
+// success, "waiting" states as a caution. Benign/neutral moves stay info.
+const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
+  start_work: "info",
+  assign_to_me: "info",
+  propose_solution: "success",
+  request_info: "warning",
+  wait_on_wso2: "warning",
+  resume_work: "info",
+  close: "success",
+  close_no_response: "success",
+  reopen: "info",
+};
+
+const FEEDBACK_PALETTE: Record<
+  FeedbackSeverity,
+  { bg: string; border: string; fg: string }
+> = {
+  success: { bg: "success.50", border: "success.main", fg: "success.main" },
+  info: { bg: "info.50", border: "info.main", fg: "info.main" },
+  warning: { bg: "warning.50", border: "warning.main", fg: "warning.main" },
+  error: { bg: "error.50", border: "error.main", fg: "error.main" },
 };
 
 const SECONDARY_TOAST: Record<string, string> = {
@@ -116,9 +168,16 @@ const SECONDARY_TOAST: Record<string, string> = {
   request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
+  download_all_attachments: "Preparing all attachments for download (mock).",
+  download_attachment: "Downloading attachment (mock).",
 };
 
-type CaseTabId = "activities" | "details" | "sla" | "related" | "time";
+type CaseTabId =
+  | "activities"
+  | "details"
+  | "sla"
+  | "attachments"
+  | "time";
 
 /**
  * Walk the parent chain to find the nearest vertically-scrollable element.
@@ -178,7 +237,7 @@ const TAB_DEFS: Array<{
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
   { id: "sla", label: "SLA", icon: <Clock size={16} /> },
-  { id: "related", label: "Related", icon: <LinkIcon size={16} /> },
+  { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
 ];
 
@@ -194,10 +253,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   } = useGetCsmCaseComments(caseId);
   const postComment = usePostCsmCaseComment();
   const recordView = useRecordRecentView();
+  const claims = useIdTokenClaims();
   const { showError } = useErrorBanner();
-  const [toast, setToast] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [metaCollapsed, setMetaCollapsed] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
   // jump to the Activities tab, scroll the entry into view vertically, and
@@ -253,10 +314,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   }, [location.hash, data, comments]);
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2500);
+    // State-transition feedback is sticky (persists until dismissed) so it
+    // isn't missed; transient confirmations auto-dismiss.
+    if (!feedback || feedback.sticky) return;
+    const t = setTimeout(() => setFeedback(null), 2500);
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [feedback]);
 
   useEffect(() => {
     if (!data) return;
@@ -271,13 +334,23 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const onAction = useCallback(
     (action: CaseLifecycleAction | { secondary: string }) => {
-      const message =
-        typeof action === "string"
-          ? LIFECYCLE_TOAST[action]
-          : SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`;
-      setToast(message);
+      if (typeof action === "string") {
+        // Lifecycle transition: sticky, semantically-colored feedback.
+        setFeedback({
+          message: LIFECYCLE_TOAST[action],
+          severity: LIFECYCLE_SEVERITY[action],
+          sticky: true,
+        });
+        return;
+      }
 
-      if (typeof action !== "string" && action.secondary === "copy_link" && data) {
+      setFeedback({
+        message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
+        severity: "info",
+        sticky: false,
+      });
+
+      if (action.secondary === "copy_link" && data) {
         navigator.clipboard
           ?.writeText(`${window.location.origin}/cases/${data.id}`)
           .catch(() => showError("Could not copy link."));
@@ -337,13 +410,37 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const c = data;
   const isClosed = c.state === "closed";
   const breached = c.minutesToBreach < 0;
+  const canReopenClosed = (claims?.groups ?? []).some((g) =>
+    LEAD_REOPEN_ROLES.has(g),
+  );
   const rawComments = comments ?? [];
+  // The description is the case's opening comment. It is injected into the
+  // stream dated 1s after `created`, so with the default latest-first sort it
+  // sits at the bottom as the oldest entry — read in context after the latest
+  // activity, which is how engineers actually work a case here.
   const descriptionComment = buildDescriptionComment(c);
-  // The description renders as the first comment in the activity stream,
-  // dated 1s after `created` so it always lands directly after that event.
   const safeComments = descriptionComment
     ? [descriptionComment, ...rawComments]
     : rawComments;
+
+  // SLA breach is a live condition, not a dismissible notice: surface it in a
+  // persistent banner under the header so it stays visible on every tab, not
+  // just the SLA tab.
+  const breachedClocks = c.slaClocks.filter((k) => k.state === "breached");
+  const showBreachBanner = breached || breachedClocks.length > 0;
+  const breachMessage =
+    breachedClocks.length > 0
+      ? `SLA breached — ${breachedClocks
+          .map(
+            (k) =>
+              `${SLA_CLOCK_LABEL[k.clockType]} ${formatTimeToBreach(
+                k.minutesToBreach,
+              )}`,
+          )
+          .join(", ")}`
+      : `SLA breached — ${SLA_CLOCK_LABEL[c.slaClockType]} ${formatTimeToBreach(
+          c.minutesToBreach,
+        )}`;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -375,10 +472,32 @@ export default function CsmCaseDetailPage(): JSX.Element {
             minWidth: 0,
           }}
         >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-            <Typography variant="overline" color="text.secondary">
+          {/* Case identity: project-scoped WSO2 id + case number, joined by a
+              slash and given prominence so it reads as the case's headline. */}
+          <Typography
+            variant="h6"
+            sx={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              letterSpacing: 0.2,
+              lineHeight: 1.2,
+            }}
+          >
+            <Box component="span" sx={{ color: "text.secondary" }}>
+              {c.wso2CaseId}
+            </Box>
+            <Box component="span" sx={{ color: "text.disabled", mx: 0.25 }}>
+              /
+            </Box>
+            <Box component="span" sx={{ color: "text.primary" }}>
               {c.caseNumber}
-            </Typography>
+            </Box>
+          </Typography>
+
+          {/* Status group (severity, lifecycle state, SLA) kept visually
+              distinct from the free-form tags by a divider, so the current
+              state doesn't get lost among the tag chips. */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
             <Chip
               size="small"
               label={`${c.severity} — ${SEVERITY_LABEL[c.severity]}`}
@@ -387,8 +506,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
             <Chip
               size="small"
               label={STATE_LABEL[c.state]}
-              variant="outlined"
               color={isClosed ? "success" : "primary"}
+              sx={{ fontWeight: 600 }}
+            />
+            <Chip
+              size="small"
+              label={TIER_LABEL[c.customerContext.tier]}
+              color={TIER_COLOR[c.customerContext.tier]}
             />
             {!isClosed && (
               <Chip
@@ -397,6 +521,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 color={breached ? "error" : c.minutesToBreach <= 60 ? "warning" : "default"}
                 label={`${SLA_CLOCK_LABEL[c.slaClockType]} · ${formatTimeToBreach(c.minutesToBreach)}`}
               />
+            )}
+            {c.tags.length > 0 && (
+              <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 0.25 }} />
             )}
             {c.tags.map((t) => (
               <Chip
@@ -411,7 +538,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <CaseActionBar caseDetail={c} onAction={onAction} />
+          <CaseActionBar
+            caseDetail={c}
+            onAction={onAction}
+            canReopenClosed={canReopenClosed}
+          />
         </Box>
       </Box>
 
@@ -422,19 +553,53 @@ export default function CsmCaseDetailPage(): JSX.Element {
         onToggleCollapsed={() => setMetaCollapsed((v) => !v)}
       />
 
-      {toast && (
+      {showBreachBanner && (
         <Box
           sx={{
-            p: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            p: 1.25,
             borderRadius: 1,
-            backgroundColor: "info.50",
+            backgroundColor: "error.50",
             border: 1,
-            borderColor: "info.main",
-            color: "info.main",
-            fontSize: "0.875rem",
+            borderColor: "error.main",
+            color: "error.main",
           }}
         >
-          {toast}
+          <TriangleAlert size={18} />
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {breachMessage}
+          </Typography>
+        </Box>
+      )}
+
+      {feedback && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            p: 1,
+            pl: 1.5,
+            borderRadius: 1,
+            backgroundColor: FEEDBACK_PALETTE[feedback.severity].bg,
+            border: 1,
+            borderColor: FEEDBACK_PALETTE[feedback.severity].border,
+            color: FEEDBACK_PALETTE[feedback.severity].fg,
+          }}
+        >
+          <Typography variant="body2" sx={{ flex: 1 }}>
+            {feedback.message}
+          </Typography>
+          <IconButton
+            size="small"
+            onClick={() => setFeedback(null)}
+            aria-label="Dismiss"
+            sx={{ color: "inherit" }}
+          >
+            <X size={16} />
+          </IconButton>
         </Box>
       )}
 
@@ -445,36 +610,97 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="scrollable"
           scrollButtons="auto"
         >
-          {TAB_DEFS.map((t) => (
-            <Tab
-              key={t.id}
-              value={t.id}
-              icon={t.icon}
-              iconPosition="start"
-              label={t.label}
-              sx={{ minHeight: 44, textTransform: "none" }}
-            />
-          ))}
+          {TAB_DEFS.map((t) => {
+            // Counts shown only where the tab IS the list (unambiguous).
+            const count =
+              t.id === "attachments"
+                ? c.attachments.length
+                : t.id === "time"
+                  ? c.timeLogs.length
+                  : undefined;
+            return (
+              <Tab
+                key={t.id}
+                value={t.id}
+                icon={t.icon}
+                iconPosition="start"
+                label={count ? `${t.label} (${count})` : t.label}
+                sx={{ minHeight: 44, textTransform: "none" }}
+              />
+            );
+          })}
         </Tabs>
       </Box>
 
       {activeTab === "activities" && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
-            <Typography variant="subtitle2">Reply</Typography>
-            <CsmCaseCommentInput
-              disabled={!caseId}
-              onSubmit={async (bodyHtml, internal) => {
-                if (!caseId) return;
-                await postComment.mutateAsync({
-                  caseId,
-                  bodyHtml,
-                  authorName: CURRENT_ENGINEER_NAME,
-                  internal,
-                });
+          {/* Comments are latest-in-top (WSO2 convention), so the composer
+              belongs at the top. It stays collapsed behind a button to keep
+              the thread the focal point until the engineer chooses to reply. */}
+          {composerOpen ? (
+            <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Typography variant="subtitle2">Reply</Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  color="inherit"
+                  onClick={() => setComposerOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </Box>
+              <CsmCaseCommentInput
+                disabled={!caseId}
+                onSubmit={async (bodyHtml, internal) => {
+                  if (!caseId) return;
+                  await postComment.mutateAsync({
+                    caseId,
+                    bodyHtml,
+                    authorName: CURRENT_ENGINEER_NAME,
+                    internal,
+                  });
+                  // Collapse only on success; on error the input keeps its
+                  // draft and surfaces the failure.
+                  setComposerOpen(false);
+                }}
+              />
+            </Card>
+          ) : (
+            // Full-width collapsed composer: a faux input bar that fills the
+            // row and reads as "click to write a reply" rather than a lone
+            // button floating in empty space.
+            <Button
+              fullWidth
+              variant="outlined"
+              color="inherit"
+              startIcon={<MessageSquarePlus size={18} />}
+              onClick={() => setComposerOpen(true)}
+              sx={{
+                justifyContent: "flex-start",
+                textTransform: "none",
+                gap: 0.5,
+                py: 1.5,
+                px: 2,
+                color: "text.secondary",
+                borderColor: "divider",
+                borderStyle: "dashed",
+                "&:hover": {
+                  borderColor: "primary.main",
+                  borderStyle: "solid",
+                  backgroundColor: "action.hover",
+                },
               }}
-            />
-          </Card>
+            >
+              Compose a reply to the customer…
+            </Button>
+          )}
 
           <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
@@ -521,14 +747,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
             alignItems: "start",
           }}
         >
-          <CustomerContextWidget ctx={c.customerContext} />
-          <ProductContextWidget ctx={c.productContext} />
-          <WatchersWidget
-            watchers={c.watchers}
-            onAdd={() => onAction({ secondary: "manage_watchers" })}
-          />
           <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
-            <Typography variant="subtitle2">Timestamps</Typography>
+            <Typography variant="subtitle2">Identifiers &amp; timestamps</Typography>
             <Box
               sx={{
                 display: "grid",
@@ -536,6 +756,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 gap: 2,
               }}
             >
+              <MetaCell label="Case ID">
+                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                  {c.caseNumber}
+                </Typography>
+              </MetaCell>
+              <MetaCell label="WSO2 case ID">
+                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                  {c.wso2CaseId}
+                </Typography>
+              </MetaCell>
               <MetaCell label="Created">
                 <Typography variant="body2">
                   <RelativeTime iso={c.createdAt} />
@@ -546,8 +776,23 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <RelativeTime iso={c.updatedAt} />
                 </Typography>
               </MetaCell>
+              <MetaCell label="Assignment group (ABT)">
+                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                  {c.assignmentGroup}
+                </Typography>
+              </MetaCell>
             </Box>
           </Card>
+          <CustomerContextWidget ctx={c.customerContext} />
+          <ProductContextWidget ctx={c.productContext} />
+          <WatchersWidget
+            watchers={c.watchers}
+            onAdd={() => onAction({ secondary: "manage_watchers" })}
+          />
+          <LinkedItemsWidget
+            items={c.linkedItems}
+            onLink={() => onAction({ secondary: "link_case" })}
+          />
         </Box>
       )}
 
@@ -567,11 +812,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
         </Box>
       )}
 
-      {activeTab === "related" && (
+      {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <LinkedItemsWidget
-            items={c.linkedItems}
-            onLink={() => onAction({ secondary: "link_case" })}
+          <AttachmentsWidget
+            attachments={c.attachments}
+            onDownloadAll={() => onAction({ secondary: "download_all_attachments" })}
+            onDownload={() => onAction({ secondary: "download_attachment" })}
           />
         </Box>
       )}

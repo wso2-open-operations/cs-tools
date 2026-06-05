@@ -20,7 +20,9 @@ import {
   Button,
   Card,
   Chip,
+  IconButton,
   LinearProgress,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -29,11 +31,13 @@ import {
   Building,
   CheckCircle,
   Clock,
+  Download,
   ExternalLink,
   History,
   Link as LinkIcon,
   Mail,
   MapPin,
+  Paperclip,
   Plus,
   Server,
   Shield,
@@ -44,7 +48,9 @@ import {
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import { initialsOf } from "@utils/userClaims";
+import { formatBytes } from "@utils/formatBytes";
 import type {
+  CaseAttachment,
   CaseAuditEntry,
   CaseCustomerContext,
   CaseLinkedItem,
@@ -53,8 +59,9 @@ import type {
   CaseTag,
   CaseTimeLogEntry,
   CaseWatcher,
-  CustomerTier,
+  DeploymentCategory,
 } from "@features/csm-cases/types/csmCases";
+import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
 import {
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
@@ -129,22 +136,6 @@ function MetaRow({
 // 1. Customer / Account context
 // ---------------------------------------------------------------------------
 
-const TIER_LABEL: Record<CustomerTier, string> = {
-  subscription: "Subscription",
-  managed_cloud: "Managed Cloud",
-  saas: "SaaS",
-  trial: "Trial",
-};
-const TIER_COLOR: Record<
-  CustomerTier,
-  "primary" | "info" | "success" | "warning"
-> = {
-  subscription: "primary",
-  managed_cloud: "success",
-  saas: "info",
-  trial: "warning",
-};
-
 export function CustomerContextWidget({
   ctx,
 }: {
@@ -218,23 +209,42 @@ const ENV_COLOR: Record<
   prod: "error",
 };
 
+const DEPLOYMENT_CATEGORY_LABEL: Record<DeploymentCategory, string> = {
+  primary_production: "Primary Production",
+  staging: "Staging",
+  qa: "QA",
+  stress: "Stress",
+  uat: "UAT",
+  development: "Development",
+};
+
 export function ProductContextWidget({
   ctx,
 }: {
   ctx: CaseProductContext;
 }): JSX.Element {
+  const categoryLabel = ctx.deploymentCategory
+    ? DEPLOYMENT_CATEGORY_LABEL[ctx.deploymentCategory]
+    : null;
   return (
-    <WidgetCard
-      title="Product"
-      icon={<Server size={16} />}
-      action={
-        <Chip
-          size="small"
-          label={ctx.environment.toUpperCase()}
-          color={ENV_COLOR[ctx.environment]}
-        />
-      }
-    >
+    <WidgetCard title="Deployment info" icon={<Server size={16} />}>
+      <MetaRow label="Deployment">
+        <Box
+          sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
+        >
+          <Typography variant="body2">
+            <strong>{ctx.deployment}</strong>
+          </Typography>
+          {categoryLabel && (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={categoryLabel}
+              color={ENV_COLOR[ctx.environment]}
+            />
+          )}
+        </Box>
+      </MetaRow>
       <MetaRow label="Product">
         <Typography variant="body2">
           <strong>{ctx.product}</strong>
@@ -250,9 +260,6 @@ export function ProductContextWidget({
           </Typography>
         </MetaRow>
       )}
-      <MetaRow label="Deployment">
-        <Typography variant="body2">{ctx.deployment}</Typography>
-      </MetaRow>
       {ctx.region && (
         <MetaRow label="Region">
           <Typography variant="body2">{ctx.region}</Typography>
@@ -644,6 +651,90 @@ export function TimeLogsWidget({
           </Box>
         ))}
       </Box>
+    </WidgetCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 7b. Attachments (all files on the case, newest first)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lists every attachment on the case in descending order of upload time, with
+ * a "Download all" affordance. Downloads are surfaced through the parent's
+ * action handler (mock) until the BE exposes attachment download URLs.
+ */
+export function AttachmentsWidget({
+  attachments,
+  onDownloadAll,
+  onDownload,
+}: {
+  attachments: CaseAttachment[];
+  onDownloadAll?: () => void;
+  onDownload?: (attachment: CaseAttachment) => void;
+}): JSX.Element {
+  const sorted = [...attachments].sort(
+    (a, b) =>
+      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+  );
+  return (
+    <WidgetCard
+      title={`Attachments (${sorted.length})`}
+      icon={<Paperclip size={16} />}
+      action={
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<Download size={14} />}
+          onClick={onDownloadAll}
+          disabled={sorted.length === 0}
+        >
+          Download all
+        </Button>
+      }
+    >
+      {sorted.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No attachments on this case.
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {sorted.map((a) => (
+            <Box
+              key={a.id}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                p: 1,
+                borderRadius: 1,
+                border: 1,
+                borderColor: "divider",
+              }}
+            >
+              <Paperclip size={16} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+                  {a.filename}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
+                  {a.uploadedBy} · <RelativeTime iso={a.uploadedAt} />
+                </Typography>
+              </Box>
+              <Tooltip title="Download">
+                <IconButton
+                  size="small"
+                  aria-label={`Download ${a.filename}`}
+                  onClick={() => onDownload?.(a)}
+                >
+                  <Download size={16} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          ))}
+        </Box>
+      )}
     </WidgetCard>
   );
 }

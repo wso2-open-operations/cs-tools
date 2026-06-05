@@ -14,10 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Box, Card, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
 import type { NavigateFunction } from "react-router";
+import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 
 interface CaseMetaBandProps {
@@ -91,10 +92,16 @@ export default function CaseMetaBand({
   onToggleCollapsed,
 }: CaseMetaBandProps): JSX.Element {
   const product = c.productContext;
+  const tier = c.customerContext.tier;
   const versionLabel =
     product.updateLevel && product.updateLevel.trim().length > 0
       ? product.updateLevel
       : product.version || "—";
+  // One-line digest shown when the band is collapsed, so collapsing doesn't
+  // hide every triage fact — account, tier, and who owns the case stay visible.
+  const collapsedSummary = [c.customer, TIER_LABEL[tier], c.assignee]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Card
@@ -112,13 +119,24 @@ export default function CaseMetaBand({
           py: collapsed ? 0.75 : 1,
         }}
       >
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}
-        >
-          Overview
-        </Typography>
+        {collapsed ? (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            noWrap
+            sx={{ minWidth: 0, mr: 1 }}
+          >
+            {collapsedSummary}
+          </Typography>
+        ) : (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}
+          >
+            Overview
+          </Typography>
+        )}
         <Tooltip title={collapsed ? "Show details" : "Hide details"}>
           <IconButton
             size="small"
@@ -146,10 +164,14 @@ export default function CaseMetaBand({
             borderColor: "divider",
           }}
         >
-          <Cell label="ABT">
-            <Typography variant="body2" noWrap>
-              <code style={{ fontSize: "0.85em" }}>{c.assignmentGroup}</code>
-            </Typography>
+          <Cell label="Tier">
+            <Box sx={{ minWidth: 0 }}>
+              <Chip
+                size="small"
+                label={TIER_LABEL[tier]}
+                color={TIER_COLOR[tier]}
+              />
+            </Box>
           </Cell>
           <Cell label="Assignee">
             <Typography variant="body2" noWrap>

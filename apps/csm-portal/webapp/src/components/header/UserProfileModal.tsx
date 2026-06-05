@@ -234,12 +234,11 @@ export default function UserProfileModal({
     <Dialog
       open={open}
       onClose={handleClose}
-      maxWidth="md"
+      maxWidth="sm"
       fullWidth
       aria-labelledby="profile-dialog-title"
       PaperProps={{
         sx: {
-          height: "90vh",
           maxHeight: "90vh",
         },
       }}
@@ -382,7 +381,7 @@ export default function UserProfileModal({
                   </Box>
                 </Box>
 
-                <Box sx={{ p: 3, width: "100%" }}>
+                <Box sx={{ width: "100%" }}>
                   <Box
                     sx={{ display: "flex", flexDirection: "column", gap: 3 }}
                   >
@@ -534,7 +533,7 @@ export default function UserProfileModal({
                           display: "flex",
                           flexDirection: "column",
                           gap: 1,
-                          flex: "1 1 45%",
+                          flex: "1 1 100%",
                           minWidth: 200,
                         }}
                       >

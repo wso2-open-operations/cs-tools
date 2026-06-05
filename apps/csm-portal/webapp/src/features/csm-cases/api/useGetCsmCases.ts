@@ -140,6 +140,7 @@ export function useGetCsmCases(
           cases.push({
             id: c.id,
             caseNumber: c.number ?? c.id,
+            wso2CaseId: c.wso2Id ?? c.id,
             subject: c.subject ?? "(no subject)",
             customer: accountName.get(accountId) ?? "—",
             accountId,
