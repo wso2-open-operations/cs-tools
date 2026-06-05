@@ -38,6 +38,11 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 export interface VariableFormFieldsProps {
   variables: CatalogItemVariable[] | undefined;
@@ -209,6 +214,7 @@ export default function VariableFormFields({
   onAttachmentAdd,
   userTimeZone,
 }: VariableFormFieldsProps): JSX.Element {
+  const { showError } = useErrorBanner();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
   const sortedVariables = useMemo(
@@ -350,6 +356,13 @@ export default function VariableFormFields({
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={onAttachmentRemove}
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
+              )
+            }
           />
         </Grid>
       );

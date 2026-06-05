@@ -33,6 +33,10 @@ import Editor from "@components/rich-text-editor/Editor";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import type { JSX } from "react";
 import { CommentType } from "@features/support/constants/supportConstants";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 /**
  * Input row with rich-text editor and send button.
@@ -240,8 +244,12 @@ export default function ActivityCommentInput({
             onAttachmentRemove={handleAttachmentRemove}
             showKeyboardHint={true}
             maxHeight="310px"
-            onPasteError={() =>
-              showError("Image exceeds the maximum allowed size of 10 MB.")
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
+              )
             }
             overlayElement={
               <Tooltip title="Send comment">

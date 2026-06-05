@@ -32,6 +32,11 @@ import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 /**
  * Renders the Case Details section for case creation.
@@ -66,6 +71,7 @@ export function CaseDetailsSection({
   isTitleFromChat = false,
   isDescriptionFromConversation = false,
 }: CaseDetailsSectionProps): JSX.Element {
+  const { showError } = useErrorBanner();
   const titleReadOnly = isTitleDisabled;
   const titleLength = title.trim().length;
   const isTitleTooLong = titleLength > 160;
@@ -242,6 +248,13 @@ export function CaseDetailsSection({
             value={description}
             onChange={setDescription}
             maxHeight="210px"
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
+              )
+            }
           />
 
           {!isRelatedCaseMode && isDescriptionFromConversation && (
