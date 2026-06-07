@@ -133,10 +133,11 @@ paths:
       parameters:
         - name: id
           in: path
-          description: ID of the case
+          description: UUID of the case.
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         description: Case comment creation payload
         content:
@@ -189,10 +190,11 @@ paths:
       parameters:
         - name: id
           in: path
-          description: ID of the case
+          description: UUID of the case.
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         description: Case comment search payload
         content:

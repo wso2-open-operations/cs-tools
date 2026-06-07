@@ -23,9 +23,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
+
+var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 var errUserNotFound = errors.New("authenticated user not found in entity service")
 
@@ -336,6 +339,10 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	caseID := r.PathValue("id")
 	if caseID == "" {
 		writeError(w, http.StatusBadRequest, "Case ID cannot be empty!")
+		return
+	}
+	if !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
