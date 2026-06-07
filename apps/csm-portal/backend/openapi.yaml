@@ -83,19 +83,48 @@ paths:
       parameters:
         - name: id
           in: path
-          description: ID of the case
+          description: UUID of the case.
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         "200":
-          description: Ok
+          description: The case with the given ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        "400":
+          description: Bad request (e.g. malformed UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "401":
-          description: Unauthorized
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "404":
-          description: NotFound
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
-          description: InternalServerError
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /cases/{id}/comments:
     post:
