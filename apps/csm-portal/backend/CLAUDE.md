@@ -39,7 +39,7 @@ Follow these steps in order:
 
 - **Auth**: always check `middleware.UserInfoFromContext(r.Context()) == nil` first → 401
 - **Body size**: cap with `http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)` (1 MiB) before reading
-- **Path params**: guard against empty string after `r.PathValue("id")`
+- **Path params**: guard against empty string after `r.PathValue("id")`; if the param is a UUID, also validate format using the package-level `uuidRe` compiled regex and return 400 on mismatch — fail fast before calling the upstream
 - **Upstream errors**: always use `mapUpstreamError(w, err, "<fallback message>")` — never write custom status mappings inline
 - **Response**: return raw `[]byte` with `writeJSON` for simple passthroughs; unmarshal into typed structs only when the response shape needs to change
 
@@ -47,6 +47,7 @@ Follow these steps in order:
 
 - Error responses use `$ref: '#/components/schemas/ErrorPayload'`
 - Every endpoint must declare a `403` response
+- Path parameters that expect UUIDs must declare `format: uuid` on the schema
 - The `Case` schema includes a computed `next_states` read-only field populated server-side from `state`
 
 ## Response shape
@@ -69,3 +70,4 @@ Follow these steps in order:
 - `upstreamErrors(fallback)` returns the standard upstream error table used across all handler tests
 - `withUser()` injects a test user into the request context
 - `decodeJSON[T]()` decodes response bodies in assertions
+- Use real UUIDs (e.g. `"11111111-1111-1111-1111-111111111111"`) for UUID path param test values — not fake slugs like `"case-1"`

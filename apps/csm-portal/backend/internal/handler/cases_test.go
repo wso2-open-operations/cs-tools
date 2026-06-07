@@ -582,10 +582,15 @@ func TestSearchProjectCases(t *testing.T) {
 // ----- GetCase -----
 
 func TestGetCase(t *testing.T) {
+	const (
+		testCaseID   = "11111111-1111-1111-1111-111111111111"
+		testCaseID42 = "42424242-4242-4242-4242-424242424242"
+	)
+
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := httptest.NewRequest(http.MethodGet, "/cases/case-1", nil)
-		r.SetPathValue("id", "case-1")
+		r := httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil)
+		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.GetCase(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
@@ -604,28 +609,39 @@ func TestGetCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/not-a-uuid", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetCase(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("passes case ID to upstream and returns 200 with next_states injected", func(t *testing.T) {
 		var capturedID string
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, caseID string) ([]byte, error) {
 				capturedID = caseID
-				return []byte(`{"id":"case-42","state":"open"}`), nil
+				return []byte(`{"id":"` + testCaseID42 + `","state":"open"}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/case-42", nil))
-		r.SetPathValue("id", "case-42")
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID42, nil))
+		r.SetPathValue("id", testCaseID42)
 		w := httptest.NewRecorder()
 		h.GetCase(w, r)
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
-		if capturedID != "case-42" {
-			t.Errorf("upstream received caseID %q, want %q", capturedID, "case-42")
+		if capturedID != testCaseID42 {
+			t.Errorf("upstream received caseID %q, want %q", capturedID, testCaseID42)
 		}
 		resp := decodeJSON[map[string]any](t, w)
-		if resp["id"] != "case-42" {
-			t.Errorf("response id = %v, want case-42", resp["id"])
+		if resp["id"] != testCaseID42 {
+			t.Errorf("response id = %v, want %s", resp["id"], testCaseID42)
 		}
 		ns, ok := resp["next_states"].([]any)
 		if !ok || len(ns) != 1 || ns[0] != caseStateWorkInProgress {
@@ -649,13 +665,13 @@ func TestGetCase(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.state, func(t *testing.T) {
 				t.Parallel()
-				body, _ := json.Marshal(map[string]string{"id": "case-1", "state": tc.state})
+				body, _ := json.Marshal(map[string]string{"id": testCaseID, "state": tc.state})
 				client := &mockEntityCaseClient{
 					getCaseFn: func(_ context.Context, _ string) ([]byte, error) { return body, nil },
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/case-1", nil))
-				r.SetPathValue("id", "case-1")
+				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+				r.SetPathValue("id", testCaseID)
 				w := httptest.NewRecorder()
 				h.GetCase(w, r)
 
@@ -684,8 +700,8 @@ func TestGetCase(t *testing.T) {
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/case-1", nil))
-				r.SetPathValue("id", "case-1")
+				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID, nil))
+				r.SetPathValue("id", testCaseID)
 				w := httptest.NewRecorder()
 				h.GetCase(w, r)
 				assertStatus(t, w, tc.wantCode)
