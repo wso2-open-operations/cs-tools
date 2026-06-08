@@ -620,6 +620,11 @@ func TestGetCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	type getCaseResp struct {
+		ID         string   `json:"id"`
+		NextStates []string `json:"nextStates"`
+	}
+
 	t.Run("passes case ID to upstream and returns 200 with nextStates injected", func(t *testing.T) {
 		var capturedID string
 		client := &mockEntityCaseClient{
@@ -639,13 +644,12 @@ func TestGetCase(t *testing.T) {
 		if capturedID != testCaseID42 {
 			t.Errorf("upstream received caseID %q, want %q", capturedID, testCaseID42)
 		}
-		resp := decodeJSON[map[string]any](t, w)
-		if resp["id"] != testCaseID42 {
-			t.Errorf("response id = %v, want %s", resp["id"], testCaseID42)
+		resp := decodeJSON[getCaseResp](t, w)
+		if resp.ID != testCaseID42 {
+			t.Errorf("response id = %v, want %s", resp.ID, testCaseID42)
 		}
-		ns, ok := resp["nextStates"].([]any)
-		if !ok || len(ns) != 1 || ns[0] != caseStateWorkInProgress {
-			t.Errorf("nextStates = %v, want [%s]", resp["nextStates"], caseStateWorkInProgress)
+		if len(resp.NextStates) != 1 || resp.NextStates[0] != caseStateWorkInProgress {
+			t.Errorf("nextStates = %v, want [%s]", resp.NextStates, caseStateWorkInProgress)
 		}
 	})
 
@@ -676,14 +680,13 @@ func TestGetCase(t *testing.T) {
 				h.GetCase(w, r)
 
 				assertStatus(t, w, http.StatusOK)
-				resp := decodeJSON[map[string]any](t, w)
-				got, _ := resp["nextStates"].([]any)
-				if len(got) != len(tc.wantNext) {
-					t.Fatalf("nextStates = %v, want %v", got, tc.wantNext)
+				resp := decodeJSON[getCaseResp](t, w)
+				if len(resp.NextStates) != len(tc.wantNext) {
+					t.Fatalf("nextStates = %v, want %v", resp.NextStates, tc.wantNext)
 				}
-				for i, v := range got {
-					if v != tc.wantNext[i] {
-						t.Errorf("nextStates[%d] = %v, want %v", i, v, tc.wantNext[i])
+				for i, got := range resp.NextStates {
+					if got != tc.wantNext[i] {
+						t.Errorf("nextStates[%d] = %v, want %v", i, got, tc.wantNext[i])
 					}
 				}
 			})
