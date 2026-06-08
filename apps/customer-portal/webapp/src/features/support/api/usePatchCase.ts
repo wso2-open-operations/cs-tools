@@ -76,7 +76,7 @@ export function usePatchCase(
       logger.debug("[usePatchCase] Case updated:", data);
       return data;
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       const matchesProjectCases = (queryKey: readonly unknown[]): boolean => {
         if (queryKey[0] !== ApiQueryKeys.PROJECT_CASES) return false;
         if (queryKey[1] === "page") return queryKey[2] === projectId;
@@ -86,14 +86,10 @@ export function usePatchCase(
       const isCaseDetailsQuery = (queryKey: readonly unknown[]) =>
         queryKey[0] === ApiQueryKeys.CASE_DETAILS && queryKey[2] === caseId;
 
-      queryClient.invalidateQueries({ predicate: (q) => isCaseDetailsQuery(q.queryKey) });
-
-      if (variables.watchList !== undefined) {
-        void queryClient.refetchQueries({
-          predicate: (q) => isCaseDetailsQuery(q.queryKey),
-          type: "active",
-        });
-      }
+      void queryClient.refetchQueries({
+        predicate: (q) => isCaseDetailsQuery(q.queryKey),
+        type: "active",
+      });
       queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CASES_STATS, projectId],
       });

@@ -97,7 +97,8 @@ export default function CaseDetailsDetailsPanel({
         .map((c) => ({
           label: `${c.firstName} ${c.lastName}`.trim() || c.email,
           value: c.email,
-        })),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     [contactsData],
   );
 
@@ -114,13 +115,15 @@ export default function CaseDetailsDetailsPanel({
   };
 
   const handleSaveWatchList = () => {
-    patchCase({ watchList: pendingWatchList }, {
+    const optimisticList = [...pendingWatchList];
+    setSavedWatchList(optimisticList);
+    patchCase({ watchList: optimisticList }, {
       onSuccess: () => {
-        setSavedWatchList(null);
         setIsEditingWatchList(false);
         showSuccess("Watch list updated successfully");
       },
       onError: () => {
+        setSavedWatchList(null);
         showError("Failed to update watch list. Please try again.");
       },
     });
@@ -654,9 +657,14 @@ export default function CaseDetailsDetailsPanel({
             loadingText="Loading..."
             options={contactOptions}
             getOptionLabel={(option) => option.label}
-            value={contactOptions.filter((o) => pendingWatchList.includes(o.value))}
+            value={pendingWatchList
+                  .map((email) => contactOptions.find((o) => o.value === email))
+                  .filter((o): o is { label: string; value: string } => o !== undefined)}
             onChange={(_event, newValue) => {
-              setPendingWatchList(newValue.map((o) => o.value));
+              const hiddenWatchers = pendingWatchList.filter(
+                (email) => !contactOptions.some((o) => o.value === email),
+              );
+              setPendingWatchList([...newValue.map((o) => o.value), ...hiddenWatchers]);
             }}
             isOptionEqualToValue={(option, val) => option.value === val.value}
             renderOption={(props, option, { selected }) => {
@@ -690,16 +698,22 @@ export default function CaseDetailsDetailsPanel({
             )}
           />
         ) : (() => {
-          const displayEmails = savedWatchList ?? (data?.watchList ?? []).map(
-            (w) => w.email ?? w.userName ?? w.name ?? ""
-          ).filter(Boolean);
-          return displayEmails.length > 0 ? (
+          const displayItems = savedWatchList
+            ? savedWatchList.map((email) => ({
+                key: email,
+                label: contactOptions.find((o) => o.value === email)?.label ?? email,
+              }))
+            : (data?.watchList ?? [])
+                .filter((w) => w.email ?? w.userName ?? w.name)
+                .map((w) => ({
+                  key: w.email ?? w.userName ?? w.name ?? "",
+                  label: w.name ?? w.userName ?? w.email ?? "",
+                }));
+          return displayItems.length > 0 ? (
             <Stack direction="row" flexWrap="wrap" gap={1}>
-              {displayEmails.map((email) => {
-                const label = contactOptions.find((o) => o.value === email)?.label ?? email;
-                return (
+              {displayItems.map(({ key, label }) => (
                   <Chip
-                    key={email}
+                    key={key}
                     label={label}
                     size="small"
                     variant="outlined"
@@ -710,8 +724,7 @@ export default function CaseDetailsDetailsPanel({
                       fontSize: "0.75rem",
                     }}
                   />
-                );
-              })}
+              ))}
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">No watchers added</Typography>

@@ -52,14 +52,18 @@ export function WatchListSection({
 }: WatchListSectionProps): JSX.Element {
   const options: ContactOption[] = useMemo(
     () =>
-      contacts.map((c) => ({
-        label: `${c.firstName} ${c.lastName}`.trim() || c.email,
-        value: c.email,
-      })),
+      contacts
+        .map((c) => ({
+          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          value: c.email,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     [contacts],
   );
 
-  const selectedOptions = options.filter((o) => selectedEmails.includes(o.value));
+  const selectedOptions = selectedEmails
+    .map((email) => options.find((o) => o.value === email))
+    .filter((o): o is ContactOption => o !== undefined);
 
   return (
     <Paper sx={{ p: 3 }}>
