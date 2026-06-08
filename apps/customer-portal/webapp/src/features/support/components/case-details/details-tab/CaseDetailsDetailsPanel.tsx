@@ -701,7 +701,10 @@ export default function CaseDetailsDetailsPanel({
           const displayItems = savedWatchList
             ? savedWatchList.map((email) => ({
                 key: email,
-                label: contactOptions.find((o) => o.value === email)?.label ?? email,
+                label:
+                  contactOptions.find((o) => o.value === email)?.label ??
+                  data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
+                  email,
               }))
             : (data?.watchList ?? [])
                 .filter((w) => w.email ?? w.userName ?? w.name)
