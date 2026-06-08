@@ -624,29 +624,7 @@ export default function CaseDetailsDetailsPanel({
             >
               Edit
             </Button>
-          ) : (
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="text"
-                size="small"
-                onClick={() => setIsEditingWatchList(false)}
-                sx={{ minHeight: "unset", p: 0, textTransform: "none" }}
-                disabled={isPatchPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="text"
-                size="small"
-                color="primary"
-                onClick={handleSaveWatchList}
-                sx={{ minHeight: "unset", p: 0, textTransform: "none" }}
-                loading={isPatchPending}
-              >
-                Save
-              </Button>
-            </Stack>
-          )
+          ) : null
         }
       >
         {isEditingWatchList ? (() => {
@@ -664,6 +642,7 @@ export default function CaseDetailsDetailsPanel({
             .filter((email) => contactOptions.some((o) => o.value === email))
             .map((email) => contactOptions.find((o) => o.value === email)!);
           return (
+            <Box>
             <Autocomplete<WatchOption, true>
               multiple
               disableCloseOnSelect
@@ -722,6 +701,28 @@ export default function CaseDetailsDetailsPanel({
                 />
               )}
             />
+            <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 1 }}>
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => setIsEditingWatchList(false)}
+                sx={{ minHeight: "unset", textTransform: "none" }}
+                disabled={isPatchPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="text"
+                size="small"
+                color="primary"
+                onClick={handleSaveWatchList}
+                sx={{ minHeight: "unset", textTransform: "none" }}
+                loading={isPatchPending}
+              >
+                Save
+              </Button>
+            </Stack>
+            </Box>
           );
         })() : (() => {
           const displayItems = savedWatchList
