@@ -649,55 +649,81 @@ export default function CaseDetailsDetailsPanel({
           )
         }
       >
-        {isEditingWatchList ? (
-          <Autocomplete
-            multiple
-            disableCloseOnSelect
-            loading={isContactsLoading}
-            loadingText="Loading..."
-            options={contactOptions}
-            getOptionLabel={(option) => option.label}
-            value={pendingWatchList
-                  .map((email) => contactOptions.find((o) => o.value === email))
-                  .filter((o): o is { label: string; value: string } => o !== undefined)}
-            onChange={(_event, newValue) => {
-              const hiddenWatchers = pendingWatchList.filter(
-                (email) => !contactOptions.some((o) => o.value === email),
-              );
-              setPendingWatchList([...newValue.map((o) => o.value), ...hiddenWatchers]);
-            }}
-            isOptionEqualToValue={(option, val) => option.value === val.value}
-            renderOption={(props, option, { selected }) => {
-              const { key, ...rest } = props;
-              return (
-                <li key={key} {...rest}>
-                  <Checkbox
-                    size="small"
-                    checked={selected}
-                    sx={{ mr: 1, p: 0.5 }}
-                  />
-                  {option.label}
-                </li>
-              );
-            }}
-            renderTags={(tagValue, getTagProps) =>
-              tagValue.map((option, index) => {
-                const { key, ...tagProps } = getTagProps({ index });
-                return <Chip key={key} label={option.label} size="small" {...tagProps} />;
-              })
-            }
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Watch List"
-                placeholder="Add watchers..."
-                size="small"
-                error={isContactsError}
-                helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
-              />
-            )}
-          />
-        ) : (() => {
+        {isEditingWatchList ? (() => {
+          type WatchOption = { label: string; value: string; readonly?: boolean };
+          const hiddenWatcherOptions: WatchOption[] = pendingWatchList
+            .filter((email) => !contactOptions.some((o) => o.value === email))
+            .map((email) => ({
+              label:
+                data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
+                email,
+              value: email,
+              readonly: true,
+            }));
+          const editableValue: WatchOption[] = pendingWatchList
+            .filter((email) => contactOptions.some((o) => o.value === email))
+            .map((email) => contactOptions.find((o) => o.value === email)!);
+          return (
+            <Autocomplete<WatchOption, true>
+              multiple
+              disableCloseOnSelect
+              loading={isContactsLoading}
+              loadingText="Loading..."
+              options={contactOptions}
+              getOptionLabel={(option) => option.label}
+              value={[...hiddenWatcherOptions, ...editableValue]}
+              onChange={(_event, newValue) => {
+                const visibleEmails = newValue
+                  .filter((o) => !o.readonly)
+                  .map((o) => o.value);
+                const hiddenEmails = pendingWatchList.filter(
+                  (email) => !contactOptions.some((o) => o.value === email),
+                );
+                setPendingWatchList([...visibleEmails, ...hiddenEmails]);
+              }}
+              isOptionEqualToValue={(option, val) => option.value === val.value}
+              renderOption={(props, option, { selected }) => {
+                const { key, ...rest } = props;
+                return (
+                  <li key={key} {...rest}>
+                    <Checkbox
+                      size="small"
+                      checked={selected}
+                      sx={{ mr: 1, p: 0.5 }}
+                    />
+                    {option.label}
+                  </li>
+                );
+              }}
+              renderTags={(tagValue, getTagProps) =>
+                tagValue.map((option, index) => {
+                  const { key, onDelete, ...tagProps } = getTagProps({ index });
+                  return option.readonly ? (
+                    <Chip
+                      key={key}
+                      label={option.label}
+                      size="small"
+                      {...tagProps}
+                      sx={{ opacity: 0.7 }}
+                    />
+                  ) : (
+                    <Chip key={key} label={option.label} size="small" onDelete={onDelete} {...tagProps} />
+                  );
+                })
+              }
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Watch List"
+                  placeholder="Add watchers..."
+                  size="small"
+                  error={isContactsError}
+                  helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
+                />
+              )}
+            />
+          );
+        })() : (() => {
           const displayItems = savedWatchList
             ? savedWatchList.map((email) => ({
                 key: email,
