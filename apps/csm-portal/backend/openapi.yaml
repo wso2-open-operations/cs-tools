@@ -90,11 +90,11 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The case with the given ID.
+          description: The enriched case with the given ID.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Case'
+                $ref: '#/components/schemas/CaseView'
         "400":
           description: Bad request (e.g. malformed UUID).
           content:
@@ -951,7 +951,7 @@ components:
         cases:
           type: array
           items:
-            $ref: '#/components/schemas/Case'
+            $ref: '#/components/schemas/CaseSearchView'
         total:
           type: integer
           description: Total number of matching cases
@@ -1019,6 +1019,108 @@ components:
         closedAt:
           type: string
           format: date-time
+
+    UserRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        userId:
+          type: string
+        email:
+          type: string
+          format: email
+
+    UserIDEmailRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    EntityRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    DeployedProductRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+
+    CaseView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        wso2Id:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - catastrophic
+            - critical
+            - high
+            - medium
+            - low
+        issueType:
+          type: string
+          enum:
+            - error
+            - partial_outage
+            - performance_degradation
+            - question
+            - security_or_compliance
+            - total_outage
+        state:
+          type: string
+          enum:
+            - open
+            - work_in_progress
+            - waiting_on_wso2
+            - awaiting_info
+            - reopened
+            - solution_proposed
+            - closed
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          $ref: '#/components/schemas/UserRef'
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/DeployedProductRef'
         nextStates:
           type: array
           readOnly: true
@@ -1031,6 +1133,66 @@ components:
               - awaiting_info
               - solution_proposed
               - closed
+
+    CaseSearchView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        wso2Id:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - catastrophic
+            - critical
+            - high
+            - medium
+            - low
+        issueType:
+          type: string
+          enum:
+            - error
+            - partial_outage
+            - performance_degradation
+            - question
+            - security_or_compliance
+            - total_outage
+        state:
+          type: string
+          enum:
+            - open
+            - work_in_progress
+            - waiting_on_wso2
+            - awaiting_info
+            - reopened
+            - solution_proposed
+            - closed
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          $ref: '#/components/schemas/UserIDEmailRef'
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/DeployedProductRef'
 
     UpdateDescriptionRequest:
       type: object
