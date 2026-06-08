@@ -355,7 +355,7 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 
 	result, err = injectNextStates(result)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to inject next_states", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
 		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
 		return
 	}

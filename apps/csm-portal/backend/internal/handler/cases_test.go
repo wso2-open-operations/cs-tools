@@ -620,7 +620,7 @@ func TestGetCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("passes case ID to upstream and returns 200 with next_states injected", func(t *testing.T) {
+	t.Run("passes case ID to upstream and returns 200 with nextStates injected", func(t *testing.T) {
 		var capturedID string
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, caseID string) ([]byte, error) {
@@ -643,13 +643,13 @@ func TestGetCase(t *testing.T) {
 		if resp["id"] != testCaseID42 {
 			t.Errorf("response id = %v, want %s", resp["id"], testCaseID42)
 		}
-		ns, ok := resp["next_states"].([]any)
+		ns, ok := resp["nextStates"].([]any)
 		if !ok || len(ns) != 1 || ns[0] != caseStateWorkInProgress {
-			t.Errorf("next_states = %v, want [%s]", resp["next_states"], caseStateWorkInProgress)
+			t.Errorf("nextStates = %v, want [%s]", resp["nextStates"], caseStateWorkInProgress)
 		}
 	})
 
-	t.Run("next_states reflects current state", func(t *testing.T) {
+	t.Run("nextStates reflects current state", func(t *testing.T) {
 		cases := []struct {
 			state    string
 			wantNext []string
@@ -677,13 +677,13 @@ func TestGetCase(t *testing.T) {
 
 				assertStatus(t, w, http.StatusOK)
 				resp := decodeJSON[map[string]any](t, w)
-				got, _ := resp["next_states"].([]any)
+				got, _ := resp["nextStates"].([]any)
 				if len(got) != len(tc.wantNext) {
-					t.Fatalf("next_states = %v, want %v", got, tc.wantNext)
+					t.Fatalf("nextStates = %v, want %v", got, tc.wantNext)
 				}
 				for i, v := range got {
 					if v != tc.wantNext[i] {
-						t.Errorf("next_states[%d] = %v, want %v", i, v, tc.wantNext[i])
+						t.Errorf("nextStates[%d] = %v, want %v", i, v, tc.wantNext[i])
 					}
 				}
 			})

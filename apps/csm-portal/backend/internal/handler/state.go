@@ -52,7 +52,7 @@ func nextStates(state string) []string {
 
 // injectNextStates parses raw case JSON returned by the entity service, derives
 // the valid next states from the "state" field, and returns the JSON with a
-// "next_states" key appended.
+// "nextStates" key appended.
 func injectNextStates(data []byte) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -68,6 +68,6 @@ func injectNextStates(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	m["next_states"] = ns
+	m["nextStates"] = ns
 	return json.Marshal(m)
 }

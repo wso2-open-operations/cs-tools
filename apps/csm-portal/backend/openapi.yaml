@@ -1019,7 +1019,7 @@ components:
         closedAt:
           type: string
           format: date-time
-        next_states:
+        nextStates:
           type: array
           readOnly: true
           items:

@@ -48,13 +48,13 @@ Follow these steps in order:
 - Error responses use `$ref: '#/components/schemas/ErrorPayload'`
 - Every endpoint must declare a `403` response
 - Path parameters that expect UUIDs must declare `format: uuid` on the schema
-- The `Case` schema includes a computed `next_states` read-only field populated server-side from `state`
+- The `Case` schema includes a computed `nextStates` read-only field populated server-side from `state`
 
 ## Response shape
 
 - For **portal-owned/transformed** responses (typed structs constructed by the portal), all JSON fields must use **camelCase** (e.g. `createdAt`, `projectId`, `issueType`); use `json:"fieldName"` struct tags to enforce this
 - **Raw passthrough** responses may retain upstream field naming as-is — do not reshape them unless there is an explicit requirement to do so
-- The `next_states` field is a documented snake_case exception where the portal constructs the field to match the upstream entity service contract
+- The `nextStates` field is portal-constructed and follows camelCase like all other portal-owned fields
 
 ## Security
 
