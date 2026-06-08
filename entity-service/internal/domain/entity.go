@@ -374,23 +374,66 @@ type CaseSort struct {
 }
 
 // Case represents a customer support case as stored in the database.
-// Priority and ClosedAt are optional and omitted from JSON when absent.
+// ClosedAt is the only nullable field; all others are required.
+// Used as the response for write operations (create).
 type Case struct {
-	ID                string       `json:"id"`
-	Number            string       `json:"number"`
-	Wso2ID            string       `json:"wso2Id"`
-	CreatedBy         string       `json:"createdBy"`
-	ProjectID         string       `json:"projectId"`
-	DeploymentID      string       `json:"deploymentId"`
-	DeployedProductID string       `json:"deployedProductId"`
-	Subject           string       `json:"subject"`
-	Description       string       `json:"description"`
+	ID                string        `json:"id"`
+	Number            string        `json:"number"`
+	Wso2ID            string        `json:"wso2Id"`
+	CreatedBy         string        `json:"createdBy"`
+	ProjectID         string        `json:"projectId"`
+	DeploymentID      string        `json:"deploymentId"`
+	DeployedProductID string        `json:"deployedProductId"`
+	Subject           string        `json:"subject"`
+	Description       string        `json:"description"`
 	Priority          CasePriority  `json:"priority"`
 	IssueType         CaseIssueType `json:"issueType"`
 	State             CaseState     `json:"state"`
-	CreatedAt         time.Time    `json:"createdAt"`
-	UpdatedAt         time.Time    `json:"updatedAt"`
-	ClosedAt          *time.Time   `json:"closedAt,omitempty"`
+	CreatedAt         time.Time     `json:"createdAt"`
+	UpdatedAt         time.Time     `json:"updatedAt"`
+	ClosedAt          *time.Time    `json:"closedAt,omitempty"`
+}
+
+// UserRef is a reference to a user with key display fields.
+type UserRef struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	UserID      string `json:"userId"`
+	Email       string `json:"email"`
+}
+
+// EntityRef is a compact reference to a named entity (project or deployment).
+type EntityRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// DeployedProductRef is a compact reference to a deployed product with a
+// computed display name combining the product name and version.
+type DeployedProductRef struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
+// CaseView is the enriched read representation of a case. It carries all
+// original Case fields plus display-value references for each FK, resolved via
+// JOIN at query time. ClosedAt is the only nullable field.
+type CaseView struct {
+	ID                     string             `json:"id"`
+	Number                 string             `json:"number"`
+	Wso2ID                 string             `json:"wso2Id"`
+	Subject                string             `json:"subject"`
+	Description            string             `json:"description"`
+	Priority               CasePriority       `json:"priority"`
+	IssueType              CaseIssueType      `json:"issueType"`
+	State                  CaseState          `json:"state"`
+	CreatedAt              time.Time          `json:"createdAt"`
+	UpdatedAt              time.Time          `json:"updatedAt"`
+	ClosedAt               *time.Time         `json:"closedAt,omitempty"`
+	CreatedByDetails       UserRef            `json:"createdByDetails"`
+	ProjectDetails         EntityRef          `json:"projectDetails"`
+	DeploymentDetails      EntityRef          `json:"deploymentDetails"`
+	DeployedProductDetails DeployedProductRef `json:"deployedProductDetails"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
@@ -411,7 +454,7 @@ type SearchCasesRequest struct {
 // SearchCasesResponse is the paginated result of a case search.
 // HasMore is true when additional pages are available beyond the current offset.
 type SearchCasesResponse struct {
-	Cases   []Case `json:"cases"`
+	Cases   []CaseView `json:"cases"`
 	Total   int    `json:"total"`
 	Limit   int    `json:"limit"`
 	Offset  int    `json:"offset"`

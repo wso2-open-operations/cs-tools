@@ -102,9 +102,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 }
 
 // GetCaseByID implements CaseService.
-func (s *caseService) GetCaseByID(ctx context.Context, id string) (domain.Case, error) {
+func (s *caseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.Case{}, err
+		return domain.CaseView{}, err
 	}
 	return s.repo.GetCaseByID(ctx, id)
 }
