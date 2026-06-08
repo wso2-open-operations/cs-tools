@@ -116,7 +116,7 @@ export default function CaseDetailsDetailsPanel({
   const handleSaveWatchList = () => {
     patchCase({ watchList: pendingWatchList }, {
       onSuccess: () => {
-        setSavedWatchList(pendingWatchList);
+        setSavedWatchList(null);
         setIsEditingWatchList(false);
         showSuccess("Watch list updated successfully");
       },
