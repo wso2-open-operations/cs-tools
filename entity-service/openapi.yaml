@@ -981,6 +981,16 @@ components:
           type: string
           format: email
 
+    UserIDEmailRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
     EntityRef:
       type: object
       properties:

@@ -402,6 +402,12 @@ type UserRef struct {
 	Email       string `json:"email,omitempty"`
 }
 
+// UserIDEmailRef is a compact user reference carrying only id and email.
+type UserIDEmailRef struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
 // EntityRef is a compact reference to a named entity (project or deployment).
 type EntityRef struct {
 	ID   string `json:"id"`
@@ -451,14 +457,34 @@ type SearchCasesRequest struct {
 	SortBy              CaseSort        `json:"sortBy"`
 }
 
+// SearchCaseView is the enriched read representation of a case returned in search
+// results. It is identical to CaseView except createdBy carries only {id, email}.
+type SearchCaseView struct {
+	ID                     string             `json:"id"`
+	Number                 string             `json:"number"`
+	Wso2ID                 string             `json:"wso2Id"`
+	Subject                string             `json:"subject"`
+	Description            string             `json:"description"`
+	Priority               CasePriority       `json:"priority"`
+	IssueType              CaseIssueType      `json:"issueType"`
+	State                  CaseState          `json:"state"`
+	CreatedAt              time.Time          `json:"createdAt"`
+	UpdatedAt              time.Time          `json:"updatedAt"`
+	ClosedAt               *time.Time         `json:"closedAt,omitempty"`
+	CreatedBy              UserIDEmailRef     `json:"createdBy"`
+	ProjectDetails         EntityRef          `json:"project"`
+	DeploymentDetails      EntityRef          `json:"deployment"`
+	DeployedProductDetails DeployedProductRef `json:"deployedProduct"`
+}
+
 // SearchCasesResponse is the paginated result of a case search.
 // HasMore is true when additional pages are available beyond the current offset.
 type SearchCasesResponse struct {
-	Cases   []CaseView `json:"cases"`
-	Total   int    `json:"total"`
-	Limit   int    `json:"limit"`
-	Offset  int    `json:"offset"`
-	HasMore bool   `json:"hasMore"`
+	Cases   []SearchCaseView `json:"cases"`
+	Total   int              `json:"total"`
+	Limit   int              `json:"limit"`
+	Offset  int              `json:"offset"`
+	HasMore bool             `json:"hasMore"`
 }
 
 // CreateCaseRequest is the input for creating a new case.

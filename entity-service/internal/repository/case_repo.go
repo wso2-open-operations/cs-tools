@@ -41,7 +41,7 @@ type CaseRepository interface {
 	// SearchCases returns a filtered, paginated slice of enriched case views
 	// together with the total count of matching rows before pagination.
 	// COUNT and SELECT are executed concurrently on separate pool connections.
-	SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.CaseView, int, error)
+	SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
 	// CreateCaseComment inserts a new comment row for the given case.
 	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error)
 	// SearchCaseComments returns a paginated slice of comments for the given case
@@ -211,7 +211,7 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 }
 
 // SearchCases implements CaseRepository.
-func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.CaseView, int, error) {
+func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
 	filterArgs := []any{}
 	argIdx := 1
 
@@ -301,7 +301,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
 
 	var total int
-	var cases []domain.CaseView
+	var cases []domain.SearchCaseView
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -319,15 +319,15 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		}
 		defer rows.Close()
 
-		result := make([]domain.CaseView, 0, req.Pagination.Limit)
+		result := make([]domain.SearchCaseView, 0, req.Pagination.Limit)
 		for rows.Next() {
-			var cv domain.CaseView
-			var ignoredUserID, ignoredEmail string
+			var cv domain.SearchCaseView
+			var ignoredDisplayName, ignoredUserID string
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.Wso2ID,
 				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State,
 				&cv.CreatedAt, &cv.UpdatedAt, &cv.ClosedAt,
-				&cv.CreatedByDetails.ID, &cv.CreatedByDetails.DisplayName, &ignoredUserID, &ignoredEmail,
+				&cv.CreatedBy.ID, &ignoredDisplayName, &ignoredUserID, &cv.CreatedBy.Email,
 				&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 				&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
 				&cv.DeployedProductDetails.ID, &cv.DeployedProductDetails.DisplayName,
