@@ -52,7 +52,7 @@ func main() {
 	srv := server.New(addr, pool)
 
 	go func() {
-		log.Printf("listening on %s", addr)
+		log.Printf("Customer Entity REST Service started in PORT : %s", cfg.ServerPort)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
