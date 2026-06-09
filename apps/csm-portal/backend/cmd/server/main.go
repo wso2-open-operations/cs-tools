@@ -81,6 +81,7 @@ func main() {
 	})
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
+	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	mux.HandleFunc("POST /projects/{id}/cases/search", caseHandler.SearchProjectCases)

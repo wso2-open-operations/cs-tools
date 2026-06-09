@@ -100,6 +100,7 @@ func injectProjectID(body []byte, projectID string) ([]byte, error) {
 // allowing the handler to be tested independently of the real HTTP client.
 type entityCaseClient interface {
 	CreateCase(ctx context.Context, body []byte) ([]byte, error)
+	PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
@@ -322,6 +323,58 @@ func (h *CaseHandler) SearchProjectCases(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCases failed", "userID", user.UserID, "projectID", projectID, "err", err)
 		mapUpstreamError(w, err, "Failed to search cases.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// PatchCase handles PATCH /cases/{id}.
+// Accepts {"state":"<new_state>"} and forwards to the entity service.
+func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" {
+		writeError(w, http.StatusBadRequest, "Case ID cannot be empty!")
+		return
+	}
+	if !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchCase(r.Context(), caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PatchCase failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to update case.")
+		return
+	}
+
+	result, err = injectNextStates(result)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
+		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
 		return
 	}
 
