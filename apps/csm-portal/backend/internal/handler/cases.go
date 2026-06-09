@@ -79,23 +79,6 @@ func injectCreatedBy(body []byte, userID string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// injectProjectID merges a project ID into a JSON request body as projectIds: [id].
-func injectProjectID(body []byte, projectID string) ([]byte, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	if m == nil {
-		m = make(map[string]json.RawMessage)
-	}
-	ids, err := json.Marshal([]string{projectID})
-	if err != nil {
-		return nil, err
-	}
-	m["projectIds"] = ids
-	return json.Marshal(m)
-}
-
 // entityCaseClient abstracts the entity service operations used by CaseHandler,
 // allowing the handler to be tested independently of the real HTTP client.
 type entityCaseClient interface {
@@ -282,18 +265,12 @@ func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, result)
 }
 
-// SearchProjectCases handles POST /projects/{id}/cases/search.
-// It enforces the project scope by injecting projectIds: [id] into the entity request.
-func (h *CaseHandler) SearchProjectCases(w http.ResponseWriter, r *http.Request) {
+// SearchCases handles POST /cases/search.
+// Project IDs and other filters are accepted directly in the request body.
+func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	projectID := r.PathValue("id")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
@@ -313,15 +290,9 @@ func (h *CaseHandler) SearchProjectCases(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	entityBody, err := injectProjectID(body, projectID)
+	result, err := h.entity.SearchCases(r.Context(), body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchCases(r.Context(), entityBody)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCases failed", "userID", user.UserID, "projectID", projectID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchCases failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to search cases.")
 		return
 	}

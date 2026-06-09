@@ -439,36 +439,24 @@ func TestSearchCaseComments(t *testing.T) {
 	})
 }
 
-// ----- SearchProjectCases -----
+// ----- SearchCases -----
 
-func TestSearchProjectCases(t *testing.T) {
+func TestSearchCases(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := httptest.NewRequest(http.MethodPost, "/projects/proj-1/cases/search", strings.NewReader(`{}`))
-		r.SetPathValue("id", "proj-1")
+		r := httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`{}`))
 		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
+		h.SearchCases(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
 		assertErrorMessage(t, w, ErrMsgUnauthorized)
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("rejects missing project id", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects//cases/search", strings.NewReader(`{}`)))
-		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
-		assertStatus(t, w, http.StatusBadRequest)
-		assertErrorMessage(t, w, ErrMsgBadRequest)
-		assertContentType(t, w, "application/json")
-	})
-
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/cases/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
-		r.SetPathValue("id", "proj-1")
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
 		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
+		h.SearchCases(w, r)
 		assertStatus(t, w, http.StatusRequestEntityTooLarge)
 		assertErrorMessage(t, w, ErrMsgTooLarge)
 		assertContentType(t, w, "application/json")
@@ -476,40 +464,27 @@ func TestSearchProjectCases(t *testing.T) {
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/cases/search", strings.NewReader(`not-json`)))
-		r.SetPathValue("id", "proj-1")
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`not-json`)))
 		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
+		h.SearchCases(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
 		assertErrorMessage(t, w, ErrMsgBadRequest)
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("handles JSON null body as empty object without panic", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/cases/search", strings.NewReader(`null`)))
-		r.SetPathValue("id", "proj-1")
-		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
-		assertStatus(t, w, http.StatusOK)
-		assertContentType(t, w, "application/json")
-	})
-
-	t.Run("injects projectId from path and forwards to upstream", func(t *testing.T) {
-		const projectID = "proj-42"
+	t.Run("forwards body to upstream and returns 200", func(t *testing.T) {
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
 			searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
 				capturedBody = body
-				return []byte(`{"cases":[{"id":"case-1","projectId":"proj-42"}],"total":1}`), nil
+				return []byte(`{"cases":[{"id":"case-1"}],"total":1}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-42/cases/search",
-			strings.NewReader(`{"pagination":{"limit":10,"offset":0},"stateKeys":["open"]}`)))
-		r.SetPathValue("id", projectID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"projectIds":["proj-1"],"stateKeys":["open"],"pagination":{"limit":10,"offset":0}}`)))
 		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
+		h.SearchCases(w, r)
 
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
@@ -519,8 +494,8 @@ func TestSearchProjectCases(t *testing.T) {
 			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
 		var ids []string
-		if err := json.Unmarshal(sent["projectIds"], &ids); err != nil || len(ids) != 1 || ids[0] != projectID {
-			t.Errorf("upstream projectIds = %v, want [%q]", ids, projectID)
+		if err := json.Unmarshal(sent["projectIds"], &ids); err != nil || len(ids) != 1 || ids[0] != "proj-1" {
+			t.Errorf("upstream projectIds = %v, want [\"proj-1\"]", ids)
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
@@ -529,8 +504,7 @@ func TestSearchProjectCases(t *testing.T) {
 		}
 	})
 
-	t.Run("path project id overrides any projectIds in request body", func(t *testing.T) {
-		const projectID = "proj-authoritative"
+	t.Run("forwards body without projectIds unchanged", func(t *testing.T) {
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
 			searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
@@ -539,21 +513,18 @@ func TestSearchProjectCases(t *testing.T) {
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-authoritative/cases/search",
-			strings.NewReader(`{"projectIds":["proj-attacker","proj-other"]}`)))
-		r.SetPathValue("id", projectID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"stateKeys":["open"],"pagination":{"limit":10,"offset":0}}`)))
 		w := httptest.NewRecorder()
-		h.SearchProjectCases(w, r)
+		h.SearchCases(w, r)
 
 		assertStatus(t, w, http.StatusOK)
-
 		var sent map[string]json.RawMessage
 		if err := json.Unmarshal(capturedBody, &sent); err != nil {
 			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
-		var ids []string
-		if err := json.Unmarshal(sent["projectIds"], &ids); err != nil || len(ids) != 1 || ids[0] != projectID {
-			t.Errorf("upstream projectIds = %v, want [%q] (path ID must win)", ids, projectID)
+		if _, exists := sent["projectIds"]; exists {
+			t.Errorf("upstream body unexpectedly contains projectIds: %s", sent["projectIds"])
 		}
 	})
 
@@ -567,10 +538,9 @@ func TestSearchProjectCases(t *testing.T) {
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/projects/proj-1/cases/search", strings.NewReader(`{}`)))
-				r.SetPathValue("id", "proj-1")
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(`{}`)))
 				w := httptest.NewRecorder()
-				h.SearchProjectCases(w, r)
+				h.SearchCases(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

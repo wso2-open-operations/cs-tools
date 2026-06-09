@@ -598,23 +598,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /projects/{id}/cases/search:
+  /cases/search:
     post:
-      summary: Search cases for a specific project.
-      operationId: postProjectsIdCasesSearch
-      parameters:
-        - name: id
-          in: path
-          description: ID of the project
-          required: true
-          schema:
-            type: string
+      summary: Search cases.
+      operationId: postCasesSearch
       requestBody:
-        description: Project case search payload
+        description: Case search payload
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProjectCaseSearchPayload'
+              $ref: '#/components/schemas/CaseSearchPayload'
         required: true
       responses:
         "200":
@@ -660,17 +653,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /projects/{id}/deployments/search:
+  /deployments/search:
     post:
-      summary: Search deployments of a project.
-      operationId: postProjectsIdDeploymentsSearch
-      parameters:
-        - name: id
-          in: path
-          description: ID of the project
-          required: true
-          schema:
-            type: string
+      summary: Search deployments.
+      operationId: postDeploymentsSearch
       requestBody:
         description: Deployment search payload
         content:
@@ -693,6 +679,18 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
           content:
             application/json:
               schema:
@@ -948,11 +946,15 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
           description: Nature of the issue
 
-    ProjectCaseSearchPayload:
+    CaseSearchPayload:
       type: object
       nullable: true
-      description: Case search payload for a project-scoped search. The project ID is taken from the URL path; any projectIds in the body are ignored.
       properties:
+        projectIds:
+          type: array
+          items:
+            type: string
+          description: Filter by project IDs (optional)
         pagination:
           allOf:
             - $ref: '#/components/schemas/Pagination'
