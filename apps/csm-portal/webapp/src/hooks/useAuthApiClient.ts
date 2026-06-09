@@ -17,6 +17,25 @@
 import { useCallback } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { apiConfig } from "@config/apiConfig";
+import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
+
+/**
+ * True when `getAccessToken()` failed because the Asgardeo SDK had not finished
+ * initializing yet (code `SPA-AUTH_CLIENT-VM-NF01`, "The SDK must be
+ * initialized first"). This is a transient race on first paint — the silent
+ * refresh added in @asgardeo/react 0.25.5 can ask for a token a tick before the
+ * SDK is ready — so callers should treat it as "auth not ready, retry", not a
+ * hard error.
+ */
+function isSdkNotInitializedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if ((error as { code?: string }).code === "SPA-AUTH_CLIENT-VM-NF01") {
+    return true;
+  }
+  return /SDK (?:must be initialized|is not initialized)/i.test(
+    `${error.name} ${error.message}`,
+  );
+}
 
 // Origin we are willing to attach the bearer token to. Computed once at module
 // load so we don't accidentally send credentials anywhere else.
@@ -97,7 +116,18 @@ export function useAuthApiClient() {
         );
       }
 
-      const token = await getAccessToken();
+      let token: string | undefined;
+      try {
+        token = await getAccessToken();
+      } catch (error) {
+        // Normalise the SDK-not-initialized race into the shared "auth not
+        // ready" signal so callers warn-and-retry instead of surfacing a raw
+        // AsgardeoAuthException as a hard error.
+        if (isSdkNotInitializedError(error)) {
+          throw new Error(AUTH_NOT_READY_ERROR_MESSAGE);
+        }
+        throw error;
+      }
       if (!token) {
         throw new Error("Unable to retrieve access token");
       }
