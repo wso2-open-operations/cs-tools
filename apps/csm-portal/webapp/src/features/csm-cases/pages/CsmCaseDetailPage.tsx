@@ -228,21 +228,21 @@ function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
  */
 function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
   if (!c.description?.trim()) return null;
-  const escaped = c.description
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n\n+/g, "</p><p>")
-    .replace(/\n/g, "<br>");
   const createdMs = new Date(c.createdAt).getTime();
   const at = new Date(createdMs + 1000).toISOString();
+  // The creator may be a WSO2 engineer (case logged in the CSM portal) or a
+  // customer (customer portal). Infer from the email domain so the badge isn't
+  // always "Customer".
+  const isWso2 = (c.createdByEmail ?? "").toLowerCase().endsWith("@wso2.com");
   return {
     id: `description`,
     caseId: c.id,
     authorName:
       c.createdBy || c.customerContext.primaryContact || c.customer,
-    authorRole: "customer",
-    bodyHtml: `<p>${escaped}</p>`,
+    authorRole: isWso2 ? "wso2_engineer" : "customer",
+    // The description is rich HTML (authored in the case-create editor, same as
+    // comments); the comment bubble sanitizes it with DOMPurify before render.
+    bodyHtml: c.description,
     createdAt: at,
   };
 }

@@ -68,6 +68,7 @@ function detailFromBeCase(
     description: c.description ?? "",
     assignmentGroup: "grp.cre_team",
     createdBy: reporter,
+    createdByEmail: c.createdBy?.email,
     customerContext: {
       accountName: customer,
       tier: "subscription",

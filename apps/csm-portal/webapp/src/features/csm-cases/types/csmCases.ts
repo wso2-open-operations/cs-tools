@@ -208,8 +208,10 @@ export interface CsmCaseDetail extends CsmCaseRow {
   assignmentGroup: string;
   /** States this case may transition into next, per the backend. */
   nextStates?: CaseState[];
-  /** Customer-side person who opened the case. */
+  /** Display name of the person who opened the case. */
   createdBy?: string;
+  /** Email of the creator — used to tell a WSO2 engineer from a customer. */
+  createdByEmail?: string;
   customerContext: CaseCustomerContext;
   productContext: CaseProductContext;
   slaClocks: CaseSlaClock[];

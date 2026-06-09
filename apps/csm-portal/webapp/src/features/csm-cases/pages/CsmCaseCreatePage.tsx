@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   FormControl,
+  Grid,
   InputLabel,
   MenuItem,
   Select,
@@ -29,6 +30,7 @@ import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
+import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
@@ -48,6 +50,11 @@ const ISSUE_TYPES: { value: BeCaseIssueType; label: string }[] = [
   { value: "security_or_compliance", label: "Security / compliance" },
   { value: "question", label: "Question" },
 ];
+
+/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
+function isEmptyHtml(html: string): boolean {
+  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
+}
 
 export default function CsmCaseCreatePage(): JSX.Element {
   const navigate = useNavigate();
@@ -74,7 +81,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       !!severity &&
       !!issueType &&
       subject.trim().length > 0 &&
-      description.trim().length > 0 &&
+      !isEmptyHtml(description) &&
       !postCase.isPending,
     [
       projectId,
@@ -107,7 +114,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
         deploymentId,
         deployedProductId,
         subject: subject.trim(),
-        description: description.trim(),
+        description,
         priority: priorityFromSeverity(severity),
         issueType,
       },
@@ -119,7 +126,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
   };
 
   return (
-    <Box sx={{ maxWidth: 760, mx: "auto", px: 2, py: 3 }}>
+    <Box sx={{ width: "100%", px: 3, py: 3 }}>
       <Button
         variant="text"
         startIcon={<ArrowLeft size={16} />}
@@ -132,112 +139,132 @@ export default function CsmCaseCreatePage(): JSX.Element {
         New case
       </Typography>
 
-      <Card variant="outlined" sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2.5 }}>
-        <FormControl fullWidth size="small" required>
-          <InputLabel id="case-project-label">Project</InputLabel>
-          <Select
-            labelId="case-project-label"
-            label="Project"
-            value={projectId}
-            onChange={(e) => onProjectChange(String(e.target.value))}
-            disabled={projects.isLoading}
-          >
-            {(projects.data ?? []).map((p) => (
-              <MenuItem key={p.id} value={p.id}>
-                {p.name ?? p.id}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+      <Card variant="outlined" sx={{ p: 3 }}>
+        <Grid container spacing={2.5}>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel id="case-project-label">Project</InputLabel>
+              <Select
+                labelId="case-project-label"
+                label="Project"
+                value={projectId}
+                onChange={(e) => onProjectChange(String(e.target.value))}
+                disabled={projects.isLoading}
+              >
+                {(projects.data ?? []).map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.name ?? p.id}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
 
-        <FormControl fullWidth size="small" required>
-          <InputLabel id="case-deployment-label">Deployment</InputLabel>
-          <Select
-            labelId="case-deployment-label"
-            label="Deployment"
-            value={deploymentId}
-            onChange={(e) => onDeploymentChange(String(e.target.value))}
-            disabled={!projectId || deployments.isLoading}
-          >
-            {(deployments.data ?? []).map((d) => (
-              <MenuItem key={d.id} value={d.id}>
-                {d.name ?? d.id}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel id="case-deployment-label">Deployment</InputLabel>
+              <Select
+                labelId="case-deployment-label"
+                label="Deployment"
+                value={deploymentId}
+                onChange={(e) => onDeploymentChange(String(e.target.value))}
+                disabled={!projectId || deployments.isLoading}
+              >
+                {(deployments.data ?? []).map((d) => (
+                  <MenuItem key={d.id} value={d.id}>
+                    {d.name ?? d.id}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
 
-        <FormControl fullWidth size="small" required>
-          <InputLabel id="case-product-label">Deployed product</InputLabel>
-          <Select
-            labelId="case-product-label"
-            label="Deployed product"
-            value={deployedProductId}
-            onChange={(e) => setDeployedProductId(String(e.target.value))}
-            disabled={!deploymentId || deployedProducts.isLoading}
-          >
-            {(deployedProducts.data ?? []).map((dp) => (
-              <MenuItem key={dp.id} value={dp.id}>
-                {dp.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel id="case-product-label">Deployed product</InputLabel>
+              <Select
+                labelId="case-product-label"
+                label="Deployed product"
+                value={deployedProductId}
+                onChange={(e) => setDeployedProductId(String(e.target.value))}
+                disabled={!deploymentId || deployedProducts.isLoading}
+              >
+                {(deployedProducts.data ?? []).map((dp) => (
+                  <MenuItem key={dp.id} value={dp.id}>
+                    {dp.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
 
-        <Box sx={{ display: "flex", gap: 2 }}>
-          <FormControl fullWidth size="small" required>
-            <InputLabel id="case-severity-label">Severity</InputLabel>
-            <Select
-              labelId="case-severity-label"
-              label="Severity"
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as Severity)}
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel id="case-severity-label">Severity</InputLabel>
+              <Select
+                labelId="case-severity-label"
+                label="Severity"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as Severity)}
+              >
+                {SEVERITIES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s} · {SEVERITY_LABEL[s]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <FormControl fullWidth size="small" required>
+              <InputLabel id="case-issue-type-label">Issue type</InputLabel>
+              <Select
+                labelId="case-issue-type-label"
+                label="Issue type"
+                value={issueType}
+                onChange={(e) => setIssueType(e.target.value as BeCaseIssueType)}
+              >
+                {ISSUE_TYPES.map((it) => (
+                  <MenuItem key={it.value} value={it.value}>
+                    {it.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid size={{ xs: 12 }}>
+            <TextField
+              label="Subject"
+              size="small"
+              fullWidth
+              required
+              value={subject}
+              onChange={(e) => setSubject(e.target.value.slice(0, 200))}
+            />
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mb: 0.5 }}
             >
-              {SEVERITIES.map((s) => (
-                <MenuItem key={s} value={s}>
-                  {s} · {SEVERITY_LABEL[s]}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              Description
+            </Typography>
+            <Editor
+              value={description}
+              onChange={setDescription}
+              placeholder="Describe the issue…"
+              minHeight={180}
+              maxHeight={420}
+              toolbarVariant="full"
+              disabled={postCase.isPending}
+            />
+          </Grid>
+        </Grid>
 
-          <FormControl fullWidth size="small" required>
-            <InputLabel id="case-issue-type-label">Issue type</InputLabel>
-            <Select
-              labelId="case-issue-type-label"
-              label="Issue type"
-              value={issueType}
-              onChange={(e) => setIssueType(e.target.value as BeCaseIssueType)}
-            >
-              {ISSUE_TYPES.map((it) => (
-                <MenuItem key={it.value} value={it.value}>
-                  {it.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Box>
-
-        <TextField
-          label="Subject"
-          size="small"
-          fullWidth
-          required
-          value={subject}
-          onChange={(e) => setSubject(e.target.value.slice(0, 200))}
-        />
-        <TextField
-          label="Description"
-          size="small"
-          fullWidth
-          required
-          multiline
-          minRows={4}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-
-        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5 }}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
           <Button variant="outlined" onClick={() => navigate("/cases")}>
             Cancel
           </Button>
