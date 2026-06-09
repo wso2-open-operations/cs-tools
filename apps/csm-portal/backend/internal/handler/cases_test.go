@@ -504,6 +504,30 @@ func TestSearchCases(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards body without projectIds unchanged", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"cases":[],"total":0}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
+			strings.NewReader(`{"stateKeys":["open"],"pagination":{"limit":10,"offset":0}}`)))
+		w := httptest.NewRecorder()
+		h.SearchCases(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
+		}
+		if _, exists := sent["projectIds"]; exists {
+			t.Errorf("upstream body unexpectedly contains projectIds: %s", sent["projectIds"])
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to search cases.") {
 			t.Run(tc.name, func(t *testing.T) {
