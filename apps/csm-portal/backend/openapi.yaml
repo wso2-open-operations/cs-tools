@@ -125,6 +125,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Update the state of a support case.
+      operationId: patchCasesId
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseStateRequest'
+      responses:
+        "200":
+          description: Case updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseView'
+        "400":
+          description: Bad request (e.g. malformed UUID or invalid state value).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /cases/{id}/comments:
     post:
@@ -836,6 +896,15 @@ components:
       properties:
         message:
           type: string
+
+    UpdateCaseStateRequest:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: The new state to transition the case to.
 
     CaseCreatePayload:
       type: object

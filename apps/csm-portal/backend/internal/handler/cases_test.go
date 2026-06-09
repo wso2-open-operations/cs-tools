@@ -579,6 +579,137 @@ func TestSearchProjectCases(t *testing.T) {
 	})
 }
 
+// ----- PatchCase -----
+
+func TestPatchCase(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const validPayload = `{"state":"work_in_progress"}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(validPayload))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/", strings.NewReader(validPayload)))
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "Case ID cannot be empty!")
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/not-a-uuid", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case ID and body, returns 200 with nextStates injected", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			patchCaseFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
+				capturedID = caseID
+				capturedBody = body
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(validPayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != testCaseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedID, testCaseID)
+		}
+		if !json.Valid(capturedBody) {
+			t.Errorf("upstream received invalid JSON body: %s", capturedBody)
+		}
+
+		type patchCaseResp struct {
+			ID         string   `json:"id"`
+			State      string   `json:"state"`
+			NextStates []string `json:"nextStates"`
+		}
+		resp := decodeJSON[patchCaseResp](t, w)
+		if resp.ID != testCaseID {
+			t.Errorf("response id = %q, want %q", resp.ID, testCaseID)
+		}
+		if resp.State != caseStateWorkInProgress {
+			t.Errorf("response state = %q, want %q", resp.State, caseStateWorkInProgress)
+		}
+		wantNext := []string{caseStateWaitingOnWSO2, caseStateAwaitingInfo, caseStateSolutionProposed, caseStateClosed}
+		if len(resp.NextStates) != len(wantNext) {
+			t.Fatalf("nextStates = %v, want %v", resp.NextStates, wantNext)
+		}
+		for i, got := range resp.NextStates {
+			if got != wantNext[i] {
+				t.Errorf("nextStates[%d] = %q, want %q", i, got, wantNext[i])
+			}
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update case.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(validPayload)))
+				r.SetPathValue("id", testCaseID)
+				w := httptest.NewRecorder()
+				h.PatchCase(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 // ----- GetCase -----
 
 func TestGetCase(t *testing.T) {

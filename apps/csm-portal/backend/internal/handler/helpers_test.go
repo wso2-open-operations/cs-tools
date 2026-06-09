@@ -86,6 +86,7 @@ func decodeJSON[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 
 type mockEntityCaseClient struct {
 	createCaseFn          func(ctx context.Context, body []byte) ([]byte, error)
+	patchCaseFn           func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	createCaseCommentFn   func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCaseCommentsFn  func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCasesFn         func(ctx context.Context, body []byte) ([]byte, error)
@@ -96,6 +97,13 @@ type mockEntityCaseClient struct {
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
 	if m.createCaseFn != nil {
 		return m.createCaseFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	if m.patchCaseFn != nil {
+		return m.patchCaseFn(ctx, caseID, body)
 	}
 	return []byte(`{}`), nil
 }
