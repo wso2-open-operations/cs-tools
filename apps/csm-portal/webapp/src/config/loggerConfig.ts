@@ -17,5 +17,5 @@
 // Configuration for the Logger service.
 export const loggerConfig = {
   level: window.config?.CSM_PORTAL_LOG_LEVEL || "ERROR",
-  prefix: "CustomerPortal",
+  prefix: "CSMPortal",
 };
