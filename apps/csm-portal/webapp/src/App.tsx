@@ -19,6 +19,9 @@ import { Navigate, Route, Routes } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import ErrorLayout from "@layouts/ErrorLayout";
 import CsmComingSoonPage from "@features/csm-coming-soon/pages/CsmComingSoonPage";
+import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
+import CsmCasesPage from "@features/csm-cases/pages/CsmCasesPage";
+import CsmCaseDetailPage from "@features/csm-cases/pages/CsmCaseDetailPage";
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
 import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
@@ -107,27 +110,11 @@ export default function App(): JSX.Element {
                   />
                 </Route>
 
+                <Route path="dashboard" element={<CsmDashboardPage />} />
+                <Route path="cases" element={<CsmCasesPage />} />
+                <Route path="cases/:caseId" element={<CsmCaseDetailPage />} />
+
                 {/* WIP placeholders for top-level features awaiting BFF support */}
-                <Route
-                  path="dashboard"
-                  element={
-                    <CsmComingSoonPage
-                      title="Dashboard"
-                      description="Engineer-scoped queue, recent activity, and SLA-at-risk summary across customers."
-                      blockedOn="csm-portal/backend dashboard endpoint"
-                    />
-                  }
-                />
-                <Route
-                  path="cases"
-                  element={
-                    <CsmComingSoonPage
-                      title="Cases"
-                      description="Cross-customer cases list with filters, severity, SLA timers, and comment trail."
-                      blockedOn="FE wiring for csm-portal/backend /cases endpoints"
-                    />
-                  }
-                />
                 <Route
                   path="operations"
                   element={
