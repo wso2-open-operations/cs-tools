@@ -30,13 +30,62 @@ const viteConfig = defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@api": fileURLToPath(new URL("./src/api", import.meta.url)),
       "@assets": fileURLToPath(new URL("./src/assets", import.meta.url)),
       "@constants": fileURLToPath(new URL("./src/constants", import.meta.url)),
       "@components": fileURLToPath(
         new URL("./src/components", import.meta.url),
       ),
+      "@update-cards": fileURLToPath(
+        new URL(
+          "./src/features/updates/components/update-cards",
+          import.meta.url,
+        ),
+      ),
+      "@case-details": fileURLToPath(
+        new URL(
+          "./src/features/support/components/case-details/header",
+          import.meta.url,
+        ),
+      ),
+      "@case-details-attachments": fileURLToPath(
+        new URL(
+          "./src/features/support/components/case-details/attachments-tab",
+          import.meta.url,
+        ),
+      ),
+      "@case-details-details": fileURLToPath(
+        new URL(
+          "./src/features/support/components/case-details/details-tab",
+          import.meta.url,
+        ),
+      ),
+      "@case-details-activity": fileURLToPath(
+        new URL(
+          "./src/features/support/components/case-details/activity-tab",
+          import.meta.url,
+        ),
+      ),
+      "@case-details-calls": fileURLToPath(
+        new URL(
+          "./src/features/support/components/case-details/calls-tab",
+          import.meta.url,
+        ),
+      ),
       "@config": fileURLToPath(new URL("./src/config", import.meta.url)),
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),
+      "@time-tracking": fileURLToPath(
+        new URL(
+          "./src/features/project-details/components/time-tracking",
+          import.meta.url,
+        ),
+      ),
+      "@deployments": fileURLToPath(
+        new URL(
+          "./src/features/project-details/components/deployments",
+          import.meta.url,
+        ),
+      ),
       "@hooks": fileURLToPath(new URL("./src/hooks", import.meta.url)),
       "@layouts": fileURLToPath(new URL("./src/layouts", import.meta.url)),
       "@features": fileURLToPath(new URL("./src/features", import.meta.url)),
