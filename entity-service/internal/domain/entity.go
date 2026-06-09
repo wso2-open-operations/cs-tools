@@ -487,6 +487,13 @@ type SearchCasesResponse struct {
 	HasMore bool             `json:"hasMore"`
 }
 
+// UpdateCaseStateRequest is the input for PATCH /cases/{id}.
+// Only State may be changed through this endpoint.
+type UpdateCaseStateRequest struct {
+	ID    string    `json:"-"`
+	State CaseState `json:"state"`
+}
+
 // CreateCaseRequest is the input for creating a new case.
 // id, number, and wso2_id are auto-generated; state defaults to open.
 type CreateCaseRequest struct {

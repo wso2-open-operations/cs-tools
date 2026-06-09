@@ -316,6 +316,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update the state of a support case.
+      operationId: patchCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseStateRequest'
+      responses:
+        "200":
+          description: Case updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /cases:
     post:
@@ -887,6 +928,15 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    UpdateCaseStateRequest:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          description: The new state to transition the case to.
 
     CreateCaseRequest:
       type: object

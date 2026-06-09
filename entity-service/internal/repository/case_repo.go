@@ -47,6 +47,10 @@ type CaseRepository interface {
 	// SearchCaseComments returns a paginated slice of comments for the given case
 	// together with the total count of matching rows before pagination.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
+	// UpdateCaseState updates the state of the case identified by req.ID.
+	// closed_at is set to NOW() when transitioning to closed, and cleared otherwise.
+	// Returns a NotFoundError if no matching row exists.
+	UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error)
 }
 
 type caseRepo struct {
@@ -208,6 +212,33 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	}
 
 	return comments, total, nil
+}
+
+// UpdateCaseState implements CaseRepository.
+func (r *caseRepo) UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error) {
+	const query = `
+		UPDATE cases
+		SET state      = $2::case_state_enum,
+		    updated_at = NOW(),
+		    closed_at  = CASE WHEN state <> 'closed'::case_state_enum AND $2 = 'closed' THEN NOW() ELSE closed_at END
+		WHERE id = $1
+		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
+		          subject, description, priority, issue_type, state, created_at, updated_at, closed_at`
+
+	var c domain.Case
+	err := r.db.QueryRow(ctx, query, req.ID, string(req.State)).Scan(
+		&c.ID, &c.Number, &c.Wso2ID, &c.CreatedBy,
+		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
+		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State,
+		&c.CreatedAt, &c.UpdatedAt, &c.ClosedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Case{}, &apierror.NotFoundError{Msg: "case not found"}
+	}
+	if err != nil {
+		return domain.Case{}, fmt.Errorf("update case state: %w", err)
+	}
+	return c, nil
 }
 
 // SearchCases implements CaseRepository.
