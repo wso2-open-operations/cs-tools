@@ -6,7 +6,7 @@ Go HTTP server (`net/http`, standard library only) that owns all core CS-platfor
 
 Strict four-layer stack — no shortcuts across layers:
 
-```
+```text
 Handler → Service → Repository → PostgreSQL (pgx/v5)
 ```
 
