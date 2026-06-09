@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@asgardeo/react':
-        specifier: 0.22.4
-        version: 0.22.4(@types/react@19.2.5)(react@19.2.0)
+        specifier: 0.25.5
+        version: 0.25.5(@types/react@19.2.5)(react@19.2.0)
       '@asgardeo/react-router':
         specifier: 2.0.0
-        version: 2.0.0(@asgardeo/react@0.22.4(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)
+        version: 2.0.0(@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)
       '@lexical/code':
         specifier: 0.40.0
         version: 0.40.0
@@ -174,14 +174,14 @@ packages:
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
 
-  '@asgardeo/browser@0.6.6':
-    resolution: {integrity: sha512-qcfux+I5a0kb6WzedmseuIe+PYsi19hf1f9iCWxW7BpVhvinxw25e9vMMSNw+YhYGh88dwQE0vL0xT5zIivKzA==}
+  '@asgardeo/browser@0.7.9':
+    resolution: {integrity: sha512-kwQ+brGx5+AqVwHaupLBRv13HNSjqcH7qkDNktL2b4oL0dVwWqrs3oeGFcNxbaS71Fege1cN5KMHGnh6hGszqg==}
 
   '@asgardeo/i18n@0.4.5':
     resolution: {integrity: sha512-p1DVVI7lNu7KeDqhRNgAuSrHvVgCbbVXc04koyiiwjDx+sJaXychuC9pwVJ2PDUnIyEp3Xgdb3KqMq+Sx4e7xA==}
 
-  '@asgardeo/javascript@0.18.0':
-    resolution: {integrity: sha512-TA0lNEil3xlQVQo2Iet1aW1awjVrfqCqmfy3CSpbjWZ1QhuO8DTmlQQYui3oib94vzILBudglRj5dY/xGfiilw==}
+  '@asgardeo/javascript@0.23.0':
+    resolution: {integrity: sha512-r2DgG6lTEJV978cXIyGhTMhfQrtVXf1cNl3PS3GqxnTbf7z3lOkPvVRFRACZ2qtCVQo5co9XEiBV0L9vbd1Azg==}
 
   '@asgardeo/react-router@2.0.0':
     resolution: {integrity: sha512-RvHol3VgjV466y7RhpmPosER89Yz1prREvjWjhu95X9e4l761+3n8bRSQR5lpP1tasAVKtVH6RzWvWoPST7+Zg==}
@@ -190,8 +190,8 @@ packages:
       react: '>=16.8.0'
       react-router: '>=6.30.1'
 
-  '@asgardeo/react@0.22.4':
-    resolution: {integrity: sha512-3L4kWd0OpOgIfVFBaC8S7Q3JBpKq3SxdpmVTDGXeLGK1XS8nan49W+iW43UeYtb6XHurh0xfN8e2lXn3aW5/pw==}
+  '@asgardeo/react@0.25.5':
+    resolution: {integrity: sha512-ng8G9f55mSFciG1+L9n93q3wJWFx/kB+6Gge2lNZ+Hjnmw82AJVa15mbKFvH4FS9qm3G0cI7FSYhEW67PYkugw==}
     peerDependencies:
       '@types/react': '>=16.8.0'
       react: '>=16.8.0'
@@ -3165,9 +3165,9 @@ snapshots:
 
   '@asamuzakjp/nwsapi@2.3.9': {}
 
-  '@asgardeo/browser@0.6.6':
+  '@asgardeo/browser@0.7.9':
     dependencies:
-      '@asgardeo/javascript': 0.18.0
+      '@asgardeo/javascript': 0.23.0
       base64url: 3.0.1
       buffer: 6.0.3
       core-js: 3.42.0
@@ -3183,22 +3183,22 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@asgardeo/javascript@0.18.0':
+  '@asgardeo/javascript@0.23.0':
     dependencies:
       '@asgardeo/i18n': 0.4.5
       jose: 5.10.0
       tslib: 2.8.1
 
-  '@asgardeo/react-router@2.0.0(@asgardeo/react@0.22.4(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)':
+  '@asgardeo/react-router@2.0.0(@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)':
     dependencies:
-      '@asgardeo/react': 0.22.4(@types/react@19.2.5)(react@19.2.0)
+      '@asgardeo/react': 0.25.5(@types/react@19.2.5)(react@19.2.0)
       react: 19.2.0
       react-router: 7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       tslib: 2.8.1
 
-  '@asgardeo/react@0.22.4(@types/react@19.2.5)(react@19.2.0)':
+  '@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0)':
     dependencies:
-      '@asgardeo/browser': 0.6.6
+      '@asgardeo/browser': 0.7.9
       '@asgardeo/i18n': 0.4.5
       '@emotion/css': 11.13.5
       '@floating-ui/react': 0.27.12(react-dom@19.2.4(react@19.2.0))(react@19.2.0)
