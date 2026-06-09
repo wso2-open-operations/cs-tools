@@ -211,6 +211,13 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
 const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): null => {
   const [editor] = useLexicalComposerContext();
 
+  // Keep the latest callback in a ref so the paste listener (registered once
+  // per editor) always calls the current onPasteError without re-registering.
+  const onPasteErrorRef = useRef(onPasteError);
+  useEffect(() => {
+    onPasteErrorRef.current = onPasteError;
+  }, [onPasteError]);
+
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       const items = event.clipboardData?.items;
@@ -225,7 +232,7 @@ const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: () => void }): 
           event.preventDefault();
 
           if (file.size > MAX_PASTE_IMAGE_SIZE) {
-            onPasteError?.();
+            onPasteErrorRef.current?.();
             break;
           }
 

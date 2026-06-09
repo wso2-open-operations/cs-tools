@@ -24,19 +24,13 @@ import {
 } from "@api/backend/mappers";
 import type {
   BeAccount,
-  BeAccountSearchPayload,
-  BeAccountSearchResponse,
   BeCase,
   BeProject,
-  BeProjectSearchPayload,
-  BeProjectSearchResponse,
 } from "@api/backend/types";
 import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 
 const MOCK_LATENCY_MS = 150;
-const PROJECT_PAGE_LIMIT = 100;
-const ACCOUNT_PAGE_LIMIT = 100;
 
 /**
  * Build a thin CsmCaseDetail from the lean `BeCase` payload plus optional
@@ -64,7 +58,9 @@ function detailFromBeCase(
     product: "—",
     severity: severityFromPriority(c.priority),
     state: uiStateFromBe(c.state),
-    assignee: c.createdBy ?? "Unassigned",
+    // The backend has no assignee field yet; `createdBy` is the reporter, not
+    // the assigned engineer, so don't surface it here as the assignee.
+    assignee: "Unassigned",
     assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 0,
@@ -129,21 +125,19 @@ export function useGetCsmCaseDetail(
       if (!beCase) return null;
 
       // Hydrate project + account so the customer / project links in the
-      // page header are not empty strings (which would no-op the click).
-      // The BE has no by-id endpoints yet, so this falls through to the
-      // paginated search and filters client-side. Failures degrade silently
-      // — the case still renders with "—" placeholders.
+      // page header are not empty strings (which would no-op the click). Use
+      // the by-id endpoints (GET /projects/{id}, GET /accounts/{id}) so this is
+      // exact rather than search-and-filter, which silently missed records
+      // outside the first page. `get` resolves 404/204 to null; failures
+      // degrade gracefully — the case still renders with "—" placeholders.
       let project: BeProject | undefined;
       let account: BeAccount | undefined;
       if (beCase.projectId) {
         try {
-          const pRes = await api.post<
-            BeProjectSearchPayload,
-            BeProjectSearchResponse
-          >("/projects/search", {
-            pagination: { offset: 0, limit: PROJECT_PAGE_LIMIT },
-          });
-          project = (pRes.projects ?? []).find((p) => p.id === beCase.projectId);
+          project =
+            (await api.get<BeProject>(
+              `/projects/${encodeURIComponent(beCase.projectId)}`,
+            )) ?? undefined;
         } catch (err) {
           logger.warn(
             `[useGetCsmCaseDetail] project hydrate failed: ${
@@ -154,13 +148,10 @@ export function useGetCsmCaseDetail(
       }
       if (project?.accountId) {
         try {
-          const aRes = await api.post<
-            BeAccountSearchPayload,
-            BeAccountSearchResponse
-          >("/accounts/search", {
-            pagination: { offset: 0, limit: ACCOUNT_PAGE_LIMIT },
-          });
-          account = (aRes.accounts ?? []).find((a) => a.id === project!.accountId);
+          account =
+            (await api.get<BeAccount>(
+              `/accounts/${encodeURIComponent(project.accountId)}`,
+            )) ?? undefined;
         } catch (err) {
           logger.warn(
             `[useGetCsmCaseDetail] account hydrate failed: ${

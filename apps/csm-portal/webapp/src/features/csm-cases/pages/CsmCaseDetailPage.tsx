@@ -271,6 +271,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     const hash = location.hash?.replace(/^#/, "");
     if (!hash) return;
     setActiveTab("activities");
+    // Track every timer (outer + both nested resets) so the cleanup can cancel
+    // all of them on unmount / hash change — the inner resets were previously
+    // leaked.
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const timer = setTimeout(() => {
       const target = document.getElementById(hash);
       if (!target) return;
@@ -304,13 +308,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
       target.style.backgroundColor = "rgba(255, 213, 79, 0.35)";
       const reset = setTimeout(() => {
         target.style.backgroundColor = prevBg;
-        setTimeout(() => {
-          target.style.transition = prevTransition;
-        }, 350);
+        timers.push(
+          setTimeout(() => {
+            target.style.transition = prevTransition;
+          }, 350),
+        );
       }, 1500);
-      return () => clearTimeout(reset);
+      timers.push(reset);
     }, 250);
-    return () => clearTimeout(timer);
+    timers.push(timer);
+    return () => timers.forEach(clearTimeout);
   }, [location.hash, data, comments]);
 
   useEffect(() => {
@@ -344,17 +351,32 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Copy-link is async: only confirm success once the clipboard write
+      // actually resolves, otherwise a failure shows both a false "copied"
+      // toast and an error.
+      if (action.secondary === "copy_link") {
+        if (data && navigator.clipboard) {
+          navigator.clipboard
+            .writeText(`${window.location.origin}/cases/${data.id}`)
+            .then(() =>
+              setFeedback({
+                message: SECONDARY_TOAST.copy_link,
+                severity: "success",
+                sticky: false,
+              }),
+            )
+            .catch(() => showError("Could not copy link."));
+        } else {
+          showError("Could not copy link.");
+        }
+        return;
+      }
+
       setFeedback({
         message: SECONDARY_TOAST[action.secondary] ?? `Action: ${action.secondary}`,
         severity: "info",
         sticky: false,
       });
-
-      if (action.secondary === "copy_link" && data) {
-        navigator.clipboard
-          ?.writeText(`${window.location.origin}/cases/${data.id}`)
-          .catch(() => showError("Could not copy link."));
-      }
     },
     [data, showError],
   );

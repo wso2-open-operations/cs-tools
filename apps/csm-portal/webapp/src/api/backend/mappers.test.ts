@@ -122,4 +122,13 @@ describe("uiCommentFromBe", () => {
     // No raw angle brackets survive the escape.
     expect(ui.bodyHtml).not.toContain("<script>");
   });
+
+  it("normalises CRLF/CR line endings to a single break (no \\r artifacts)", () => {
+    const ui = uiCommentFromBe({
+      ...base,
+      body: "line1\r\nline2\rline3\nline4",
+    });
+    expect(ui.bodyHtml).toBe("<p>line1<br/>line2<br/>line3<br/>line4</p>");
+    expect(ui.bodyHtml).not.toContain("\r");
+  });
 });

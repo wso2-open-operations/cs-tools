@@ -315,7 +315,9 @@ export function getMockAbtDashboard(
 
   // My Queue is always "me", independent of scope.
   const { actionRequired, inProgress, awaitingInfo } = sumQueue(QUEUE_TOP_CASES);
-  const totalOpen = actionRequired + inProgress + awaitingInfo;
+  // Count every non-closed case, not just the three display buckets, so the
+  // total doesn't drop states like solution_proposed / waiting_on_wso2.
+  const totalOpen = QUEUE_TOP_CASES.filter((c) => c.state !== "closed").length;
 
   return {
     engineer: ENGINEER,

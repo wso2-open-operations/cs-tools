@@ -511,7 +511,7 @@ export function LinkedItemsWidget({
                     {item.title}
                   </Typography>
                 </Box>
-                {!item.href && <ExternalLink size={14} />}
+                {item.href && <ExternalLink size={14} />}
               </Box>
             );
             return item.href ? (

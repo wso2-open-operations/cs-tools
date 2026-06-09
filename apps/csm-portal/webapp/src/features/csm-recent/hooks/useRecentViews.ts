@@ -18,6 +18,19 @@ import { useCallback, useEffect, useState } from "react";
 
 export type RecentViewKind = "case" | "project" | "account";
 
+const RECENT_VIEW_KINDS: readonly RecentViewKind[] = [
+  "case",
+  "project",
+  "account",
+];
+
+function isRecentViewKind(v: unknown): v is RecentViewKind {
+  return (
+    typeof v === "string" &&
+    (RECENT_VIEW_KINDS as readonly string[]).includes(v)
+  );
+}
+
 export interface RecentView {
   kind: RecentViewKind;
   id: string;
@@ -44,7 +57,9 @@ function readStorage(): RecentView[] {
         typeof v === "object" &&
         v !== null &&
         typeof (v as RecentView).id === "string" &&
-        typeof (v as RecentView).kind === "string" &&
+        // Validate kind against the known set so a malformed entry can't later
+        // crash consumers that index by kind.
+        isRecentViewKind((v as RecentView).kind) &&
         typeof (v as RecentView).title === "string" &&
         typeof (v as RecentView).href === "string" &&
         typeof (v as RecentView).visitedAt === "string",

@@ -22,7 +22,7 @@
 
 import type {
   BeCaseComment,
-  BeCaseCommentType,
+  BeCreatableCommentType,
   BeCasePriority,
   BeCaseState,
 } from "@api/backend/types";
@@ -113,13 +113,15 @@ function htmlFromPlain(body: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br/>");
+    // Normalise CRLF/CR to a single break so Windows line endings don't leave
+    // stray \r artifacts in the rendered HTML.
+    .replace(/\r\n?|\n/g, "<br/>");
   return `<p>${escaped}</p>`;
 }
 
 export function commentTypeFromInternal(
   internal: boolean,
-): BeCaseCommentType {
+): BeCreatableCommentType {
   return internal ? "work_note" : "comment";
 }
 

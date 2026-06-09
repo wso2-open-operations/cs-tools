@@ -135,8 +135,11 @@ export interface BeCaseComment {
   createdAt: string;
 }
 
+/** Comment types a client may create. `activity` is system-generated only. */
+export type BeCreatableCommentType = Exclude<BeCaseCommentType, "activity">;
+
 export interface BeCaseCommentCreatePayload {
-  commentType: BeCaseCommentType;
+  commentType: BeCreatableCommentType;
   body: string;
 }
 

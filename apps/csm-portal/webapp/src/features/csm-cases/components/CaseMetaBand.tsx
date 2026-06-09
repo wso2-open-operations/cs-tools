@@ -65,13 +65,30 @@ function LinkText({
 }): JSX.Element {
   return (
     <Typography
+      component="span"
+      role="link"
+      tabIndex={0}
       variant="body2"
       noWrap
       onClick={onClick}
+      onKeyDown={(e) => {
+        // Keyboard activation: Enter/Space mirror the click so the link is
+        // reachable without a pointer.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       sx={{
         cursor: "pointer",
         color: "primary.main",
         "&:hover": { textDecoration: "underline" },
+        "&:focus-visible": {
+          outline: "2px solid",
+          outlineColor: "primary.main",
+          outlineOffset: 2,
+          borderRadius: 0.5,
+        },
       }}
     >
       {children}

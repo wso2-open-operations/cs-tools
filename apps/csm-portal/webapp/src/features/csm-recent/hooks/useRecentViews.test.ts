@@ -40,6 +40,18 @@ describe("useRecentViews + useRecordRecentView", () => {
     expect(result.current).toEqual([]);
   });
 
+  it("drops persisted entries with an unknown kind", () => {
+    localStorage.setItem(
+      "csm.recentViews.v1",
+      JSON.stringify([
+        { kind: "case", id: "1", title: "Case 1", href: "/cases/1", visitedAt: "t" },
+        { kind: "bogus", id: "2", title: "X", href: "/x", visitedAt: "t" },
+      ]),
+    );
+    const { result } = renderHook(() => useRecentViews());
+    expect(result.current.map((v) => v.id)).toEqual(["1"]);
+  });
+
   it("records a visit and exposes it to readers in the same tab", () => {
     const reader = renderHook(() => useRecentViews());
     const recorder = renderHook(() => useRecordRecentView());

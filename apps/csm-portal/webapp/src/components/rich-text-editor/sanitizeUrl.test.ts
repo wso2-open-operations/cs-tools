@@ -67,4 +67,18 @@ describe("deriveAltFromFilename", () => {
   it("falls back to Image when no usable name is present", () => {
     expect(deriveAltFromFilename("")).toBe("Image");
   });
+
+  it("decodes percent-encoded filenames", () => {
+    expect(
+      deriveAltFromFilename("https://cdn.example.com/img/screen%20shot.png"),
+    ).toBe("screen shot");
+    expect(deriveAltFromFilename("/uploads/my%2Bfile.jpeg")).toBe("my+file");
+  });
+
+  it("falls back to the raw segment when decoding fails", () => {
+    // A malformed percent-escape must not throw.
+    expect(deriveAltFromFilename("/uploads/bad%E0%A4name.png")).toBe(
+      "bad%E0%A4name",
+    );
+  });
 });

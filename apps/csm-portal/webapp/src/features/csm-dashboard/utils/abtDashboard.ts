@@ -78,11 +78,13 @@ export function formatRelativeTime(
   const diffMs = now - epoch;
   const futureSuffix = diffMs < 0 ? " from now" : " ago";
   const abs = Math.abs(diffMs);
-  const diffMin = Math.round(abs / 60_000);
+  // Floor each unit so we don't round up across a boundary (e.g. show "1h ago"
+  // at 30 minutes, or "1d ago" at 12 hours).
+  const diffMin = Math.floor(abs / 60_000);
   if (diffMin < 1) return "just now";
   if (diffMin < 60) return `${diffMin}m${futureSuffix}`;
-  const diffHr = Math.round(diffMin / 60);
+  const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h${futureSuffix}`;
-  const diffDay = Math.round(diffHr / 24);
+  const diffDay = Math.floor(diffHr / 24);
   return `${diffDay}d${futureSuffix}`;
 }
