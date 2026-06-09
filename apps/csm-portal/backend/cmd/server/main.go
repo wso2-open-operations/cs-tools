@@ -96,7 +96,7 @@ func main() {
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
 	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
-	mux.HandleFunc("POST /projects/{id}/deployments/search", deploymentHandler.SearchDeployments)
+	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
 
 	addr := envOrDefault("PORT", ":8080")

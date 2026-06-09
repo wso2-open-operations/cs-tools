@@ -61,17 +61,12 @@ func NewDeploymentHandler(entity entityDeploymentClient) *DeploymentHandler {
 	return &DeploymentHandler{entity: entity}
 }
 
-// SearchDeployments handles POST /projects/{id}/deployments/search.
+// SearchDeployments handles POST /deployments/search.
+// Project IDs and other filters are accepted directly in the request body.
 func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	projectID := r.PathValue("id")
-	if projectID == "" {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
@@ -92,8 +87,6 @@ func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// TODO: Decode into a typed SearchDeploymentsRequest and validate fields before forwarding.
-
 	result, err := h.entity.SearchDeployments(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployments failed", "userID", user.UserID, "err", err)
@@ -101,7 +94,6 @@ func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// TODO: Unmarshal result and filter to only the fields required by the frontend.
 	writeJSON(w, http.StatusOK, result)
 }
 
