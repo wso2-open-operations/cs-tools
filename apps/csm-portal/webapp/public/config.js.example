@@ -16,6 +16,14 @@ window.config = {
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "ERROR",
 
+  // Mock data: when true, data hooks short-circuit to seeded fixtures instead
+  // of calling the backend. Leave false (or unset) to use the live backend.
+  CSM_PORTAL_USE_MOCKS: false,
+  // Show the in-header mock-data toggle so the value above can be flipped at
+  // runtime (persisted per-browser). Keep false in production — engineers must
+  // not be able to switch to fake data against live cases.
+  CSM_PORTAL_ALLOW_MOCK_TOGGLE: false,
+
   CSM_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
   // Optional maintenance banner overrides:
   // CSM_PORTAL_MAINTENANCE_BANNER_SEVERITY: "info",

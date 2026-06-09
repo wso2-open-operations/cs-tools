@@ -206,6 +206,8 @@ export type CaseLifecycleAction =
 export interface CsmCaseDetail extends CsmCaseRow {
   description: string;
   assignmentGroup: string;
+  /** States this case may transition into next, per the backend. */
+  nextStates?: CaseState[];
   /** Customer-side person who opened the case. */
   createdBy?: string;
   customerContext: CaseCustomerContext;

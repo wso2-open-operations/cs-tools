@@ -18,10 +18,15 @@ import Prism from "prismjs";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import AppWithConfig from "./AppWithConfig";
+import { hydrateMockModeFromStorage } from "@context/mock-mode/MockModeContext";
 
 if (typeof window !== "undefined") {
   (window as unknown as { Prism: typeof Prism }).Prism = Prism;
 }
+
+// Apply any saved mock-vs-backend preference to window.config BEFORE React
+// mounts, so the first render of every data hook reads the correct flag.
+hydrateMockModeFromStorage();
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

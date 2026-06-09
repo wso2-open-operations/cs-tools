@@ -46,16 +46,16 @@ interface CsmNavItem {
 }
 
 const CSM_NAV_ITEMS: CsmNavItem[] = [
+  { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn },
+  { id: "cases", label: "Cases", path: "/cases", icon: Headset },
+  { id: "operations", label: "Operations", path: "/operations", icon: Cog },
+  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase },
+  { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
+  { id: "security-center", label: "Security center", path: "/security-center", icon: Shield },
+  { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
   { id: "accounts", label: "Accounts", path: "/accounts", icon: Building },
   { id: "projects", label: "Projects", path: "/projects", icon: FolderOpen },
-  { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
   { id: "admin", label: "Administration", path: "/admin", icon: Settings },
-  { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn, wip: true },
-  { id: "cases", label: "Cases", path: "/cases", icon: Headset, wip: true },
-  { id: "operations", label: "Operations", path: "/operations", icon: Cog, wip: true },
-  { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase, wip: true },
-  { id: "security-center", label: "Security center", path: "/security-center", icon: Shield, wip: true },
-  { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock, wip: true },
 ];
 
 function pickActiveId(pathname: string): string {

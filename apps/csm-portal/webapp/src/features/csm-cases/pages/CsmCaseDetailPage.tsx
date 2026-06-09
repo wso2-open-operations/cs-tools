@@ -40,6 +40,8 @@ import {
 import { useCallback, useEffect, useState, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
+import { usePatchCsmCase } from "@features/csm-cases/api/usePatchCsmCase";
+import type { BeCaseState } from "@api/backend/types";
 import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
@@ -141,6 +143,22 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   close: "success",
   close_no_response: "success",
   reopen: "info",
+};
+
+// Lifecycle actions that map to a `PATCH /cases/{id}` state transition.
+// `assign_to_me` is intentionally absent — the backend has no assignee field
+// yet, so it can't be persisted and stays a local-only acknowledgement.
+const LIFECYCLE_TARGET_STATE: Partial<
+  Record<CaseLifecycleAction, BeCaseState>
+> = {
+  start_work: "work_in_progress",
+  resume_work: "work_in_progress",
+  propose_solution: "solution_proposed",
+  request_info: "awaiting_info",
+  wait_on_wso2: "waiting_on_wso2",
+  close: "closed",
+  close_no_response: "closed",
+  reopen: "reopened",
 };
 
 const FEEDBACK_PALETTE: Record<
@@ -252,6 +270,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
   const postComment = usePostCsmCaseComment();
+  const patchCase = usePatchCsmCase(caseId);
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
   const { showError } = useErrorBanner();
@@ -345,7 +364,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const onAction = useCallback(
     (action: CaseLifecycleAction | { secondary: string }) => {
       if (typeof action === "string") {
-        // Lifecycle transition: sticky, semantically-colored feedback.
+        const targetState = LIFECYCLE_TARGET_STATE[action];
+        if (targetState) {
+          // Real state transition via PATCH /cases/{id}; the detail + list
+          // queries refetch on success so the new state shows.
+          patchCase.mutate(
+            { state: targetState },
+            {
+              onSuccess: () =>
+                setFeedback({
+                  message: LIFECYCLE_TOAST[action],
+                  severity: LIFECYCLE_SEVERITY[action],
+                  sticky: true,
+                }),
+              onError: () =>
+                showError(
+                  "Could not update the case. Please try again.",
+                ),
+            },
+          );
+          return;
+        }
+        // No backend state change (e.g. assign_to_me — no assignee field yet):
+        // local acknowledgement only.
         setFeedback({
           message: LIFECYCLE_TOAST[action],
           severity: LIFECYCLE_SEVERITY[action],
@@ -381,7 +422,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         sticky: false,
       });
     },
-    [data, showError],
+    [data, showError, patchCase],
   );
 
   if (isLoading) {

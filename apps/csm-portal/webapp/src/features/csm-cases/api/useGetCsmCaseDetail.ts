@@ -18,13 +18,10 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
-import {
-  severityFromPriority,
-  uiStateFromBe,
-} from "@api/backend/mappers";
+import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
 import type {
   BeAccount,
-  BeCase,
+  BeCaseView,
   BeProject,
 } from "@api/backend/types";
 import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
@@ -33,31 +30,33 @@ import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 const MOCK_LATENCY_MS = 150;
 
 /**
- * Build a thin CsmCaseDetail from the lean `BeCase` payload plus optional
- * hydrated project/account context. Side widgets (SLA clocks, watchers, tags,
- * time logs, attachments, linked items, customer + product context) are not
- * yet returned by the backend, so they default to empty / placeholder values.
- * The UI degrades gracefully — sections render empty states rather than
- * crashing.
+ * Build a CsmCaseDetail from the rich `BeCaseView`. The view embeds the
+ * project / deployment / deployed-product / reporter as objects, so their
+ * display names come straight off the response. Only the account (customer)
+ * name is not embedded and is passed in after a best-effort lookup. Side
+ * widgets the backend doesn't return yet (SLA clocks, watchers, tags, time
+ * logs, attachments, linked items) default to empty / placeholder values.
  */
 function detailFromBeCase(
-  c: BeCase,
-  project?: BeProject,
+  c: BeCaseView,
   account?: BeAccount,
 ): CsmCaseDetail {
   const customer = account?.name ?? "—";
+  const reporter = c.createdBy?.displayName ?? c.createdBy?.email;
+  const product = c.deployedProduct?.displayName ?? "—";
   return {
     id: c.id,
     caseNumber: c.number ?? c.id,
     wso2CaseId: c.wso2Id ?? c.id,
     subject: c.subject ?? "(no subject)",
     customer,
-    accountId: project?.accountId ?? account?.id ?? "",
-    projectId: c.projectId ?? "",
-    projectName: project?.name ?? project?.projectKey ?? "—",
-    product: "—",
+    accountId: account?.id ?? "",
+    projectId: c.project?.id ?? "",
+    projectName: c.project?.name ?? "—",
+    product,
     severity: severityFromPriority(c.priority),
     state: uiStateFromBe(c.state),
+    nextStates: (c.nextStates ?? []).map(uiStateFromBe),
     // The backend has no assignee field yet; `createdBy` is the reporter, not
     // the assigned engineer, so don't surface it here as the assignee.
     assignee: "Unassigned",
@@ -68,20 +67,21 @@ function detailFromBeCase(
     updatedAt: c.updatedAt ?? c.createdAt ?? "",
     description: c.description ?? "",
     assignmentGroup: "grp.cre_team",
-    createdBy: c.createdBy ?? undefined,
+    createdBy: reporter,
     customerContext: {
       accountName: customer,
       tier: "subscription",
       region: account?.region ?? "—",
-      primaryContact: "—",
-      primaryContactEmail: "—",
+      // The reporter (createdBy) is the customer-side person who opened it.
+      primaryContact: reporter ?? "—",
+      primaryContactEmail: c.createdBy?.email ?? "—",
       accountManager: account?.ownerId ?? "—",
       openCases: 0,
     },
     productContext: {
-      product: "—",
+      product,
       version: "—",
-      deployment: "—",
+      deployment: c.deployment?.name ?? "—",
       environment: "prod",
     },
     slaClocks: [],
@@ -119,39 +119,29 @@ export function useGetCsmCaseDetail(
         return getMockCsmCaseDetailById(caseId) ?? null;
       }
 
-      const beCase = await api.get<BeCase>(
+      const beCase = await api.get<BeCaseView>(
         `/cases/${encodeURIComponent(caseId)}`,
       );
       if (!beCase) return null;
 
-      // Hydrate project + account so the customer / project links in the
-      // page header are not empty strings (which would no-op the click). Use
-      // the by-id endpoints (GET /projects/{id}, GET /accounts/{id}) so this is
-      // exact rather than search-and-filter, which silently missed records
-      // outside the first page. `get` resolves 404/204 to null; failures
-      // degrade gracefully — the case still renders with "—" placeholders.
-      let project: BeProject | undefined;
+      // The CaseView already embeds project / deployment / deployed-product /
+      // reporter names, so no lookups are needed for those. Only the account
+      // (customer) name is not embedded — resolve it best-effort via the
+      // project's account (the embedded project ref carries id + name only, so
+      // fetch the full project for its accountId, then the account). Failures
+      // degrade gracefully: the case still renders with a "—" customer.
       let account: BeAccount | undefined;
-      if (beCase.projectId) {
+      if (beCase.project?.id) {
         try {
-          project =
-            (await api.get<BeProject>(
-              `/projects/${encodeURIComponent(beCase.projectId)}`,
-            )) ?? undefined;
-        } catch (err) {
-          logger.warn(
-            `[useGetCsmCaseDetail] project hydrate failed: ${
-              (err as Error).message
-            }`,
+          const fullProject = await api.get<BeProject>(
+            `/projects/${encodeURIComponent(beCase.project.id)}`,
           );
-        }
-      }
-      if (project?.accountId) {
-        try {
-          account =
-            (await api.get<BeAccount>(
-              `/accounts/${encodeURIComponent(project.accountId)}`,
-            )) ?? undefined;
+          if (fullProject?.accountId) {
+            account =
+              (await api.get<BeAccount>(
+                `/accounts/${encodeURIComponent(fullProject.accountId)}`,
+              )) ?? undefined;
+          }
         } catch (err) {
           logger.warn(
             `[useGetCsmCaseDetail] account hydrate failed: ${
@@ -160,7 +150,7 @@ export function useGetCsmCaseDetail(
           );
         }
       }
-      return detailFromBeCase(beCase, project, account);
+      return detailFromBeCase(beCase, account);
     },
     enabled: !!caseId,
     staleTime: 30_000,

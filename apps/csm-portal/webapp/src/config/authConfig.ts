@@ -39,6 +39,7 @@ declare global {
       CSM_PORTAL_ANNOUNCEMENT_BANNER_STORAGE_KEY?: string;
       CSM_PORTAL_ANNOUNCEMENT_BANNER_HTML?: string;
       CSM_PORTAL_USE_MOCKS?: boolean;
+      CSM_PORTAL_ALLOW_MOCK_TOGGLE?: boolean;
     };
   }
 }

@@ -92,6 +92,51 @@ export interface BeCase {
   closedAt?: string;
 }
 
+/** A referenced user, as embedded in case views (not just an id string). */
+export interface BeUserRef {
+  id: string;
+  displayName?: string;
+  userId?: string;
+  email?: string;
+}
+
+/** A referenced entity carrying its display name (project, deployment, ...). */
+export interface BeEntityRef {
+  id: string;
+  name: string;
+}
+
+/** A referenced deployed product (its display name is the product + version). */
+export interface BeDeployedProductRef {
+  id: string;
+  displayName: string;
+}
+
+/**
+ * `GET /cases/{id}` response — the rich CaseView. Unlike {@link BeCase} (the
+ * flat create/legacy shape), it embeds the related entities as objects, so the
+ * UI gets project / deployment / deployed-product / reporter names without any
+ * extra lookups.
+ */
+export interface BeCaseView {
+  id: string;
+  number?: string;
+  wso2Id?: string;
+  subject?: string;
+  description?: string;
+  priority?: BeCasePriority;
+  issueType?: BeCaseIssueType;
+  state?: BeCaseState;
+  nextStates?: BeCaseState[];
+  createdBy?: BeUserRef;
+  project?: BeEntityRef;
+  deployment?: BeEntityRef;
+  deployedProduct?: BeDeployedProductRef;
+  createdAt?: string;
+  updatedAt?: string;
+  closedAt?: string;
+}
+
 export interface BeCaseCreatePayload {
   projectId: string;
   deploymentId: string;
@@ -102,9 +147,21 @@ export interface BeCaseCreatePayload {
   issueType: BeCaseIssueType;
 }
 
-export interface BeProjectCaseSearchPayload {
+/**
+ * Request body for `PATCH /cases/{id}`. At least one of `state` / `priority`
+ * must be set (mirrors the entity `UpdateCaseRequest`).
+ */
+export interface BeCaseUpdatePayload {
+  state?: BeCaseState;
+  priority?: BeCasePriority;
+}
+
+/** Request body for `POST /cases/search` (the flat, cross-project search). */
+export interface BeCaseSearchPayload {
   pagination?: BePagination;
   searchQuery?: string;
+  /** Optional project filter; omit for a cross-project search. */
+  projectIds?: string[];
   deploymentIds?: string[];
   deployedProductIds?: string[];
   stateKeys?: BeCaseState[];
@@ -116,8 +173,32 @@ export interface BeProjectCaseSearchPayload {
   };
 }
 
+/**
+ * Item shape returned by `POST /cases/search`. Like {@link BeCaseView} it
+ * embeds the related entities, so the list gets project / deployment /
+ * deployed-product names without extra lookups. (The account/customer is not
+ * embedded.)
+ */
+export interface BeCaseSearchView {
+  id: string;
+  number?: string;
+  wso2Id?: string;
+  subject?: string;
+  description?: string;
+  priority?: BeCasePriority;
+  issueType?: BeCaseIssueType;
+  state?: BeCaseState;
+  createdAt?: string;
+  updatedAt?: string;
+  closedAt?: string | null;
+  createdBy?: BeUserRef;
+  project?: BeEntityRef;
+  deployment?: BeEntityRef;
+  deployedProduct?: BeDeployedProductRef;
+}
+
 export interface BeCaseSearchResponse extends BeSearchResponseBase {
-  cases: BeCase[];
+  cases: BeCaseSearchView[];
 }
 
 // ---------------------------------------------------------------------------
