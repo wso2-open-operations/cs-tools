@@ -23,7 +23,7 @@ import type {
   BeDeploymentSearchResponse,
 } from "@api/backend/types";
 
-const PAGE_LIMIT = 200;
+const PAGE_LIMIT = 100; // backend caps pagination limit at 100
 
 /**
  * Deployments belonging to a project, via `POST /deployments/search`

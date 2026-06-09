@@ -52,7 +52,7 @@ function applyFilters(cases: CsmCaseRow[], f: CasesFilters): CsmCaseRow[] {
       );
       if (!match) return false;
     }
-    if (f.projects.length && !f.projects.includes(c.projectName)) return false;
+    if (f.projects.length && !f.projects.includes(c.projectId)) return false;
     if (f.products.length && !f.products.includes(c.product)) return false;
     if (q) {
       const hay = `${c.caseNumber} ${c.subject} ${c.customer} ${c.projectName} ${c.assignee} ${c.product}`.toLowerCase();
@@ -85,7 +85,7 @@ export default function CsmCasesPage(): JSX.Element {
     [setSearchParams],
   );
 
-  const { data, isLoading, isError } = useGetCsmCases(filters.scope);
+  const { data, isLoading, isError } = useGetCsmCases(filters);
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
@@ -116,12 +116,17 @@ export default function CsmCasesPage(): JSX.Element {
     return list;
   }, [directoryUsers]);
 
+  // Project filter is id-based (sends projectIds server-side), so options carry
+  // id + name. Derived from the loaded cases (which embed projectId +
+  // projectName) so it works in both LIVE and MOCK without an extra fetch.
   const availableProjects = useMemo(() => {
-    const set = new Set<string>();
+    const byId = new Map<string, string>();
     (data?.cases ?? []).forEach((c) => {
-      if (c.projectName) set.add(c.projectName);
+      if (c.projectId) byId.set(c.projectId, c.projectName || c.projectId);
     });
-    return Array.from(set).sort();
+    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }, [data?.cases]);
 
   const availableProducts = useMemo(() => {

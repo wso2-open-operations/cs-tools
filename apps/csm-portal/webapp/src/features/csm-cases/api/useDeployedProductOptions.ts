@@ -26,8 +26,8 @@ import type {
   BeProductVersionSearchResponse,
 } from "@api/backend/types";
 
-const PAGE_LIMIT = 200;
-const PRODUCTS_LIMIT = 500;
+const PAGE_LIMIT = 100;
+const PRODUCTS_LIMIT = 100; // backend caps pagination limit at 100
 
 export interface DeployedProductOption {
   /** Deployed-product id — the value the case-create payload needs. */

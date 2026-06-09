@@ -18,7 +18,12 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
-import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
+import {
+  beStateFromUi,
+  priorityFromSeverity,
+  severityFromPriority,
+  uiStateFromBe,
+} from "@api/backend/mappers";
 import type {
   BeAccountSearchPayload,
   BeAccountSearchResponse,
@@ -28,7 +33,7 @@ import type {
   BeProjectSearchResponse,
 } from "@api/backend/types";
 import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
-import type { DashboardScope } from "@features/csm-dashboard/types/abtDashboard";
+import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 import type {
   CsmCaseRow,
   CsmCasesListResponse,
@@ -39,7 +44,7 @@ const MOCK_LATENCY_MS = 200;
 /** Page size for the cross-project case list (server-side filtering TBD). */
 const CASES_PAGE_LIMIT = 100;
 /** Page size for the project / account name lookups (customer column). */
-const LOOKUP_PAGE_LIMIT = 200;
+const LOOKUP_PAGE_LIMIT = 100; // backend caps pagination limit at 100
 
 /**
  * Cross-project CSM cases list.
@@ -51,32 +56,52 @@ const LOOKUP_PAGE_LIMIT = 200;
  * (projectId → accountId) + `accounts/search` (accountId → name) rather than
  * the old per-project fan-out.
  *
- * Filtering is still applied client-side in `CsmCasesPage`; pushing filters
- * into the search payload (searchQuery / priorityKeys / stateKeys / projectIds)
- * and true pagination are the follow-up. The BE has no assignee field, so the
- * `scope` parameter remains a no-op in LIVE.
+ * Severity / state filters are pushed into the search payload (priorityKeys /
+ * stateKeys); the remaining filters stay client-side in `CsmCasesPage`
+ * (`applyFilters`), which also drives MOCK mode. The BE has no assignee field,
+ * so `scope` / assignee filters remain inert in LIVE.
  */
 export function useGetCsmCases(
-  scope: DashboardScope,
+  filters: CasesFilters,
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
 
   return useQuery<CsmCasesListResponse, Error>({
-    queryKey: [ApiQueryKeys.CSM_CASES, scope],
+    queryKey: [
+      ApiQueryKeys.CSM_CASES,
+      filters.scope,
+      filters.severities,
+      filters.states,
+      filters.projects,
+    ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
       if (isMockMode()) {
-        logger.debug(`[useGetCsmCases] Returning mock cases for scope=${scope}`);
+        logger.debug(
+          `[useGetCsmCases] Returning mock cases for scope=${filters.scope}`,
+        );
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCases(scope);
+        return getMockCsmCases(filters.scope);
       }
 
       // One cross-project case search, plus project/account lookups for the
       // customer column (cases embed the project, but not its account).
+      // Severity / state filters are applied server-side via the search
+      // payload; the rest stay client-side in CsmCasesPage.
       const [casesResponse, projectsResponse, accountsResponse] =
         await Promise.all([
           api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
             pagination: { offset: 0, limit: CASES_PAGE_LIMIT },
+            ...(filters.severities.length > 0 && {
+              priorityKeys: filters.severities.map(priorityFromSeverity),
+            }),
+            ...(filters.states.length > 0 && {
+              stateKeys: filters.states.map(beStateFromUi),
+            }),
+            // `filters.projects` holds project IDs (the filter is id-based).
+            ...(filters.projects.length > 0 && {
+              projectIds: filters.projects,
+            }),
           }),
           api
             .post<BeProjectSearchPayload, BeProjectSearchResponse>(
@@ -150,7 +175,7 @@ export function useGetCsmCases(
         };
       });
 
-      return { scope, cases };
+      return { scope: filters.scope, cases };
     },
     staleTime: 30_000,
   });

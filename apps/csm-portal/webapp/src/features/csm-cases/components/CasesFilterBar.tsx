@@ -49,6 +49,7 @@ import type {
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import { isMockMode } from "@api/backend/client";
 
 export type SlaFilter = "any" | "breached" | "at_risk";
 
@@ -94,8 +95,8 @@ interface CasesFilterBarProps {
   onFiltersToggle: () => void;
   /** Full user directory shown in the assignee picker. */
   availableAssigneeUsers: AssigneeUser[];
-  /** Project names seen in the current data. */
-  availableProjects: string[];
+  /** Projects for the (id-based) project filter — value is the id, label the name. */
+  availableProjects: { id: string; name: string }[];
   /** Product names seen in the current data. */
   availableProducts: string[];
 }
@@ -217,6 +218,7 @@ interface SingleSelectFieldProps<T extends string> {
   value: T;
   options: { value: T; label: string }[];
   onChange: (next: T) => void;
+  disabled?: boolean;
 }
 
 function SingleSelectField<T extends string>({
@@ -225,9 +227,10 @@ function SingleSelectField<T extends string>({
   value,
   options,
   onChange,
+  disabled,
 }: SingleSelectFieldProps<T>): JSX.Element {
   return (
-    <FormControl fullWidth size="small">
+    <FormControl fullWidth size="small" disabled={disabled}>
       <InputLabel id={`${id}-label`}>{label}</InputLabel>
       <Select
         labelId={`${id}-label`}
@@ -259,6 +262,7 @@ interface SearchableMultiSelectProps {
   /** Optional filter against synthetic text (e.g. include email in the query). */
   getOptionSearchText?: (value: string) => string;
   onChange: (next: string[]) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -277,6 +281,7 @@ function SearchableMultiSelect({
   getOptionSecondary,
   getOptionSearchText,
   onChange,
+  disabled,
 }: SearchableMultiSelectProps): JSX.Element {
   const format = formatOption ?? ((v: string) => v);
   const searchText = getOptionSearchText ?? format;
@@ -284,6 +289,7 @@ function SearchableMultiSelect({
     <Autocomplete
       multiple
       size="small"
+      disabled={disabled}
       id={id}
       options={options}
       value={values}
@@ -357,6 +363,13 @@ export default function CasesFilterBar({
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
 
+  // Scope (ABT), assignee, and SLA have no backend support yet (no assignee or
+  // SLA fields), so disable them against the live backend — they only do
+  // anything against seeded mock data.
+  const beUnsupported = !isMockMode();
+  const beUnsupportedReason =
+    "Not available against the live backend yet (no assignee / SLA data).";
+
   const severityOptions = useMemo(
     () => ALL_SEVERITIES.map((s) => ({ value: s, label: s })),
     [],
@@ -364,6 +377,16 @@ export default function CasesFilterBar({
   const stateOptions = useMemo(
     () => PRIMARY_STATES.map((s) => ({ value: s, label: STATE_LABEL[s] })),
     [],
+  );
+
+  // Project filter is id-based: options are project ids, displayed by name.
+  const projectIdOptions = useMemo(
+    () => availableProjects.map((p) => p.id),
+    [availableProjects],
+  );
+  const projectNameById = useMemo(
+    () => new Map(availableProjects.map((p) => [p.id, p.name])),
+    [availableProjects],
   );
 
   // Pin "@me" and "Unassigned" to the top of the assignee option list, then
@@ -402,24 +425,30 @@ export default function CasesFilterBar({
       {/* Scope + search + filters toggle. Scope buttons are CSM-specific
           (My ABT vs All customers) and live alongside search at the top. */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-        <Box sx={{ display: "flex", gap: 0.75 }}>
-          <Button
-            size="small"
-            variant={filters.scope === "my_abt" ? "contained" : "outlined"}
-            color="primary"
-            onClick={() => onChange({ ...filters, scope: "my_abt" })}
-          >
-            My ABT
-          </Button>
-          <Button
-            size="small"
-            variant={filters.scope === "all_customers" ? "contained" : "outlined"}
-            color="primary"
-            onClick={() => onChange({ ...filters, scope: "all_customers" })}
-          >
-            All customers
-          </Button>
-        </Box>
+        <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
+          <Box sx={{ display: "flex", gap: 0.75 }}>
+            <Button
+              size="small"
+              variant={filters.scope === "my_abt" ? "contained" : "outlined"}
+              color="primary"
+              disabled={beUnsupported}
+              onClick={() => onChange({ ...filters, scope: "my_abt" })}
+            >
+              My ABT
+            </Button>
+            <Button
+              size="small"
+              variant={
+                filters.scope === "all_customers" ? "contained" : "outlined"
+              }
+              color="primary"
+              disabled={beUnsupported}
+              onClick={() => onChange({ ...filters, scope: "all_customers" })}
+            >
+              All customers
+            </Button>
+          </Box>
+        </Tooltip>
 
         <Box sx={{ position: "relative", flex: 1, minWidth: 240 }}>
           <TextField
@@ -491,26 +520,38 @@ export default function CasesFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <SingleSelectField
-                id="cases-filter-sla"
-                label="SLA"
-                value={filters.sla}
-                options={SLA_OPTIONS}
-                onChange={(next) => onChange({ ...filters, sla: next })}
-              />
+              <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
+                <Box>
+                  <SingleSelectField
+                    id="cases-filter-sla"
+                    label="SLA"
+                    value={filters.sla}
+                    options={SLA_OPTIONS}
+                    onChange={(next) => onChange({ ...filters, sla: next })}
+                    disabled={beUnsupported}
+                  />
+                </Box>
+              </Tooltip>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <SearchableMultiSelect
-                id="cases-filter-assignee"
-                label="Assignee"
-                placeholder="Search users…"
-                values={filters.assignees}
-                options={assigneeOptions}
-                formatOption={assigneeLabel}
-                getOptionSecondary={assigneeSecondary}
-                getOptionSearchText={assigneeSearchText}
-                onChange={(next) => onChange({ ...filters, assignees: next })}
-              />
+              <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
+                <Box>
+                  <SearchableMultiSelect
+                    id="cases-filter-assignee"
+                    label="Assignee"
+                    placeholder="Search users…"
+                    values={filters.assignees}
+                    options={assigneeOptions}
+                    formatOption={assigneeLabel}
+                    getOptionSecondary={assigneeSecondary}
+                    getOptionSearchText={assigneeSearchText}
+                    onChange={(next) =>
+                      onChange({ ...filters, assignees: next })
+                    }
+                    disabled={beUnsupported}
+                  />
+                </Box>
+              </Tooltip>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               <SearchableMultiSelect
@@ -518,7 +559,9 @@ export default function CasesFilterBar({
                 label="Project"
                 placeholder="Type a project…"
                 values={filters.projects}
-                options={availableProjects}
+                options={projectIdOptions}
+                formatOption={(id) => projectNameById.get(id) ?? id}
+                getOptionSearchText={(id) => projectNameById.get(id) ?? id}
                 onChange={(next) => onChange({ ...filters, projects: next })}
               />
             </Grid>

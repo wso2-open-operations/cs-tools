@@ -22,7 +22,7 @@ import type {
   BeProjectSearchResponse,
 } from "@api/backend/types";
 
-const PAGE_LIMIT = 500;
+const PAGE_LIMIT = 100; // backend caps pagination limit at 100
 
 /** Projects for the case-create project selector, via `POST /projects/search`. */
 export function useProjectOptions(): UseQueryResult<BeProject[], Error> {
