@@ -47,10 +47,10 @@ type CaseRepository interface {
 	// SearchCaseComments returns a paginated slice of comments for the given case
 	// together with the total count of matching rows before pagination.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
-	// UpdateCaseState updates the state of the case identified by req.ID.
-	// closed_at is set to NOW() when transitioning to closed, and cleared otherwise.
+	// UpdateCase updates the state and/or priority of the case identified by req.ID.
+	// closed_at is set to NOW() when transitioning to closed.
 	// Returns a NotFoundError if no matching row exists.
-	UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error)
+	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
 }
 
 type caseRepo struct {
@@ -214,11 +214,20 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 	return comments, total, nil
 }
 
-// UpdateCaseState implements CaseRepository.
-func (r *caseRepo) UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error) {
+// UpdateCase implements CaseRepository.
+func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
+	state := ""
+	if req.State != nil {
+		state = string(*req.State)
+	}
+	priority := ""
+	if req.Priority != nil {
+		priority = string(*req.Priority)
+	}
 	const query = `
 		UPDATE cases
-		SET state      = $2::case_state_enum,
+		SET state      = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
+		    priority   = CASE WHEN $3 <> '' THEN $3::case_priority_enum ELSE priority END,
 		    updated_at = NOW(),
 		    closed_at  = CASE WHEN state <> 'closed'::case_state_enum AND $2 = 'closed' THEN NOW() ELSE closed_at END
 		WHERE id = $1
@@ -226,7 +235,7 @@ func (r *caseRepo) UpdateCaseState(ctx context.Context, req domain.UpdateCaseSta
 		          subject, description, priority, issue_type, state, created_at, updated_at, closed_at`
 
 	var c domain.Case
-	err := r.db.QueryRow(ctx, query, req.ID, string(req.State)).Scan(
+	err := r.db.QueryRow(ctx, query, req.ID, state, priority).Scan(
 		&c.ID, &c.Number, &c.Wso2ID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
 		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State,
@@ -236,7 +245,7 @@ func (r *caseRepo) UpdateCaseState(ctx context.Context, req domain.UpdateCaseSta
 		return domain.Case{}, &apierror.NotFoundError{Msg: "case not found"}
 	}
 	if err != nil {
-		return domain.Case{}, fmt.Errorf("update case state: %w", err)
+		return domain.Case{}, fmt.Errorf("update case: %w", err)
 	}
 	return c, nil
 }
