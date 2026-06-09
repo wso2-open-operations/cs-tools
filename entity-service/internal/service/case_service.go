@@ -153,6 +153,17 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 	}, nil
 }
 
+// UpdateCaseState implements CaseService.
+func (s *caseService) UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error) {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.Case{}, err
+	}
+	if !validCaseState[req.State] {
+		return domain.Case{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(req.State)}
+	}
+	return s.repo.UpdateCaseState(ctx, req)
+}
+
 // SearchCases implements CaseService.
 func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {
