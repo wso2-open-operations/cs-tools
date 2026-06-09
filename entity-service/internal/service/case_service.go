@@ -153,15 +153,21 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 	}, nil
 }
 
-// UpdateCaseState implements CaseService.
-func (s *caseService) UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error) {
+// UpdateCase implements CaseService.
+func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.Case{}, err
 	}
-	if !validCaseState[req.State] {
-		return domain.Case{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(req.State)}
+	if req.State == nil && req.Priority == nil {
+		return domain.Case{}, &apierror.ValidationError{Msg: "at least one of state or priority must be provided"}
 	}
-	return s.repo.UpdateCaseState(ctx, req)
+	if req.State != nil && !validCaseState[*req.State] {
+		return domain.Case{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
+	}
+	if req.Priority != nil && !validCasePriority[*req.Priority] {
+		return domain.Case{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(*req.Priority)}
+	}
+	return s.repo.UpdateCase(ctx, req)
 }
 
 // SearchCases implements CaseService.

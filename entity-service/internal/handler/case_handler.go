@@ -63,14 +63,14 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(c)
 }
 
-// PatchCase handles PATCH /cases/{id} and allows updating the case state.
+// PatchCase handles PATCH /cases/{id} and allows updating the case state and priority.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
-	var req domain.UpdateCaseStateRequest
+	var req domain.UpdateCaseRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
 	req.ID = r.PathValue("id")
-	c, err := h.svc.UpdateCaseState(r.Context(), req)
+	c, err := h.svc.UpdateCase(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

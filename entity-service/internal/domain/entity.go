@@ -487,11 +487,12 @@ type SearchCasesResponse struct {
 	HasMore bool             `json:"hasMore"`
 }
 
-// UpdateCaseStateRequest is the input for PATCH /cases/{id}.
-// Only State may be changed through this endpoint.
-type UpdateCaseStateRequest struct {
-	ID    string    `json:"-"`
-	State CaseState `json:"state"`
+// UpdateCaseRequest is the input for PATCH /cases/{id}.
+// State and Priority may be changed through this endpoint.
+type UpdateCaseRequest struct {
+	ID       string        `json:"-"`
+	State    *CaseState    `json:"state"`
+	Priority *CasePriority `json:"priority"`
 }
 
 // CreateCaseRequest is the input for creating a new case.

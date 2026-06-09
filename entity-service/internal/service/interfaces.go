@@ -107,7 +107,7 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCaseState transitions the case to the given state. A ValidationError is
-	// returned for an invalid state value or malformed UUID; a NotFoundError if no case matches.
-	UpdateCaseState(ctx context.Context, req domain.UpdateCaseStateRequest) (domain.Case, error)
+	// UpdateCase updates the state and/or priority of a case. A ValidationError is
+	// returned for invalid values or malformed UUID; a NotFoundError if no case matches.
+	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
 }
