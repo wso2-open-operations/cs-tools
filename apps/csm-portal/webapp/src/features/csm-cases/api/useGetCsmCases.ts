@@ -149,7 +149,11 @@ export function useGetCsmCases(
             product: "—",
             severity: severityFromPriority(c.priority),
             state: uiStateFromBe(c.state),
-            assignee: c.createdBy ?? "Unassigned",
+            // The backend has no assignee field yet, and `createdBy` is the
+            // reporter (returned as a `{id, email}` object, not a string) —
+            // rendering it directly crashes the list. Until a real assignee
+            // lands, show "Unassigned".
+            assignee: "Unassigned",
             assigneeIsMe: false,
             slaClockType: "ack",
             minutesToBreach: 0,

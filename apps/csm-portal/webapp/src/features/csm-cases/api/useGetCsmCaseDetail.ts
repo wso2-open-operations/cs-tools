@@ -40,6 +40,20 @@ const MOCK_LATENCY_MS = 150;
  * The UI degrades gracefully — sections render empty states rather than
  * crashing.
  */
+/**
+ * `createdBy` is typed `string` but the live API returns a `{id, email}`
+ * UserRef. Coerce either shape to a display string so rendering it never
+ * throws "Objects are not valid as a React child".
+ */
+function createdByName(v: unknown): string | undefined {
+  if (typeof v === "string") return v || undefined;
+  if (v && typeof v === "object") {
+    const ref = v as { email?: string; id?: string };
+    return ref.email ?? ref.id ?? undefined;
+  }
+  return undefined;
+}
+
 function detailFromBeCase(
   c: BeCase,
   project?: BeProject,
@@ -68,7 +82,7 @@ function detailFromBeCase(
     updatedAt: c.updatedAt ?? c.createdAt ?? "",
     description: c.description ?? "",
     assignmentGroup: "grp.cre_team",
-    createdBy: c.createdBy ?? undefined,
+    createdBy: createdByName(c.createdBy),
     customerContext: {
       accountName: customer,
       tier: "subscription",
