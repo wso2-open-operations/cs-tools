@@ -76,6 +76,9 @@ export default function UserProfileModal({
 
   useEffect(() => {
     if (open && userMe) {
+      // Seed the editable draft from the latest server value each time the
+      // dialog opens (the accepted "reset form state on open" pattern).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- form reset on dialog open
       setPhoneDraft(userMe.phoneNumber ?? "");
       setIsPhoneEditing(false);
     }

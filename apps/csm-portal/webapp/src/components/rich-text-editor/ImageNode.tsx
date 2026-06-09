@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+/* eslint-disable react-refresh/only-export-components -- Lexical node class and its render component are colocated by design (fast-refresh DX only) */
+
 import {
   DecoratorNode,
   $getNodeByKey,

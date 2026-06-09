@@ -36,17 +36,26 @@ export type InsertImagePayload = {
  * Handles absolute URLs, relative paths, and plain filenames.
  */
 export function deriveAltFromFilename(src: string): string {
+  // Percent-encoded names (e.g. "screen%20shot") read poorly as alt text;
+  // decode them, but fall back to the raw value if it isn't valid encoding.
+  const decode = (s: string): string => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
   try {
     const url = new URL(src);
     const path = url.pathname || "";
     const match = path.match(/\/([^/]+)$/);
     const name = (match?.[1] ?? path) || "Image";
-    const base = name.replace(/\.[^.]+$/, "");
+    const base = decode(name).replace(/\.[^.]+$/, "");
     return base ? base : "Image";
   } catch {
     const pathOnly = src.split("?")[0].split("#")[0].trim();
     const lastSegment = pathOnly.replace(/\/+$/, "").split("/").pop() || "";
-    const base = lastSegment.replace(/\.[^.]+$/, "");
+    const base = decode(lastSegment).replace(/\.[^.]+$/, "");
     return base ? base : "Image";
   }
 }

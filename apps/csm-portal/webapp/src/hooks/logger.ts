@@ -26,10 +26,10 @@ export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
 // Interface for the Logger service.
 export interface ILogger {
-  debug(message: string, ...args: any[]): void;
-  info(message: string, ...args: any[]): void;
-  warn(message: string, ...args: any[]): void;
-  error(message: string, ...args: any[]): void;
+  debug(message: string, ...args: unknown[]): void;
+  info(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
 }
 
 // Logger service that handles application-wide logging.
@@ -53,7 +53,7 @@ export class Logger implements ILogger {
     level: LogLevel,
     levelName: string,
     message: string,
-    ...args: any[]
+    ...args: unknown[]
   ): void {
     if (level >= this.level) {
       const formattedMessage = this.formatMessage(levelName, message);
@@ -77,19 +77,19 @@ export class Logger implements ILogger {
     }
   }
 
-  debug(message: string, ...args: any[]): void {
+  debug(message: string, ...args: unknown[]): void {
     this.log(LogLevel.DEBUG, "DEBUG", message, ...args);
   }
 
-  info(message: string, ...args: any[]): void {
+  info(message: string, ...args: unknown[]): void {
     this.log(LogLevel.INFO, "INFO", message, ...args);
   }
 
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
     this.log(LogLevel.WARN, "WARN", message, ...args);
   }
 
-  error(message: string, ...args: any[]): void {
+  error(message: string, ...args: unknown[]): void {
     this.log(LogLevel.ERROR, "ERROR", message, ...args);
   }
 

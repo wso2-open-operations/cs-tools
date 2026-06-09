@@ -85,6 +85,9 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
 
   useEffect(() => {
     if (!isAuthLoading) {
+      // One-way init latch: flips to true once auth settles and stays there.
+      // Effect-driven by design (must re-render on the transition).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional init latch
       setHasInitialized(true);
     }
   }, [isAuthLoading]);
@@ -92,6 +95,9 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
   useEffect(() => {
     if (!isAuthLoading || !isLoginCallback) return;
 
+    // Re-asserts the message when the callback effect (re)runs; the staged
+    // timers below legitimately setState from async callbacks.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs message to auth/callback state
     setLoadingMessage("Authenticating…");
     const t1 = setTimeout(() => setLoadingMessage("Fetching user info…"), 1500);
     const t2 = setTimeout(() => setLoadingMessage("Please wait…"), 3000);

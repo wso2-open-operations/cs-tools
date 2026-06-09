@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+/* eslint-disable react-refresh/only-export-components -- Provider component and its useXxx hook are colocated per the repo's context idiom (fast-refresh DX only) */
+
 import ErrorBanner from "@components/error-banner/ErrorBanner";
 import {
   createContext,

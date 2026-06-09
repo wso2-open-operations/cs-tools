@@ -29,6 +29,7 @@ import { $createImageNode } from "@components/rich-text-editor/ImageNode";
 import {
   INSERT_IMAGE_COMMAND,
   deriveAltFromFilename,
+  sanitizeUrl,
   type InsertImagePayload,
 } from "@components/rich-text-editor/richTextEditor";
 
@@ -53,6 +54,11 @@ export default function ImagesPlugin(): null {
       INSERT_IMAGE_COMMAND,
       (payload) => {
         const src = getPayloadSrc(payload);
+        // Blocked/invalid URLs sanitize to "" — skip insertion rather than
+        // commit an image node with an empty src (broken editor content).
+        if (!sanitizeUrl(src)) {
+          return true;
+        }
         const altText = getPayloadAltText(payload);
         const imageNode = $createImageNode(src, altText);
 

@@ -38,6 +38,7 @@ export default function GlobalNotificationBanner({
   // Reset the dismissed state when the visibility configuration changes to true.
   useEffect(() => {
     if (visible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset dismissal when banner is re-shown
       setDismissed(false);
     }
   }, [visible]);
