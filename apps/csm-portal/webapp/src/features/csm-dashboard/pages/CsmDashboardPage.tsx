@@ -22,6 +22,7 @@ import MyQueueSection from "@features/csm-dashboard/components/MyQueueSection";
 import SlaAtRiskSection from "@features/csm-dashboard/components/SlaAtRiskSection";
 import CustomerSummarySection from "@features/csm-dashboard/components/CustomerSummarySection";
 import RecentActivitySection from "@features/csm-dashboard/components/RecentActivitySection";
+import CaseCountsMatrix from "@features/csm-dashboard/components/CaseCountsMatrix";
 import { useGetCsmDashboard } from "@features/csm-dashboard/api/useGetCsmDashboard";
 import {
   DASHBOARD_OPTIONS,
@@ -70,6 +71,7 @@ export default function CsmDashboardPage(): JSX.Element {
       />
       {dashboardKey === "engineer" ? (
         <>
+          <CaseCountsMatrix />
           <Box
             sx={{
               display: "grid",
