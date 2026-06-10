@@ -52,6 +52,7 @@ import type {
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
+import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 
 type ActionConfirm = {
   title: string;
@@ -60,159 +61,81 @@ type ActionConfirm = {
   confirmColor: "primary" | "error" | "warning";
 };
 
-type StateAction = {
+/**
+ * Presentation for a transition *into* a given state. The button LABEL is never
+ * stored here — it always comes from `STATE_LABEL[targetState]`, so the bar
+ * honours the backend transition graph verbatim and never invents UI-specific
+ * verbs. This only carries the icon/colour, the lifecycle action used for the
+ * post-transition toast, and an optional confirm gate.
+ */
+type TargetConfig = {
   action: CaseLifecycleAction;
-  /**
-   * The state this transition moves the case into. It comes straight from the
-   * backend's `nextStates`, and the same value is what the PATCH writes — so the
-   * button the engineer sees and the transition that is persisted can never
-   * drift apart. (The earlier bug was a hand-maintained action→state map that
-   * disagreed with the backend graph and silently dropped valid buttons.)
-   */
-  targetState: CaseState;
-  label: string;
   color: "primary" | "success" | "warning" | "error";
   icon: JSX.Element;
-  /** Hover hint clarifying the consequence of the transition. */
-  tooltip?: string;
-  /**
-   * When set, the action is gated behind a confirmation dialog. Used for
-   * transitions that notify the customer or are otherwise hard to undo, so a
-   * stray click in a busy queue can't silently close a case or email the
-   * customer.
-   */
   confirm?: ActionConfirm;
+};
+
+/** A concrete button: a target state plus its presentation. */
+type PrimaryButton = TargetConfig & {
+  targetState: CaseState;
+  label: string;
+  tooltip?: string;
 };
 
 const CLOSE_CONFIRM: ActionConfirm = {
   title: "Close this case?",
-  body: "The customer receives a closure notification and the case moves to “Closed”. Once closed, the case cannot be reopened.",
+  // No "cannot be reopened" claim — reopen is a lead-only override, so that
+  // assertion would be false for leads.
+  body: "The customer receives a closure notification and the case moves to “Closed”.",
   confirmLabel: "Close case",
   confirmColor: "warning",
 };
 
 /**
- * Default button for a transition *into* `target`, used whenever the
- * (source → target) edge needs no source-specific wording. The label describes
- * the destination; `targetState` is what gets PATCHed.
+ * Per-target-state presentation. One entry per state a case can move INTO.
+ * Customer-notifying / hard-to-undo transitions carry a confirm gate so a stray
+ * click in a busy queue can't silently close a case or email the customer.
  */
-function defaultActionFor(target: CaseState): StateAction | null {
-  switch (target) {
-    case "work_in_progress":
-      // Reached from a paused/parked sub-state — the engineer is un-pausing.
-      return {
-        action: "resume_work",
-        targetState: target,
-        label: "Resume work",
-        color: "primary",
-        icon: <Play size={16} />,
-      };
-    case "waiting_on_wso2":
-      return {
-        action: "wait_on_wso2",
-        targetState: target,
-        label: "Wait on WSO2",
-        color: "primary",
-        icon: <Clock size={16} />,
-      };
-    case "awaiting_info":
-      return {
-        action: "request_info",
-        targetState: target,
-        label: "Request info",
-        color: "primary",
-        icon: <Inbox size={16} />,
-      };
-    case "solution_proposed":
-      return {
-        action: "propose_solution",
-        targetState: target,
-        label: "Propose solution",
-        color: "success",
-        icon: <Send size={16} />,
-        confirm: {
-          title: "Propose solution to the customer?",
-          body: "The customer is notified that a solution has been proposed and the case moves to “Solution proposed”.",
-          confirmLabel: "Propose solution",
-          confirmColor: "primary",
-        },
-      };
-    case "closed":
-      return {
-        action: "close",
-        targetState: target,
-        label: "Close",
-        color: "success",
-        icon: <CheckCircle size={16} />,
-        confirm: CLOSE_CONFIRM,
-      };
-    case "reopen":
-      return {
-        action: "reopen",
-        targetState: target,
-        label: "Reopen",
-        color: "primary",
-        icon: <RotateCcw size={16} />,
-      };
-    // `open` is an initial state, not a transition target the bar offers.
-    case "open":
-    default:
-      return null;
-  }
-}
-
-/**
- * Source-specific overrides where the label depends on *where the case is
- * coming from*, not just where it is going. The clearest case is the move into
- * Waiting on WSO2: from Work in progress it is a deliberate "Wait on WSO2"
- * pause, but from a paused/parked state (Awaiting info, Solution proposed,
- * Reopened) the same target means the engineer is *resuming* the case. Anything
- * not listed here falls back to `defaultActionFor`.
- */
-const EDGE_OVERRIDES: Partial<
-  Record<CaseState, Partial<Record<CaseState, StateAction>>>
-> = {
-  open: {
-    work_in_progress: {
-      action: "start_work",
-      targetState: "work_in_progress",
-      label: "Start work",
-      color: "primary",
-      icon: <Play size={16} />,
-      tooltip: "Moves this case to Work in progress.",
-    },
+const TARGET_CONFIG: Record<CaseState, TargetConfig> = {
+  open: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
+  work_in_progress: {
+    action: "resume_work",
+    color: "primary",
+    icon: <Play size={16} />,
+  },
+  waiting_on_wso2: {
+    action: "wait_on_wso2",
+    color: "primary",
+    icon: <Clock size={16} />,
   },
   awaiting_info: {
-    waiting_on_wso2: {
-      action: "resume_work",
-      targetState: "waiting_on_wso2",
-      label: "Resume work",
-      color: "primary",
-      icon: <Play size={16} />,
-    },
+    action: "request_info",
+    color: "primary",
+    icon: <Inbox size={16} />,
   },
   solution_proposed: {
-    waiting_on_wso2: {
-      action: "resume_work",
-      targetState: "waiting_on_wso2",
-      label: "Resume work",
-      color: "primary",
-      icon: <RotateCcw size={16} />,
+    action: "propose_solution",
+    color: "success",
+    icon: <Send size={16} />,
+    confirm: {
+      title: "Propose solution to the customer?",
+      body: "The customer is notified that a solution has been proposed and the case moves to “Solution proposed”.",
+      confirmLabel: "Propose solution",
+      confirmColor: "primary",
     },
   },
-  reopen: {
-    waiting_on_wso2: {
-      action: "resume_work",
-      targetState: "waiting_on_wso2",
-      label: "Resume work",
-      color: "primary",
-      icon: <Play size={16} />,
-    },
+  reopen: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
+  closed: {
+    action: "close",
+    color: "warning",
+    icon: <CheckCircle size={16} />,
+    confirm: CLOSE_CONFIRM,
   },
 };
 
-function actionFor(from: CaseState, to: CaseState): StateAction | null {
-  return EDGE_OVERRIDES[from]?.[to] ?? defaultActionFor(to);
+/** Build the button for a transition into `target`, labelled by the BE state. */
+function buttonFor(target: CaseState): PrimaryButton {
+  return { targetState: target, label: STATE_LABEL[target], ...TARGET_CONFIG[target] };
 }
 
 /**
@@ -262,13 +185,14 @@ function orderRank(s: CaseState): number {
  * Lead-only override to reopen a closed case. Not part of the normal
  * `nextStates` flow — the backend reports a closed case as terminal
  * (`nextStates: []`) — so it is appended for the `closed` state only when the
- * caller grants the `canReopenClosed` capability.
+ * caller grants the `canReopenClosed` capability. Labelled by the BE state it
+ * lands in (`reopen` → "Reopened") like every other button.
  */
-const REOPEN_ACTION: StateAction = {
-  action: "reopen",
+const REOPEN_BUTTON: PrimaryButton = {
   targetState: "reopen",
-  label: "Reopen",
-  color: "primary",
+  label: STATE_LABEL.reopen,
+  action: "reopen",
+  color: "warning",
   icon: <RotateCcw size={16} />,
   tooltip: "Lead-only: reopen a closed case for an exceptional follow-up.",
   confirm: {
@@ -337,9 +261,9 @@ interface CaseActionBarProps {
 /**
  * Lifecycle + overflow action bar for the case detail page. Primary buttons are
  * driven directly by the case's backend-supplied `nextStates`: one button per
- * reachable state, so the bar always reflects exactly the transitions the
- * backend permits. Secondary actions live in an overflow menu and are
- * state-independent.
+ * reachable state, labelled with that state's name, so the bar always reflects
+ * exactly the transitions the backend permits. Secondary actions live in an
+ * overflow menu and are state-independent.
  */
 export default function CaseActionBar({
   caseDetail,
@@ -347,7 +271,7 @@ export default function CaseActionBar({
   canReopenClosed = false,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [pendingConfirm, setPendingConfirm] = useState<StateAction | null>(
+  const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
     null,
   );
 
@@ -359,17 +283,16 @@ export default function CaseActionBar({
   const targets = caseDetail.nextStates ?? FALLBACK_TARGETS[from] ?? [];
   const lifecycle = [...new Set(targets)]
     .sort((a, b) => orderRank(a) - orderRank(b))
-    .map((to) => actionFor(from, to))
-    .filter((a): a is StateAction => a !== null);
+    .map(buttonFor);
   const primary = [
     ...lifecycle,
     // Lead-only reopen is an override outside the normal `nextStates` flow, so
     // it is gated by capability rather than by the backend transition list.
-    ...(from === "closed" && canReopenClosed ? [REOPEN_ACTION] : []),
+    ...(from === "closed" && canReopenClosed ? [REOPEN_BUTTON] : []),
   ];
   const secondary = buildSecondaryItems();
 
-  const runPrimary = (p: StateAction): void => {
+  const runPrimary = (p: PrimaryButton): void => {
     if (p.confirm) {
       setPendingConfirm(p);
       return;
@@ -399,12 +322,19 @@ export default function CaseActionBar({
             {p.label}
           </Button>
         );
+        // `targetState` is unique per button (each moves to a distinct state),
+        // so it is the correct React key — the lifecycle action is not (e.g.
+        // `resume_work` can map from more than one source state).
         return p.tooltip ? (
-          <Tooltip key={p.action} title={p.tooltip}>
+          <Tooltip key={p.targetState} title={p.tooltip}>
             {button}
           </Tooltip>
         ) : (
-          <Box key={p.action} component="span" sx={{ display: "inline-flex" }}>
+          <Box
+            key={p.targetState}
+            component="span"
+            sx={{ display: "inline-flex" }}
+          >
             {button}
           </Box>
         );

@@ -28,6 +28,9 @@ import type {
 
 const PAGE_LIMIT = 100;
 const PRODUCTS_LIMIT = 100; // backend caps pagination limit at 100
+// Bound the catalog scan: if referenced product ids can't be resolved (deleted
+// or bad data), don't page through an unbounded catalog. ~2000 products covered.
+const MAX_CATALOG_PAGES = 20;
 
 export interface DeployedProductOption {
   /** Deployed-product id — the value the case-create payload needs. */
@@ -73,22 +76,25 @@ export function useDeployedProductOptions(
       const productName = new Map<string, string>();
       const unresolved = new Set(productIds);
       const resolveProductNames = async (): Promise<void> => {
-        for (let offset = 0; unresolved.size > 0; offset += PRODUCTS_LIMIT) {
+        let offset = 0;
+        for (let page = 0; unresolved.size > 0 && page < MAX_CATALOG_PAGES; page += 1) {
           const res = await api.post<
             BeProductSearchPayload,
             BeProductSearchResponse
           >("/products/search", {
             pagination: { offset, limit: PRODUCTS_LIMIT },
           });
-          const page = res.products ?? [];
-          for (const p of page) {
+          const products = res.products ?? [];
+          for (const p of products) {
             if (unresolved.has(p.id)) {
               productName.set(p.id, p.name ?? p.id);
               unresolved.delete(p.id);
             }
           }
-          if (page.length < PRODUCTS_LIMIT) break;
+          if (products.length < PRODUCTS_LIMIT) break;
+          offset += PRODUCTS_LIMIT;
         }
+        // Any still-unresolved ids fall back to the id as their label below.
       };
 
       const [, versionLists] = await Promise.all([

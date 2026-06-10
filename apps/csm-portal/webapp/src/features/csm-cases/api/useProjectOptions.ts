@@ -15,6 +15,7 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
   BeProject,
@@ -23,24 +24,29 @@ import type {
 } from "@api/backend/types";
 
 const PAGE_LIMIT = 100; // backend caps pagination limit at 100
+// Cap the scan so a large project catalog can't fire unbounded sequential
+// requests (~2000 projects covered).
+const MAX_PAGES = 20;
 
 /** Projects for the case-create project selector, via `POST /projects/search`. */
 export function useProjectOptions(): UseQueryResult<BeProject[], Error> {
   const api = useBackendApi();
 
   return useQuery<BeProject[], Error>({
-    queryKey: ["csm-case-create-projects"],
+    queryKey: [ApiQueryKeys.CSM_PROJECTS, "case-create-options"],
     queryFn: async (): Promise<BeProject[]> => {
       // Page through so projects beyond the first page are still selectable.
       const all: BeProject[] = [];
-      for (let offset = 0; ; offset += PAGE_LIMIT) {
+      let offset = 0;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
         const res = await api.post<
           BeProjectSearchPayload,
           BeProjectSearchResponse
         >("/projects/search", { pagination: { offset, limit: PAGE_LIMIT } });
-        const page = res.projects ?? [];
-        all.push(...page);
-        if (page.length < PAGE_LIMIT) break;
+        const projects = res.projects ?? [];
+        all.push(...projects);
+        if (projects.length < PAGE_LIMIT) break;
+        offset += PAGE_LIMIT;
       }
       return all;
     },

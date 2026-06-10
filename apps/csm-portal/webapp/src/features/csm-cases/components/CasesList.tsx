@@ -20,6 +20,7 @@ import { useNavigate } from "react-router";
 import {
   SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
+  STATE_COLOR,
   STATE_LABEL,
   formatTimeToBreach,
 } from "@features/csm-dashboard/utils/abtDashboard";
@@ -177,9 +178,12 @@ export default function CasesList({
                 label={c.severity}
                 color={SEVERITY_COLOR[c.severity]}
               />
-              <Typography variant="body2" noWrap>
-                {STATE_LABEL[c.state]}
-              </Typography>
+              <Chip
+                size="small"
+                variant="outlined"
+                label={STATE_LABEL[c.state]}
+                color={STATE_COLOR[c.state]}
+              />
               <Typography variant="body2" noWrap>
                 {c.assigneeIsMe ? (
                   <strong>{c.assignee}</strong>

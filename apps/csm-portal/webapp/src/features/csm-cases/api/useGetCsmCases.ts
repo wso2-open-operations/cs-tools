@@ -68,12 +68,14 @@ export function useGetCsmCases(
   const api = useBackendApi();
 
   return useQuery<CsmCasesListResponse, Error>({
+    // Sort the array filters so selection order doesn't fragment the cache
+    // (["S1","S2"] and ["S2","S1"] are the same query).
     queryKey: [
       ApiQueryKeys.CSM_CASES,
       filters.scope,
-      filters.severities,
-      filters.states,
-      filters.projects,
+      [...filters.severities].sort(),
+      [...filters.states].sort(),
+      [...filters.projects].sort(),
     ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
       if (isMockMode()) {

@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   FormControl,
+  FormHelperText,
   Grid,
   InputLabel,
   MenuItem,
@@ -204,6 +205,11 @@ export default function CsmCaseCreatePage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
+              {!projectId ? (
+                <FormHelperText>Select a project first</FormHelperText>
+              ) : deployments.isLoading ? (
+                <FormHelperText>Loading deployments…</FormHelperText>
+              ) : null}
             </FormControl>
           </Grid>
 
@@ -223,6 +229,11 @@ export default function CsmCaseCreatePage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
+              {!deploymentId ? (
+                <FormHelperText>Select a deployment first</FormHelperText>
+              ) : deployedProducts.isLoading ? (
+                <FormHelperText>Loading products…</FormHelperText>
+              ) : null}
             </FormControl>
           </Grid>
 
@@ -270,25 +281,34 @@ export default function CsmCaseCreatePage(): JSX.Element {
               required
               value={subject}
               onChange={(e) => setSubject(e.target.value.slice(0, 200))}
+              helperText={
+                subject.length >= 160 ? `${subject.length}/200` : undefined
+              }
             />
           </Grid>
           <Grid size={{ xs: 12 }}>
             <Typography
+              id="case-description-label"
+              component="label"
               variant="caption"
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
               Description
             </Typography>
-            <Editor
-              value={description}
-              onChange={setDescription}
-              placeholder="Describe the issue…"
-              minHeight={180}
-              maxHeight={420}
-              toolbarVariant="full"
-              disabled={postCase.isPending}
-            />
+            {/* Editor doesn't accept an `id`, so associate the label by wrapping
+                the editor in a labelled group for assistive tech. */}
+            <Box role="group" aria-labelledby="case-description-label">
+              <Editor
+                value={description}
+                onChange={setDescription}
+                placeholder="Describe the issue…"
+                minHeight={180}
+                maxHeight={420}
+                toolbarVariant="full"
+                disabled={postCase.isPending}
+              />
+            </Box>
           </Grid>
         </Grid>
 

@@ -36,10 +36,10 @@ function caseInState(
 }
 
 describe("CaseActionBar — nextStates-driven buttons", () => {
-  it("renders one button per backend nextState", () => {
+  it("renders one button per backend nextState, labelled by the target state", () => {
     // The reported bug: a solution_proposed case returns
-    // nextStates [closed, waiting_on_wso2] but only "Close" showed because the
-    // resume action was hardwired to work_in_progress. Both must now appear.
+    // nextStates [closed, waiting_on_wso2] but only one button showed. Both
+    // must appear, each named after the backend state it moves into.
     render(
       <CaseActionBar
         caseDetail={caseInState("solution_proposed", [
@@ -49,13 +49,11 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /resume work/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^closed$/i })).toBeInTheDocument();
   });
 
   it("shows exactly the transitions the backend permits, nothing more", () => {
-    // work_in_progress could move many ways, but the backend here only allows
-    // two — so only those two buttons render.
     render(
       <CaseActionBar
         caseDetail={caseInState("work_in_progress", [
@@ -65,51 +63,65 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /propose solution/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /request info/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /solution proposed/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /awaiting info/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^closed$/i })).not.toBeInTheDocument();
   });
 
-  it("labels the move into Waiting on WSO2 by source: pause vs resume", () => {
-    // From WIP it is a deliberate pause...
+  it("labels a target the same regardless of source state (no UI-invented verbs)", () => {
+    // From WIP, moving to waiting_on_wso2...
     const { unmount } = render(
       <CaseActionBar
         caseDetail={caseInState("work_in_progress", ["waiting_on_wso2"])}
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /resume work/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
     unmount();
 
-    // ...but from a paused state (awaiting_info) the same target reads "Resume".
+    // ...and from a paused state, the SAME target reads the same — "Waiting on
+    // WSO2", not a fabricated "Resume work".
     render(
       <CaseActionBar
         caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /resume work/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /wait on wso2/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
   });
 
   it("dispatches the action with the backend nextState as the PATCH target", () => {
     const onAction = vi.fn();
     render(
       <CaseActionBar
-        caseDetail={caseInState("solution_proposed", [
-          "closed",
-          "waiting_on_wso2",
-        ])}
+        caseDetail={caseInState("awaiting_info", ["waiting_on_wso2"])}
         onAction={onAction}
       />,
     );
-    // "Resume work" has no confirm dialog, so it dispatches immediately. The
-    // target must be the real backend nextState (waiting_on_wso2), not a
-    // re-derived guess (work_in_progress).
-    fireEvent.click(screen.getByRole("button", { name: /resume work/i }));
-    expect(onAction).toHaveBeenCalledWith("resume_work", "waiting_on_wso2");
+    // "Waiting on WSO2" has no confirm dialog, so it dispatches immediately, and
+    // the target must be the real backend nextState.
+    fireEvent.click(screen.getByRole("button", { name: /waiting on wso2/i }));
+    expect(onAction).toHaveBeenCalledWith("wait_on_wso2", "waiting_on_wso2");
+  });
+
+  it("gates a customer-notifying transition behind a confirm dialog before dispatch", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("work_in_progress", ["closed"])}
+        onAction={onAction}
+      />,
+    );
+    // Clicking "Closed" must NOT dispatch yet — it opens a confirm dialog.
+    fireEvent.click(screen.getByRole("button", { name: /^closed$/i }));
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // Confirming dispatches with the close action + closed target.
+    fireEvent.click(screen.getByRole("button", { name: /close case/i }));
+    expect(onAction).toHaveBeenCalledWith("close", "closed");
   });
 
   it("falls back to the known graph when nextStates is absent", () => {
@@ -119,23 +131,21 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         onAction={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /propose solution/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /request info/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /wait on wso2/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /solution proposed/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /awaiting info/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /waiting on wso2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^closed$/i })).toBeInTheDocument();
   });
 
   it("shows no state-change buttons when nextStates is empty (terminal case)", () => {
-    // An empty nextStates is meaningful: a closed/terminal case has no next
-    // step, so it must offer none and not fall back to the graph.
     render(
       <CaseActionBar
         caseDetail={caseInState("closed", [])}
         onAction={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /resume work/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /waiting on wso2/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reopened/i })).not.toBeInTheDocument();
     // The state-independent "More" overflow is unaffected.
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
@@ -148,6 +158,8 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
         canReopenClosed
       />,
     );
-    expect(screen.getByRole("button", { name: /reopen/i })).toBeInTheDocument();
+    // The button carries a tooltip, so its accessible name is the tooltip text;
+    // assert the visible "Reopened" label (the BE state name) instead.
+    expect(screen.getByText("Reopened")).toBeInTheDocument();
   });
 });

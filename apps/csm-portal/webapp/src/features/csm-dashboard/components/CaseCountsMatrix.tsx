@@ -100,7 +100,7 @@ export default function CaseCountsMatrix(): JSX.Element {
           <Table size="small" aria-label="Case counts by severity and state">
             <TableHead>
               <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Severity \ State</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Severity / State</TableCell>
                 {MATRIX_STATES.map((st) => (
                   <TableCell key={st} align="center">
                     <Link
@@ -122,7 +122,7 @@ export default function CaseCountsMatrix(): JSX.Element {
             <TableBody>
               {MATRIX_SEVERITIES.map((sev) => (
                 <TableRow key={sev} hover>
-                  <TableCell>
+                  <TableCell component="th" scope="row">
                     <Link
                       component={RouterLink}
                       to={casesHref(sev)}
@@ -151,7 +151,9 @@ export default function CaseCountsMatrix(): JSX.Element {
                 </TableRow>
               ))}
               <TableRow>
-                <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
+                <TableCell component="th" scope="row" sx={{ fontWeight: 700 }}>
+                  Total
+                </TableCell>
                 {MATRIX_STATES.map((st) => (
                   <CountCell
                     key={st}
