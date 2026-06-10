@@ -170,6 +170,9 @@ export function useGetCsmCases(
           assigneeIsMe: false,
           slaClockType: "ack",
           minutesToBreach: 0,
+          // No SLA data from the backend yet — keep the SLA column neutral
+          // rather than painting every open row orange with a bogus "0m left".
+          hasSla: false,
           createdAt: c.createdAt ?? "",
           updatedAt: c.updatedAt ?? c.createdAt ?? "",
         };

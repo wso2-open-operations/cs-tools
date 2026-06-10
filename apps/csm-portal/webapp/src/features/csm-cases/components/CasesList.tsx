@@ -121,6 +121,10 @@ export default function CasesList({
       {!isLoading &&
         cases.map((c) => {
           const breached = c.minutesToBreach < 0;
+          // SLA timing is only meaningful when the backend supplies it; absent
+          // (or explicitly true) → show the clock, false → neutral "—".
+          const hasSla = c.hasSla !== false;
+          const showSla = hasSla && c.state !== "closed";
           const handleClick = () => {
             navigate(`/cases/${c.id}`);
           };
@@ -188,15 +192,25 @@ export default function CasesList({
               <Box sx={{ textAlign: "right" }}>
                 <Typography
                   variant="body2"
-                  color={breached ? "error" : c.minutesToBreach <= 60 ? "warning.main" : "text.primary"}
+                  color={
+                    !showSla
+                      ? "text.primary"
+                      : breached
+                        ? "error"
+                        : c.minutesToBreach <= 60
+                          ? "warning.main"
+                          : "text.primary"
+                  }
                   noWrap
                 >
-                  {c.state === "closed"
-                    ? "—"
-                    : formatTimeToBreach(c.minutesToBreach)}
+                  {!showSla ? "—" : formatTimeToBreach(c.minutesToBreach)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" noWrap>
-                  {c.state === "closed" ? "Closed" : SLA_CLOCK_LABEL[c.slaClockType]}
+                  {c.state === "closed"
+                    ? "Closed"
+                    : hasSla
+                      ? SLA_CLOCK_LABEL[c.slaClockType]
+                      : "No SLA"}
                 </Typography>
               </Box>
               <Typography

@@ -476,6 +476,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const c = data;
   const isClosed = c.state === "closed";
   const breached = c.minutesToBreach < 0;
+  // The backend carries no SLA timing yet (LIVE detail leaves slaClocks empty
+  // and minutesToBreach at 0). Without this guard the header SLA chip reads
+  // `0 <= 60` and paints every open case orange ("Ack · 0m left"), which is
+  // both wrong and the main source of orange on the screen. Only show SLA
+  // affordances when we actually have clock data (mock, and LIVE once wired).
+  const hasSlaData = c.slaClocks.length > 0;
   const canReopenClosed = (claims?.groups ?? []).some((g) =>
     LEAD_REOPEN_ROLES.has(g),
   );
@@ -580,7 +586,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               label={TIER_LABEL[c.customerContext.tier]}
               color={TIER_COLOR[c.customerContext.tier]}
             />
-            {!isClosed && (
+            {!isClosed && hasSlaData && (
               <Chip
                 size="small"
                 variant="outlined"
