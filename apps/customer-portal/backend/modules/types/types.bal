@@ -72,6 +72,14 @@ public type CaseSearchFilters record {|
     entity:UtcDateTimeString closedStartDate?;
     # Closed end date
     entity:UtcDateTimeString closedEndDate?;
+    # Start date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    entity:UtcDateTimeString startCreatedDate?;
+    # End date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    entity:UtcDateTimeString endCreatedDate?;
+    # Start date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    entity:UtcDateTimeString startUpdatedDate?;
+    # End date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    entity:UtcDateTimeString endUpdatedDate?;
     # Deployment ID
     string deploymentId?;
     # Deployment ID list

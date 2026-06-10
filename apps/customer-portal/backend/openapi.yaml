@@ -3735,6 +3735,14 @@ components:
           $ref: '#/components/schemas/UtcDateTimeString'
         closedEndDate:
           $ref: '#/components/schemas/UtcDateTimeString'
+        startCreatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        endCreatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        startUpdatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
+        endUpdatedDate:
+          $ref: '#/components/schemas/UtcDateTimeString'
         deploymentId:
           type: string
           description: Deployment ID

@@ -66,7 +66,11 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             createdByMe: payload.filters?.createdByMe,
             engagementTypeKeys: payload.filters?.engagementTypeKeys,
             closedStartDate: payload.filters?.closedStartDate,
-            closedEndDate: payload.filters?.closedEndDate
+            closedEndDate: payload.filters?.closedEndDate,
+            startCreatedDate: payload.filters?.startCreatedDate,
+            endCreatedDate: payload.filters?.endCreatedDate,
+            startUpdatedDate: payload.filters?.startUpdatedDate,
+            endUpdatedDate: payload.filters?.endUpdatedDate
         },
         pagination: payload.pagination,
         sortBy: payload.sortBy

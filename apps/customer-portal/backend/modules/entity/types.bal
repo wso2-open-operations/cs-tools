@@ -456,6 +456,14 @@ public type CaseSearchFilters record {|
     UtcDateTimeString closedStartDate?;
     # End date for closed date
     UtcDateTimeString closedEndDate?;
+    # Start date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString startCreatedDate?;
+    # End date for created date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString endCreatedDate?;
+    # Start date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString startUpdatedDate?;
+    # End date for updated date filter (UTC format: YYYY-MM-DDTHH:MM:SSZ)
+    UtcDateTimeString endUpdatedDate?;
     # Deployment ID
     string deploymentId?;
     # Deployment ID list
