@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { usePatchCsmCase } from "@features/csm-cases/api/usePatchCsmCase";
 import type { BeCaseState } from "@api/backend/types";
+import { beStateFromUi } from "@api/backend/mappers";
 import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
@@ -77,6 +78,7 @@ import type {
   CsmCaseComment,
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
+import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 function MetaCell({
   label,
@@ -362,9 +364,18 @@ export default function CsmCaseDetailPage(): JSX.Element {
   }, [data, recordView]);
 
   const onAction = useCallback(
-    (action: CaseLifecycleAction | { secondary: string }) => {
+    (
+      action: CaseLifecycleAction | { secondary: string },
+      // Target state supplied by the action bar, taken straight from the case's
+      // backend `nextStates`. It is authoritative for the PATCH: the action name
+      // (e.g. `resume_work`) maps to different states depending on the source
+      // state, so we never re-derive the target from the action alone.
+      nextState?: CaseState,
+    ) => {
       if (typeof action === "string") {
-        const targetState = LIFECYCLE_TARGET_STATE[action];
+        const targetState = nextState
+          ? beStateFromUi(nextState)
+          : LIFECYCLE_TARGET_STATE[action];
         if (targetState) {
           // Real state transition via PATCH /cases/{id}; the detail + list
           // queries refetch on success so the new state shows.
