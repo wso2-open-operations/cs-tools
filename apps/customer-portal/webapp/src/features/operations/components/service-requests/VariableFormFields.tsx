@@ -34,8 +34,12 @@ import {
   isFileCopyPathField,
   isDescriptionField,
   isDateTimeField,
+  isPastOnlyDateTimeField,
 } from "@features/operations/utils/serviceRequestValidation";
-import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
+import {
+  computeMinScheduleDatetimeLocalForTimeZone,
+  computeMaxDatetimeLocalForTimeZone,
+} from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -217,6 +221,7 @@ export default function VariableFormFields({
   const { showError } = useErrorBanner();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
+  const maxDatetime = computeMaxDatetimeLocalForTimeZone(effectiveTimeZone);
   const sortedVariables = useMemo(
     () => (variables ? [...variables].sort((a, b) => a.order - b.order) : []),
     [variables],
@@ -504,6 +509,7 @@ export default function VariableFormFields({
     }
 
     if (isDateTimeField(variable)) {
+      const isPastOnly = isPastOnlyDateTimeField(variable);
       return (
         <Grid key={variable.id} size={{ xs: 12, sm: 6 }}>
           <Box sx={{ mb: 1 }}>
@@ -517,7 +523,7 @@ export default function VariableFormFields({
             onChange={(e) => onChange(variable.id, e.target.value)}
             disabled={isContext}
             slotProps={{ inputLabel: { shrink: true } }}
-            inputProps={{ min: minDatetime }}
+            inputProps={isPastOnly ? { max: maxDatetime } : { min: minDatetime }}
             helperText={`Timezone: ${effectiveTimeZone}`}
           />
         </Grid>

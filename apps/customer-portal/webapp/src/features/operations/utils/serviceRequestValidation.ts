@@ -132,6 +132,15 @@ export function isDateTimeField(variable: CatalogItemVariable): boolean {
 }
 
 /**
+ * True if the datetime field is for historical/log retrieval (Start Time / End Time)
+ * rather than scheduling a future action. These fields should use max=now instead of min=future.
+ */
+export function isPastOnlyDateTimeField(variable: CatalogItemVariable): boolean {
+  const q = (variable.questionText ?? "").trim();
+  return /^(start|end)\s*(date|time)$/i.test(q);
+}
+
+/**
  * Returns user-editable variables (excludes context and hidden).
  * Hot fix: all typable fields are mandatory.
  */
