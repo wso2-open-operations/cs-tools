@@ -57,6 +57,7 @@ function buildRequestHeaders(
   input: RequestInfo | URL,
   options: RequestInit | undefined,
   token: string,
+  idToken: string,
 ): Headers {
   // When `input` is a Request, `init.headers` on the outer fetch call REPLACES
   // the request's headers wholesale — it does not merge. Seed the headers from
@@ -70,6 +71,10 @@ function buildRequestHeaders(
   }
 
   headers.set("Authorization", `Bearer ${token}`);
+  // The ID token travels alongside the access token (same convention as the
+  // customer portal): the gateway validates the bearer, while the backend
+  // reads the user's identity claims from `x-user-id-token`.
+  headers.set("x-user-id-token", idToken);
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");
   }
@@ -98,14 +103,16 @@ function buildRequestHeaders(
   return headers;
 }
 
-// Fetch wrapper that attaches a fresh IdP access token as the bearer. The
+// Fetch wrapper that attaches a fresh IdP access token as the bearer and the
+// ID token as `x-user-id-token` (the customer portal's convention). The
 // Choreo gateway validates the access token and forwards it upstream as
-// `x-jwt-assertion`, which csm-portal-backend reads in its auth middleware.
-// The token is only attached when the request origin matches the configured
-// backend; calls to any other origin go through bare fetch so credentials
-// can't be leaked to third-party hosts.
+// `x-jwt-assertion`, which csm-portal-backend reads in its auth middleware;
+// `x-user-id-token` passes through to the backend untouched.
+// The tokens are only attached when the request origin matches the configured
+// backend; calls to any other origin are refused so credentials can't be
+// leaked to third-party hosts.
 export function useAuthApiClient() {
-  const { getAccessToken } = useAsgardeo();
+  const { getAccessToken, getIdToken } = useAsgardeo();
 
   return useCallback(
     async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
@@ -117,8 +124,12 @@ export function useAuthApiClient() {
       }
 
       let token: string | undefined;
+      let idToken: string | undefined;
       try {
-        token = await getAccessToken();
+        [token, idToken] = await Promise.all([
+          getAccessToken(),
+          getIdToken(),
+        ]);
       } catch (error) {
         // Normalise the SDK-not-initialized race into the shared "auth not
         // ready" signal so callers warn-and-retry instead of surfacing a raw
@@ -131,12 +142,15 @@ export function useAuthApiClient() {
       if (!token) {
         throw new Error("Unable to retrieve access token");
       }
+      if (!idToken) {
+        throw new Error("Unable to retrieve ID token");
+      }
 
       return fetch(input, {
         ...options,
-        headers: buildRequestHeaders(input, options, token),
+        headers: buildRequestHeaders(input, options, token, idToken),
       });
     },
-    [getAccessToken],
+    [getAccessToken, getIdToken],
   );
 }

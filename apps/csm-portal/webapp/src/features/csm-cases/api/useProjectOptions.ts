@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useBackendApi } from "@api/backend/client";
+import { useBackendApi, type BackendApi } from "@api/backend/client";
 import type {
   BeProject,
   BeProjectSearchPayload,
@@ -28,12 +28,15 @@ const PAGE_LIMIT = 100; // backend caps pagination limit at 100
 // requests (~2000 projects covered).
 const MAX_PAGES = 20;
 
-/** Projects for the case-create project selector, via `POST /projects/search`. */
-export function useProjectOptions(): UseQueryResult<BeProject[], Error> {
-  const api = useBackendApi();
-
-  return useQuery<BeProject[], Error>({
-    queryKey: [ApiQueryKeys.CSM_PROJECTS, "case-create-options"],
+/**
+ * Query options for the full project directory, via `POST /projects/search`.
+ * Exported (rather than only the hook) so non-component code — e.g. the
+ * `useGetCsmCases` queryFn — can resolve the same cached data through
+ * `queryClient.fetchQuery` instead of re-fetching on every cases query.
+ */
+export function projectOptionsQueryOptions(api: BackendApi) {
+  return {
+    queryKey: [ApiQueryKeys.CSM_PROJECTS, "options"],
     queryFn: async (): Promise<BeProject[]> => {
       // Page through so projects beyond the first page are still selectable.
       const all: BeProject[] = [];
@@ -51,5 +54,12 @@ export function useProjectOptions(): UseQueryResult<BeProject[], Error> {
       return all;
     },
     staleTime: 60_000,
-  });
+  } as const;
+}
+
+/** Projects for the case-create / case-filter project selectors. */
+export function useProjectOptions(): UseQueryResult<BeProject[], Error> {
+  const api = useBackendApi();
+
+  return useQuery<BeProject[], Error>(projectOptionsQueryOptions(api));
 }
