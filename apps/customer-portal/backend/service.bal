@@ -1368,7 +1368,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if isInvalidDateRange(payload.filters?.closedStartDate, payload.filters?.closedEndDate) {
+        if isInvalidDateRange(payload.filters?.closedStartDate, payload.filters?.closedEndDate) ||
+        isInvalidDateRange(payload.filters?.startCreatedDate, payload.filters?.endCreatedDate) ||
+        isInvalidDateRange(payload.filters?.startUpdatedDate, payload.filters?.endUpdatedDate) {
             return <http:BadRequest>{
                 body: {
                     message: "Start date must not be after End date"
