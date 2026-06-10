@@ -1864,14 +1864,6 @@ export function computeMinScheduleDatetimeLocalForTimeZone(
   return severityStr > floorStr ? severityStr : floorStr;
 }
 
-/** Returns the current datetime as a datetime-local string in the given timezone (used as max for past-date fields). */
-export function computeMaxDatetimeLocalForTimeZone(
-  profileTimeZone?: string | null,
-): string {
-  const tz = resolveCallSchedulingTimeZone(profileTimeZone);
-  return instantToDatetimeLocalStringInZone(Date.now(), tz);
-}
-
 export {
   countListSearchAndFilters,
   hasListSearchOrFilters,
