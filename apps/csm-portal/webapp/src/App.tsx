@@ -39,12 +39,12 @@ import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
  * redirect is pending (rendering nothing so it doesn't race the restore);
- * otherwise sends the user to the default `/accounts` landing. A pure read of
+ * otherwise sends the user to the default `/dashboard` landing. A pure read of
  * sessionStorage — AuthGuard owns clearing the key.
  */
 function RootLanding(): JSX.Element | null {
   const pending = sessionStorage.getItem("post_login_redirect");
-  return pending ? null : <Navigate to="/accounts" replace />;
+  return pending ? null : <Navigate to="/dashboard" replace />;
 }
 
 export default function App(): JSX.Element {
