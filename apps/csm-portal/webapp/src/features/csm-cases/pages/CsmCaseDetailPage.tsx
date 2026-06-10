@@ -69,6 +69,7 @@ import {
   SEVERITY_COLOR,
   SEVERITY_LABEL,
   SLA_CLOCK_LABEL,
+  STATE_COLOR,
   STATE_LABEL,
   formatTimeToBreach,
 } from "@features/csm-dashboard/utils/abtDashboard";
@@ -589,7 +590,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             <Chip
               size="small"
               label={STATE_LABEL[c.state]}
-              color={isClosed ? "success" : "primary"}
+              color={STATE_COLOR[c.state]}
               sx={{ fontWeight: 600 }}
             />
             <Chip

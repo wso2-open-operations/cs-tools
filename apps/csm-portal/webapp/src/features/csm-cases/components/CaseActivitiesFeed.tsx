@@ -123,21 +123,21 @@ export default function CaseActivitiesFeed({
         <Chip
           size="small"
           variant={showWorkNotes ? "filled" : "outlined"}
-          color={showWorkNotes ? "primary" : "default"}
+          color={showWorkNotes ? "info" : "default"}
           label={`Work notes (${counts.workNotes})`}
           onClick={() => setShowWorkNotes((v) => !v)}
         />
         <Chip
           size="small"
           variant={showLifecycle ? "filled" : "outlined"}
-          color={showLifecycle ? "primary" : "default"}
+          color={showLifecycle ? "info" : "default"}
           label={`State changes (${counts.lifecycle})`}
           onClick={() => setShowLifecycle((v) => !v)}
         />
         <Chip
           size="small"
           variant={showAttachments ? "filled" : "outlined"}
-          color={showAttachments ? "primary" : "default"}
+          color={showAttachments ? "info" : "default"}
           label={`Attachments (${counts.attachments})`}
           onClick={() => setShowAttachments((v) => !v)}
         />

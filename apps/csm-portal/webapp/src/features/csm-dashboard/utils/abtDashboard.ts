@@ -50,6 +50,30 @@ export const STATE_LABEL: Record<CaseState, string> = {
   closed: "Closed",
 };
 
+// Status chip colour by "whose move is it", so colour carries information when
+// an engineer scans a queue — instead of every open case rendering the same
+// brand orange (the old `isClosed ? "success" : "primary"`, which also failed
+// WCAG contrast). The four buckets:
+//   info (blue)    = active, on us, normal      -> open, work_in_progress
+//   warning (amber)= active, on us, elevated    -> waiting_on_wso2, reopen
+//   default (grey) = waiting on the customer     -> solution_proposed, awaiting_info
+//   success (green)= done                        -> closed
+// All four roles have a dark `contrastText` in this theme, so filled chips pass
+// AA. `primary` (orange) is deliberately not used here: it is reserved for the
+// one real action button, selected nav, and links.
+export const STATE_COLOR: Record<
+  CaseState,
+  "info" | "warning" | "success" | "default"
+> = {
+  open: "info",
+  work_in_progress: "info",
+  waiting_on_wso2: "warning",
+  reopen: "warning",
+  solution_proposed: "default",
+  awaiting_info: "default",
+  closed: "success",
+};
+
 export const SLA_CLOCK_LABEL: Record<SlaClockType, string> = {
   ack: "Ack",
   first_response: "First response",

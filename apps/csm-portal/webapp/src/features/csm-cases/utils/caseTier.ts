@@ -27,11 +27,16 @@ export const TIER_LABEL: Record<CustomerTier, string> = {
   trial: "Trial",
 };
 
+// Tier is metadata, not an action, so it must not wear the brand accent
+// (`primary`/orange). subscription is the most common tier, so colouring it
+// orange painted nearly every case header orange and also failed WCAG contrast
+// (white-on-#F87643 ~ 2.7:1). It renders neutral; the chromatic tiers stay on
+// contrast-safe semantic roles (their contrastText is dark in this theme).
 export const TIER_COLOR: Record<
   CustomerTier,
-  "primary" | "info" | "success" | "warning"
+  "default" | "info" | "success" | "warning"
 > = {
-  subscription: "primary",
+  subscription: "default",
   managed_cloud: "success",
   saas: "info",
   trial: "warning",
