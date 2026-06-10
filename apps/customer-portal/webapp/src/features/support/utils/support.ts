@@ -1882,11 +1882,17 @@ export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {
  * what the user sees in the date picker regardless of their timezone offset.
  */
 export function toUtcStartOfDay(date: Date): string {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    throw new TypeError(`toUtcStartOfDay: invalid Date argument — ${String(date)}`);
+  }
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00Z`;
 }
 
 export function toUtcEndOfDay(date: Date): string {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    throw new TypeError(`toUtcEndOfDay: invalid Date argument — ${String(date)}`);
+  }
   const pad = (n: number) => String(n).padStart(2, "0");
   // Send start of next UTC day as the exclusive upper bound.
   // ServiceNow applies a strict < comparison on the date portion, so

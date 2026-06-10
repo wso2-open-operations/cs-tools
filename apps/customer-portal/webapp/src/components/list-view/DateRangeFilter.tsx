@@ -90,7 +90,7 @@ export default function DateRangeFilter({
             value={parsedStart}
             maxDate={parsedEnd ?? undefined}
             onChange={(date) => {
-              onStartChange(date ? toUtcStartOfDay(date) : undefined);
+              onStartChange(date instanceof Date && !isNaN(date.getTime()) ? toUtcStartOfDay(date) : undefined);
             }}
             slotProps={{
               textField: { size: "small", fullWidth: true },
@@ -102,7 +102,7 @@ export default function DateRangeFilter({
             value={parsedEnd}
             minDate={parsedStart ?? undefined}
             onChange={(date) => {
-              onEndChange(date ? toUtcEndOfDay(date) : undefined);
+              onEndChange(date instanceof Date && !isNaN(date.getTime()) ? toUtcEndOfDay(date) : undefined);
             }}
             slotProps={{
               textField: { size: "small", fullWidth: true },

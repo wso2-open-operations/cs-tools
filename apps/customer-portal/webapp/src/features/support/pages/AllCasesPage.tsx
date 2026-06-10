@@ -145,6 +145,8 @@ export default function AllCasesPage(): JSX.Element {
   const { data: contactsData, isLoading: isContactsLoading } = useGetProjectContacts(projectId || "");
   const contactsList = contactsData ?? [];
 
+  const hideSearchPanel = statusFilter != null || isDashboardSeverityNavigation;
+
   const caseSearchRequest = useMemo(
     () => ({
       filters: {
@@ -166,10 +168,10 @@ export default function AllCasesPage(): JSX.Element {
             statusFilter === "active",
         }),
         ...(statusFilter === "resolved" ? getLast30DaysUtcRange() : {}),
-        ...(filters.startCreatedDate ? { startCreatedDate: filters.startCreatedDate } : {}),
-        ...(filters.endCreatedDate ? { endCreatedDate: filters.endCreatedDate } : {}),
-        ...(filters.startUpdatedDate ? { startUpdatedDate: filters.startUpdatedDate } : {}),
-        ...(filters.endUpdatedDate ? { endUpdatedDate: filters.endUpdatedDate } : {}),
+        ...(!hideSearchPanel && filters.startCreatedDate ? { startCreatedDate: filters.startCreatedDate } : {}),
+        ...(!hideSearchPanel && filters.endCreatedDate ? { endCreatedDate: filters.endCreatedDate } : {}),
+        ...(!hideSearchPanel && filters.startUpdatedDate ? { startUpdatedDate: filters.startUpdatedDate } : {}),
+        ...(!hideSearchPanel && filters.endUpdatedDate ? { endUpdatedDate: filters.endUpdatedDate } : {}),
       },
       sortBy: {
         field: sortField,
@@ -177,6 +179,7 @@ export default function AllCasesPage(): JSX.Element {
       },
     }),
     [
+      hideSearchPanel,
       statusFilter,
       filters,
       searchTerm,
@@ -315,8 +318,6 @@ export default function AllCasesPage(): JSX.Element {
       disabled={!hasCasesResponse || isCasesError || totalItems === 0}
     />
   ) : null;
-
-  const hideSearchPanel = statusFilter != null || isDashboardSeverityNavigation;
 
   return (
     <Stack spacing={3} sx={{ minWidth: 0 }}>
