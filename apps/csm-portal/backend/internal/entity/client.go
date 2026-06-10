@@ -29,6 +29,21 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 )
 
+type ctxKey string
+
+const userIDTokenKey ctxKey = "x-user-id-token"
+
+// WithUserIDToken returns a copy of ctx carrying the x-user-id-token value to
+// be forwarded on every outgoing entity request.
+func WithUserIDToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, userIDTokenKey, token)
+}
+
+func userIDTokenFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(userIDTokenKey).(string)
+	return v
+}
+
 // Config holds the configuration for the entity service client.
 type Config struct {
 	BaseURL      string
@@ -82,6 +97,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if token := userIDTokenFromContext(ctx); token != "" {
+		req.Header.Set("x-user-id-token", token)
 	}
 
 	resp, err := c.http.Do(req)

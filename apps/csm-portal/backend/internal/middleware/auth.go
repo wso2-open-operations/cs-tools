@@ -26,6 +26,7 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 )
 
 // authErrorBody is the JSON error payload for auth failures.
@@ -109,6 +110,7 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), userInfoKey, info)
+			ctx = entity.WithUserIDToken(ctx, r.Header.Get("x-user-id-token"))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
