@@ -34,6 +34,10 @@ export interface ListSearchPanelProps {
     issueTypes?: string[];
     deploymentIds?: string[];
     createdBy?: string[];
+    startCreatedDate?: string;
+    endCreatedDate?: string;
+    startUpdatedDate?: string;
+    endUpdatedDate?: string;
   };
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
@@ -49,6 +53,7 @@ export interface ListSearchPanelProps {
   hideCategoryFilter?: boolean;
   hideCreatedByFilter?: boolean;
   hideFiltersButton?: boolean;
+  hideDateFilters?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
@@ -84,6 +89,7 @@ export default function ListSearchPanel({
   hideCategoryFilter = false,
   hideCreatedByFilter = false,
   hideFiltersButton = false,
+  hideDateFilters = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
@@ -99,6 +105,23 @@ export default function ListSearchPanel({
     ...(hideDeploymentFilter ? { deploymentIds: undefined } : {}),
     ...(hideCategoryFilter ? { issueTypes: undefined } : {}),
     ...(hideCreatedByFilter ? { createdBy: undefined } : {}),
+    // Collapse each date range pair into a single "active" sentinel so each pair counts as 1.
+    startCreatedDate: undefined,
+    endCreatedDate: undefined,
+    startUpdatedDate: undefined,
+    endUpdatedDate: undefined,
+    ...(!hideDateFilters
+      ? {
+          _createdDateRange:
+            filters.startCreatedDate || filters.endCreatedDate
+              ? "active"
+              : undefined,
+          _updatedDateRange:
+            filters.startUpdatedDate || filters.endUpdatedDate
+              ? "active"
+              : undefined,
+        }
+      : {}),
     ...excluded,
   };
   return (
@@ -131,6 +154,7 @@ export default function ListSearchPanel({
           hideDeploymentFilter={hideDeploymentFilter}
           hideCategoryFilter={hideCategoryFilter}
           hideCreatedByFilter={hideCreatedByFilter}
+          hideDateFilters={hideDateFilters}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}
           isFetchingMoreDeployments={isFetchingMoreDeployments}

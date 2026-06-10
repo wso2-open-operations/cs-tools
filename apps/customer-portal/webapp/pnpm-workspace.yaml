@@ -1,6 +1,3 @@
 allowBuilds:
   core-js: true
   esbuild: true
-minimumReleaseAgeExclude:
-  - '@asgardeo/browser@0.7.9'
-  - '@asgardeo/react@0.25.5'

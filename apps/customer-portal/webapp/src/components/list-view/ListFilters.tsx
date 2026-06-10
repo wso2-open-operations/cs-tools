@@ -45,6 +45,7 @@ import {
   deriveFilterLabels,
   mapSeverityToDisplay,
 } from "@features/support/utils/support";
+import DateRangeFilter from "@components/list-view/DateRangeFilter";
 
 export interface ListFiltersProps {
   filters: AllCasesFilterValues;
@@ -60,6 +61,7 @@ export interface ListFiltersProps {
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
   hideCreatedByFilter?: boolean;
+  hideDateFilters?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
@@ -86,6 +88,7 @@ export default function ListFilters({
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
   hideCreatedByFilter = false,
+  hideDateFilters = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
@@ -105,6 +108,7 @@ export default function ListFilters({
     };
 
   return (
+    <>
     <Grid container spacing={2} sx={{ mt: 1, flexWrap: { xs: "wrap", md: "nowrap" }, overflowX: { md: "auto" } }}>
       {ALL_CASES_FILTER_DEFINITIONS.map((def) => {
         if (hideSeverityFilter && def.id === "severity") {
@@ -300,5 +304,28 @@ export default function ListFilters({
         );
       })}
     </Grid>
+    {!hideDateFilters && (
+      <Grid container spacing={2} sx={{ mt: 1 }}>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <DateRangeFilter
+            label="Created Date"
+            startDate={filters.startCreatedDate}
+            endDate={filters.endCreatedDate}
+            onStartChange={(val) => onFilterChange("startCreatedDate", val ?? "")}
+            onEndChange={(val) => onFilterChange("endCreatedDate", val ?? "")}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <DateRangeFilter
+            label="Updated Date"
+            startDate={filters.startUpdatedDate}
+            endDate={filters.endUpdatedDate}
+            onStartChange={(val) => onFilterChange("startUpdatedDate", val ?? "")}
+            onEndChange={(val) => onFilterChange("endUpdatedDate", val ?? "")}
+          />
+        </Grid>
+      </Grid>
+    )}
+    </>
   );
 }
