@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { DashboardScope } from "@features/csm-dashboard/types/abtDashboard";
+import type {
+  CaseState,
+  DashboardScope,
+} from "@features/csm-dashboard/types/abtDashboard";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -355,7 +358,7 @@ const ABT_CASE_SEEDS: CaseSeed[] = [
     projectId: "prj-acme-iam-prod",
     projectName: "IAM Production",
     severity: "S2",
-    state: "reopen",
+    state: "reopened",
     assignee: "Sajith Ekanayaka",
     assigneeIsMe: true,
     slaClockType: "ack",
@@ -803,7 +806,7 @@ function deriveTags(c: CsmCaseRow): CaseTag[] {
     tags.push({ id: "t-priority", label: "high-priority", color: "error" });
   if (c.minutesToBreach < 0)
     tags.push({ id: "t-breach", label: "sla-breached", color: "warning" });
-  if (c.state === "reopen")
+  if (c.state === "reopened")
     tags.push({ id: "t-reopen", label: "reopened", color: "warning" });
   const subjLower = c.subject.toLowerCase();
   if (subjLower.includes("ldap")) tags.push({ id: "t-ldap", label: "ldap", color: "info" });
@@ -912,7 +915,7 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
       createdAt: c.updatedAt,
     });
   }
-  if (c.state === "reopen") {
+  if (c.state === "reopened") {
     events.push({
       id: `a-${c.id}-3`,
       kind: "state_change",
@@ -1141,6 +1144,27 @@ function deriveAttachments(c: CsmCaseRow): CaseAttachment[] {
   return sets[seedIdx % 4] ?? [];
 }
 
+/**
+ * Mirror of the backend transition graph in
+ * `apps/csm-portal/backend/internal/handler/state.go` (`nextStates`). The mock
+ * stands in for the backend, so it owns this copy the way the real backend does;
+ * the webapp itself never re-derives the graph — it renders from `nextStates`.
+ */
+const MOCK_NEXT_STATES: Record<CaseState, CaseState[]> = {
+  open: ["work_in_progress"],
+  work_in_progress: [
+    "waiting_on_wso2",
+    "awaiting_info",
+    "solution_proposed",
+    "closed",
+  ],
+  waiting_on_wso2: ["work_in_progress"],
+  awaiting_info: ["waiting_on_wso2"],
+  reopened: ["waiting_on_wso2"],
+  solution_proposed: ["closed", "waiting_on_wso2"],
+  closed: [],
+};
+
 export function getMockCsmCaseDetailById(
   idOrNumber: string,
 ): CsmCaseDetail | undefined {
@@ -1149,6 +1173,7 @@ export function getMockCsmCaseDetailById(
   const customerContext = CUSTOMER_CONTEXTS[row.accountId] ?? FALLBACK_CUSTOMER;
   return {
     ...row,
+    nextStates: MOCK_NEXT_STATES[row.state] ?? [],
     description: describe(row),
     assignmentGroup: row.projectName.toLowerCase().includes("choreo")
       ? "grp.choreo_sre"

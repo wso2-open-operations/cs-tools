@@ -293,7 +293,7 @@ const sumQueue = (cases: CsmQueueCase[]) => {
   let inProgress = 0;
   let awaitingInfo = 0;
   for (const c of cases) {
-    if (c.state === "open" || c.state === "reopen") actionRequired += 1;
+    if (c.state === "open" || c.state === "reopened") actionRequired += 1;
     else if (c.state === "work_in_progress") inProgress += 1;
     else if (c.state === "awaiting_info") awaitingInfo += 1;
   }

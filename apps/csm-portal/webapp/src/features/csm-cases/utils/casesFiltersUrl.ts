@@ -43,7 +43,7 @@ const VALID_STATES: CaseState[] = [
   "solution_proposed",
   "awaiting_info",
   "waiting_on_wso2",
-  "reopen",
+  "reopened",
   "closed",
 ];
 const VALID_SLA: SlaFilter[] = ["any", "at_risk", "breached"];

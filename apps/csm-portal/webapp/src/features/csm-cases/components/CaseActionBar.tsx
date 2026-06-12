@@ -124,7 +124,7 @@ const TARGET_CONFIG: Record<CaseState, TargetConfig> = {
       confirmColor: "primary",
     },
   },
-  reopen: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
+  reopened: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
   closed: {
     action: "close",
     color: "warning",
@@ -139,28 +139,6 @@ function buttonFor(target: CaseState): PrimaryButton {
 }
 
 /**
- * Fallback target lists, mirroring the backend `nextStates` graph in
- * `state.go`. Used only when the case carries no `nextStates` (e.g. mock data,
- * or a backend that hasn't populated the field) so the bar still shows the
- * expected actions. When the case *does* carry `nextStates`, that drives the
- * buttons directly and this map is ignored.
- */
-const FALLBACK_TARGETS: Record<CaseState, CaseState[]> = {
-  open: ["work_in_progress"],
-  work_in_progress: [
-    "solution_proposed",
-    "awaiting_info",
-    "waiting_on_wso2",
-    "closed",
-  ],
-  solution_proposed: ["waiting_on_wso2", "closed"],
-  awaiting_info: ["waiting_on_wso2"],
-  waiting_on_wso2: ["work_in_progress"],
-  reopen: ["waiting_on_wso2"],
-  closed: [],
-};
-
-/**
  * Display order for the lifecycle buttons. The forward/safe action sits first
  * (it gets the contained emphasis); Close is always last so a destructive
  * action is never the emphasised default. States not listed sort just before
@@ -171,7 +149,7 @@ const DISPLAY_ORDER: CaseState[] = [
   "work_in_progress",
   "awaiting_info",
   "waiting_on_wso2",
-  "reopen",
+  "reopened",
   "open",
   "closed",
 ];
@@ -186,11 +164,11 @@ function orderRank(s: CaseState): number {
  * `nextStates` flow — the backend reports a closed case as terminal
  * (`nextStates: []`) — so it is appended for the `closed` state only when the
  * caller grants the `canReopenClosed` capability. Labelled by the BE state it
- * lands in (`reopen` → "Reopened") like every other button.
+ * lands in (`reopened` → "Reopened") like every other button.
  */
 const REOPEN_BUTTON: PrimaryButton = {
-  targetState: "reopen",
-  label: STATE_LABEL.reopen,
+  targetState: "reopened",
+  label: STATE_LABEL.reopened,
   action: "reopen",
   color: "warning",
   icon: <RotateCcw size={16} />,
@@ -276,11 +254,11 @@ export default function CaseActionBar({
   );
 
   const from = caseDetail.state;
-  // Render a button for every state the backend says the case can move to. When
-  // the field is absent (undefined — mock data / not yet populated) fall back to
-  // the known graph so the bar isn't empty. An explicit empty list (a terminal
-  // case, e.g. Closed) correctly yields no lifecycle buttons.
-  const targets = caseDetail.nextStates ?? FALLBACK_TARGETS[from] ?? [];
+  // Render a button for every state the backend says the case can move to. The
+  // backend `nextStates` is the single source of truth: an empty/terminal list
+  // (e.g. Closed) yields no lifecycle buttons, and a missing field also yields
+  // none rather than guessing from a duplicated client-side graph.
+  const targets = caseDetail.nextStates ?? [];
   const lifecycle = [...new Set(targets)]
     .sort((a, b) => orderRank(a) - orderRank(b))
     .map(buttonFor);

@@ -46,7 +46,7 @@ export const STATE_LABEL: Record<CaseState, string> = {
   solution_proposed: "Solution proposed",
   awaiting_info: "Awaiting info",
   waiting_on_wso2: "Waiting on WSO2",
-  reopen: "Reopened",
+  reopened: "Reopened",
   closed: "Closed",
 };
 
@@ -55,7 +55,7 @@ export const STATE_LABEL: Record<CaseState, string> = {
 // brand orange (the old `isClosed ? "success" : "primary"`, which also failed
 // WCAG contrast). The four buckets:
 //   info (blue)    = active, on us, normal      -> open, work_in_progress
-//   warning (amber)= active, on us, elevated    -> waiting_on_wso2, reopen
+//   warning (amber)= active, on us, elevated    -> waiting_on_wso2, reopened
 //   default (grey) = waiting on the customer     -> solution_proposed, awaiting_info
 //   success (green)= done                        -> closed
 // All four roles have a dark `contrastText` in this theme, so filled chips pass
@@ -68,7 +68,7 @@ export const STATE_COLOR: Record<
   open: "info",
   work_in_progress: "info",
   waiting_on_wso2: "warning",
-  reopen: "warning",
+  reopened: "warning",
   solution_proposed: "default",
   awaiting_info: "default",
   closed: "success",

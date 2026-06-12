@@ -22,7 +22,7 @@ export type CaseState =
   | "solution_proposed"
   | "awaiting_info"
   | "waiting_on_wso2"
-  | "reopen"
+  | "reopened"
   | "closed";
 
 export type SlaClockType = "ack" | "first_response" | "resolution";
