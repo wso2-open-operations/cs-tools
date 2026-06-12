@@ -673,7 +673,7 @@ func TestPatchCase(t *testing.T) {
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
-		assertStatus(t, w, http.StatusUnprocessableEntity)
+		assertStatus(t, w, http.StatusBadRequest)
 		assertErrorMessage(t, w, ErrMsgInvalidTransition)
 		assertContentType(t, w, "application/json")
 	})

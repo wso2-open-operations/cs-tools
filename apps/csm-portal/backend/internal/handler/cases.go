@@ -355,7 +355,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !isValidStateTransition(currentCase.State, *patch.State) {
-			writeError(w, http.StatusUnprocessableEntity, ErrMsgInvalidTransition)
+			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
 			return
 		}
 	}
