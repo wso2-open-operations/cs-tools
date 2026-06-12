@@ -21,8 +21,8 @@ import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import {
   SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
-  STATE_LABEL,
   formatTimeToBreach,
+  stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
@@ -185,7 +185,7 @@ export default function MyQueueSection({
                   <strong>{c.caseNumber}</strong> · {c.subject}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {c.customer} · {STATE_LABEL[c.state]}
+                  {c.customer} · {stateLabel(c.state)}
                 </Typography>
               </Box>
               <Box sx={{ textAlign: "right" }}>

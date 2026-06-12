@@ -28,6 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle,
   ChevronDown,
   Clock,
@@ -52,7 +53,7 @@ import type {
   CsmCaseDetail,
 } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
-import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 
 type ActionConfirm = {
   title: string;
@@ -63,7 +64,7 @@ type ActionConfirm = {
 
 /**
  * Presentation for a transition *into* a given state. The button LABEL is never
- * stored here — it always comes from `STATE_LABEL[targetState]`, so the bar
+ * stored here — it always comes from `stateLabel(targetState)`, so the bar
  * honours the backend transition graph verbatim and never invents UI-specific
  * verbs. This only carries the icon/colour, the lifecycle action used for the
  * post-transition toast, and an optional confirm gate.
@@ -133,9 +134,26 @@ const TARGET_CONFIG: Record<CaseState, TargetConfig> = {
   },
 };
 
+/**
+ * Presentation for a transition into a state the bar has no curated config for
+ * (e.g. a state added on the backend). Keeps the button renderable and safe to
+ * click — neutral styling, a generic `transition` action for the toast — so a
+ * new backend state needs no frontend change to appear and work. The PATCH
+ * target still comes from the state itself, not from this action.
+ */
+const DEFAULT_TARGET_CONFIG: TargetConfig = {
+  action: "transition",
+  color: "primary",
+  icon: <ArrowRight size={16} />,
+};
+
 /** Build the button for a transition into `target`, labelled by the BE state. */
 function buttonFor(target: CaseState): PrimaryButton {
-  return { targetState: target, label: STATE_LABEL[target], ...TARGET_CONFIG[target] };
+  return {
+    targetState: target,
+    label: stateLabel(target),
+    ...(TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG),
+  };
 }
 
 /**
@@ -168,7 +186,7 @@ function orderRank(s: CaseState): number {
  */
 const REOPEN_BUTTON: PrimaryButton = {
   targetState: "reopened",
-  label: STATE_LABEL.reopened,
+  label: stateLabel("reopened"),
   action: "reopen",
   color: "warning",
   icon: <RotateCcw size={16} />,

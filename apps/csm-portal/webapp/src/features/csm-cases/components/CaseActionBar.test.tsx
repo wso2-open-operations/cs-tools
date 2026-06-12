@@ -141,6 +141,27 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
 
+  it("renders a usable button for a state it has no curated config for", () => {
+    // Rollout skew / a newly added backend state: the bar must still render the
+    // transition (humanized label, neutral styling) and dispatch correctly,
+    // rather than building a broken button — so a new state needs no FE change.
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={caseInState("work_in_progress", [
+          "pending_review" as CaseState,
+        ])}
+        onAction={onAction}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /pending review/i });
+    expect(button).toBeInTheDocument();
+    // The generic transition action drives only the toast; the PATCH target is
+    // the backend state itself, so the transition still works.
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledWith("transition", "pending_review");
+  });
+
   it("shows no state-change buttons when nextStates is empty (terminal case)", () => {
     render(
       <CaseActionBar

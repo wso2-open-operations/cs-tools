@@ -70,8 +70,15 @@ describe("uiStateFromBe / beStateFromUi", () => {
     }
   });
 
-  it("defaults an unknown/undefined backend state to open", () => {
+  it("defaults an absent backend state to open", () => {
     expect(uiStateFromBe(undefined)).toBe("open");
+  });
+
+  it("passes an unknown backend state through so the UI can render it", () => {
+    // A state the frontend has not been taught about must still reach the UI
+    // (it renders with a humanized label) rather than being collapsed to a
+    // known state — that is what lets the backend add a state with no FE change.
+    expect(uiStateFromBe("pending_review")).toBe("pending_review");
   });
 });
 

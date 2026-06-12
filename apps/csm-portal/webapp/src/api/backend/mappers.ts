@@ -82,23 +82,16 @@ export function priorityFromSeverity(severity: Severity): BeCasePriority {
 
 /**
  * The UI and backend state vocabularies are identical (`CaseState` ===
- * `BeCaseState`), so these are identity maps at the type level. They survive as
- * the single API boundary: `uiStateFromBe` still guards against an undefined or
- * unexpected runtime value by defaulting to `open`, and `beStateFromUi` keeps
- * the call sites symmetric and ready if the two vocabularies ever diverge again.
+ * `BeCaseState`), so these are identity maps. They survive as the single API
+ * boundary and, deliberately, pass an *unknown* backend state straight through
+ * rather than collapsing it to a known one: a state the frontend has not been
+ * taught about must still reach the UI so it can render with a humanized label
+ * (see `stateLabel`/`stateColor`). That is what lets the backend introduce a new
+ * state with no frontend change. Only a genuinely absent value defaults to
+ * `open`.
  */
-const KNOWN_STATES: readonly CaseState[] = [
-  "open",
-  "work_in_progress",
-  "waiting_on_wso2",
-  "awaiting_info",
-  "reopened",
-  "solution_proposed",
-  "closed",
-];
-
-export function uiStateFromBe(state: BeCaseState | undefined): CaseState {
-  return state && KNOWN_STATES.includes(state) ? state : "open";
+export function uiStateFromBe(state: string | undefined): CaseState {
+  return (state ?? "open") as CaseState;
 }
 
 export function beStateFromUi(state: CaseState): BeCaseState {

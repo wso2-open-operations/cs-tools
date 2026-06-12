@@ -69,9 +69,9 @@ import {
   SEVERITY_COLOR,
   SEVERITY_LABEL,
   SLA_CLOCK_LABEL,
-  STATE_COLOR,
-  STATE_LABEL,
   formatTimeToBreach,
+  stateColor,
+  stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import type {
@@ -118,6 +118,7 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
   reopen: "Case reopened.",
+  transition: "Case updated.",
 };
 
 type FeedbackSeverity = "success" | "info" | "warning" | "error";
@@ -142,6 +143,7 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   close: "success",
   close_no_response: "success",
   reopen: "info",
+  transition: "info",
 };
 
 // Lifecycle actions that map to a `PATCH /cases/{id}` state transition.
@@ -593,8 +595,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
             />
             <Chip
               size="small"
-              label={STATE_LABEL[c.state]}
-              color={STATE_COLOR[c.state]}
+              label={stateLabel(c.state)}
+              color={stateColor(c.state)}
               sx={{ fontWeight: 600 }}
             />
             <Chip

@@ -20,9 +20,9 @@ import { useNavigate } from "react-router";
 import {
   SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
-  STATE_COLOR,
-  STATE_LABEL,
   formatTimeToBreach,
+  stateColor,
+  stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
@@ -181,8 +181,8 @@ export default function CasesList({
               <Chip
                 size="small"
                 variant="outlined"
-                label={STATE_LABEL[c.state]}
-                color={STATE_COLOR[c.state]}
+                label={stateLabel(c.state)}
+                color={stateColor(c.state)}
               />
               <Typography variant="body2" noWrap>
                 {c.assigneeIsMe ? (
