@@ -17,10 +17,14 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
@@ -100,20 +104,42 @@ func main() {
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
 
 	addr := envOrDefault("PORT", ":8080")
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		slog.Error("failed to bind", "addr", addr, "err", err)
+		os.Exit(1)
+	}
 	slog.Info("CSM Portal Backend started", "addr", addr)
 
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           middleware.Auth(authCfg)(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	if err := srv.ListenAndServe(); err != nil {
-		slog.Error("server exited", "err", err)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			slog.Error("server exited", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("graceful shutdown failed", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("CSM Portal Backend stopped")
 }
 
 func mustEnv(key string) string {

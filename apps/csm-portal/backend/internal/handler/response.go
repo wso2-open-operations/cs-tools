@@ -79,6 +79,10 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)
 		case http.StatusBadRequest:
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		case http.StatusConflict, http.StatusUnprocessableEntity:
+			writeError(w, apiErr.StatusCode, apiErr.Body)
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			writeError(w, http.StatusServiceUnavailable, fallbackMsg)
 		default:
 			writeError(w, http.StatusInternalServerError, fallbackMsg)
 		}

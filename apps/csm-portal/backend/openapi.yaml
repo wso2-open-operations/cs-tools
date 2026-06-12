@@ -173,14 +173,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict (e.g. concurrent update).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "413":
           description: RequestEntityTooLarge
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: Unprocessable entity (e.g. invalid state transition).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable.
           content:
             application/json:
               schema:

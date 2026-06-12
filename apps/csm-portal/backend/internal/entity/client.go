@@ -26,8 +26,13 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
+
+// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
+// Overridden in tests to keep them fast.
+var tokenFetchTimeout = 10 * time.Second
 
 type ctxKey string
 
@@ -74,8 +79,10 @@ func NewClient(cfg Config) *Client {
 	// TODO: wrap the base transport with a retry transport that retries on
 	// HTTP 502, 503, and 504 (up to 3 attempts with a 2 s interval) to match
 	// the retryConfig defined in the Ballerina entity client.
-	httpClient := cc.Client(context.Background())
-	httpClient.Timeout = 300 * time.Second
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
+		&http.Client{Timeout: tokenFetchTimeout})
+	httpClient := cc.Client(tokenCtx)
+	httpClient.Timeout = 25 * time.Second
 
 	return &Client{
 		http:    httpClient,

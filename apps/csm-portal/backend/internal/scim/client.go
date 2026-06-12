@@ -26,8 +26,13 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
+
+// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
+// Overridden in tests to keep them fast.
+var tokenFetchTimeout = 10 * time.Second
 
 // Config holds the configuration for the SCIM operations client.
 type Config struct {
@@ -55,8 +60,10 @@ func NewClient(cfg Config) *Client {
 		Scopes:       cfg.Scopes,
 	}
 
-	httpClient := cc.Client(context.Background())
-	httpClient.Timeout = 300 * time.Second
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
+		&http.Client{Timeout: tokenFetchTimeout})
+	httpClient := cc.Client(tokenCtx)
+	httpClient.Timeout = 25 * time.Second
 
 	return &Client{
 		http:    httpClient,
