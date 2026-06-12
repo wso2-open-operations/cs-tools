@@ -14,20 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX } from "react";
+import { type JSX, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import ErrorLayout from "@layouts/ErrorLayout";
 import CsmComingSoonPage from "@features/csm-coming-soon/pages/CsmComingSoonPage";
-import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
-import CsmCasesPage from "@features/csm-cases/pages/CsmCasesPage";
-import CsmCaseCreatePage from "@features/csm-cases/pages/CsmCaseCreatePage";
-import CsmCaseDetailPage from "@features/csm-cases/pages/CsmCaseDetailPage";
-import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
-import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
-import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
-import CsmProjectsPage from "@features/csm-projects/pages/CsmProjectsPage";
-import CsmUpdatesPage from "@features/updates/pages/CsmUpdatesPage";
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
 import Error404Page from "@components/error/Error404Page";
@@ -35,6 +26,41 @@ import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 import { ErrorPageProvider } from "@context/error-page/ErrorPageContext";
+
+/*
+ * Authenticated feature pages are lazily loaded so each lands in its own chunk
+ * and is fetched only when its route is visited, instead of being bundled into
+ * the initial entry chunk. They all render inside AppLayout's Outlet, which
+ * owns the Suspense boundary that covers the load. Error pages and the shared
+ * CsmComingSoonPage stay eager: they are tiny and act as immediate fallbacks.
+ */
+const CsmDashboardPage = lazy(
+  () => import("@features/csm-dashboard/pages/CsmDashboardPage"),
+);
+const CsmCasesPage = lazy(
+  () => import("@features/csm-cases/pages/CsmCasesPage"),
+);
+const CsmCaseCreatePage = lazy(
+  () => import("@features/csm-cases/pages/CsmCaseCreatePage"),
+);
+const CsmCaseDetailPage = lazy(
+  () => import("@features/csm-cases/pages/CsmCaseDetailPage"),
+);
+const CsmAdminLayout = lazy(
+  () => import("@features/csm-admin/pages/CsmAdminLayout"),
+);
+const CsmUsersPage = lazy(
+  () => import("@features/csm-users/pages/CsmUsersPage"),
+);
+const CsmAccountsPage = lazy(
+  () => import("@features/csm-accounts/pages/CsmAccountsPage"),
+);
+const CsmProjectsPage = lazy(
+  () => import("@features/csm-projects/pages/CsmProjectsPage"),
+);
+const CsmUpdatesPage = lazy(
+  () => import("@features/updates/pages/CsmUpdatesPage"),
+);
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a

@@ -15,8 +15,9 @@
 // under the License.
 
 import { Box, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import { type JSX, Suspense } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
 
 interface AdminTab {
   id: string;
@@ -75,7 +76,9 @@ export default function CsmAdminLayout(): JSX.Element {
         ))}
       </Tabs>
 
-      <Outlet />
+      <Suspense fallback={<RouteSuspenseFallback />}>
+        <Outlet />
+      </Suspense>
     </Box>
   );
 }

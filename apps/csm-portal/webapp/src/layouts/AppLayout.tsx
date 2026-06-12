@@ -22,7 +22,14 @@ import {
   LinearProgress,
   Typography,
 } from "@wso2/oxygen-ui";
-import { type JSX, type ReactNode, useRef, useEffect, useState } from "react";
+import {
+  type JSX,
+  type ReactNode,
+  Suspense,
+  useRef,
+  useEffect,
+  useState,
+} from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
@@ -34,6 +41,7 @@ import TopBanner from "@components/top-banner/TopBanner";
 import Footer from "@components/footer/Footer";
 import Header from "@components/header/Header";
 import CsmSideBar from "@components/side-nav-bar/CsmSideBar";
+import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
 
 const SIDEBAR_COLLAPSED_KEY = "csm.sidebar.collapsed";
 
@@ -204,7 +212,9 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
                     </Typography>
                   </Box>
                 ) : (
-                  children || <Outlet />
+                  <Suspense fallback={<RouteSuspenseFallback />}>
+                    {children || <Outlet />}
+                  </Suspense>
                 )}
               </Box>
             </Box>
