@@ -147,7 +147,11 @@ const CONFIG_OVERRIDES = `
 // --- appended by vite local-gateway mode (CSM_PORTAL_LOCAL_BE=1) ---
 window.config.CSM_PORTAL_AUTH_BASE_URL = "${LOCAL_IDP}";
 window.config.CSM_PORTAL_AUTH_CLIENT_ID = "csm-local-dev";
-window.config.CSM_PORTAL_BACKEND_BASE_URL = "http://localhost:3001/local-api";
+// Same-origin backend: derive from the actual origin the dev server is reached
+// on, so a forwarded host/IP (devcontainer port-forward, LAN address) still
+// hits the Vite /local-api proxy instead of a hardcoded localhost that would
+// break the same-origin contract.
+window.config.CSM_PORTAL_BACKEND_BASE_URL = window.location.origin + "/local-api";
 window.config.CSM_PORTAL_USE_MOCKS = false;
 // Pin the runtime mock toggle off so a stale localStorage flag cannot
 // silently re-enable mock data in front of the real local backend.
