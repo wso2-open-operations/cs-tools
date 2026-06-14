@@ -943,22 +943,48 @@ components:
             type: string
           description: Filter by deployment UUIDs.
 
-    DeployedProduct:
+    DeployedProductVersionRef:
       type: object
       properties:
         id:
           type: string
-        deploymentId:
+        name:
           type: string
-        productId:
+        releasedDate:
           type: string
-        productVersionId:
+          format: date
+          nullable: true
+        supportEoLDate:
+          type: string
+          format: date
+          nullable: true
+
+    DeployedProductView:
+      type: object
+      properties:
+        id:
+          type: string
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        version:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/DeployedProductVersionRef'
+        cores:
           type: string
           nullable: true
-        createdAt:
+        tps:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -968,7 +994,7 @@ components:
         deployedProducts:
           type: array
           items:
-            $ref: '#/components/schemas/DeployedProduct'
+            $ref: '#/components/schemas/DeployedProductView'
         total:
           type: integer
         limit:
