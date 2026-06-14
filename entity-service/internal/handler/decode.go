@@ -53,12 +53,24 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		ve  *apierror.ValidationError
 		nfe *apierror.NotFoundError
 		sue *apierror.ServiceUnavailableError
+		ue  *apierror.UnauthorizedError
+		fe  *apierror.ForbiddenError
 	)
 	switch {
 	case errors.As(err, &ve):
 		// 400 – caller-supplied input is invalid; the message is safe to return.
 		log.Printf("Bad request: %s %s: %s", r.Method, r.URL.Path, ve.Msg)
 		apierror.WriteJSON(w, http.StatusBadRequest, ve.Msg)
+
+	case errors.As(err, &ue):
+		// 401 – caller is not authenticated.
+		log.Printf("Unauthorized: %s %s: %s", r.Method, r.URL.Path, ue.Msg)
+		apierror.WriteJSON(w, http.StatusUnauthorized, ue.Msg)
+
+	case errors.As(err, &fe):
+		// 403 – caller is authenticated but not permitted.
+		log.Printf("Forbidden: %s %s: %s", r.Method, r.URL.Path, fe.Msg)
+		apierror.WriteJSON(w, http.StatusForbidden, fe.Msg)
 
 	case errors.As(err, &nfe):
 		// 404 – resource not found; message is safe to return.
