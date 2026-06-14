@@ -165,8 +165,6 @@ type ProjectAccountRef struct {
 	ActivationDate      *time.Time `json:"activationDate"`
 	Tier                string     `json:"tier"`
 	Region              *string    `json:"region"`
-	OwnerID             string     `json:"ownerId"`
-	TechnicalOwnerID    *string    `json:"technicalOwnerId"`
 	AgentEnabled        bool       `json:"agentEnabled"`
 	KbReferencesEnabled bool       `json:"kbReferencesEnabled"`
 }

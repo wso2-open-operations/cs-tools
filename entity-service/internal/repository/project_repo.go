@@ -132,7 +132,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string) (domain.Pro
 		`SELECT p.id, p.sf_id, p.name, p.key, p.subscription_type,
 		        p.start_date, p.end_date, p.created_at, p.updated_at,
 		        a.id, a.name, a.activation_date, a.tier::TEXT, a.region,
-		        a.owner_id, a.technical_owner_id, a.agent_enabled, a.kb_references_enabled
+		        a.agent_enabled, a.kb_references_enabled
 		 FROM projects p
 		 JOIN accounts a ON p.account_id = a.id
 		 WHERE p.id = $1`, id,
@@ -140,7 +140,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string) (domain.Pro
 		&v.ID, &v.SfID, &v.Name, &v.Key, &v.SubscriptionType,
 		&v.StartDate, &v.EndDate, &v.CreatedOn, &v.UpdatedOn,
 		&v.Account.ID, &v.Account.Name, &v.Account.ActivationDate, &v.Account.Tier, &v.Account.Region,
-		&v.Account.OwnerID, &v.Account.TechnicalOwnerID, &v.Account.AgentEnabled, &v.Account.KbReferencesEnabled,
+		&v.Account.AgentEnabled, &v.Account.KbReferencesEnabled,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProjectDetailsView{}, &apierror.NotFoundError{Msg: "project not found"}

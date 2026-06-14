@@ -155,15 +155,13 @@ type snProjectDetailsResponse struct {
 }
 
 type snProjectAccount struct {
-	ID                  string  `json:"id"`
-	Name                string  `json:"name"`
-	ActivationDate      *string `json:"activationDate"`
-	SupportTier         string  `json:"supportTier"`
-	Region              *string `json:"region"`
-	OwnerEmail          string  `json:"ownerEmail"`
-	TechnicalOwnerEmail *string `json:"technicalOwnerEmail"`
-	HasAgent            bool    `json:"hasAgent"`
-	HasKbReferences     bool    `json:"hasKbReferences"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	ActivationDate  *string `json:"activationDate"`
+	SupportTier     string  `json:"supportTier"`
+	Region          *string `json:"region"`
+	HasAgent        bool    `json:"hasAgent"`
+	HasKbReferences bool    `json:"hasKbReferences"`
 }
 
 // GetProjectByID implements ProjectService by calling the Choreo GET /projects/{id} endpoint.
@@ -213,11 +211,6 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 		activationDate = &t
 	}
 
-	var technicalOwnerID *string
-	if sn.Account.TechnicalOwnerEmail != nil && *sn.Account.TechnicalOwnerEmail != "" {
-		technicalOwnerID = sn.Account.TechnicalOwnerEmail
-	}
-
 	return domain.ProjectDetailsView{
 		ID:               sn.ID,
 		SfID:             sn.SfID,
@@ -234,8 +227,6 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 			ActivationDate:      activationDate,
 			Tier:                sn.Account.SupportTier,
 			Region:              sn.Account.Region,
-			OwnerID:             sn.Account.OwnerEmail,
-			TechnicalOwnerID:    technicalOwnerID,
 			AgentEnabled:        sn.Account.HasAgent,
 			KbReferencesEnabled: sn.Account.HasKbReferences,
 		},
