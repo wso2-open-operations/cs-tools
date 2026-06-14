@@ -69,7 +69,8 @@ func newCorrelationID() string {
 }
 
 // ctxHandler wraps a slog.Handler to automatically inject the correlation ID
-// from the request context into every log record produced via *Context methods.
+// and authenticated user ID from the request context into every log record
+// produced via *Context methods.
 type ctxHandler struct {
 	inner slog.Handler
 }
@@ -81,6 +82,9 @@ func (h ctxHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h ctxHandler) Handle(ctx context.Context, r slog.Record) error {
 	if id := CorrelationIDFromContext(ctx); id != "" {
 		r.AddAttrs(slog.String("correlationID", id))
+	}
+	if user := UserInfoFromContext(ctx); user != nil {
+		r.AddAttrs(slog.String("userID", user.UserID))
 	}
 	return h.inner.Handle(ctx, r)
 }
