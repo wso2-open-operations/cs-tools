@@ -43,6 +43,7 @@ interface AbtDashboardHeaderProps {
   onScopeChange: (scope: DashboardScope) => void;
   dashboardKey: DashboardKey;
   onDashboardChange: (key: DashboardKey) => void;
+  isError?: boolean;
 }
 
 export default function AbtDashboardHeader({
@@ -51,6 +52,7 @@ export default function AbtDashboardHeader({
   onScopeChange,
   dashboardKey,
   onDashboardChange,
+  isError,
 }: AbtDashboardHeaderProps): JSX.Element {
   const currentOption = DASHBOARD_OPTIONS.find((o) => o.key === dashboardKey);
   const showScopeButtons = currentOption?.scopeBased ?? false;
@@ -71,7 +73,11 @@ export default function AbtDashboardHeader({
           sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}
         >
           <Typography variant="body2" color="text.secondary">
-            {engineer ? engineer.name : "Loading engineer…"}
+            {engineer
+              ? engineer.name
+              : isError
+                ? "Engineer overview"
+                : "Loading engineer…"}
           </Typography>
           {engineer?.abtName && (
             <Chip

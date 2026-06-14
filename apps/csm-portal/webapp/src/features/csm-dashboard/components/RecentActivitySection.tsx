@@ -26,6 +26,7 @@ import type {
 interface RecentActivitySectionProps {
   activity?: CsmRecentActivity[];
   isLoading: boolean;
+  isError?: boolean;
 }
 
 const TYPE_LABEL: Record<CsmRecentActivityType, string> = {
@@ -50,7 +51,18 @@ const TYPE_COLOR: Record<
 export default function RecentActivitySection({
   activity,
   isLoading,
+  isError,
 }: RecentActivitySectionProps): JSX.Element {
+  if (isError) {
+    return (
+      <SectionCard title="Recent activity" subtitle="Across ABT cases">
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load recent activity right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
+
   return (
     <SectionCard title="Recent activity" subtitle="Across ABT cases">
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>

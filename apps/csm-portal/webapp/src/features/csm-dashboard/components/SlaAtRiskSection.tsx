@@ -30,16 +30,31 @@ import type { CsmSlaAtRiskCase } from "@features/csm-dashboard/types/abtDashboar
 interface SlaAtRiskSectionProps {
   cases?: CsmSlaAtRiskCase[];
   isLoading: boolean;
+  isError?: boolean;
 }
 
 export default function SlaAtRiskSection({
   cases,
   isLoading,
+  isError,
 }: SlaAtRiskSectionProps): JSX.Element {
   const navigate = useNavigate();
   const theme = useTheme();
   const go = (href: string) => navigate(href);
   const breachedCount = (cases ?? []).filter((c) => c.minutesToBreach < 0).length;
+
+  if (isError) {
+    return (
+      <SectionCard
+        title="SLA at risk"
+        subtitle="Cases breaching or about to breach"
+      >
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load SLA data right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard

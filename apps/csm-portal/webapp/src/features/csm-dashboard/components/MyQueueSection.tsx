@@ -31,6 +31,7 @@ import type { CsmQueueSummary } from "@features/csm-dashboard/types/abtDashboard
 interface MyQueueSectionProps {
   queue?: CsmQueueSummary;
   isLoading: boolean;
+  isError?: boolean;
 }
 
 function StatPill({
@@ -90,10 +91,21 @@ function StatPill({
 export default function MyQueueSection({
   queue,
   isLoading,
+  isError,
 }: MyQueueSectionProps): JSX.Element {
   const navigate = useNavigate();
   const theme = useTheme();
   const go = (href: string) => navigate(href);
+
+  if (isError) {
+    return (
+      <SectionCard title="My queue" subtitle="Cases assigned to you">
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load your queue right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard

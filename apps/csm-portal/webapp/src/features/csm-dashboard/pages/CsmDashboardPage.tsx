@@ -15,8 +15,7 @@
 // under the License.
 
 import { Box, Card, Chip, Typography } from "@wso2/oxygen-ui";
-import { useEffect, useRef, useState, type JSX } from "react";
-import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useState, type JSX } from "react";
 import AbtDashboardHeader from "@features/csm-dashboard/components/AbtDashboardHeader";
 import MyQueueSection from "@features/csm-dashboard/components/MyQueueSection";
 import SlaAtRiskSection from "@features/csm-dashboard/components/SlaAtRiskSection";
@@ -44,16 +43,11 @@ export default function CsmDashboardPage(): JSX.Element {
   const [scope, setScope] = useState<DashboardScope>("all_customers");
   const [dashboardKey, setDashboardKey] = useState<DashboardKey>("engineer");
   const { data, isLoading, isError } = useGetCsmDashboard(scope);
-  const { showError } = useErrorBanner();
-  const hasShownErrorRef = useRef(false);
-
-  useEffect(() => {
-    if (isError && !hasShownErrorRef.current) {
-      hasShownErrorRef.current = true;
-      showError("Could not load dashboard.");
-    }
-    if (!isError) hasShownErrorRef.current = false;
-  }, [isError, showError]);
+  // No page-level "Could not load dashboard" toast: this aggregate query backs
+  // four independent sections (queue, SLA, customers, recent activity), while
+  // the severity matrix loads from a separate source. A global toast wrongly
+  // implies the whole page is dead. Pass isError to each section so the engineer
+  // sees exactly what's missing and what's still trustworthy (§2.2).
 
   const scopeLabel =
     scope === "my_abt"
@@ -70,6 +64,7 @@ export default function CsmDashboardPage(): JSX.Element {
         onScopeChange={setScope}
         dashboardKey={dashboardKey}
         onDashboardChange={setDashboardKey}
+        isError={isError}
       />
       {dashboardKey === "engineer" ? (
         <>
@@ -84,8 +79,16 @@ export default function CsmDashboardPage(): JSX.Element {
               },
             }}
           >
-            <MyQueueSection queue={data?.queue} isLoading={isLoading} />
-            <SlaAtRiskSection cases={data?.slaAtRisk} isLoading={isLoading} />
+            <MyQueueSection
+              queue={data?.queue}
+              isLoading={isLoading}
+              isError={isError}
+            />
+            <SlaAtRiskSection
+              cases={data?.slaAtRisk}
+              isLoading={isLoading}
+              isError={isError}
+            />
           </Box>
           <Box
             sx={{
@@ -101,10 +104,12 @@ export default function CsmDashboardPage(): JSX.Element {
               customers={data?.customers}
               isLoading={isLoading}
               scopeLabel={scopeLabel}
+              isError={isError}
             />
             <RecentActivitySection
               activity={data?.recentActivity}
               isLoading={isLoading}
+              isError={isError}
             />
           </Box>
         </>
