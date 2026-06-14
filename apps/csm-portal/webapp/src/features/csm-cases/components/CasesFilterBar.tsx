@@ -20,13 +20,20 @@ import {
   Button,
   Checkbox,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControl,
   Grid,
   IconButton,
   InputAdornment,
   InputLabel,
+  ListItemIcon,
   ListItemText,
+  ListSubheader,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -36,19 +43,33 @@ import {
 } from "@wso2/oxygen-ui";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import {
+  Bookmark,
+  BookmarkPlus,
+  Check,
   ChevronDown,
   ChevronUp,
   ListFilter,
   Search,
+  Trash2,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import type {
   CaseState,
   DashboardScope,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import {
+  readCasesFiltersFromUrl,
+  writeCasesFiltersToUrl,
+} from "@features/csm-cases/utils/casesFiltersUrl";
+import {
+  deleteFilterView,
+  saveFilterView,
+  SUGGESTED_FILTER_VIEWS,
+  useSavedFilterViews,
+} from "@features/csm-cases/utils/savedFilterViews";
 import { isMockMode } from "@api/backend/client";
 
 export type SlaFilter = "any" | "breached" | "at_risk";
@@ -363,6 +384,39 @@ export default function CasesFilterBar({
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
 
+  // ── Saved views ──────────────────────────────────────────────────────────
+  // A saved view is just a name pointing at a serialized filter query string;
+  // applying one feeds the parsed filters back through onChange (which the page
+  // writes to the URL), so the URL stays the source of truth.
+  const savedViews = useSavedFilterViews();
+  const currentQs = writeCasesFiltersToUrl(filters).toString();
+  // Canonicalize a query string (normalize comma encoding, param order, and
+  // drop unknown params) so the "active view" check matches regardless of how a
+  // view's qs was authored — suggested presets use literal commas, while
+  // writeCasesFiltersToUrl emits %2C.
+  const canonicalQs = (qs: string): string =>
+    writeCasesFiltersToUrl(
+      readCasesFiltersFromUrl(new URLSearchParams(qs)),
+    ).toString();
+  const currentCanonical = canonicalQs(currentQs);
+  const isActiveView = (qs: string): boolean => canonicalQs(qs) === currentCanonical;
+  const [savedAnchor, setSavedAnchor] = useState<HTMLElement | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [newViewName, setNewViewName] = useState("");
+
+  const applyView = (qs: string): void => {
+    setSavedAnchor(null);
+    onChange(readCasesFiltersFromUrl(new URLSearchParams(qs)));
+  };
+
+  const handleSaveView = (): void => {
+    if (!newViewName.trim()) return;
+    saveFilterView(newViewName, currentQs);
+    setNewViewName("");
+    setSaveDialogOpen(false);
+    setSavedAnchor(null);
+  };
+
   // Scope (ABT), assignee, and SLA have no backend support yet (no assignee or
   // SLA fields), so disable them against the live backend — they only do
   // anything against seeded mock data.
@@ -484,6 +538,86 @@ export default function CasesFilterBar({
         <Button
           variant="outlined"
           size="small"
+          color="inherit"
+          onClick={(e) => setSavedAnchor(e.currentTarget)}
+          startIcon={<Bookmark size={16} />}
+          endIcon={<ChevronDown size={16} />}
+          aria-haspopup="true"
+          aria-expanded={Boolean(savedAnchor)}
+        >
+          Saved views
+        </Button>
+        <Menu
+          anchorEl={savedAnchor}
+          open={Boolean(savedAnchor)}
+          onClose={() => setSavedAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        >
+          <MenuItem
+            onClick={() => {
+              setSavedAnchor(null);
+              setSaveDialogOpen(true);
+            }}
+          >
+            <ListItemIcon>
+              <BookmarkPlus size={16} />
+            </ListItemIcon>
+            <ListItemText primary="Save current view…" />
+          </MenuItem>
+          <Divider />
+          <ListSubheader sx={{ lineHeight: "32px" }}>Suggested</ListSubheader>
+          {SUGGESTED_FILTER_VIEWS.map((v) => (
+            <MenuItem
+              key={`suggested-${v.name}`}
+              selected={isActiveView(v.qs)}
+              onClick={() => applyView(v.qs)}
+            >
+              <ListItemIcon>
+                {isActiveView(v.qs) ? <Check size={16} /> : null}
+              </ListItemIcon>
+              <ListItemText primary={v.name} />
+            </MenuItem>
+          ))}
+          <Divider />
+          <ListSubheader sx={{ lineHeight: "32px" }}>Saved</ListSubheader>
+          {savedViews.length === 0 ? (
+            <MenuItem disabled>
+              <ListItemText
+                primary="No saved views yet"
+                slotProps={{ primary: { variant: "body2" } }}
+              />
+            </MenuItem>
+          ) : (
+            savedViews.map((v) => (
+              <MenuItem
+                key={`saved-${v.name}`}
+                selected={isActiveView(v.qs)}
+                onClick={() => applyView(v.qs)}
+              >
+                <ListItemIcon>
+                  {isActiveView(v.qs) ? <Check size={16} /> : null}
+                </ListItemIcon>
+                <ListItemText primary={v.name} />
+                <IconButton
+                  size="small"
+                  edge="end"
+                  aria-label={`Delete saved view ${v.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteFilterView(v.name);
+                  }}
+                  sx={{ ml: 1 }}
+                >
+                  <Trash2 size={15} />
+                </IconButton>
+              </MenuItem>
+            ))
+          )}
+        </Menu>
+
+        <Button
+          variant="outlined"
+          size="small"
           onClick={hasActive ? onReset : onFiltersToggle}
           startIcon={hasActive ? <X size={16} /> : <ListFilter size={16} />}
           endIcon={
@@ -494,6 +628,50 @@ export default function CasesFilterBar({
           {hasActive ? `Clear filters (${activeCount})` : "Filters"}
         </Button>
       </Box>
+
+      <Dialog
+        open={saveDialogOpen}
+        onClose={() => setSaveDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Save current view</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            margin="dense"
+            label="View name"
+            placeholder="e.g. My open S1/S2"
+            value={newViewName}
+            onChange={(e) => setNewViewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSaveView();
+              }
+            }}
+            helperText={
+              activeCount === 0
+                ? "Tip: no filters are active — this view will show all cases."
+                : `Captures the ${activeCount} active filter${activeCount === 1 ? "" : "s"}.`
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button color="inherit" onClick={() => setSaveDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveView}
+            disabled={!newViewName.trim()}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Collapsible filter grid. Severity / state stay as fixed multi-selects;
           assignee / project / product are type-to-search Autocompletes. */}
