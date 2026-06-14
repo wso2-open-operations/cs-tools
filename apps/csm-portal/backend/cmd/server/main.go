@@ -115,8 +115,8 @@ func main() {
 
 	srv := &http.Server{
 		Handler: middleware.CorrelationID(
-			middleware.Logger(
-				middleware.Auth(authCfg)(mux),
+			middleware.Auth(authCfg)(
+				middleware.Logger(mux),
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
