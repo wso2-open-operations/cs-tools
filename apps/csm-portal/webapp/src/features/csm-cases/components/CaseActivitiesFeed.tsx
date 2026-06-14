@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
+import { Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
+import { pickAccessibleText } from "@utils/contrastText";
 import {
   Activity,
   ArrowUpRight,
@@ -107,6 +108,17 @@ export default function CaseActivitiesFeed({
     attachments: attachments.length,
   };
 
+  // A filled `color="info"` chip uses MUI's contrastText (3:1 floor), so the
+  // selected filter toggles render white-on-blue at ~3.9:1 and fail WCAG AA for
+  // their small labels. Override the label colour with a luminance-matched
+  // choice so the active toggle stays legible.
+  const theme = useTheme();
+  const activeFilterFg = pickAccessibleText(theme.palette.info.main);
+  const activeFilterSx = {
+    color: activeFilterFg,
+    "& .MuiChip-label": { color: activeFilterFg },
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
       <Box
@@ -126,6 +138,7 @@ export default function CaseActivitiesFeed({
           color={showWorkNotes ? "info" : "default"}
           label={`Work notes (${counts.workNotes})`}
           onClick={() => setShowWorkNotes((v) => !v)}
+          sx={showWorkNotes ? activeFilterSx : undefined}
         />
         <Chip
           size="small"
@@ -133,6 +146,7 @@ export default function CaseActivitiesFeed({
           color={showLifecycle ? "info" : "default"}
           label={`State changes (${counts.lifecycle})`}
           onClick={() => setShowLifecycle((v) => !v)}
+          sx={showLifecycle ? activeFilterSx : undefined}
         />
         <Chip
           size="small"
@@ -140,6 +154,7 @@ export default function CaseActivitiesFeed({
           color={showAttachments ? "info" : "default"}
           label={`Attachments (${counts.attachments})`}
           onClick={() => setShowAttachments((v) => !v)}
+          sx={showAttachments ? activeFilterSx : undefined}
         />
         <Box sx={{ flex: 1 }} />
         <Chip

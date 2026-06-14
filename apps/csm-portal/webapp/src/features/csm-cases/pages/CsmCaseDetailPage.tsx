@@ -66,14 +66,13 @@ import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
-  SEVERITY_COLOR,
-  SEVERITY_LABEL,
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
   stateColor,
   stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
+import SeverityChip from "@components/SeverityChip";
 import type {
   CaseLifecycleAction,
   CsmCaseComment,
@@ -588,13 +587,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
               distinct from the free-form tags by a divider, so the current
               state doesn't get lost among the tag chips. */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <SeverityChip severity={c.severity} withLabel />
             <Chip
               size="small"
-              label={`${c.severity} — ${SEVERITY_LABEL[c.severity]}`}
-              color={SEVERITY_COLOR[c.severity]}
-            />
-            <Chip
-              size="small"
+              variant="outlined"
               label={stateLabel(c.state)}
               color={stateColor(c.state)}
               sx={{ fontWeight: 600 }}
@@ -638,7 +634,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       <CaseMetaBand
         detail={c}
-        navigate={navigate}
         collapsed={metaCollapsed}
         onToggleCollapsed={() => setMetaCollapsed((v) => !v)}
       />

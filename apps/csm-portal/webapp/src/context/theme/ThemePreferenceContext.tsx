@@ -33,6 +33,7 @@ import {
   THEME_OPTIONS,
   type ThemeKey,
 } from "@config/themeConfig";
+import { withA11yOverrides } from "@config/a11yThemeOverrides";
 
 const STORAGE_KEY = "csm.theme";
 
@@ -76,6 +77,12 @@ export function ThemePreferenceProvider({
 }): JSX.Element {
   const [themeKey, setThemeKeyState] = useState<ThemeKey>(() => readInitial());
 
+  // Layer the WCAG-AA accent overlay on the resolved theme (see
+  // withA11yOverrides). Memoised so the theme object is stable per key.
+  const theme = useMemo(() => withA11yOverrides(resolveTheme(themeKey)), [
+    themeKey,
+  ]);
+
   const setThemeKey = useCallback((next: ThemeKey): void => {
     setThemeKeyState(next);
     try {
@@ -92,7 +99,7 @@ export function ThemePreferenceProvider({
 
   return (
     <ThemePreferenceContext.Provider value={value}>
-      <OxygenUIThemeProvider theme={resolveTheme(themeKey)}>
+      <OxygenUIThemeProvider theme={theme}>
         {children}
       </OxygenUIThemeProvider>
     </ThemePreferenceContext.Provider>

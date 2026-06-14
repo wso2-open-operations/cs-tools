@@ -16,7 +16,6 @@
 
 import {
   Box,
-  Chip,
   Link,
   Skeleton,
   Table,
@@ -34,10 +33,8 @@ import {
   MATRIX_STATES,
   useCaseCountsMatrix,
 } from "@features/csm-dashboard/api/useCaseCountsMatrix";
-import {
-  SEVERITY_COLOR,
-  STATE_LABEL,
-} from "@features/csm-dashboard/utils/abtDashboard";
+import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import SeverityChip from "@components/SeverityChip";
 import type {
   CaseState,
   Severity,
@@ -76,7 +73,7 @@ function CountCell({
           {value}
         </Link>
       ) : (
-        <Typography component="span" variant="body2" color="text.disabled">
+        <Typography component="span" variant="body2" color="text.secondary">
           0
         </Typography>
       )}
@@ -128,12 +125,7 @@ export default function CaseCountsMatrix(): JSX.Element {
                       to={casesHref(sev)}
                       underline="none"
                     >
-                      <Chip
-                        size="small"
-                        label={sev}
-                        color={SEVERITY_COLOR[sev]}
-                        sx={{ cursor: "pointer" }}
-                      />
+                      <SeverityChip severity={sev} clickable />
                     </Link>
                   </TableCell>
                   {MATRIX_STATES.map((st) => (
