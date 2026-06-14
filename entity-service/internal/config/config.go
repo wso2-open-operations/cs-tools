@@ -62,7 +62,7 @@ func Load() *Config {
 		DBSSLMode:  os.Getenv("DB_SSLMODE"),
 		ServerPort: getEnvOrDefault("SERVER_PORT", "8080"),
 		DataSource: DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
-		SNBaseURL:  os.Getenv("CHOREO_ENTITY_BASE_URL"),
+		SNBaseURL:  os.Getenv("ENTITY_BASE_URL"),
 	}
 }
 
@@ -74,7 +74,7 @@ func getEnvOrDefault(key, defaultVal string) string {
 }
 
 // Validate checks that the configuration is self-consistent. It returns an
-// error if DATA_SOURCE is an unrecognised value, or if CHOREO_ENTITY_BASE_URL is missing
+// error if DATA_SOURCE is an unrecognised value, or if ENTITY_BASE_URL is missing
 // when DATA_SOURCE=servicenow.
 func (c *Config) Validate() error {
 	switch c.DataSource {
@@ -84,7 +84,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
 	}
 	if c.DataSource == DataSourceServiceNow && c.SNBaseURL == "" {
-		return fmt.Errorf("CHOREO_ENTITY_BASE_URL is required when DATA_SOURCE=servicenow")
+		return fmt.Errorf("ENTITY_BASE_URL is required when DATA_SOURCE=servicenow")
 	}
 	return nil
 }
