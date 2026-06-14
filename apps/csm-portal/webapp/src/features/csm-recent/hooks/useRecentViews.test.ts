@@ -18,12 +18,13 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearRecentViews,
+  toggleRecentViewPin,
   useRecentViews,
   useRecordRecentView,
   type RecentView,
 } from "./useRecentViews";
 
-const entry = (id: string): Omit<RecentView, "visitedAt"> => ({
+const entry = (id: string): Omit<RecentView, "visitedAt" | "pinned"> => ({
   kind: "case",
   id,
   title: `Case ${id}`,
@@ -94,5 +95,57 @@ describe("useRecentViews + useRecordRecentView", () => {
 
     act(() => clearRecentViews());
     expect(reader.result.current).toEqual([]);
+  });
+
+  describe("pinning", () => {
+    it("toggles pinned state by kind+id", () => {
+      const reader = renderHook(() => useRecentViews());
+      const recorder = renderHook(() => useRecordRecentView());
+      act(() => recorder.result.current(entry("1")));
+      expect(reader.result.current[0].pinned).toBeFalsy();
+
+      act(() => toggleRecentViewPin("case", "1"));
+      expect(reader.result.current[0].pinned).toBe(true);
+
+      act(() => toggleRecentViewPin("case", "1"));
+      expect(reader.result.current[0].pinned).toBe(false);
+    });
+
+    it("never evicts pinned entries when the recency cap is exceeded", () => {
+      const recorder = renderHook(() => useRecordRecentView());
+      act(() => recorder.result.current(entry("keep")));
+      act(() => toggleRecentViewPin("case", "keep"));
+      // Push well past the 12-entry unpinned cap.
+      for (let i = 0; i < 15; i++) {
+        act(() => recorder.result.current(entry(String(i))));
+      }
+      const reader = renderHook(() => useRecentViews());
+      const ids = reader.result.current.map((v) => v.id);
+      // The pinned entry survives; unpinned are still capped at 12.
+      expect(ids).toContain("keep");
+      expect(ids.filter((id) => id !== "keep")).toHaveLength(12);
+    });
+
+    it("preserves the pinned flag when an entry is re-visited", () => {
+      const reader = renderHook(() => useRecentViews());
+      const recorder = renderHook(() => useRecordRecentView());
+      act(() => recorder.result.current(entry("1")));
+      act(() => toggleRecentViewPin("case", "1"));
+      expect(reader.result.current[0].pinned).toBe(true);
+
+      act(() => recorder.result.current(entry("1")));
+      expect(reader.result.current[0].pinned).toBe(true);
+    });
+
+    it("clearRecentViews keeps pinned entries", () => {
+      const reader = renderHook(() => useRecentViews());
+      const recorder = renderHook(() => useRecordRecentView());
+      act(() => recorder.result.current(entry("history")));
+      act(() => recorder.result.current(entry("pinned")));
+      act(() => toggleRecentViewPin("case", "pinned"));
+
+      act(() => clearRecentViews());
+      expect(reader.result.current.map((v) => v.id)).toEqual(["pinned"]);
+    });
   });
 });

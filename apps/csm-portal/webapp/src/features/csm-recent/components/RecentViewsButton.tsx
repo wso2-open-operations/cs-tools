@@ -28,6 +28,8 @@ import {
   FolderOpen,
   Headset,
   History,
+  Pin,
+  PinOff,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
@@ -42,6 +44,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import {
   clearRecentViews,
+  toggleRecentViewPin,
   useRecentViews,
   type RecentView,
   type RecentViewKind,
@@ -125,12 +128,85 @@ export default function RecentViewsButton(): JSX.Element {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const grouped = useMemo(() => groupByKind(recents), [recents]);
+  const pinned = useMemo(() => recents.filter((e) => e.pinned), [recents]);
+  const grouped = useMemo(
+    () => groupByKind(recents.filter((e) => !e.pinned)),
+    [recents],
+  );
 
   const handleSelect = (entry: RecentView) => {
     setOpen(false);
     navigate(entry.href);
   };
+
+  const renderRow = (entry: RecentView): JSX.Element => (
+    <Box
+      key={`${entry.kind}-${entry.id}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => handleSelect(entry)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleSelect(entry);
+        }
+      }}
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 1.5,
+        px: 1.5,
+        py: 1,
+        cursor: "pointer",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+    >
+      {kindIcon(entry.kind)}
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="body2" noWrap>
+          {entry.title}
+        </Typography>
+        {entry.subtitle && (
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {entry.subtitle}
+          </Typography>
+        )}
+      </Box>
+      <Tooltip title={entry.pinned ? "Unpin" : "Pin to working set"}>
+        <IconButton
+          size="small"
+          aria-label={
+            entry.pinned
+              ? `Unpin ${entry.title}`
+              : `Pin ${entry.title} to working set`
+          }
+          // Stop the row's navigate; pinning must not leave the panel.
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleRecentViewPin(entry.kind, entry.id);
+          }}
+          // Pinned icon carries the brand accent, but orange-on-light is ~2.5:1
+          // (below the 3:1 icon floor), so shift to primary.dark in light mode
+          // and keep the brighter accent in dark — `palette.mode` is unreliable
+          // under CssVars, so scope with applyStyles.
+          sx={(t) => ({
+            flexShrink: 0,
+            ...(entry.pinned
+              ? {
+                  color: t.palette.primary.dark,
+                  ...t.applyStyles("dark", { color: t.palette.primary.main }),
+                }
+              : {}),
+          })}
+        >
+          {entry.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+        </IconButton>
+      </Tooltip>
+      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+        <RelativeTime iso={entry.visitedAt} href={entry.href} />
+      </Typography>
+    </Box>
+  );
 
   const panel = open && anchorRect && (
     <Paper
@@ -164,14 +240,19 @@ export default function RecentViewsButton(): JSX.Element {
         }}
       >
         <Typography variant="subtitle2">Recently viewed</Typography>
-        {recents.length > 0 && (
-          <Button
-            size="small"
-            variant="text"
-            onClick={() => clearRecentViews()}
-          >
-            Clear
-          </Button>
+        {grouped.case.length +
+          grouped.project.length +
+          grouped.account.length >
+          0 && (
+          <Tooltip title="Clear history (pinned items are kept)">
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => clearRecentViews()}
+            >
+              Clear history
+            </Button>
+          </Tooltip>
         )}
       </Box>
 
@@ -179,8 +260,35 @@ export default function RecentViewsButton(): JSX.Element {
         {recents.length === 0 && (
           <Box sx={{ px: 1.5, py: 2.5, textAlign: "center" }}>
             <Typography variant="body2" color="text.secondary">
-              No recent items. Open a case, project, or account to start tracking history.
+              No recent items. Open a case, project, or account to start tracking history. Pin the ones you are actively working to keep them here.
             </Typography>
+          </Box>
+        )}
+
+        {pinned.length > 0 && (
+          <Box>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                px: 1.5,
+                py: 0.5,
+                bgcolor: "background.default",
+                borderBottom: 1,
+                borderColor: "divider",
+              }}
+            >
+              <Pin size={12} />
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontWeight: 600 }}
+              >
+                Pinned · working set
+              </Typography>
+            </Box>
+            {pinned.map(renderRow)}
           </Box>
         )}
 
@@ -202,44 +310,7 @@ export default function RecentViewsButton(): JSX.Element {
                   {KIND_LABEL[kind]}
                 </Typography>
               </Box>
-              {group.map((entry) => (
-                <Box
-                  key={`${entry.kind}-${entry.id}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleSelect(entry)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleSelect(entry);
-                    }
-                  }}
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1.5,
-                    px: 1.5,
-                    py: 1,
-                    cursor: "pointer",
-                    "&:hover": { bgcolor: "action.hover" },
-                  }}
-                >
-                  {kindIcon(entry.kind)}
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" noWrap>
-                      {entry.title}
-                    </Typography>
-                    {entry.subtitle && (
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {entry.subtitle}
-                      </Typography>
-                    )}
-                  </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                    <RelativeTime iso={entry.visitedAt} href={entry.href} />
-                  </Typography>
-                </Box>
-              ))}
+              {group.map(renderRow)}
             </Box>
           );
         })}

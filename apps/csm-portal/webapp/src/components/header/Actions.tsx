@@ -25,6 +25,7 @@ import { useAsgardeo } from "@asgardeo/react";
 import UserProfile from "@components/header/UserProfile";
 import MockModeToggle from "@components/header/MockModeToggle";
 import ThemeSelect from "@components/header/ThemeSelect";
+import RecentViewsButton from "@features/csm-recent/components/RecentViewsButton";
 
 export default function Actions(): JSX.Element {
   const { isSignedIn } = useAsgardeo();
@@ -34,6 +35,7 @@ export default function Actions(): JSX.Element {
       <MockModeToggle />
       <ThemeSelect />
       <ColorSchemeToggle />
+      {isSignedIn && <RecentViewsButton />}
       <Divider
         orientation="vertical"
         flexItem
