@@ -882,12 +882,12 @@ components:
               - development
           description: Filter by deployment types.
 
-    Deployment:
+    DeploymentView:
       type: object
       properties:
         id:
           type: string
-        projectId:
+        number:
           type: string
         name:
           type: string
@@ -904,11 +904,15 @@ components:
           type: string
           nullable: true
         createdBy:
-          type: string
-        createdAt:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -918,7 +922,7 @@ components:
         deployments:
           type: array
           items:
-            $ref: '#/components/schemas/Deployment'
+            $ref: '#/components/schemas/DeploymentView'
         total:
           type: integer
         limit:
