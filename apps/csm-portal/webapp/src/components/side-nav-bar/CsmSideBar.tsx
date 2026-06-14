@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Link, Sidebar } from "@wso2/oxygen-ui";
+import { Link, Sidebar } from "@wso2/oxygen-ui";
 import { type JSX } from "react";
 import { Link as NavigateLink, useLocation } from "react-router";
 import { CSM_NAV_ITEMS, navItemForPath } from "@config/csmNavItems";
@@ -62,29 +62,10 @@ export default function CsmSideBar({
                 <Sidebar.ItemIcon>
                   <item.icon size={20} />
                 </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1,
-                      width: "100%",
-                    }}
-                  >
-                    <Box component="span" sx={{ flex: 1 }}>
-                      {item.label}
-                    </Box>
-                    {item.wip && !collapsed && (
-                      <Chip
-                        size="small"
-                        label="WIP"
-                        color="warning"
-                        variant="outlined"
-                        sx={{ height: 18, fontSize: 10 }}
-                      />
-                    )}
-                  </Box>
-                </Sidebar.ItemLabel>
+                {/* Plain string: Oxygen derives the collapsed-rail tooltip via
+                    String(ItemLabel.children), so a wrapper element would render
+                    as "[object Object]". */}
+                <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
               </Sidebar.Item>
             </Link>
           ))}
