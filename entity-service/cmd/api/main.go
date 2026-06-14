@@ -46,9 +46,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
-	if pool != nil {
-		defer pool.Close()
-	}
+	defer pool.Close()
 
 	addr := ":" + cfg.ServerPort
 	srv := server.New(addr, pool, cfg)
