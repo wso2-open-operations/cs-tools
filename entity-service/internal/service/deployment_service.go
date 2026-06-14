@@ -45,16 +45,16 @@ func (s *deploymentService) SearchDeployments(ctx context.Context, req domain.Se
 		return domain.SearchDeploymentsResponse{}, err
 	}
 
-	deployments, total, err := s.repo.SearchDeployments(ctx, req)
+	views, total, err := s.repo.SearchDeployments(ctx, req)
 	if err != nil {
 		return domain.SearchDeploymentsResponse{}, err
 	}
 
 	return domain.SearchDeploymentsResponse{
-		Deployments: deployments,
+		Deployments: views,
 		Total:       total,
 		Limit:       req.Pagination.Limit,
 		Offset:      req.Pagination.Offset,
-		HasMore:     req.Pagination.Offset+len(deployments) < total,
+		HasMore:     req.Pagination.Offset+len(views) < total,
 	}, nil
 }

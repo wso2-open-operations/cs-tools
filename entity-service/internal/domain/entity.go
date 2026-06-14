@@ -304,7 +304,6 @@ const (
 )
 
 // Deployment represents a project deployment environment as stored in the database.
-// Description is optional and omitted from JSON when absent.
 type Deployment struct {
 	ID          string         `json:"id"`
 	ProjectID   string         `json:"projectId"`
@@ -314,6 +313,20 @@ type Deployment struct {
 	CreatedBy   string         `json:"createdBy"`
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+
+// DeploymentView is the enriched search result for a deployment. It embeds
+// project and createdBy as named refs and uses createdOn/updatedOn naming.
+type DeploymentView struct {
+	ID          string         `json:"id"`
+	Number      string         `json:"number"`
+	Name        string         `json:"name"`
+	Type        DeploymentType `json:"type"`
+	Description *string        `json:"description"`
+	CreatedBy   *EntityRef     `json:"createdBy"`
+	Project     EntityRef      `json:"project"`
+	CreatedOn   time.Time      `json:"createdOn"`
+	UpdatedOn   time.Time      `json:"updatedOn"`
 }
 
 // SearchDeploymentsRequest is the input for a deployment search operation.
@@ -330,11 +343,11 @@ type SearchDeploymentsRequest struct {
 // SearchDeploymentsResponse is the paginated result of a deployment search.
 // HasMore is true when additional pages are available beyond the current offset.
 type SearchDeploymentsResponse struct {
-	Deployments []Deployment `json:"deployments"`
-	Total       int          `json:"total"`
-	Limit       int          `json:"limit"`
-	Offset      int          `json:"offset"`
-	HasMore     bool         `json:"hasMore"`
+	Deployments []DeploymentView `json:"deployments"`
+	Total       int              `json:"total"`
+	Limit       int              `json:"limit"`
+	Offset      int              `json:"offset"`
+	HasMore     bool             `json:"hasMore"`
 }
 
 // DeployedProduct represents a product (and optional version) associated with a deployment.
