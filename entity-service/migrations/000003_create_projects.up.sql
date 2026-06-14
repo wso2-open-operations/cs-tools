@@ -10,13 +10,23 @@ CREATE TYPE subscription_type_enum AS ENUM (
     'professional_services'
 );
 
+CREATE TYPE closure_status_enum AS ENUM (
+    'notify',
+    'closed',
+    'open',
+    'read_only',
+    'restricted',
+    'suspended'
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id                TEXT                   PRIMARY KEY,
     account_id        TEXT                   NOT NULL,
     sf_id             TEXT                   NOT NULL UNIQUE,
     name              TEXT                   NOT NULL,
-    project_key       TEXT                   NOT NULL UNIQUE,
+    key               TEXT                   NOT NULL UNIQUE,
     subscription_type subscription_type_enum NOT NULL,
+    closure_status    closure_status_enum    NULL,
     start_date        DATE                   NOT NULL,
     end_date          DATE                   NOT NULL,
     created_at        TIMESTAMPTZ            NOT NULL DEFAULT NOW(),

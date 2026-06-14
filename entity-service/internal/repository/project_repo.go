@@ -62,7 +62,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 		// All three ILIKE branches reference the same positional parameter — PostgreSQL
 		// allows a single $N to appear multiple times in one query.
 		where += fmt.Sprintf(
-			" AND (name ILIKE $%d ESCAPE '\\' OR project_key ILIKE $%d ESCAPE '\\' OR subscription_type::TEXT ILIKE $%d ESCAPE '\\')",
+			" AND (name ILIKE $%d ESCAPE '\\' OR key ILIKE $%d ESCAPE '\\' OR subscription_type::TEXT ILIKE $%d ESCAPE '\\')",
 			argIdx, argIdx, argIdx,
 		)
 		filterArgs = append(filterArgs, pattern)
@@ -72,7 +72,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 	countQuery := "SELECT COUNT(*) FROM projects " + where
 
 	dataQuery := fmt.Sprintf(
-		`SELECT id, account_id, sf_id, name, project_key, subscription_type,
+		`SELECT id, account_id, sf_id, name, key, subscription_type, closure_status,
 		        start_date, end_date, created_at, updated_at
 		 FROM projects %s
 		 ORDER BY created_at DESC, id
@@ -104,7 +104,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 		for rows.Next() {
 			var p domain.Project
 			if err := rows.Scan(
-				&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.ProjectKey, &p.SubscriptionType,
+				&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.Key, &p.SubscriptionType, &p.ClosureStatus,
 				&p.StartDate, &p.EndDate, &p.CreatedAt, &p.UpdatedAt,
 			); err != nil {
 				return fmt.Errorf("scan project: %w", err)
@@ -129,11 +129,11 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 func (r *projectRepo) GetProjectByID(ctx context.Context, id string) (domain.Project, error) {
 	var p domain.Project
 	err := r.db.QueryRow(ctx,
-		`SELECT id, account_id, sf_id, name, project_key, subscription_type,
+		`SELECT id, account_id, sf_id, name, key, subscription_type, closure_status,
 		        start_date, end_date, created_at, updated_at
 		 FROM projects WHERE id = $1`, id,
 	).Scan(
-		&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.ProjectKey, &p.SubscriptionType,
+		&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.Key, &p.SubscriptionType, &p.ClosureStatus,
 		&p.StartDate, &p.EndDate, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
