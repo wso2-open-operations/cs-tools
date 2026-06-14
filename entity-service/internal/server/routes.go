@@ -60,8 +60,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	productVersionHandler := handler.NewProductVersionHandler(productVersionSvc)
 
 	deploymentRepo := repository.NewDeploymentRepository(db)
-	deploymentSvc := service.NewDeploymentService(deploymentRepo)
-	deploymentHandler := handler.NewDeploymentHandler(deploymentSvc)
+	var activeDeploymentSvc service.DeploymentService
+	if cfg.DataSource == config.DataSourceServiceNow {
+		activeDeploymentSvc = service.NewSNDeploymentService(snclient.New(cfg.SNBaseURL))
+	} else {
+		activeDeploymentSvc = service.NewDeploymentService(deploymentRepo)
+	}
+	deploymentHandler := handler.NewDeploymentHandler(activeDeploymentSvc)
 
 	deployedProductRepo := repository.NewDeployedProductRepository(db)
 	deployedProductSvc := service.NewDeployedProductService(deployedProductRepo)
