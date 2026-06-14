@@ -159,7 +159,7 @@ type Project struct {
 }
 
 // SearchProjectsRequest is the input for a project search operation.
-// SearchQuery is matched case-insensitively against name, project_key, and subscription_type.
+// SearchQuery is matched case-insensitively against name, key, and subscription_type.
 type SearchProjectsRequest struct {
 	Pagination  Pagination `json:"pagination"`
 	SearchQuery string     `json:"searchQuery"`
