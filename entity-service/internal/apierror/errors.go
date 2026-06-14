@@ -58,6 +58,24 @@ type ServiceUnavailableError struct {
 // Error implements the error interface.
 func (e *ServiceUnavailableError) Error() string { return e.Msg }
 
+// UnauthorizedError signals that the caller is not authenticated and should be
+// reported as HTTP 401.
+type UnauthorizedError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *UnauthorizedError) Error() string { return e.Msg }
+
+// ForbiddenError signals that the caller is authenticated but not permitted to
+// access the resource and should be reported as HTTP 403.
+type ForbiddenError struct {
+	Msg string
+}
+
+// Error implements the error interface.
+func (e *ForbiddenError) Error() string { return e.Msg }
+
 // WriteJSON writes an ErrorResponse JSON body with the given HTTP status code.
 func WriteJSON(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")

@@ -38,18 +38,20 @@ func main() {
 	}
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	pool, err := db.NewPool(ctx, cfg.DSN())
+	pool, err := db.NewPoolIfNeeded(cfg)
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
-	defer pool.Close()
+	if pool != nil {
+		defer pool.Close()
+	}
 
 	addr := ":" + cfg.ServerPort
-	srv := server.New(addr, pool)
+	srv := server.New(addr, pool, cfg)
 
 	go func() {
 		log.Printf("Customer Entity REST Service started in PORT : %s", cfg.ServerPort)

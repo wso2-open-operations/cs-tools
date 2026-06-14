@@ -47,8 +47,19 @@ func (s *projectService) SearchProjects(ctx context.Context, req domain.SearchPr
 		return domain.SearchProjectsResponse{}, err
 	}
 
+	views := make([]domain.ProjectView, len(projects))
+	for i, p := range projects {
+		views[i] = domain.ProjectView{
+			ID:               p.ID,
+			Name:             p.Name,
+			Key:              p.Key,
+			SubscriptionType: p.SubscriptionType,
+			CreatedOn:        p.CreatedAt,
+		}
+	}
+
 	return domain.SearchProjectsResponse{
-		Projects: projects,
+		Projects: views,
 		Total:    total,
 		Limit:    req.Pagination.Limit,
 		Offset:   req.Pagination.Offset,

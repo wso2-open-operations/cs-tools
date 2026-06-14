@@ -658,7 +658,7 @@ components:
           $ref: '#/components/schemas/Pagination'
         searchQuery:
           type: string
-          description: Case-insensitive match against name, project_key, and subscription_type.
+          description: Case-insensitive match against name, key, and subscription_type.
 
     Project:
       type: object
@@ -671,7 +671,7 @@ components:
           type: string
         name:
           type: string
-        projectKey:
+        key:
           type: string
         subscriptionType:
           type: string
@@ -685,6 +685,16 @@ components:
             - platformer_subscription
             - cloud_support
             - professional_services
+        closureStatus:
+          type: string
+          nullable: true
+          enum:
+            - notify
+            - closed
+            - open
+            - read_only
+            - restricted
+            - suspended
         startDate:
           type: string
           format: date-time

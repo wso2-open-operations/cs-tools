@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
 const (
@@ -32,10 +33,10 @@ const (
 
 // New creates an http.Server listening on addr with production-safe timeouts
 // and the full middleware/router chain wired up via NewRouter.
-func New(addr string, db *pgxpool.Pool) *http.Server {
+func New(addr string, db *pgxpool.Pool, cfg *config.Config) *http.Server {
 	return &http.Server{
 		Addr:         addr,
-		Handler:      NewRouter(db),
+		Handler:      NewRouter(db, cfg),
 		ReadTimeout:  serverReadTimeout,
 		WriteTimeout: serverWriteTimeout,
 		IdleTimeout:  serverIdleTimeout,

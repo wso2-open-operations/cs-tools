@@ -131,18 +131,31 @@ const (
 	SubscriptionTypeProfessionalServices     SubscriptionType = "professional_services"
 )
 
+// ClosureStatus represents the closure/access state of a project.
+type ClosureStatus string
+
+const (
+	ClosureStatusNotify     ClosureStatus = "notify"
+	ClosureStatusClosed     ClosureStatus = "closed"
+	ClosureStatusOpen       ClosureStatus = "open"
+	ClosureStatusReadOnly   ClosureStatus = "read_only"
+	ClosureStatusRestricted ClosureStatus = "restricted"
+	ClosureStatusSuspended  ClosureStatus = "suspended"
+)
+
 // Project represents a customer project linked to an account.
 type Project struct {
-	ID               string           `json:"id"`
-	AccountID        string           `json:"accountId"`
-	SfID             string           `json:"sfId"`
-	Name             string           `json:"name"`
-	ProjectKey       string           `json:"projectKey"`
+	ID               string         `json:"id"`
+	AccountID        string         `json:"accountId"`
+	SfID             string         `json:"sfId"`
+	Name             string         `json:"name"`
+	Key              string         `json:"key"`
 	SubscriptionType SubscriptionType `json:"subscriptionType"`
-	StartDate        time.Time        `json:"startDate"`
-	EndDate          time.Time        `json:"endDate"`
-	CreatedAt        time.Time        `json:"createdAt"`
-	UpdatedAt        time.Time        `json:"updatedAt"`
+	ClosureStatus    *ClosureStatus `json:"closureStatus,omitempty"`
+	StartDate        time.Time      `json:"startDate"`
+	EndDate          time.Time      `json:"endDate"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	UpdatedAt        time.Time      `json:"updatedAt"`
 }
 
 // SearchProjectsRequest is the input for a project search operation.
@@ -152,13 +165,24 @@ type SearchProjectsRequest struct {
 	SearchQuery string     `json:"searchQuery"`
 }
 
+// ProjectView is the unified search result shape returned for all data sources.
+// Both Postgres and ServiceNow responses are mapped to this type so callers
+// receive the same fields regardless of which backend is active.
+type ProjectView struct {
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	Key              string           `json:"key"`
+	SubscriptionType SubscriptionType `json:"subscriptionType"`
+	CreatedOn        time.Time        `json:"createdOn"`
+}
+
 // SearchProjectsResponse is the paginated result of a project search.
 type SearchProjectsResponse struct {
-	Projects []Project `json:"projects"`
-	Total    int       `json:"total"`
-	Limit    int       `json:"limit"`
-	Offset   int       `json:"offset"`
-	HasMore  bool      `json:"hasMore"`
+	Projects []ProjectView `json:"projects"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+	HasMore  bool          `json:"hasMore"`
 }
 
 // ProductClass classifies a product as either a standalone software or a managed service.

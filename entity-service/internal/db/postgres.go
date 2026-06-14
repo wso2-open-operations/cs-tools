@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
 const (
@@ -57,4 +58,16 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// NewPoolIfNeeded creates a connection pool only when cfg.DataSource requires
+// Postgres. Returns nil, nil when the datasource is ServiceNow so the server
+// can start without a local database.
+func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
+	if cfg.DataSource == config.DataSourceServiceNow {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return NewPool(ctx, cfg.DSN())
 }

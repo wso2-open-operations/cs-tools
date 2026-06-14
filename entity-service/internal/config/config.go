@@ -18,8 +18,19 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"os"
+)
+
+// DataSource identifies which backend the service reads from.
+type DataSource string
+
+const (
+	// DataSourcePostgres uses the local PostgreSQL database.
+	DataSourcePostgres DataSource = "postgres"
+	// DataSourceServiceNow uses the Choreo ServiceNow API.
+	DataSourceServiceNow DataSource = "servicenow"
 )
 
 // Config holds all environment-driven settings for the service.
@@ -31,6 +42,11 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 	ServerPort string
+	// DataSource controls which backend is used. Defaults to "postgres".
+	DataSource DataSource
+	// SNBaseURL is the base URL for the Choreo ServiceNow API
+	// Required when DataSource is "servicenow".
+	SNBaseURL string
 }
 
 // Load reads configuration from environment variables and returns a populated
@@ -45,6 +61,8 @@ func Load() *Config {
 		DBName:     os.Getenv("DB_NAME"),
 		DBSSLMode:  os.Getenv("DB_SSLMODE"),
 		ServerPort: getEnvOrDefault("SERVER_PORT", "8080"),
+		DataSource: DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
+		SNBaseURL:  os.Getenv("SN_BASE_URL"),
 	}
 }
 
@@ -53,6 +71,22 @@ func getEnvOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// Validate checks that the configuration is self-consistent. It returns an
+// error if DATA_SOURCE is an unrecognised value, or if SN_BASE_URL is missing
+// when DATA_SOURCE=servicenow.
+func (c *Config) Validate() error {
+	switch c.DataSource {
+	case DataSourcePostgres, DataSourceServiceNow:
+		// valid
+	default:
+		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
+	}
+	if c.DataSource == DataSourceServiceNow && c.SNBaseURL == "" {
+		return fmt.Errorf("SN_BASE_URL is required when DATA_SOURCE=servicenow")
+	}
+	return nil
 }
 
 // DSN constructs a PostgreSQL connection string from the config fields.

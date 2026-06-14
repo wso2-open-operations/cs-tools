@@ -21,16 +21,18 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/snclient"
 )
 
 // NewRouter builds the dependency graph (repository → service → handler),
 // registers all routes, and wraps the mux with the middleware chain:
 // Recovery → Logger → Timeout.
-func NewRouter(db *pgxpool.Pool) http.Handler {
+func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	userRepo := repository.NewUserRepository(db)
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handler.NewUserHandler(userSvc)
@@ -40,8 +42,14 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 	accountHandler := handler.NewAccountHandler(accountSvc)
 
 	projectRepo := repository.NewProjectRepository(db)
-	projectSvc := service.NewProjectService(projectRepo)
-	projectHandler := handler.NewProjectHandler(projectSvc)
+	pgProjectSvc := service.NewProjectService(projectRepo)
+	var activeProjectSvc service.ProjectService
+	if cfg.DataSource == config.DataSourceServiceNow {
+		activeProjectSvc = service.NewSNProjectService(snclient.New(cfg.SNBaseURL), pgProjectSvc)
+	} else {
+		activeProjectSvc = pgProjectSvc
+	}
+	projectHandler := handler.NewProjectHandler(activeProjectSvc)
 
 	productRepo := repository.NewProductRepository(db)
 	productSvc := service.NewProductService(productRepo)
@@ -84,7 +92,9 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 
 	return middleware.Recovery(
 		middleware.Logger(
-			middleware.Timeout(10 * time.Second)(mux),
+			middleware.UserIDToken(
+				middleware.Timeout(10 * time.Second)(mux),
+			),
 		),
 	)
 }
