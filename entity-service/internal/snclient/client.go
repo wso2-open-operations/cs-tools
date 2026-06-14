@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,6 +64,9 @@ func (c *Client) Post(ctx context.Context, path string, userIDToken string, payl
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		return nil, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf("snclient: %s: %v", path, err)}
 	}
 	defer resp.Body.Close()
