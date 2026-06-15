@@ -72,6 +72,10 @@ function LinkText({
       variant="body2"
       noWrap
       sx={(t) => ({
+        // Block (not the default inline anchor) so `noWrap` actually clips with
+        // an ellipsis inside the min-width:0 grid cell instead of overflowing
+        // into the next column on a long project/account name.
+        display: "block",
         cursor: "pointer",
         textDecoration: "none",
         // Brand orange (`primary.main`) on a light surface fails WCAG AA
