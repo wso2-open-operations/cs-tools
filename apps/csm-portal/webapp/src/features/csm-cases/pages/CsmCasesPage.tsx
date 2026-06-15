@@ -86,7 +86,7 @@ export default function CsmCasesPage(): JSX.Element {
     [setSearchParams],
   );
 
-  const { data, isLoading, isError } = useGetCsmCases(filters);
+  const { data, isLoading, isError, error } = useGetCsmCases(filters);
   const { data: projectDirectory } = useProjectOptions();
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
@@ -96,10 +96,10 @@ export default function CsmCasesPage(): JSX.Element {
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
-      showError("Could not load cases.");
+      showError("Could not load cases.", error);
     }
     if (!isError) hasShownErrorRef.current = false;
-  }, [isError, showError]);
+  }, [isError, error, showError]);
 
   const filtered = useMemo(() => {
     const list = data?.cases ?? [];

@@ -18,6 +18,8 @@ import { useCallback } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { apiConfig } from "@config/apiConfig";
 import { AUTH_NOT_READY_ERROR_MESSAGE } from "@constants/apiConstants";
+import { useLogger } from "@hooks/useLogger";
+import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
 
 /**
  * True when `getAccessToken()` failed because the Asgardeo SDK had not finished
@@ -58,6 +60,7 @@ function buildRequestHeaders(
   options: RequestInit | undefined,
   token: string,
   idToken: string,
+  correlationId: string,
 ): Headers {
   // When `input` is a Request, `init.headers` on the outer fetch call REPLACES
   // the request's headers wholesale — it does not merge. Seed the headers from
@@ -75,6 +78,13 @@ function buildRequestHeaders(
   // customer portal): the gateway validates the bearer, while the backend
   // reads the user's identity claims from `x-user-id-token`.
   headers.set("x-user-id-token", idToken);
+  // Correlation ID for end-to-end tracing. The backend honours an inbound value
+  // and only generates its own when absent, so a caller-supplied header (rare:
+  // a retry that wants to reuse an ID) is preserved; otherwise we stamp a fresh
+  // per-request UUID.
+  if (!headers.has(CORRELATION_ID_HEADER)) {
+    headers.set(CORRELATION_ID_HEADER, correlationId);
+  }
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");
   }
@@ -113,6 +123,7 @@ function buildRequestHeaders(
 // leaked to third-party hosts.
 export function useAuthApiClient() {
   const { getAccessToken, getIdToken } = useAsgardeo();
+  const logger = useLogger();
 
   return useCallback(
     async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
@@ -146,11 +157,42 @@ export function useAuthApiClient() {
         throw new Error("Unable to retrieve ID token");
       }
 
-      return fetch(input, {
-        ...options,
-        headers: buildRequestHeaders(input, options, token, idToken),
-      });
+      // One correlation ID per physical request (React Query retries each get a
+      // distinct one, matching the backend's per-request unit). A caller that
+      // pre-set the header keeps its value; we log whichever ID actually ships.
+      const headers = buildRequestHeaders(
+        input,
+        options,
+        token,
+        idToken,
+        newCorrelationId(),
+      );
+      const correlationId = headers.get(CORRELATION_ID_HEADER) ?? "";
+      const method = (
+        options?.method ??
+        (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+
+      // Centralised FE access log, mirroring the backend's request-logging
+      // middleware: every backend call is logged once here with the same
+      // correlation ID that backend + entity-service stamp on their log lines.
+      try {
+        const response = await fetch(input, { ...options, headers });
+        const line = `[api] ${method} ${url.pathname} -> ${response.status} correlationID=${correlationId}`;
+        if (response.ok) {
+          logger.debug(line);
+        } else {
+          logger.error(line);
+        }
+        return response;
+      } catch (error) {
+        logger.error(
+          `[api] ${method} ${url.pathname} -> network error correlationID=${correlationId}`,
+          error,
+        );
+        throw error;
+      }
     },
-    [getAccessToken, getIdToken],
+    [getAccessToken, getIdToken, logger],
   );
 }

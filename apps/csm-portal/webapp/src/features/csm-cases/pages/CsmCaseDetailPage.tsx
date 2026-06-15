@@ -396,9 +396,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   severity: LIFECYCLE_SEVERITY[action],
                   sticky: true,
                 }),
-              onError: () =>
+              onError: (err) =>
                 showError(
                   "Could not update the case. Please try again.",
+                  err,
                 ),
             },
           );

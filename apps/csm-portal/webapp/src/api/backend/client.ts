@@ -17,6 +17,7 @@
 import { useCallback, useMemo } from "react";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import type { BeErrorPayload } from "@api/backend/types";
+import { CORRELATION_ID_HEADER } from "@utils/correlationId";
 
 /**
  * `true` when the mock toggle is on. Hooks should branch on this and call
@@ -37,11 +38,26 @@ export function backendBaseUrl(): string {
 export class BackendApiError extends Error {
   status: number;
   payload?: BeErrorPayload;
-  constructor(status: number, message: string, payload?: BeErrorPayload) {
+  /**
+   * Correlation ID for this failed request, read back from the response's
+   * `X-Correlation-ID` header (the backend echoes the ID it logged against).
+   * Surface it to users as a support "Reference ID". `undefined` when the
+   * gateway does not expose the header on cross-origin responses (it must be
+   * listed in `Access-Control-Expose-Headers`); the FE access log still records
+   * the ID regardless.
+   */
+  correlationId?: string;
+  constructor(
+    status: number,
+    message: string,
+    payload?: BeErrorPayload,
+    correlationId?: string,
+  ) {
     super(message);
     this.name = "BackendApiError";
     this.status = status;
     this.payload = payload;
+    this.correlationId = correlationId;
   }
 }
 
@@ -56,7 +72,9 @@ async function readError(response: Response): Promise<BackendApiError> {
     payload?.message ??
     response.statusText ??
     `Request failed with status ${response.status}`;
-  return new BackendApiError(response.status, msg, payload);
+  const correlationId =
+    response.headers.get(CORRELATION_ID_HEADER) ?? undefined;
+  return new BackendApiError(response.status, msg, payload, correlationId);
 }
 
 /**

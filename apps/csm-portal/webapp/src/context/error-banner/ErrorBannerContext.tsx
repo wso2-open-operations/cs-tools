@@ -29,10 +29,15 @@ import {
 } from "react";
 
 import { ERROR_BANNER_TIMEOUT_MS } from "@constants/common";
+import { getErrorReferenceId } from "@utils/correlationId";
 
 interface ErrorBannerContextType {
-  /** Show the error banner with the given user-facing message. */
-  showError: (message: string) => void;
+  /**
+   * Show the error banner with the given user-facing message. Pass the original
+   * error as the second argument to append a support "Reference ID" (the
+   * request's correlation ID) when one is available.
+   */
+  showError: (message: string, error?: unknown) => void;
 }
 
 const ErrorBannerContext = createContext<ErrorBannerContextType | undefined>(
@@ -56,8 +61,9 @@ export function ErrorBannerProvider({
   const [message, setMessage] = useState<string | null>(null);
   const [key, setKey] = useState(0);
 
-  const showError = useCallback((msg: string) => {
-    setMessage(msg);
+  const showError = useCallback((msg: string, error?: unknown) => {
+    const referenceId = getErrorReferenceId(error);
+    setMessage(referenceId ? `${msg} (Reference ID: ${referenceId})` : msg);
     setKey((prev) => prev + 1);
   }, []);
 

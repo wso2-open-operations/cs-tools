@@ -131,7 +131,8 @@ export default function CsmCaseCreatePage(): JSX.Element {
       },
       {
         onSuccess: (created) => navigate(`/cases/${created.id}`),
-        onError: () => showError("Could not create the case. Please try again."),
+        onError: (err) =>
+          showError("Could not create the case. Please try again.", err),
       },
     );
   };
