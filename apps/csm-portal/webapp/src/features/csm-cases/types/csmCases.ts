@@ -69,6 +69,14 @@ export interface CsmCaseRow {
 export interface CsmCasesListResponse {
   scope: DashboardScope;
   cases: CsmCaseRow[];
+  /** Total rows matching the query across all pages (BE `total`). */
+  total: number;
+  /** Page size used for this response (BE `limit`). */
+  limit: number;
+  /** Zero-based row offset of this page (BE `offset`). */
+  offset: number;
+  /** Whether more rows exist beyond this page (BE `hasMore`). */
+  hasMore: boolean;
 }
 
 export type CsmCommentAuthorRole = "customer" | "wso2_engineer" | "system";

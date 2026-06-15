@@ -88,7 +88,7 @@ export function useCaseCountsMatrix(): UseQueryResult<CaseCountsMatrix, Error> {
       const matrix = emptyMatrix();
 
       if (isMockMode()) {
-        for (const c of getMockCsmCases("all_customers").cases) {
+        for (const c of getMockCsmCases("all_customers")) {
           if (matrix.counts[c.severity]?.[c.state] === undefined) continue;
           matrix.counts[c.severity][c.state] += 1;
           matrix.severityTotals[c.severity] += 1;

@@ -17,12 +17,7 @@
 import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
-import {
-  SLA_CLOCK_LABEL,
-  formatTimeToBreach,
-  stateColor,
-  stateLabel,
-} from "@features/csm-dashboard/utils/abtDashboard";
+import { stateColor, stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
@@ -36,15 +31,14 @@ interface CasesListProps {
 const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
   { label: "Case" },
   { label: "Customer" },
+  { label: "Product" },
   { label: "Severity" },
   { label: "State" },
-  { label: "Assignee" },
-  { label: "SLA", align: "right" },
   { label: "Updated", align: "right" },
 ];
 
 const GRID =
-  "minmax(280px, 2.5fr) minmax(140px, 1fr) auto minmax(140px, 1fr) minmax(120px, 1fr) auto auto";
+  "minmax(280px, 2.5fr) minmax(140px, 1fr) minmax(140px, 1fr) auto minmax(120px, 1fr) auto";
 
 export default function CasesList({
   cases,
@@ -121,11 +115,6 @@ export default function CasesList({
 
       {!isLoading &&
         cases.map((c) => {
-          const breached = c.minutesToBreach < 0;
-          // SLA timing is only meaningful when the backend supplies it; absent
-          // (or explicitly true) → show the clock, false → neutral "—".
-          const hasSla = c.hasSla !== false;
-          const showSla = hasSla && c.state !== "closed";
           return (
             // A real anchor (not a click-handler div) so the row supports
             // cmd/middle-click "open in new tab" — essential when an engineer
@@ -178,6 +167,9 @@ export default function CasesList({
               <Typography variant="body2" noWrap>
                 {c.customer}
               </Typography>
+              <Typography variant="body2" noWrap>
+                {c.product}
+              </Typography>
               <SeverityChip severity={c.severity} />
               <Chip
                 size="small"
@@ -185,39 +177,6 @@ export default function CasesList({
                 label={stateLabel(c.state)}
                 color={stateColor(c.state)}
               />
-              <Typography variant="body2" noWrap>
-                {c.assigneeIsMe ? (
-                  <strong>{c.assignee}</strong>
-                ) : c.assignee === "Unassigned" ? (
-                  <em>Unassigned</em>
-                ) : (
-                  c.assignee
-                )}
-              </Typography>
-              <Box sx={{ textAlign: "right" }}>
-                <Typography
-                  variant="body2"
-                  color={
-                    !showSla
-                      ? "text.primary"
-                      : breached
-                        ? "error"
-                        : c.minutesToBreach <= 60
-                          ? "warning.main"
-                          : "text.primary"
-                  }
-                  noWrap
-                >
-                  {!showSla ? "—" : formatTimeToBreach(c.minutesToBreach)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
-                  {c.state === "closed"
-                    ? "Closed"
-                    : hasSla
-                      ? SLA_CLOCK_LABEL[c.slaClockType]
-                      : "No SLA"}
-                </Typography>
-              </Box>
               <Typography
                 variant="caption"
                 color="text.secondary"

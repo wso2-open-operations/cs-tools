@@ -423,6 +423,12 @@ export default function CasesFilterBar({
   const beUnsupported = !isMockMode();
   const beUnsupportedReason =
     "Not available against the live backend yet (no assignee / SLA data).";
+  // Product filtering would need the backend to filter by deployed-product
+  // instance ids (the case carries an instance id, not the product name), and
+  // there is no directory to map product name → instance ids. So it is
+  // disabled in LIVE and only refines the seeded mock data.
+  const productFilterUnsupportedReason =
+    "Filtering by product isn't supported by the live backend yet.";
 
   const severityOptions = useMemo(
     () => ALL_SEVERITIES.map((s) => ({ value: s, label: s })),
@@ -744,14 +750,23 @@ export default function CasesFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <SearchableMultiSelect
-                id="cases-filter-product"
-                label="Product"
-                placeholder="Type a product…"
-                values={filters.products}
-                options={availableProducts}
-                onChange={(next) => onChange({ ...filters, products: next })}
-              />
+              <Tooltip
+                title={beUnsupported ? productFilterUnsupportedReason : ""}
+              >
+                <Box>
+                  <SearchableMultiSelect
+                    id="cases-filter-product"
+                    label="Product"
+                    placeholder="Type a product…"
+                    values={filters.products}
+                    options={availableProducts}
+                    onChange={(next) =>
+                      onChange({ ...filters, products: next })
+                    }
+                    disabled={beUnsupported}
+                  />
+                </Box>
+              </Tooltip>
             </Grid>
           </Grid>
           {activeCount > 0 && (
