@@ -44,6 +44,9 @@ CREATE TABLE cases (
   created_at          TIMESTAMP DEFAULT NOW(),
   updated_at          TIMESTAMP DEFAULT NOW(),
   closed_at           TIMESTAMP,
+  assigned_engineer   UUID NULL REFERENCES users(id),
+  parent_case_id      UUID NULL REFERENCES cases(id),
+  related_case_id     UUID NULL REFERENCES cases(id),
 
   CONSTRAINT chk_closed_at_on_closed
     CHECK (state != 'closed' OR closed_at IS NOT NULL),

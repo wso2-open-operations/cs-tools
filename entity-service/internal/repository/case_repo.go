@@ -366,7 +366,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
 				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State,
-				&cv.CreatedAt, &cv.UpdatedAt, &cv.ClosedAt,
+				&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedAt,
 				&cv.CreatedBy.ID, &ignoredDisplayName, &ignoredUserID, &cv.CreatedBy.Email,
 				&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 				&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,

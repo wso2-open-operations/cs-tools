@@ -554,8 +554,8 @@ type SearchCaseView struct {
 	Priority               CasePriority       `json:"priority"`
 	IssueType              CaseIssueType      `json:"issueType"`
 	State                  CaseState          `json:"state"`
-	CreatedAt              time.Time          `json:"createdAt"`
-	UpdatedAt              time.Time          `json:"updatedAt"`
+	CreatedOn              time.Time          `json:"createdOn"`
+	UpdatedOn              time.Time          `json:"updatedOn"`
 	ClosedAt               *time.Time         `json:"closedAt"`
 	CreatedBy              UserIDEmailRef     `json:"createdBy"`
 	ProjectDetails         EntityRef          `json:"project"`
