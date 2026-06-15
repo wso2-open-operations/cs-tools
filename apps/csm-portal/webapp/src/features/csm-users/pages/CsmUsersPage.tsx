@@ -34,10 +34,11 @@ import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import type { SearchUsersRequest } from "@features/csm-users/types/csmUsers";
+import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
-// 100 dropped: the backend rejects pagination limits above 50 (BE_MAX_PAGE_LIMIT).
-const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+// Top option is the backend's max page limit; larger requests are rejected.
+const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
 
 export default function CsmUsersPage(): JSX.Element {
   const [searchInput, setSearchInput] = useState("");

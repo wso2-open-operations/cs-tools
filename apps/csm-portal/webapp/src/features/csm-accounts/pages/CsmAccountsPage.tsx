@@ -34,10 +34,11 @@ import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchAccounts } from "@features/csm-accounts/api/useSearchAccounts";
 import type { SearchAccountsRequest } from "@features/csm-accounts/types/csmAccounts";
+import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
-// 100 dropped: the backend rejects pagination limits above 50 (BE_MAX_PAGE_LIMIT).
-const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
+// Top option is the backend's max page limit; larger requests are rejected.
+const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
