@@ -107,6 +107,68 @@ type snCaseFilters struct {
 	ProjectIDs         []string `json:"projectIds,omitempty"`
 	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
 	DeployedProductIDs []string `json:"deployedProductIds,omitempty"`
+	StateKeys          []int    `json:"stateKeys,omitempty"`
+	SeverityKeys       []int    `json:"severityKeys,omitempty"`
+	IssueTypeKeys      []int    `json:"issueTypeKeys,omitempty"`
+}
+
+// snStateIDMap maps domain CaseState enums to SN numeric state IDs.
+var snStateIDMap = map[domain.CaseState]int{
+	domain.CaseStateOpen:             1,
+	domain.CaseStateWorkInProgress:   10,
+	domain.CaseStateAwaitingInfo:     18,
+	domain.CaseStateWaitingOnWSO2:    1003,
+	domain.CaseStateSolutionProposed: 6,
+	domain.CaseStateClosed:           3,
+	domain.CaseStateReopened:         1006,
+}
+
+// snSeverityIDMap maps domain CasePriority enums to SN numeric severity IDs.
+var snSeverityIDMap = map[domain.CasePriority]int{
+	domain.CasePriorityCritical: 10,
+	domain.CasePriorityHigh:     11,
+	domain.CasePriorityMedium:   12,
+	domain.CasePriorityLow:      13,
+}
+
+// snIssueTypeIDMap maps domain CaseIssueType enums to SN numeric issue type IDs.
+var snIssueTypeIDMap = map[domain.CaseIssueType]int{
+	domain.CaseIssueTypeTotalOutage:            1,
+	domain.CaseIssueTypePartialOutage:          2,
+	domain.CaseIssueTypePerformanceDegradation: 3,
+	domain.CaseIssueTypeQuestion:               4,
+	domain.CaseIssueTypeSecurityOrCompliance:   5,
+	domain.CaseIssueTypeError:                  6,
+}
+
+func domainStatesToSNIDs(states []domain.CaseState) []int {
+	ids := make([]int, 0, len(states))
+	for _, s := range states {
+		if id, ok := snStateIDMap[s]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func domainPrioritiesToSNIDs(priorities []domain.CasePriority) []int {
+	ids := make([]int, 0, len(priorities))
+	for _, p := range priorities {
+		if id, ok := snSeverityIDMap[p]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func domainIssueTypesToSNIDs(issueTypes []domain.CaseIssueType) []int {
+	ids := make([]int, 0, len(issueTypes))
+	for _, it := range issueTypes {
+		if id, ok := snIssueTypeIDMap[it]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 type snCaseService struct {
@@ -231,6 +293,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			ProjectIDs:         req.ProjectIDs,
 			DeploymentIDs:      req.DeploymentIDs,
 			DeployedProductIDs: req.DeployedProductIDs,
+			StateKeys:          domainStatesToSNIDs(req.StateKeys),
+			SeverityKeys:       domainPrioritiesToSNIDs(req.PriorityKeys),
+			IssueTypeKeys:      domainIssueTypesToSNIDs(req.IssueTypeKeys),
 		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
