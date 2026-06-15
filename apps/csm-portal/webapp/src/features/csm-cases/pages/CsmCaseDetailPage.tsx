@@ -73,6 +73,7 @@ import {
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
+import { parseBackendTimestamp } from "@utils/dateTime";
 import type {
   CaseLifecycleAction,
   CsmCaseComment,
@@ -228,8 +229,13 @@ function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
  */
 function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
   if (!c.description?.trim()) return null;
-  const createdMs = new Date(c.createdAt).getTime();
-  const at = new Date(createdMs + 1000).toISOString();
+  // `createdAt` may be missing or in a format a bare `new Date()` can't parse,
+  // which made the old raw `.toISOString()` throw and crash the page. Parse
+  // safely; offset 1s when valid, else fall back to the raw value.
+  const created = parseBackendTimestamp(c.createdAt);
+  const at = created
+    ? new Date(created.getTime() + 1000).toISOString()
+    : c.createdAt;
   // The creator may be a WSO2 engineer (case logged in the CSM portal) or a
   // customer (customer portal). Infer from the email domain so the badge isn't
   // always "Customer".
@@ -808,16 +814,23 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <Skeleton key={i} variant="rectangular" height={56} />
                 ))}
               </Box>
-            ) : isCommentsError ? (
-              <Typography variant="body2" color="error">
-                Could not load comments.
-              </Typography>
             ) : (
-              <CaseActivitiesFeed
-                comments={safeComments}
-                audit={c.audit}
-                attachments={c.attachments}
-              />
+              // A comments failure shouldn't blank the timeline — the
+              // description, audit, and attachments loaded fine. Show them with
+              // an inline notice.
+              <>
+                {isCommentsError && (
+                  <Typography variant="body2" color="error">
+                    Could not load comments. Showing the rest of the activity —
+                    reload to try again.
+                  </Typography>
+                )}
+                <CaseActivitiesFeed
+                  comments={safeComments}
+                  audit={c.audit}
+                  attachments={c.attachments}
+                />
+              </>
             )}
           </Card>
         </Box>
