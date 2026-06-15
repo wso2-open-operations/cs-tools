@@ -30,7 +30,9 @@ const PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
 const PRODUCTS_LIMIT = BE_MAX_PAGE_LIMIT;
 // Bound the catalog scan: if referenced product ids can't be resolved (deleted
 // or bad data), don't page through an unbounded catalog. ~2000 products covered.
-const MAX_CATALOG_PAGES = 20;
+// Doubled from 20 when the page limit halved to BE_MAX_PAGE_LIMIT, so the total
+// scan ceiling (pages * limit) is unchanged.
+const MAX_CATALOG_PAGES = 40;
 
 export interface DeployedProductOption {
   /** Deployed-product id — the value the case-create payload needs. */
