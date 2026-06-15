@@ -808,16 +808,24 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <Skeleton key={i} variant="rectangular" height={56} />
                 ))}
               </Box>
-            ) : isCommentsError ? (
-              <Typography variant="body2" color="error">
-                Could not load comments.
-              </Typography>
             ) : (
-              <CaseActivitiesFeed
-                comments={safeComments}
-                audit={c.audit}
-                attachments={c.attachments}
-              />
+              // A comments-load failure must not blank the whole timeline: the
+              // description, audit trail, and attachments come from the case
+              // itself and loaded fine. Show them, with a non-blocking notice
+              // that the comments portion is missing (per-section degradation).
+              <>
+                {isCommentsError && (
+                  <Typography variant="body2" color="error">
+                    Could not load comments. Showing the rest of the activity —
+                    reload to try again.
+                  </Typography>
+                )}
+                <CaseActivitiesFeed
+                  comments={safeComments}
+                  audit={c.audit}
+                  attachments={c.attachments}
+                />
+              </>
             )}
           </Card>
         </Box>
