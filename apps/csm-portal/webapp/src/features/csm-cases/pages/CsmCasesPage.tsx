@@ -39,7 +39,6 @@ import CasesFilterBar, {
 } from "@features/csm-cases/components/CasesFilterBar";
 import CasesList from "@features/csm-cases/components/CasesList";
 import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
-import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import {
@@ -98,7 +97,6 @@ export default function CsmCasesPage(): JSX.Element {
     setRowsPerPage(parseInt(e.target.value, 10));
     setPage(0);
   };
-  const { data: projectDirectory } = useProjectOptions();
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
@@ -129,28 +127,17 @@ export default function CsmCasesPage(): JSX.Element {
     return list;
   }, [directoryUsers]);
 
-  // Project filter is id-based (sends projectIds server-side), so options carry
-  // id + name. The list is sourced from the full project directory rather than
-  // the loaded cases: once a project is selected the result set is
-  // server-filtered to it, so deriving options from `data.cases` would collapse
-  // the selector to the chosen project and block adding a second one. Loaded
-  // cases backfill the list (covers MOCK mode, where the directory is empty),
-  // and selected ids are always kept visible.
+  // The project filter searches the backend as the user types, so we no longer
+  // preload the whole catalogue. These are only the projects on the loaded
+  // cases — used to label an already-selected project id (e.g. from a shared
+  // URL) until a search resolves its name.
   const availableProjects = useMemo(() => {
     const byId = new Map<string, string>();
-    (projectDirectory ?? []).forEach((p) => byId.set(p.id, p.name || p.id));
     (data?.cases ?? []).forEach((c) => {
-      if (c.projectId && !byId.has(c.projectId)) {
-        byId.set(c.projectId, c.projectName || c.projectId);
-      }
+      if (c.projectId) byId.set(c.projectId, c.projectName || c.projectId);
     });
-    filters.projects.forEach((id) => {
-      if (!byId.has(id)) byId.set(id, id);
-    });
-    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
-  }, [projectDirectory, data?.cases, filters.projects]);
+    return Array.from(byId, ([id, name]) => ({ id, name }));
+  }, [data?.cases]);
 
   const availableProducts = useMemo(() => {
     const set = new Set<string>();
@@ -285,9 +272,8 @@ export default function CsmCasesPage(): JSX.Element {
             color="text.secondary"
             sx={{ maxWidth: 420 }}
           >
-            Enter a search term or pick a filter above to load matching cases.
-            We don&apos;t load every case up front, so you only pull what you
-            need.
+            Enter a search term or pick a filter above to find the cases
+            you&apos;re looking for.
           </Typography>
         </Box>
       )}
