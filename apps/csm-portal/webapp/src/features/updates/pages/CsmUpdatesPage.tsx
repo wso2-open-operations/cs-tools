@@ -32,6 +32,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -489,6 +490,32 @@ function ReportPreviewDialog({
   );
 }
 
+/**
+ * Scaffolding for the four filter dropdowns + action buttons, shown while the
+ * product/version/level catalogue loads — so the initial screen presents the
+ * shape of the controls instead of empty disabled selects. Mirrors the customer
+ * portal's "Search Update Levels" loading state.
+ */
+function UpdatesFilterSkeleton(): JSX.Element {
+  return (
+    <>
+      <Grid container spacing={2}>
+        {[1, 2, 3, 4].map((i) => (
+          <Grid key={i} size={{ xs: 12, sm: 6, md: 3 }}>
+            <Skeleton variant="rounded" height={40} />
+          </Grid>
+        ))}
+      </Grid>
+      <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap">
+        <Skeleton variant="rounded" width={96} height={36} />
+        <Skeleton variant="rounded" width={72} height={36} />
+        <Skeleton variant="rounded" width={150} height={36} />
+        <Skeleton variant="rounded" width={150} height={36} />
+      </Stack>
+    </>
+  );
+}
+
 export default function CsmUpdatesPage(): JSX.Element {
   const theme = useTheme();
 
@@ -648,6 +675,10 @@ export default function CsmUpdatesPage(): JSX.Element {
               Could not load product catalog.
             </Alert>
           )}
+          {productLevels.isLoading ? (
+            <UpdatesFilterSkeleton />
+          ) : (
+          <>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <FormControl fullWidth size="small" disabled={productLevels.isLoading}>
@@ -733,6 +764,8 @@ export default function CsmUpdatesPage(): JSX.Element {
               Download PDF
             </Button>
           </Stack>
+          </>
+          )}
         </CardContent>
       </Card>
 
