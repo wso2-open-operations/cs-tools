@@ -26,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/snclient"
+	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
 // snCasesResponse mirrors the Choreo POST /cases/search response.
@@ -88,13 +88,13 @@ type snCaseFilters struct {
 }
 
 type snCaseService struct {
-	client     *snclient.Client
+	client     *integrationservice.Client
 	pgFallback CaseService
 }
 
 // NewSNCaseService constructs a CaseService that delegates SearchCases to the
 // Choreo API and all write/read-by-id operations to pgFallback.
-func NewSNCaseService(client *snclient.Client, pgFallback CaseService) CaseService {
+func NewServiceNowCaseService(client *integrationservice.Client, pgFallback CaseService) CaseService {
 	return &snCaseService{client: client, pgFallback: pgFallback}
 }
 
@@ -174,17 +174,17 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		}
 
 		views = append(views, domain.SearchCaseView{
-			ID:          c.ID,
-			Number:      c.Number,
-			InternalID:  c.InternalID,
-			Subject:     c.Title,
-			Description: c.Description,
-			Priority:    snSeverityToPriority(c.Severity),
-			IssueType:   snIssueTypeToEnum(c.IssueType),
-			State:       state,
-			CreatedOn:   createdOn,
-			UpdatedOn:   updatedOn,
-			CreatedBy:   domain.UserIDEmailRef{Email: c.CreatedBy},
+			ID:                     c.ID,
+			Number:                 c.Number,
+			InternalID:             c.InternalID,
+			Subject:                c.Title,
+			Description:            c.Description,
+			Priority:               snSeverityToPriority(c.Severity),
+			IssueType:              snIssueTypeToEnum(c.IssueType),
+			State:                  state,
+			CreatedOn:              createdOn,
+			UpdatedOn:              updatedOn,
+			CreatedBy:              domain.UserIDEmailRef{Email: c.CreatedBy},
 			ProjectDetails:         domain.EntityRef{ID: c.Project.ID, Name: c.Project.Name},
 			DeploymentDetails:      domain.EntityRef{ID: c.Deployment.ID, Name: c.Deployment.Name},
 			DeployedProductDetails: domain.DeployedProductRef{ID: c.DeployedProduct.ID, DisplayName: c.DeployedProduct.Name},

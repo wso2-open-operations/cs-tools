@@ -27,7 +27,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/snclient"
+	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
 // snProjectsResponse mirrors the Choreo POST /projects/search response.
@@ -72,13 +72,13 @@ const snCreatedOnLayout = "2006-01-02 15:04:05"
 const snDateLayout = "2006-01-02"
 
 type snProjectService struct {
-	client     *snclient.Client
+	client     *integrationservice.Client
 	pgFallback ProjectService
 }
 
 // NewSNProjectService constructs a ProjectService backed by the Choreo API.
 // pgFallback is used for GetProjectByID (no SN single-project endpoint).
-func NewSNProjectService(client *snclient.Client, pgFallback ProjectService) ProjectService {
+func NewServiceNowProjectService(client *integrationservice.Client, pgFallback ProjectService) ProjectService {
 	return &snProjectService{client: client, pgFallback: pgFallback}
 }
 

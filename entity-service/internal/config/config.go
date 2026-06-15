@@ -44,9 +44,15 @@ type Config struct {
 	ServerPort string
 	// DataSource controls which backend is used. Defaults to "postgres".
 	DataSource DataSource
-	// SNBaseURL is the base URL for the Choreo ServiceNow API
+	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
 	// Required when DataSource is "servicenow".
-	SNBaseURL string
+	ServiceNowIntegrationServiceBaseURL string
+	// OAuth2 client credentials for the ServiceNow integration service.
+	// All four fields are required when DataSource is "servicenow".
+	ServiceNowIntegrationServiceTokenURL     string
+	ServiceNowIntegrationServiceClientID     string
+	ServiceNowIntegrationServiceClientSecret string
+	ServiceNowIntegrationServiceScopes       string
 }
 
 // Load reads configuration from environment variables and returns a populated
@@ -61,8 +67,12 @@ func Load() *Config {
 		DBName:     os.Getenv("DB_NAME"),
 		DBSSLMode:  os.Getenv("DB_SSLMODE"),
 		ServerPort: getEnvOrDefault("SERVER_PORT", "8080"),
-		DataSource: DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
-		SNBaseURL:  os.Getenv("ENTITY_BASE_URL"),
+		DataSource:             DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
+		ServiceNowIntegrationServiceBaseURL:      os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
+		ServiceNowIntegrationServiceTokenURL:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
+		ServiceNowIntegrationServiceClientID:     os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
+		ServiceNowIntegrationServiceClientSecret: os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET"),
+		ServiceNowIntegrationServiceScopes:       os.Getenv("SERVICENOW_INTEGRATION_SERVICE_SCOPES"),
 	}
 }
 
@@ -74,7 +84,7 @@ func getEnvOrDefault(key, defaultVal string) string {
 }
 
 // Validate checks that the configuration is self-consistent. It returns an
-// error if DATA_SOURCE is an unrecognised value, or if ENTITY_BASE_URL is missing
+// error if DATA_SOURCE is an unrecognised value, or if SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing
 // when DATA_SOURCE=servicenow.
 func (c *Config) Validate() error {
 	switch c.DataSource {
@@ -83,8 +93,19 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
 	}
-	if c.DataSource == DataSourceServiceNow && c.SNBaseURL == "" {
-		return fmt.Errorf("ENTITY_BASE_URL is required when DATA_SOURCE=servicenow")
+	if c.DataSource == DataSourceServiceNow {
+		if c.ServiceNowIntegrationServiceBaseURL == "" {
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=servicenow")
+		}
+		if c.ServiceNowIntegrationServiceTokenURL == "" {
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=servicenow")
+		}
+		if c.ServiceNowIntegrationServiceClientID == "" {
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=servicenow")
+		}
+		if c.ServiceNowIntegrationServiceClientSecret == "" {
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=servicenow")
+		}
 	}
 	return nil
 }

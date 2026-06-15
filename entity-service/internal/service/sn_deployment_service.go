@@ -26,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/snclient"
+	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
 // snDeploymentsResponse mirrors the Choreo POST /deployments/search response.
@@ -69,11 +69,11 @@ type snDeploymentFilters struct {
 }
 
 type snDeploymentService struct {
-	client *snclient.Client
+	client *integrationservice.Client
 }
 
 // NewSNDeploymentService constructs a DeploymentService backed by the Choreo API.
-func NewSNDeploymentService(client *snclient.Client) DeploymentService {
+func NewServiceNowDeploymentService(client *integrationservice.Client) DeploymentService {
 	return &snDeploymentService{client: client}
 }
 

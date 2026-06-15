@@ -26,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/snclient"
+	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
 // NewRouter builds the dependency graph (repository → service → handler),
@@ -41,11 +41,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	accountSvc := service.NewAccountService(accountRepo)
 	accountHandler := handler.NewAccountHandler(accountSvc)
 
+	var serviceNowIntegrationServiceClient *integrationservice.Client
+	if cfg.DataSource == config.DataSourceServiceNow {
+		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
+			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
+			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
+			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
+			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
+		})
+	}
+
 	projectRepo := repository.NewProjectRepository(db)
 	pgProjectSvc := service.NewProjectService(projectRepo)
 	var activeProjectSvc service.ProjectService
 	if cfg.DataSource == config.DataSourceServiceNow {
-		activeProjectSvc = service.NewSNProjectService(snclient.New(cfg.SNBaseURL), pgProjectSvc)
+		activeProjectSvc = service.NewServiceNowProjectService(serviceNowIntegrationServiceClient, pgProjectSvc)
 	} else {
 		activeProjectSvc = pgProjectSvc
 	}
@@ -62,7 +72,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	deploymentRepo := repository.NewDeploymentRepository(db)
 	var activeDeploymentSvc service.DeploymentService
 	if cfg.DataSource == config.DataSourceServiceNow {
-		activeDeploymentSvc = service.NewSNDeploymentService(snclient.New(cfg.SNBaseURL))
+		activeDeploymentSvc = service.NewServiceNowDeploymentService(serviceNowIntegrationServiceClient)
 	} else {
 		activeDeploymentSvc = service.NewDeploymentService(deploymentRepo)
 	}
@@ -76,7 +86,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	pgCaseSvc := service.NewCaseService(caseRepo)
 	var activeCaseSvc service.CaseService
 	if cfg.DataSource == config.DataSourceServiceNow {
-		activeCaseSvc = service.NewSNCaseService(snclient.New(cfg.SNBaseURL), pgCaseSvc)
+		activeCaseSvc = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, pgCaseSvc)
 	} else {
 		activeCaseSvc = pgCaseSvc
 	}
