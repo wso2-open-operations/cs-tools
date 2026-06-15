@@ -120,8 +120,96 @@ func NewServiceNowCaseService(client *integrationservice.Client, pgFallback Case
 	return &snCaseService{client: client, pgFallback: pgFallback}
 }
 
-func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
-	return s.pgFallback.CreateCase(ctx, req)
+// snPriorityID maps domain CasePriority to the ServiceNow severity choice-list value.
+var snPriorityID = map[domain.CasePriority]int{
+	domain.CasePriorityCatastrophic: 14,
+	domain.CasePriorityCritical:     10,
+	domain.CasePriorityHigh:         11,
+	domain.CasePriorityMedium:       12,
+	domain.CasePriorityLow:          13,
+}
+
+// snIssueTypeID maps domain CaseIssueType to the ServiceNow issue-type choice-list value.
+var snIssueTypeID = map[domain.CaseIssueType]int{
+	domain.CaseIssueTypeTotalOutage:            1,
+	domain.CaseIssueTypePartialOutage:          2,
+	domain.CaseIssueTypePerformanceDegradation: 3,
+	domain.CaseIssueTypeQuestion:               4,
+	domain.CaseIssueTypeSecurityOrCompliance:   5,
+	domain.CaseIssueTypeError:                  6,
+}
+
+type snCreateCasePayload struct {
+	Type              string `json:"type"`
+	ProjectID         string `json:"projectId"`
+	DeploymentID      string `json:"deploymentId"`
+	DeployedProductID string `json:"deployedProductId"`
+	Title             string `json:"title"`
+	Description       string `json:"description"`
+	SeverityKey       int    `json:"severityKey"`
+	IssueTypeKey      int    `json:"issueTypeKey"`
+}
+
+type snCreateCaseResponse struct {
+	Message string `json:"message"`
+	Case    struct {
+		ID         string       `json:"id"`
+		InternalID string       `json:"internalId"`
+		Number     string       `json:"number"`
+		CreatedBy  string       `json:"createdBy"`
+		CreatedOn  string       `json:"createdOn"`
+		State      *snCaseState `json:"state"`
+	} `json:"case"`
+}
+
+func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snCreateCasePayload{
+		Type:              "default_case",
+		ProjectID:         req.ProjectID,
+		DeploymentID:      req.DeploymentID,
+		DeployedProductID: req.DeployedProductID,
+		Title:             req.Subject,
+		Description:       req.Description,
+		SeverityKey:  snPriorityID[req.Priority],
+		IssueTypeKey: snIssueTypeID[req.IssueType],
+	}
+
+	raw, err := s.client.Post(ctx, "/cases", token, payload)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
+	var snResp snCreateCaseResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.CreateCaseResponse{}, fmt.Errorf("sn create case: parse response: %w", err)
+	}
+
+	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Case.CreatedOn)
+	if err != nil {
+		return domain.CreateCaseResponse{}, fmt.Errorf("sn create case: parse createdOn %q: %w", snResp.Case.CreatedOn, err)
+	}
+
+	stateLabel := ""
+	if snResp.Case.State != nil {
+		stateLabel = snResp.Case.State.Label
+	}
+
+	return domain.CreateCaseResponse{
+		Message: snResp.Message,
+		Case: domain.CreateCaseDetails{
+			ID:         snResp.Case.ID,
+			InternalID: snResp.Case.InternalID,
+			Number:     snResp.Case.Number,
+			CreatedBy:  snResp.Case.CreatedBy,
+			CreatedOn:  createdOn,
+			State:      stateLabel,
+		},
+	}, nil
 }
 
 func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
