@@ -14,16 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Box, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX, KeyboardEvent } from "react";
 import { useNavigate } from "react-router";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import {
-  SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
   stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
+import SeverityChip from "@components/SeverityChip";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
 import type { CsmQueueSummary } from "@features/csm-dashboard/types/abtDashboard";
@@ -31,6 +31,7 @@ import type { CsmQueueSummary } from "@features/csm-dashboard/types/abtDashboard
 interface MyQueueSectionProps {
   queue?: CsmQueueSummary;
   isLoading: boolean;
+  isError?: boolean;
 }
 
 function StatPill({
@@ -90,10 +91,21 @@ function StatPill({
 export default function MyQueueSection({
   queue,
   isLoading,
+  isError,
 }: MyQueueSectionProps): JSX.Element {
   const navigate = useNavigate();
   const theme = useTheme();
   const go = (href: string) => navigate(href);
+
+  if (isError) {
+    return (
+      <SectionCard title="My queue" subtitle="Cases assigned to you">
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load your queue right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard
@@ -175,11 +187,7 @@ export default function MyQueueSection({
                 },
               }}
             >
-              <Chip
-                size="small"
-                label={c.severity}
-                color={SEVERITY_COLOR[c.severity]}
-              />
+              <SeverityChip severity={c.severity} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="body2" noWrap>
                   <strong>{c.caseNumber}</strong> · {c.subject}

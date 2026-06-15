@@ -14,16 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Chip, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Box, Card, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
-import type { NavigateFunction } from "react-router";
+import { Link as RouterLink } from "react-router";
 import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
+import SemanticChip from "@components/SemanticChip";
 
 interface CaseMetaBandProps {
   detail: CsmCaseDetail;
-  navigate: NavigateFunction;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }
@@ -57,31 +57,35 @@ function Cell({
 }
 
 function LinkText({
-  onClick,
+  to,
   children,
 }: {
-  onClick: () => void;
+  to: string;
   children: ReactNode;
 }): JSX.Element {
   return (
+    // Real anchor (RouterLink) so account/project links are cmd/middle-clickable
+    // and copyable, with plain left-click staying in-app.
     <Typography
-      component="span"
-      role="link"
-      tabIndex={0}
+      component={RouterLink}
+      to={to}
       variant="body2"
       noWrap
-      onClick={onClick}
-      onKeyDown={(e) => {
-        // Keyboard activation: Enter/Space mirror the click so the link is
-        // reachable without a pointer.
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      sx={{
+      sx={(t) => ({
         cursor: "pointer",
-        color: "primary.main",
+        textDecoration: "none",
+        // Brand orange (`primary.main`) on a light surface fails WCAG AA
+        // (~2.5:1), and the darker `primary.dark` shade fails on the dark
+        // surface (~4.0:1). Pick per colour scheme. `palette.mode` is unreliable
+        // here: the app drives theming through MUI CssVars (`useColorScheme`),
+        // where `palette.mode` stays pinned to the default scheme, so a
+        // `mode === "dark"` check always resolved to the light branch. Scope the
+        // dark colour with `applyStyles("dark", …)` instead — the same mechanism
+        // the a11y button overrides use.
+        color: t.palette.primary.dark,
+        ...t.applyStyles("dark", {
+          color: t.palette.primary.main,
+        }),
         "&:hover": { textDecoration: "underline" },
         "&:focus-visible": {
           outline: "2px solid",
@@ -89,7 +93,7 @@ function LinkText({
           outlineOffset: 2,
           borderRadius: 0.5,
         },
-      }}
+      })}
     >
       {children}
     </Typography>
@@ -104,7 +108,6 @@ function LinkText({
  */
 export default function CaseMetaBand({
   detail: c,
-  navigate,
   collapsed,
   onToggleCollapsed,
 }: CaseMetaBandProps): JSX.Element {
@@ -183,11 +186,7 @@ export default function CaseMetaBand({
         >
           <Cell label="Tier">
             <Box sx={{ minWidth: 0 }}>
-              <Chip
-                size="small"
-                label={TIER_LABEL[tier]}
-                color={TIER_COLOR[tier]}
-              />
+              <SemanticChip role={TIER_COLOR[tier]} label={TIER_LABEL[tier]} />
             </Box>
           </Cell>
           <Cell label="Assignee">
@@ -206,7 +205,7 @@ export default function CaseMetaBand({
           </Cell>
           <Cell label="Account">
             {c.accountId ? (
-              <LinkText onClick={() => navigate(`/accounts/${c.accountId}`)}>
+              <LinkText to={`/accounts/${c.accountId}`}>
                 {c.customer}
               </LinkText>
             ) : (
@@ -217,7 +216,7 @@ export default function CaseMetaBand({
           </Cell>
           <Cell label="Project">
             {c.projectId ? (
-              <LinkText onClick={() => navigate(`/projects/${c.projectId}`)}>
+              <LinkText to={`/projects/${c.projectId}`}>
                 {c.projectName}
               </LinkText>
             ) : (

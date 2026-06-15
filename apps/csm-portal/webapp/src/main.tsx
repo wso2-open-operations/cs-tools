@@ -36,7 +36,10 @@ hydrateMockModeFromStorage();
 // root and the OAuth callback (which carries `?code=&state=`).
 if (typeof window !== "undefined") {
   try {
-    const entry = window.location.pathname + window.location.search;
+    // Include the hash so permalinks like `/cases/:id#description` (per-comment /
+    // per-section anchors) survive the IdP round-trip, not just pathname+search.
+    const entry =
+      window.location.pathname + window.location.search + window.location.hash;
     // Only the OAuth callback carries BOTH `code` and `state`; requiring both
     // avoids misclassifying legitimate deep links that happen to use a business
     // `state` (or `code`) query param and dropping their post-login restore.

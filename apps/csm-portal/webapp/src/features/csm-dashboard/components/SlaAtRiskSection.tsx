@@ -19,27 +19,42 @@ import type { JSX } from "react";
 import { useNavigate } from "react-router";
 import SectionCard from "@features/csm-dashboard/components/SectionCard";
 import {
-  SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
   stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
+import SeverityChip from "@components/SeverityChip";
 import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import type { CsmSlaAtRiskCase } from "@features/csm-dashboard/types/abtDashboard";
 
 interface SlaAtRiskSectionProps {
   cases?: CsmSlaAtRiskCase[];
   isLoading: boolean;
+  isError?: boolean;
 }
 
 export default function SlaAtRiskSection({
   cases,
   isLoading,
+  isError,
 }: SlaAtRiskSectionProps): JSX.Element {
   const navigate = useNavigate();
   const theme = useTheme();
   const go = (href: string) => navigate(href);
   const breachedCount = (cases ?? []).filter((c) => c.minutesToBreach < 0).length;
+
+  if (isError) {
+    return (
+      <SectionCard
+        title="SLA at risk"
+        subtitle="Cases breaching or about to breach"
+      >
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load SLA data right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard
@@ -114,11 +129,7 @@ export default function SlaAtRiskSection({
                 },
               }}
             >
-              <Chip
-                size="small"
-                label={c.severity}
-                color={SEVERITY_COLOR[c.severity]}
-              />
+              <SeverityChip severity={c.severity} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="body2" noWrap>
                   <strong>{c.caseNumber}</strong> · {c.subject}

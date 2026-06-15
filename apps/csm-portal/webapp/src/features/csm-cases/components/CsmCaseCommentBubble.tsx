@@ -14,10 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Avatar, Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
+import { Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import type { JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
+import SemanticChip from "@components/SemanticChip";
+import { pickAccessibleText } from "@utils/contrastText";
 import { initialsOf } from "@utils/userClaims";
 import type {
   CsmCaseComment,
@@ -72,6 +74,7 @@ const PURIFY_CONFIG = {
 export default function CsmCaseCommentBubble({
   comment,
 }: CsmCaseCommentBubbleProps): JSX.Element {
+  const theme = useTheme();
   const safeHtml = DOMPurify.sanitize(comment.bodyHtml, PURIFY_CONFIG);
   const isSystem = comment.authorRole === "system";
 
@@ -89,7 +92,7 @@ export default function CsmCaseCommentBubble({
           scrollMarginTop: 96,
         }}
       >
-        <Chip size="small" color="warning" label="System" />
+        <SemanticChip role="warning" label="System" />
         <Box
           sx={{
             flex: 1,
@@ -108,6 +111,16 @@ export default function CsmCaseCommentBubble({
 
   const isInternal = !!comment.internal;
 
+  // The author avatar carries the brand orange for WSO2 engineers; its initials
+  // must stay legible on that fill (white-on-orange ~2.4:1 fails AA). Pick the
+  // text colour by the fill's luminance, and use a dark-enough grey for
+  // customers (grey.500 also fails with either text colour).
+  const avatarBg =
+    comment.authorRole === "wso2_engineer"
+      ? theme.palette.primary.main
+      : theme.palette.grey[700];
+  const avatarFg = pickAccessibleText(avatarBg);
+
   return (
     <Box
       id={comment.id}
@@ -115,10 +128,8 @@ export default function CsmCaseCommentBubble({
     >
       <Avatar
         sx={{
-          bgcolor:
-            comment.authorRole === "wso2_engineer"
-              ? "primary.main"
-              : "grey.500",
+          bgcolor: avatarBg,
+          color: avatarFg,
           width: 32,
           height: 32,
           fontSize: "0.85rem",
@@ -149,12 +160,7 @@ export default function CsmCaseCommentBubble({
             variant="outlined"
           />
           {isInternal && (
-            <Chip
-              size="small"
-              label="Internal work note"
-              color="warning"
-              variant="filled"
-            />
+            <SemanticChip role="warning" label="Internal work note" />
           )}
           <Typography variant="caption" color="text.secondary">
             <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />

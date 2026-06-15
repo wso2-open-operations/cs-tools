@@ -18,6 +18,8 @@ import { type JSX } from "react";
 import { Header as HeaderUI } from "@wso2/oxygen-ui";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
+import PinnedTabs from "@features/csm-recent/components/PinnedTabs";
+import QuickNav from "@features/csm-recent/components/QuickNav";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -36,7 +38,8 @@ export default function Header({
         <HeaderUI.Toggle collapsed={collapsed} onToggle={onToggleSidebar} />
       )}
       <Brand />
-      <HeaderUI.Spacer />
+      <QuickNav />
+      <PinnedTabs />
       <Actions />
     </HeaderUI>
   );

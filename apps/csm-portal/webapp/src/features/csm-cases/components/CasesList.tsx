@@ -16,15 +16,15 @@
 
 import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { useNavigate } from "react-router";
+import { Link as RouterLink } from "react-router";
 import {
-  SEVERITY_COLOR,
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
   stateColor,
   stateLabel,
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
+import SeverityChip from "@components/SeverityChip";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
 interface CasesListProps {
@@ -49,7 +49,6 @@ export default function CasesList({
   cases,
   isLoading,
 }: CasesListProps): JSX.Element {
-  const navigate = useNavigate();
   const theme = useTheme();
 
   return (
@@ -126,21 +125,15 @@ export default function CasesList({
           // (or explicitly true) → show the clock, false → neutral "—".
           const hasSla = c.hasSla !== false;
           const showSla = hasSla && c.state !== "closed";
-          const handleClick = () => {
-            navigate(`/cases/${c.id}`);
-          };
           return (
+            // A real anchor (not a click-handler div) so the row supports
+            // cmd/middle-click "open in new tab" — essential when an engineer
+            // pulls up other cases for reference — and exposes a copyable URL
+            // (ISSU-031). RouterLink keeps plain left-click as in-app SPA nav.
             <Box
               key={c.id}
-              role="button"
-              tabIndex={0}
-              onClick={handleClick}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleClick();
-                }
-              }}
+              component={RouterLink}
+              to={`/cases/${c.id}`}
               sx={{
                 gridColumn: "1 / -1",
                 display: "grid",
@@ -152,6 +145,8 @@ export default function CasesList({
                 borderBottom: 1,
                 borderColor: "divider",
                 cursor: "pointer",
+                color: "inherit",
+                textDecoration: "none",
                 "&:hover": {
                   bgcolor: "action.hover",
                 },
@@ -173,11 +168,7 @@ export default function CasesList({
               <Typography variant="body2" noWrap>
                 {c.customer}
               </Typography>
-              <Chip
-                size="small"
-                label={c.severity}
-                color={SEVERITY_COLOR[c.severity]}
-              />
+              <SeverityChip severity={c.severity} />
               <Chip
                 size="small"
                 variant="outlined"

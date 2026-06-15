@@ -24,6 +24,7 @@ interface CustomerSummarySectionProps {
   customers?: CsmCustomerSummary[];
   isLoading: boolean;
   scopeLabel: string;
+  isError?: boolean;
 }
 
 function TierChip({ tier }: { tier: string }): JSX.Element {
@@ -42,7 +43,18 @@ export default function CustomerSummarySection({
   customers,
   isLoading,
   scopeLabel,
+  isError,
 }: CustomerSummarySectionProps): JSX.Element {
+  if (isError) {
+    return (
+      <SectionCard title="Customers" subtitle={scopeLabel}>
+        <Typography variant="body2" color="text.secondary">
+          Couldn’t load customer summaries right now.
+        </Typography>
+      </SectionCard>
+    );
+  }
+
   return (
     <SectionCard
       title="Customers"

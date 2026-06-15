@@ -23,12 +23,7 @@ import {
   Typography,
   useTheme,
 } from "@wso2/oxygen-ui";
-import {
-  Building,
-  FolderOpen,
-  Headset,
-  History,
-} from "@wso2/oxygen-ui-icons-react";
+import { History, Pin, PinOff } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
@@ -42,38 +37,25 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import {
   clearRecentViews,
+  toggleRecentViewPin,
   useRecentViews,
   type RecentView,
   type RecentViewKind,
 } from "@features/csm-recent/hooks/useRecentViews";
+import { KIND_LABEL, KIND_ORDER, kindIcon } from "@features/csm-recent/kindMeta";
 import RelativeTime from "@components/RelativeTime";
 
 const PANEL_WIDTH = 360;
 
-const KIND_LABEL: Record<RecentViewKind, string> = {
-  case: "Cases",
-  project: "Projects",
-  account: "Accounts",
-};
-
-const KIND_ORDER: RecentViewKind[] = ["case", "project", "account"];
-
-function kindIcon(kind: RecentViewKind): JSX.Element {
-  switch (kind) {
-    case "case":
-      return <Headset size={16} />;
-    case "project":
-      return <FolderOpen size={16} />;
-    case "account":
-      return <Building size={16} />;
-  }
-}
-
-function groupByKind(entries: RecentView[]): Record<RecentViewKind, RecentView[]> {
+function groupByKind(
+  entries: RecentView[],
+): Record<RecentViewKind, RecentView[]> {
   const out: Record<RecentViewKind, RecentView[]> = {
     case: [],
     project: [],
     account: [],
+    search: [],
+    page: [],
   };
   for (const e of entries) out[e.kind].push(e);
   return out;
@@ -125,12 +107,90 @@ export default function RecentViewsButton(): JSX.Element {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  // Pinned entries surface as tabs in the top nav bar (PinnedTabs) AND stay in
+  // the history list here — pinning promotes an item into the working set
+  // without removing it from "recently viewed". The per-row toggle reflects the
+  // pinned state (Unpin vs Pin to top nav bar).
   const grouped = useMemo(() => groupByKind(recents), [recents]);
 
   const handleSelect = (entry: RecentView) => {
     setOpen(false);
     navigate(entry.href);
   };
+
+  const renderRow = (entry: RecentView): JSX.Element => (
+    <Box
+      key={`${entry.kind}-${entry.id}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => handleSelect(entry)}
+      onKeyDown={(e) => {
+        // Only act on keys aimed at the row itself; Enter/Space on the nested
+        // pin button must toggle the pin, not navigate the row.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleSelect(entry);
+        }
+      }}
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 1.5,
+        px: 1.5,
+        py: 1,
+        cursor: "pointer",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+    >
+      {kindIcon(entry.kind)}
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="body2" noWrap>
+          {entry.title}
+        </Typography>
+        {entry.subtitle && (
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {entry.subtitle}
+          </Typography>
+        )}
+      </Box>
+      <Tooltip
+        title={entry.pinned ? "Unpin from top nav bar" : "Pin to top nav bar"}
+      >
+        <IconButton
+          size="small"
+          aria-label={
+            entry.pinned
+              ? `Unpin ${entry.title} from top nav bar`
+              : `Pin ${entry.title} to top nav bar`
+          }
+          // Stop the row's navigate; pinning must not leave the panel.
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleRecentViewPin(entry.kind, entry.id);
+          }}
+          // Pinned icon carries the brand accent, but orange-on-light is ~2.5:1
+          // (below the 3:1 icon floor), so shift to primary.dark in light mode
+          // and keep the brighter accent in dark — `palette.mode` is unreliable
+          // under CssVars, so scope with applyStyles.
+          sx={(t) => ({
+            flexShrink: 0,
+            ...(entry.pinned
+              ? {
+                  color: t.palette.primary.dark,
+                  ...t.applyStyles("dark", { color: t.palette.primary.main }),
+                }
+              : {}),
+          })}
+        >
+          {entry.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+        </IconButton>
+      </Tooltip>
+      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+        <RelativeTime iso={entry.visitedAt} href={entry.href} />
+      </Typography>
+    </Box>
+  );
 
   const panel = open && anchorRect && (
     <Paper
@@ -164,14 +224,16 @@ export default function RecentViewsButton(): JSX.Element {
         }}
       >
         <Typography variant="subtitle2">Recently viewed</Typography>
-        {recents.length > 0 && (
-          <Button
-            size="small"
-            variant="text"
-            onClick={() => clearRecentViews()}
-          >
-            Clear
-          </Button>
+        {recents.some((e) => !e.pinned) && (
+          <Tooltip title="Clear history (pinned items are kept)">
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => clearRecentViews()}
+            >
+              Clear history
+            </Button>
+          </Tooltip>
         )}
       </Box>
 
@@ -179,7 +241,7 @@ export default function RecentViewsButton(): JSX.Element {
         {recents.length === 0 && (
           <Box sx={{ px: 1.5, py: 2.5, textAlign: "center" }}>
             <Typography variant="body2" color="text.secondary">
-              No recent items. Open a case, project, or account to start tracking history.
+              No recent items. Open a case, project, or account to start tracking history, then pin the ones you are actively working to keep them in the top nav bar.
             </Typography>
           </Box>
         )}
@@ -202,44 +264,7 @@ export default function RecentViewsButton(): JSX.Element {
                   {KIND_LABEL[kind]}
                 </Typography>
               </Box>
-              {group.map((entry) => (
-                <Box
-                  key={`${entry.kind}-${entry.id}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleSelect(entry)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleSelect(entry);
-                    }
-                  }}
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1.5,
-                    px: 1.5,
-                    py: 1,
-                    cursor: "pointer",
-                    "&:hover": { bgcolor: "action.hover" },
-                  }}
-                >
-                  {kindIcon(entry.kind)}
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" noWrap>
-                      {entry.title}
-                    </Typography>
-                    {entry.subtitle && (
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {entry.subtitle}
-                      </Typography>
-                    )}
-                  </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                    <RelativeTime iso={entry.visitedAt} href={entry.href} />
-                  </Typography>
-                </Box>
-              ))}
+              {group.map(renderRow)}
             </Box>
           );
         })}

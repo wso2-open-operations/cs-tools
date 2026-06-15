@@ -51,18 +51,22 @@ export default function AuthGuard(): JSX.Element {
     if (!isSignedIn) return;
     const redirect = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY);
     if (!redirect) return;
-    if (location.pathname + location.search === redirect) {
+    // Compare (and restore) the full location including the hash, so anchor
+    // permalinks like `/cases/:id#description` are honoured, not stripped.
+    const here = location.pathname + location.search + location.hash;
+    if (here === redirect) {
       sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
     } else {
       void navigate(redirect, { replace: true });
     }
-  }, [isSignedIn, navigate, location.pathname, location.search]);
+  }, [isSignedIn, navigate, location.pathname, location.search, location.hash]);
 
   return (
     <ProtectedRoute
       loader={<AppLayout />}
       onSignIn={(defaultSignIn, signInOptions) => {
-        const intended = location.pathname + location.search;
+        const intended =
+          location.pathname + location.search + location.hash;
         if (intended !== "/") {
           sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended);
         }

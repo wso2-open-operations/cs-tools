@@ -14,12 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Chip, Paper, Typography } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Checkbox,
+  Chip,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Paper,
+  Typography,
+} from "@wso2/oxygen-ui";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   ArrowUpRight,
   CheckCircle,
   Link as LinkIcon,
+  ListFilter,
   Paperclip,
   Plus,
   TriangleAlert,
@@ -69,6 +81,7 @@ export default function CaseActivitiesFeed({
   const [showLifecycle, setShowLifecycle] = useState(true);
   const [showAttachments, setShowAttachments] = useState(true);
   const [newestFirst, setNewestFirst] = useState(true);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
 
   const entries: FeedEntry[] = useMemo(() => {
     const out: FeedEntry[] = [];
@@ -107,52 +120,89 @@ export default function CaseActivitiesFeed({
     attachments: attachments.length,
   };
 
+  // Filters live in a dropdown so the timeline reads as content, not a row of
+  // loud toggles. Surface how many of the three categories are showing when not
+  // all are, so the (collapsed) filter state stays discoverable.
+  const filterOptions: {
+    label: string;
+    checked: boolean;
+    toggle: () => void;
+  }[] = [
+    {
+      label: `Work notes (${counts.workNotes})`,
+      checked: showWorkNotes,
+      toggle: () => setShowWorkNotes((v) => !v),
+    },
+    {
+      label: `State changes (${counts.lifecycle})`,
+      checked: showLifecycle,
+      toggle: () => setShowLifecycle((v) => !v),
+    },
+    {
+      label: `Attachments (${counts.attachments})`,
+      checked: showAttachments,
+      toggle: () => setShowAttachments((v) => !v),
+    },
+  ];
+  const activeFilters = filterOptions.filter((o) => o.checked).length;
+  const filterLabel =
+    activeFilters < filterOptions.length
+      ? `Filter (${activeFilters}/${filterOptions.length})`
+      : "Filter";
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 1.5,
+          gap: 1,
           flexWrap: "wrap",
         }}
       >
-        <Typography variant="caption" color="text.secondary">
-          Filter:
-        </Typography>
-        <Chip
-          size="small"
-          variant={showWorkNotes ? "filled" : "outlined"}
-          color={showWorkNotes ? "info" : "default"}
-          label={`Work notes (${counts.workNotes})`}
-          onClick={() => setShowWorkNotes((v) => !v)}
-        />
-        <Chip
-          size="small"
-          variant={showLifecycle ? "filled" : "outlined"}
-          color={showLifecycle ? "info" : "default"}
-          label={`State changes (${counts.lifecycle})`}
-          onClick={() => setShowLifecycle((v) => !v)}
-        />
-        <Chip
-          size="small"
-          variant={showAttachments ? "filled" : "outlined"}
-          color={showAttachments ? "info" : "default"}
-          label={`Attachments (${counts.attachments})`}
-          onClick={() => setShowAttachments((v) => !v)}
-        />
         <Box sx={{ flex: 1 }} />
         <Chip
           size="small"
           variant="outlined"
+          icon={<ListFilter size={14} />}
+          label={filterLabel}
+          onClick={(e) => setFilterAnchor(e.currentTarget)}
+          aria-haspopup="true"
+          aria-expanded={Boolean(filterAnchor)}
+        />
+        <Menu
+          anchorEl={filterAnchor}
+          open={Boolean(filterAnchor)}
+          onClose={() => setFilterAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+        >
+          {filterOptions.map((o) => (
+            <MenuItem key={o.label} dense onClick={o.toggle}>
+              <Checkbox
+                size="small"
+                edge="start"
+                checked={o.checked}
+                tabIndex={-1}
+                disableRipple
+              />
+              <ListItemText primary={o.label} />
+            </MenuItem>
+          ))}
+        </Menu>
+        <Chip
+          size="small"
+          variant="outlined"
+          icon={newestFirst ? <ArrowDown size={14} /> : <ArrowUp size={14} />}
           label={newestFirst ? "Newest first" : "Oldest first"}
           onClick={() => setNewestFirst((v) => !v)}
+          aria-label={`Sort: ${newestFirst ? "newest first" : "oldest first"} (click to reverse)`}
         />
       </Box>
 
       {entries.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          Nothing to show — try widening the filters above.
+          Nothing to show — enable more categories in the Filter menu.
         </Typography>
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>

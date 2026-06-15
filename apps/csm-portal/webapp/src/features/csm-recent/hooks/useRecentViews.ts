@@ -16,12 +16,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export type RecentViewKind = "case" | "project" | "account";
+export type RecentViewKind =
+  | "case"
+  | "project"
+  | "account"
+  | "search"
+  | "page";
 
 const RECENT_VIEW_KINDS: readonly RecentViewKind[] = [
   "case",
   "project",
   "account",
+  "search",
+  "page",
 ];
 
 function isRecentViewKind(v: unknown): v is RecentViewKind {
@@ -39,11 +46,37 @@ export interface RecentView {
   href: string;
   /** ISO timestamp of the last visit. */
   visitedAt: string;
+  /**
+   * Pinned entries form the engineer's working set: they are never evicted by
+   * the recency cap and surface in a dedicated "Pinned" group. Absent/false for
+   * ordinary history entries.
+   */
+  pinned?: boolean;
 }
 
 const STORAGE_KEY = "csm.recentViews.v1";
+/** Recency cap for UNPINNED entries only — pinned entries are always kept. */
 const MAX_ENTRIES = 12;
 const STORAGE_EVENT = "csm:recent-views-changed";
+
+/**
+ * Enforce the recency cap on unpinned entries while keeping every pinned entry,
+ * preserving overall (recency) order. Pinned entries are the working set the
+ * engineer manages explicitly, so they must survive any number of new visits.
+ */
+function capUnpinned(entries: RecentView[]): RecentView[] {
+  const kept: RecentView[] = [];
+  let unpinned = 0;
+  for (const e of entries) {
+    if (e.pinned) {
+      kept.push(e);
+    } else if (unpinned < MAX_ENTRIES) {
+      kept.push(e);
+      unpinned += 1;
+    }
+  }
+  return kept;
+}
 
 function readStorage(): RecentView[] {
   try {
@@ -102,22 +135,42 @@ export function useRecentViews(): RecentView[] {
  * bumps the existing entry to the top, caps the list at {@link MAX_ENTRIES}.
  */
 export function useRecordRecentView(): (
-  entry: Omit<RecentView, "visitedAt">,
+  entry: Omit<RecentView, "visitedAt" | "pinned">,
 ) => void {
-  return useCallback((entry: Omit<RecentView, "visitedAt">) => {
+  return useCallback((entry: Omit<RecentView, "visitedAt" | "pinned">) => {
     const now = new Date().toISOString();
     const current = readStorage();
+    const existing = current.find(
+      (e) => e.kind === entry.kind && e.id === entry.id,
+    );
     const filtered = current.filter(
       (e) => !(e.kind === entry.kind && e.id === entry.id),
     );
-    const next: RecentView[] = [
-      { ...entry, visitedAt: now },
+    // Re-visiting an entry must preserve its pinned state — a pin is not lost
+    // just because the case was opened again.
+    const next: RecentView[] = capUnpinned([
+      { ...entry, visitedAt: now, pinned: existing?.pinned },
       ...filtered,
-    ].slice(0, MAX_ENTRIES);
+    ]);
     writeStorage(next);
   }, []);
 }
 
+/**
+ * Pin or unpin an entry by `kind`+`id`. Pinning keeps it in the working set
+ * indefinitely; unpinning returns it to ordinary history (subject to the cap).
+ * No-op if the entry is not currently tracked.
+ */
+export function toggleRecentViewPin(kind: RecentViewKind, id: string): void {
+  const current = readStorage();
+  const next = current.map((e) =>
+    e.kind === kind && e.id === id ? { ...e, pinned: !e.pinned } : e,
+  );
+  writeStorage(capUnpinned(next));
+}
+
 export function clearRecentViews(): void {
-  writeStorage([]);
+  // Keep pinned entries — "Clear" wipes browsing history, not the working set
+  // the engineer deliberately assembled.
+  writeStorage(readStorage().filter((e) => e.pinned));
 }
