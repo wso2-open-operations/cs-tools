@@ -73,6 +73,7 @@ import {
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
+import { parseBackendTimestamp } from "@utils/dateTime";
 import type {
   CaseLifecycleAction,
   CsmCaseComment,
@@ -228,8 +229,16 @@ function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
  */
 function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
   if (!c.description?.trim()) return null;
-  const createdMs = new Date(c.createdAt).getTime();
-  const at = new Date(createdMs + 1000).toISOString();
+  // Use the shared backend-timestamp parser: `createdAt` arrives in formats a
+  // bare `new Date()` can't parse (e.g. space-separated "YYYY-MM-DD HH:MM:SS"),
+  // and may be missing entirely. A raw `new Date(...).toISOString()` on an
+  // invalid value throws "RangeError: Invalid time value" and crashes the whole
+  // detail page. Offset by 1s only when parseable; otherwise fall back to the
+  // raw value so RelativeTime degrades to "Unknown time" instead of crashing.
+  const created = parseBackendTimestamp(c.createdAt);
+  const at = created
+    ? new Date(created.getTime() + 1000).toISOString()
+    : c.createdAt;
   // The creator may be a WSO2 engineer (case logged in the CSM portal) or a
   // customer (customer portal). Infer from the email domain so the badge isn't
   // always "Customer".
