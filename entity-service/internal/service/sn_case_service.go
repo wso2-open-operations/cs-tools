@@ -124,6 +124,8 @@ var snStateIDMap = map[domain.CaseState]int{
 }
 
 // snSeverityIDMap maps domain CasePriority enums to SN numeric severity IDs.
+// CasePriorityCatastrophic is intentionally absent: ServiceNow's severity scale
+// only goes up to Critical (P1=10) and has no catastrophic equivalent.
 var snSeverityIDMap = map[domain.CasePriority]int{
 	domain.CasePriorityCritical: 10,
 	domain.CasePriorityHigh:     11,
