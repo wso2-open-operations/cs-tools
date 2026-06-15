@@ -22,18 +22,25 @@ import type {
 } from "@features/csm-dashboard/types/abtDashboard";
 
 export interface CsmCaseRow {
+  /**
+   * UUID primary key. Identifies the case in API paths and links only — never
+   * shown to humans. Use {@link caseNumber} / {@link wso2CaseId} for display.
+   */
   id: string;
   /**
    * ServiceNow-style case number (e.g. "CS-1007"). The number engineers and
-   * customers quote day to day.
+   * customers quote day to day. Optional: absent until the BE assigns one, and
+   * never substituted with the UUID {@link id}.
    */
-  caseNumber: string;
+  caseNumber?: string;
   /**
    * Project/subscription-scoped WSO2 case reference (e.g. "ACMESUB-123").
    * Distinct from {@link caseNumber}; shown alongside it as `wso2CaseId/caseNumber`.
-   * Mirrors the customer portal's `internalId` / BE `wso2Id`.
+   * Mirrors the customer portal's `internalId` / BE `wso2Id`. Optional: a case
+   * may have no WSO2 reference, and it is never substituted with the UUID
+   * {@link id}.
    */
-  wso2CaseId: string;
+  wso2CaseId?: string;
   subject: string;
   customer: string;
   accountId: string;
@@ -62,6 +69,14 @@ export interface CsmCaseRow {
 export interface CsmCasesListResponse {
   scope: DashboardScope;
   cases: CsmCaseRow[];
+  /** Total rows matching the query across all pages (BE `total`). */
+  total: number;
+  /** Page size used for this response (BE `limit`). */
+  limit: number;
+  /** Zero-based row offset of this page (BE `offset`). */
+  offset: number;
+  /** Whether more rows exist beyond this page (BE `hasMore`). */
+  hasMore: boolean;
 }
 
 export type CsmCommentAuthorRole = "customer" | "wso2_engineer" | "system";

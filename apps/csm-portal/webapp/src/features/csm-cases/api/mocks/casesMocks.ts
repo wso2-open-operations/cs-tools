@@ -30,7 +30,6 @@ import type {
   CaseWatcher,
   CsmCaseDetail,
   CsmCaseRow,
-  CsmCasesListResponse,
 } from "@features/csm-cases/types/csmCases";
 
 const minutesAgo = (n: number): string =>
@@ -464,10 +463,12 @@ function hydrate(seed: CaseSeed): CsmCaseRow {
 const ABT_CASES: CsmCaseRow[] = ABT_CASE_SEEDS.map(hydrate);
 const ALL_EXTRA_CASES: CsmCaseRow[] = ALL_EXTRA_CASE_SEEDS.map(hydrate);
 
-export function getMockCsmCases(scope: DashboardScope): CsmCasesListResponse {
-  const cases =
-    scope === "my_abt" ? ABT_CASES : [...ABT_CASES, ...ALL_EXTRA_CASES];
-  return { scope, cases };
+/**
+ * The full seeded case set for a scope. Callers apply their own filtering and
+ * pagination (the cases hook slices this into pages; the dashboard tallies it).
+ */
+export function getMockCsmCases(scope: DashboardScope): CsmCaseRow[] {
+  return scope === "my_abt" ? ABT_CASES : [...ABT_CASES, ...ALL_EXTRA_CASES];
 }
 
 const ALL_CASES_BY_ID = new Map<string, CsmCaseRow>(
@@ -475,7 +476,9 @@ const ALL_CASES_BY_ID = new Map<string, CsmCaseRow>(
 );
 
 const ALL_CASES_BY_NUMBER = new Map<string, CsmCaseRow>(
-  [...ABT_CASES, ...ALL_EXTRA_CASES].map((c) => [c.caseNumber, c]),
+  [...ABT_CASES, ...ALL_EXTRA_CASES].flatMap((c) =>
+    c.caseNumber ? [[c.caseNumber, c] as [string, CsmCaseRow]] : [],
+  ),
 );
 
 export function getMockCsmCaseById(
@@ -754,7 +757,7 @@ function deriveLinkedItems(c: CsmCaseRow): CaseLinkedItem[] {
     linked.push({
       id: `link-${c.id}-${r.id}`,
       kind: "case",
-      reference: r.caseNumber,
+      reference: r.caseNumber ?? r.wso2CaseId ?? r.id,
       title: r.subject,
       state: r.state,
       href: `/cases/${r.id}`,

@@ -121,7 +121,8 @@ export interface BeDeployedProductRef {
 export interface BeCaseView {
   id: string;
   number?: string;
-  wso2Id?: string;
+  /** Project-scoped WSO2 case reference (customer portal calls this the same). */
+  internalId?: string;
   subject?: string;
   description?: string;
   priority?: BeCasePriority;
@@ -132,9 +133,9 @@ export interface BeCaseView {
   project?: BeEntityRef;
   deployment?: BeEntityRef;
   deployedProduct?: BeDeployedProductRef;
-  createdAt?: string;
-  updatedAt?: string;
-  closedAt?: string;
+  createdOn?: string;
+  updatedOn?: string;
+  closedAt?: string | null;
 }
 
 export interface BeCaseCreatePayload {
@@ -182,14 +183,15 @@ export interface BeCaseSearchPayload {
 export interface BeCaseSearchView {
   id: string;
   number?: string;
-  wso2Id?: string;
+  /** Project-scoped WSO2 case reference (customer portal calls this the same). */
+  internalId?: string;
   subject?: string;
   description?: string;
   priority?: BeCasePriority;
   issueType?: BeCaseIssueType;
   state?: BeCaseState;
-  createdAt?: string;
-  updatedAt?: string;
+  createdOn?: string;
+  updatedOn?: string;
   closedAt?: string | null;
   createdBy?: BeUserRef;
   project?: BeEntityRef;

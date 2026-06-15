@@ -38,15 +38,16 @@ import type {
 } from "@api/backend/types";
 import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
+import {
+  applyCasesFilters,
+  sortBySlaUrgency,
+} from "@features/csm-cases/utils/casesClientFilter";
 import type {
   CsmCaseRow,
   CsmCasesListResponse,
 } from "@features/csm-cases/types/csmCases";
 
 const MOCK_LATENCY_MS = 200;
-
-/** Page size for the cross-project case list (server-side filtering TBD). */
-const CASES_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
 /** Page size for the account name lookup (customer column). */
 const LOOKUP_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
 // Cap the account scan the same way useProjectOptions caps the project scan.
@@ -98,17 +99,27 @@ function accountOptionsQueryOptions(api: BackendApi) {
  * go stale. The project lookup shares `useProjectOptions`' key, which the
  * cases page already mounts for its filter options.
  *
- * Severity / state filters are pushed into the search payload (priorityKeys /
- * stateKeys); the remaining filters stay client-side in `CsmCasesPage`
- * (`applyFilters`), which also drives MOCK mode. The BE has no assignee field,
- * so `scope` / assignee filters remain inert in LIVE.
+ * Search and the severity / state / project filters are pushed into the search
+ * payload (searchQuery / priorityKeys / stateKeys / projectIds) and the BE
+ * paginates the result (`pagination` → `total` / `limit` / `offset` /
+ * `hasMore`). The remaining filters (assignee, SLA, product) have no BE support
+ * and are disabled in LIVE; they only do anything in MOCK mode, where the whole
+ * seeded dataset is filtered, sorted and sliced client-side here.
+ *
+ * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
+ * limit (≤ {@link BE_MAX_PAGE_LIMIT}).
  */
 export function useGetCsmCases(
   filters: CasesFilters,
+  page: number,
+  pageSize: number,
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
   const queryClient = useQueryClient();
+
+  const offset = page * pageSize;
+  const search = filters.search.trim();
 
   return useQuery<CsmCasesListResponse, Error>({
     // Sort the array filters so selection order doesn't fragment the cache
@@ -116,9 +127,16 @@ export function useGetCsmCases(
     queryKey: [
       ApiQueryKeys.CSM_CASES,
       filters.scope,
+      search,
       [...filters.severities].sort(),
       [...filters.states].sort(),
       [...filters.projects].sort(),
+      // MOCK-only filters still affect the sliced result in mock mode.
+      filters.sla,
+      [...filters.assignees].sort(),
+      [...filters.products].sort(),
+      page,
+      pageSize,
     ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
       if (isMockMode()) {
@@ -126,7 +144,19 @@ export function useGetCsmCases(
           `[useGetCsmCases] Returning mock cases for scope=${filters.scope}`,
         );
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCases(filters.scope);
+        const all = getMockCsmCases(filters.scope);
+        const matched = applyCasesFilters(all, filters)
+          .slice()
+          .sort(sortBySlaUrgency);
+        const pageRows = matched.slice(offset, offset + pageSize);
+        return {
+          scope: filters.scope,
+          cases: pageRows,
+          total: matched.length,
+          limit: pageSize,
+          offset,
+          hasMore: offset + pageRows.length < matched.length,
+        };
       }
 
       // One cross-project case search, plus project/account lookups for the
@@ -136,7 +166,9 @@ export function useGetCsmCases(
       // change. Lookup failures degrade to "—" names, not a failed list.
       const [casesResponse, projects, accounts] = await Promise.all([
         api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
-          pagination: { offset: 0, limit: CASES_PAGE_LIMIT },
+          pagination: { offset, limit: pageSize },
+          sortBy: { field: "updated_at", order: "desc" },
+          ...(search.length > 0 && { searchQuery: search }),
           ...(filters.severities.length > 0 && {
             priorityKeys: filters.severities.map(priorityFromSeverity),
           }),
@@ -178,8 +210,8 @@ export function useGetCsmCases(
         const accountId = projectAccount.get(projectId) ?? "";
         return {
           id: c.id,
-          caseNumber: c.number ?? c.id,
-          wso2CaseId: c.wso2Id ?? c.id,
+          caseNumber: c.number,
+          wso2CaseId: c.internalId,
           subject: c.subject ?? "(no subject)",
           customer: accountName.get(accountId) ?? "—",
           accountId,
@@ -196,12 +228,19 @@ export function useGetCsmCases(
           // No SLA data from the backend yet — keep the SLA column neutral
           // rather than painting every open row orange with a bogus "0m left".
           hasSla: false,
-          createdAt: c.createdAt ?? "",
-          updatedAt: c.updatedAt ?? c.createdAt ?? "",
+          createdAt: c.createdOn ?? "",
+          updatedAt: c.updatedOn ?? c.createdOn ?? "",
         };
       });
 
-      return { scope: filters.scope, cases };
+      return {
+        scope: filters.scope,
+        cases,
+        total: casesResponse.total ?? cases.length,
+        limit: casesResponse.limit ?? pageSize,
+        offset: casesResponse.offset ?? offset,
+        hasMore: casesResponse.hasMore ?? false,
+      };
     },
     staleTime: 30_000,
   });

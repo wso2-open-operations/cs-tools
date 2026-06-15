@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  Box,
   Link,
   Skeleton,
   Table,
@@ -158,13 +157,6 @@ export default function CaseCountsMatrix(): JSX.Element {
               </TableRow>
             </TableBody>
           </Table>
-          {data.truncated && (
-            <Box sx={{ mt: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Sampled the first {data.total} cases; totals may be higher.
-              </Typography>
-            </Box>
-          )}
         </TableContainer>
       )}
     </SectionCard>

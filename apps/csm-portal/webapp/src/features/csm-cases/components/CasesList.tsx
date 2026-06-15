@@ -17,12 +17,7 @@
 import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
-import {
-  SLA_CLOCK_LABEL,
-  formatTimeToBreach,
-  stateColor,
-  stateLabel,
-} from "@features/csm-dashboard/utils/abtDashboard";
+import { stateColor, stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
@@ -33,17 +28,18 @@ interface CasesListProps {
 }
 
 const HEADER_CELLS: { label: string; align?: "left" | "right" }[] = [
-  { label: "Case" },
-  { label: "Customer" },
+  { label: "Case ID" },
+  { label: "Subject" },
+  { label: "Product" },
   { label: "Severity" },
   { label: "State" },
-  { label: "Assignee" },
-  { label: "SLA", align: "right" },
   { label: "Updated", align: "right" },
 ];
 
+// Subject gets the lion's share of the row; the ids sit in their own narrow
+// column so a long subject no longer has to share one cell with them.
 const GRID =
-  "minmax(280px, 2.5fr) minmax(140px, 1fr) auto minmax(140px, 1fr) minmax(120px, 1fr) auto auto";
+  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto";
 
 export default function CasesList({
   cases,
@@ -120,11 +116,6 @@ export default function CasesList({
 
       {!isLoading &&
         cases.map((c) => {
-          const breached = c.minutesToBreach < 0;
-          // SLA timing is only meaningful when the backend supplies it; absent
-          // (or explicitly true) → show the clock, false → neutral "—".
-          const hasSla = c.hasSla !== false;
-          const showSla = hasSla && c.state !== "closed";
           return (
             // A real anchor (not a click-handler div) so the row supports
             // cmd/middle-click "open in new tab" — essential when an engineer
@@ -157,16 +148,50 @@ export default function CasesList({
                 "&:last-of-type": { borderBottom: 0 },
               }}
             >
+              {/* Case ids: WSO2 internal id on top, CS number beneath. Never
+                  the UUID. "—" when the case has neither yet. */}
+              <Box sx={{ minWidth: 0 }}>
+                {c.wso2CaseId && (
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    sx={{ fontFamily: "monospace", fontWeight: 600 }}
+                  >
+                    {c.wso2CaseId}
+                  </Typography>
+                )}
+                {c.caseNumber && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    noWrap
+                    sx={{ fontFamily: "monospace", display: "block" }}
+                  >
+                    {c.caseNumber}
+                  </Typography>
+                )}
+                {!c.wso2CaseId && !c.caseNumber && (
+                  <Typography variant="body2" color="text.secondary">
+                    —
+                  </Typography>
+                )}
+              </Box>
+              {/* Subject (the widest column) + project for context. */}
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" noWrap>
-                  <strong>{c.caseNumber}</strong> · {c.subject}
+                  {c.subject}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  noWrap
+                  sx={{ display: "block" }}
+                >
                   {c.projectName}
                 </Typography>
               </Box>
               <Typography variant="body2" noWrap>
-                {c.customer}
+                {c.product}
               </Typography>
               <SeverityChip severity={c.severity} />
               <Chip
@@ -175,39 +200,6 @@ export default function CasesList({
                 label={stateLabel(c.state)}
                 color={stateColor(c.state)}
               />
-              <Typography variant="body2" noWrap>
-                {c.assigneeIsMe ? (
-                  <strong>{c.assignee}</strong>
-                ) : c.assignee === "Unassigned" ? (
-                  <em>Unassigned</em>
-                ) : (
-                  c.assignee
-                )}
-              </Typography>
-              <Box sx={{ textAlign: "right" }}>
-                <Typography
-                  variant="body2"
-                  color={
-                    !showSla
-                      ? "text.primary"
-                      : breached
-                        ? "error"
-                        : c.minutesToBreach <= 60
-                          ? "warning.main"
-                          : "text.primary"
-                  }
-                  noWrap
-                >
-                  {!showSla ? "—" : formatTimeToBreach(c.minutesToBreach)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
-                  {c.state === "closed"
-                    ? "Closed"
-                    : hasSla
-                      ? SLA_CLOCK_LABEL[c.slaClockType]
-                      : "No SLA"}
-                </Typography>
-              </Box>
               <Typography
                 variant="caption"
                 color="text.secondary"

@@ -62,6 +62,7 @@ import {
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
+import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -369,9 +370,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
     recordView({
       kind: "case",
       id: data.id,
-      // Show the WSO2 case id (not the CS case number) as the recent/pinned
-      // label — it is the id engineers and customers reference.
-      title: `${data.wso2CaseId} · ${data.subject}`,
+      // Lead with the human case id(s) (WSO2 id / CS number, never the UUID) as
+      // the recent/pinned label — what engineers and customers reference. Falls
+      // back to the subject alone when a case has no human id yet.
+      title: caseIdLabel(data)
+        ? `${caseIdLabel(data)} · ${data.subject}`
+        : data.subject,
       subtitle: `${data.customer} · ${data.projectName}`,
       href: `/cases/${data.id}`,
     });
@@ -581,15 +585,26 @@ export default function CsmCaseDetailPage(): JSX.Element {
               lineHeight: 1.2,
             }}
           >
-            <Box component="span" sx={{ color: "text.secondary" }}>
-              {c.wso2CaseId}
-            </Box>
-            <Box component="span" sx={{ color: "text.disabled", mx: 0.25 }}>
-              /
-            </Box>
-            <Box component="span" sx={{ color: "text.primary" }}>
-              {c.caseNumber}
-            </Box>
+            {c.wso2CaseId && (
+              <Box component="span" sx={{ color: "text.secondary" }}>
+                {c.wso2CaseId}
+              </Box>
+            )}
+            {c.wso2CaseId && c.caseNumber && (
+              <Box component="span" sx={{ color: "text.disabled", mx: 0.25 }}>
+                /
+              </Box>
+            )}
+            {c.caseNumber && (
+              <Box component="span" sx={{ color: "text.primary" }}>
+                {c.caseNumber}
+              </Box>
+            )}
+            {!c.wso2CaseId && !c.caseNumber && (
+              <Box component="span" sx={{ color: "text.disabled" }}>
+                —
+              </Box>
+            )}
           </Typography>
 
           {/* Status group (severity, lifecycle state, SLA) kept visually
@@ -857,14 +872,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 gap: 2,
               }}
             >
-              <MetaCell label="Case ID">
+              <MetaCell label="Case number">
                 <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                  {c.caseNumber}
+                  {c.caseNumber ?? "—"}
                 </Typography>
               </MetaCell>
               <MetaCell label="WSO2 case ID">
                 <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                  {c.wso2CaseId}
+                  {c.wso2CaseId ?? "—"}
                 </Typography>
               </MetaCell>
               <MetaCell label="Created">

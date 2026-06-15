@@ -46,8 +46,8 @@ function detailFromBeCase(
   const product = c.deployedProduct?.displayName ?? "—";
   return {
     id: c.id,
-    caseNumber: c.number ?? c.id,
-    wso2CaseId: c.wso2Id ?? c.id,
+    caseNumber: c.number,
+    wso2CaseId: c.internalId,
     subject: c.subject ?? "(no subject)",
     customer,
     accountId: account?.id ?? "",
@@ -63,8 +63,8 @@ function detailFromBeCase(
     assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 0,
-    createdAt: c.createdAt ?? "",
-    updatedAt: c.updatedAt ?? c.createdAt ?? "",
+    createdAt: c.createdOn ?? "",
+    updatedAt: c.updatedOn ?? c.createdOn ?? "",
     description: c.description ?? "",
     assignmentGroup: "grp.cre_team",
     createdBy: reporter,

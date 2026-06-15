@@ -15,9 +15,9 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
-import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
+import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
@@ -28,10 +28,9 @@ import type {
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 
-const PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
-const MAX_PAGES = 10; // bound the fan-out (≤500 cases sampled for the matrix); doubled from 5 when the page limit halved to BE_MAX_PAGE_LIMIT
-
 export const MATRIX_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
+// Closed cases are deliberately excluded: the dashboard matrix tracks active
+// work, so the totals reflect open cases only.
 export const MATRIX_STATES: CaseState[] = [
   "open",
   "work_in_progress",
@@ -39,7 +38,6 @@ export const MATRIX_STATES: CaseState[] = [
   "awaiting_info",
   "solution_proposed",
   "reopened",
-  "closed",
 ];
 
 export interface CaseCountsMatrix {
@@ -48,8 +46,6 @@ export interface CaseCountsMatrix {
   severityTotals: Record<Severity, number>;
   stateTotals: Record<CaseState, number>;
   total: number;
-  /** True when more cases exist than were sampled (page cap hit). */
-  truncated: boolean;
 }
 
 function emptyMatrix(): CaseCountsMatrix {
@@ -62,21 +58,26 @@ function emptyMatrix(): CaseCountsMatrix {
     for (const st of MATRIX_STATES) counts[s][st] = 0;
   }
   for (const st of MATRIX_STATES) stateTotals[st] = 0;
-  return { counts, severityTotals, stateTotals, total: 0, truncated: false };
+  return { counts, severityTotals, stateTotals, total: 0 };
 }
 
 /**
  * Case counts broken down by severity × state, for the dashboard matrix.
  *
- * The backend has no aggregation endpoint, so this samples cases via
- * `POST /cases/search` (up to {@link MAX_PAGES} pages of {@link PAGE_LIMIT}) and
- * tallies client-side. `truncated` flags when the real total exceeds the
- * sample. MOCK mode tallies the seeded cases.
+ * The backend has no aggregation endpoint, so this fans out one count-only
+ * `POST /cases/search` per (severity, state) cell: each request filters by the
+ * cell's priority + state and asks for `limit: 1`, then reads the `total`
+ * attribute off the response (the case rows themselves are discarded). Counts
+ * are therefore *exact* — no sampling, no truncation. Row/column/grand totals
+ * are summed from the cells. MOCK mode tallies the seeded cases client-side.
+ *
+ * Trade-off: this is `MATRIX_SEVERITIES.length * MATRIX_STATES.length` requests
+ * (fired in parallel) per refresh. They are cheap indexed counts; the proper
+ * long-term fix is a single faceted aggregation endpoint on the backend.
  *
  * Keyed under its own root (not `CSM_CASES`) so case create/patch mutations,
- * which invalidate the `CSM_CASES` prefix, do not re-trigger this up-to-500-row
- * fan-out. The matrix is a sampled approximation; `staleTime` plus
- * refetch-on-mount keeps it fresh enough on the dashboard.
+ * which invalidate the `CSM_CASES` prefix, do not re-trigger this fan-out.
+ * `staleTime` plus refetch-on-mount keeps it fresh enough on the dashboard.
  */
 export function useCaseCountsMatrix(): UseQueryResult<CaseCountsMatrix, Error> {
   const api = useBackendApi();
@@ -86,35 +87,37 @@ export function useCaseCountsMatrix(): UseQueryResult<CaseCountsMatrix, Error> {
     queryFn: async (): Promise<CaseCountsMatrix> => {
       const matrix = emptyMatrix();
 
-      const tally = (severity: Severity, state: CaseState): void => {
-        if (!matrix.counts[severity] || matrix.counts[severity][state] === undefined) {
-          return;
-        }
-        matrix.counts[severity][state] += 1;
-        matrix.severityTotals[severity] += 1;
-        matrix.stateTotals[state] += 1;
-        matrix.total += 1;
-      };
-
       if (isMockMode()) {
-        for (const c of getMockCsmCases("all_customers").cases) {
-          tally(c.severity, c.state);
+        for (const c of getMockCsmCases("all_customers")) {
+          if (matrix.counts[c.severity]?.[c.state] === undefined) continue;
+          matrix.counts[c.severity][c.state] += 1;
+          matrix.severityTotals[c.severity] += 1;
+          matrix.stateTotals[c.state] += 1;
+          matrix.total += 1;
         }
         return matrix;
       }
 
-      let offset = 0;
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const res = await api.post<BeCaseSearchPayload, BeCaseSearchResponse>(
-          "/cases/search",
-          { pagination: { offset, limit: PAGE_LIMIT } },
-        );
-        for (const c of res.cases ?? []) {
-          tally(severityFromPriority(c.priority), uiStateFromBe(c.state));
-        }
-        if (!res.hasMore || (res.cases ?? []).length === 0) break;
-        offset += PAGE_LIMIT;
-        if (page === MAX_PAGES - 1 && res.hasMore) matrix.truncated = true;
+      const cells = MATRIX_SEVERITIES.flatMap((severity) =>
+        MATRIX_STATES.map((state) => ({ severity, state })),
+      );
+      const counted = await Promise.all(
+        cells.map(({ severity, state }) =>
+          api
+            .post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
+              pagination: { offset: 0, limit: 1 },
+              priorityKeys: [priorityFromSeverity(severity)],
+              stateKeys: [beStateFromUi(state)],
+            })
+            .then((res) => ({ severity, state, count: res.total ?? 0 })),
+        ),
+      );
+
+      for (const { severity, state, count } of counted) {
+        matrix.counts[severity][state] = count;
+        matrix.severityTotals[severity] += count;
+        matrix.stateTotals[state] += count;
+        matrix.total += count;
       }
       return matrix;
     },
