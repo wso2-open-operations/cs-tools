@@ -34,10 +34,15 @@ export function applyCasesFilters(
   return cases.filter((c) => {
     if (f.severities.length && !f.severities.includes(c.severity)) return false;
     if (f.states.length && !f.states.includes(c.state)) return false;
-    if (f.sla === "breached" && c.minutesToBreach >= 0) return false;
+    // SLA status only applies to active cases; a closed row (often
+    // minutesToBreach = 0) must not match "breached" or "at_risk".
+    if (f.sla === "breached") {
+      if (c.state === "closed" || c.minutesToBreach >= 0) return false;
+    }
     if (
       f.sla === "at_risk" &&
       !(
+        c.state !== "closed" &&
         c.minutesToBreach >= 0 &&
         c.minutesToBreach <= SLA_AT_RISK_THRESHOLD_MINUTES
       )

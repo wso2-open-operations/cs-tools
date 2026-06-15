@@ -153,6 +153,16 @@ export default function CsmCasesPage(): JSX.Element {
   }, [data?.cases]);
 
   const total = data?.total ?? 0;
+  // If the total shrinks (a background refetch, or rows closing) while we're on
+  // a later page, clamp back to the last valid page so the table never shows an
+  // empty out-of-range page with a misleading range. Adjusting state during
+  // render (React's documented pattern) rather than in an effect: React
+  // re-renders with the corrected page and the hook refetches the right slice.
+  const lastPage = total === 0 ? 0 : Math.ceil(total / rowsPerPage) - 1;
+  if (page > lastPage) {
+    setPage(lastPage);
+  }
+
   // Counts reflect the current page only (the backend exposes no SLA/assignee
   // breakdown across pages); both are inert in LIVE where that data is absent.
   const breachedCount = cases.filter(
