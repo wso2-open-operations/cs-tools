@@ -163,6 +163,10 @@ type snCreateCaseResponse struct {
 }
 
 func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
+	if err := validateCreateCaseRequest(req); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}

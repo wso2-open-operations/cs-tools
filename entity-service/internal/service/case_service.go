@@ -74,8 +74,39 @@ var validCaseIssueType = map[domain.CaseIssueType]bool{
 	domain.CaseIssueTypeTotalOutage:            true,
 }
 
+// validateCreateCaseRequest validates fields common to all CreateCase data sources.
+// UUID format of ID fields is not checked here — postgres IDs are UUIDs but
+// ServiceNow IDs are opaque hex strings; callers add format checks as needed.
+func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
+	if req.ProjectID == "" {
+		return &apierror.ValidationError{Msg: "projectId is required"}
+	}
+	if req.DeploymentID == "" {
+		return &apierror.ValidationError{Msg: "deploymentId is required"}
+	}
+	if req.DeployedProductID == "" {
+		return &apierror.ValidationError{Msg: "deployedProductId is required"}
+	}
+	if req.Subject == "" {
+		return &apierror.ValidationError{Msg: "subject is required"}
+	}
+	if req.Description == "" {
+		return &apierror.ValidationError{Msg: "description is required"}
+	}
+	if !validCasePriority[req.Priority] {
+		return &apierror.ValidationError{Msg: "priority contains invalid value: " + string(req.Priority)}
+	}
+	if !validCaseIssueType[req.IssueType] {
+		return &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
+	}
+	return nil
+}
+
 // CreateCase implements CaseService.
 func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
+	if err := validateCreateCaseRequest(req); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
@@ -84,18 +115,6 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	}
 	if err := validateUUIDs("deployedProductId", []string{req.DeployedProductID}); err != nil {
 		return domain.CreateCaseResponse{}, err
-	}
-	if req.Subject == "" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "subject is required"}
-	}
-	if req.Description == "" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "description is required"}
-	}
-	if !validCasePriority[req.Priority] {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(req.Priority)}
-	}
-	if !validCaseIssueType[req.IssueType] {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
 	}
 	if req.CreatedBy == "" {
 		token := middleware.UserIDTokenFromContext(ctx)
