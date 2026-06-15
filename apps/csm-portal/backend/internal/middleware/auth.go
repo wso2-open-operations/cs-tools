@@ -110,7 +110,11 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), userInfoKey, info)
-			ctx = entity.WithUserIDToken(ctx, r.Header.Get("x-user-id-token"))
+			userIDToken := r.Header.Get("x-user-id-token")
+			if userIDToken == "" {
+				userIDToken = tokenStr
+			}
+			ctx = entity.WithUserIDToken(ctx, userIDToken)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
