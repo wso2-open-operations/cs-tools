@@ -27,8 +27,10 @@
  * every shipped theme this clears 4.5:1.
  */
 
-/** MUI's conventional near-black body-text colour. */
-export const NEAR_BLACK = "rgba(0, 0, 0, 0.87)";
+/** Opacity of MUI's conventional near-black body-text colour. */
+export const NEAR_BLACK_ALPHA = 0.87;
+/** MUI's conventional near-black body-text colour (translucent). */
+export const NEAR_BLACK = `rgba(0, 0, 0, ${NEAR_BLACK_ALPHA})`;
 export const WHITE = "#ffffff";
 
 interface Rgb {
@@ -89,17 +91,29 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** Composite a translucent foreground over an opaque background. */
+export function compositeOver(fg: Rgb, alpha: number, bg: Rgb): Rgb {
+  return {
+    r: fg.r * alpha + bg.r * (1 - alpha),
+    g: fg.g * alpha + bg.g * (1 - alpha),
+    b: fg.b * alpha + bg.b * (1 - alpha),
+  };
+}
+
 /**
  * Pick the label colour (near-black or white) with the higher contrast against
- * `background`. Falls back to white for an unparseable background so a coloured
- * chip never renders invisible text.
+ * `background`. The near-black candidate is the translucent {@link NEAR_BLACK},
+ * so we evaluate the colour it actually composites to over the (opaque) surface
+ * — not opaque black — otherwise the picked colour could sit below 4.5:1 even
+ * though the opaque-black comparison said it passed. Falls back to white for an
+ * unparseable background so a coloured chip never renders invisible text.
  */
 export function pickAccessibleText(background: string): string {
   const bg = parseColor(background);
   if (!bg) return WHITE;
-  const black = { r: 0, g: 0, b: 0 };
   const white = { r: 255, g: 255, b: 255 };
-  return contrastRatio(bg, black) >= contrastRatio(bg, white)
+  const nearBlack = compositeOver({ r: 0, g: 0, b: 0 }, NEAR_BLACK_ALPHA, bg);
+  return contrastRatio(bg, nearBlack) >= contrastRatio(bg, white)
     ? NEAR_BLACK
     : WHITE;
 }

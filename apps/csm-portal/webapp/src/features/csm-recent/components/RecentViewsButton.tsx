@@ -125,6 +125,9 @@ export default function RecentViewsButton(): JSX.Element {
       tabIndex={0}
       onClick={() => handleSelect(entry)}
       onKeyDown={(e) => {
+        // Only act on keys aimed at the row itself; Enter/Space on the nested
+        // pin button must toggle the pin, not navigate the row.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           handleSelect(entry);
@@ -221,10 +224,7 @@ export default function RecentViewsButton(): JSX.Element {
         }}
       >
         <Typography variant="subtitle2">Recently viewed</Typography>
-        {grouped.case.length +
-          grouped.project.length +
-          grouped.account.length >
-          0 && (
+        {recents.some((e) => !e.pinned) && (
           <Tooltip title="Clear history (pinned items are kept)">
             <Button
               size="small"

@@ -16,8 +16,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  compositeOver,
   contrastRatio,
   NEAR_BLACK,
+  NEAR_BLACK_ALPHA,
   parseColor,
   pickAccessibleText,
   WHITE,
@@ -73,9 +75,15 @@ describe("pickAccessibleText", () => {
 
   for (const [name, main] of Object.entries(SEMANTIC_MAINS)) {
     it(`picks a text colour that passes AA on ${name} (${main})`, () => {
+      const bg = parseColor(main)!;
       const text = pickAccessibleText(main);
-      const textRgb = parseColor(text === NEAR_BLACK ? "#000000" : "#ffffff")!;
-      const ratio = contrastRatio(parseColor(main)!, textRgb);
+      // Evaluate the colour as actually rendered: NEAR_BLACK is translucent, so
+      // composite it over the fill rather than treating it as opaque black.
+      const textRgb =
+        text === NEAR_BLACK
+          ? compositeOver({ r: 0, g: 0, b: 0 }, NEAR_BLACK_ALPHA, bg)
+          : { r: 255, g: 255, b: 255 };
+      const ratio = contrastRatio(bg, textRgb);
       expect(ratio).toBeGreaterThanOrEqual(4.5);
     });
   }

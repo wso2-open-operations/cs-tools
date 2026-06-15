@@ -53,8 +53,10 @@ export default function QuickNav(): JSX.Element | null {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
-  // ⌘K / Ctrl+K toggles the palette from anywhere.
+  // ⌘K / Ctrl+K toggles the palette — only while signed in, so we don't hijack
+  // the browser shortcut on the sign-in screen (where the palette can't render).
   useEffect(() => {
+    if (!isSignedIn) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -63,7 +65,7 @@ export default function QuickNav(): JSX.Element | null {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [isSignedIn]);
 
   const results: Result[] = useMemo(() => {
     const q = query.trim().toLowerCase();

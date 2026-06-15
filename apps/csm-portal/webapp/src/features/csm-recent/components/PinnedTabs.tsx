@@ -70,7 +70,14 @@ export default function PinnedTabs(): JSX.Element {
       }}
     >
       {pinned.map((entry) => {
-        const active = location.pathname === entry.href.split("?")[0];
+        // A search pin is path + query, so match the full href; for everything
+        // else match the path alone (the case/project/account a tab points at,
+        // independent of any query). Path-only matching would light up every
+        // pinned search on the same route at once.
+        const active =
+          entry.kind === "search"
+            ? location.pathname + location.search === entry.href
+            : location.pathname === entry.href.split("?")[0];
         return (
           <Tooltip key={`${entry.kind}-${entry.id}`} title={entry.title}>
             <Chip
