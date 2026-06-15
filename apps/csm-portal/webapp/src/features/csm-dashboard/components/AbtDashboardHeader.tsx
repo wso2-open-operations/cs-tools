@@ -37,6 +37,11 @@ import {
 // Flip this to re-enable the toggle once ABT membership data is available.
 const ABT_SCOPING_ENABLED = false;
 
+// Only the Engineer dashboard is live; the others are mock placeholders, so the
+// switcher is disabled and locked to Engineer. Flip this to re-enable the
+// dropdown once the other dashboards are real.
+const DASHBOARD_SWITCHER_ENABLED = false;
+
 interface AbtDashboardHeaderProps {
   engineer?: CsmDashboardEngineer;
   scope: DashboardScope;
@@ -120,19 +125,30 @@ export default function AbtDashboardHeader({
             </Box>
           </Tooltip>
         )}
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <Select
-            value={dashboardKey}
-            onChange={(e) => onDashboardChange(e.target.value as DashboardKey)}
-            displayEmpty
-          >
-            {DASHBOARD_OPTIONS.map((o) => (
-              <MenuItem key={o.key} value={o.key}>
-                {o.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Tooltip
+          title={
+            DASHBOARD_SWITCHER_ENABLED
+              ? ""
+              : "Other dashboards are not available yet — showing the Engineer dashboard."
+          }
+        >
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={dashboardKey}
+              onChange={(e) =>
+                onDashboardChange(e.target.value as DashboardKey)
+              }
+              disabled={!DASHBOARD_SWITCHER_ENABLED}
+              displayEmpty
+            >
+              {DASHBOARD_OPTIONS.map((o) => (
+                <MenuItem key={o.key} value={o.key}>
+                  {o.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Tooltip>
       </Box>
     </Box>
   );

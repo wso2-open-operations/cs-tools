@@ -17,10 +17,6 @@
 import { Box, Card, Chip, Typography } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import AbtDashboardHeader from "@features/csm-dashboard/components/AbtDashboardHeader";
-import MyQueueSection from "@features/csm-dashboard/components/MyQueueSection";
-import SlaAtRiskSection from "@features/csm-dashboard/components/SlaAtRiskSection";
-import CustomerSummarySection from "@features/csm-dashboard/components/CustomerSummarySection";
-import RecentActivitySection from "@features/csm-dashboard/components/RecentActivitySection";
 import CaseCountsMatrix from "@features/csm-dashboard/components/CaseCountsMatrix";
 import { useGetCsmDashboard } from "@features/csm-dashboard/api/useGetCsmDashboard";
 import {
@@ -30,31 +26,26 @@ import {
 } from "@features/csm-dashboard/types/abtDashboard";
 
 /**
- * Top-level CSM dashboard. Hosts the engineer-overview dashboard (queue +
- * SLA + customers + activity) plus four placeholder dashboards selectable
- * from the top-right dropdown (Operations, IAM CS, Security, Team
- * performance). Per DashboardsAndReportsProposal.md the real tab+widget
- * model lives behind the entity-service reports DSL; these placeholders
- * are mocks for UX iteration only.
+ * Top-level CSM dashboard. Currently locked to the Engineer dashboard and
+ * showing only the "Cases by severity and state" matrix: the queue / SLA /
+ * customers / activity widgets are hidden, and the dashboard switcher dropdown
+ * (Operations, IAM CS, Security, Team performance) is disabled in the header
+ * because those are mock placeholders. Re-enable via DASHBOARD_SWITCHER_ENABLED
+ * in AbtDashboardHeader and restore the hidden sections here once the real
+ * tab+widget model (DashboardsAndReportsProposal.md, entity-service reports
+ * DSL) lands. The placeholder dashboards below are kept for that restore.
  */
 export default function CsmDashboardPage(): JSX.Element {
   // ABT scoping is not implemented yet, so default to (and stay on)
   // all-customers; the My ABT / All customers toggle is disabled in the header.
   const [scope, setScope] = useState<DashboardScope>("all_customers");
+  // Locked to the Engineer dashboard: the switcher is disabled in the header
+  // (the other dashboards are mock placeholders), so this never changes today.
   const [dashboardKey, setDashboardKey] = useState<DashboardKey>("engineer");
-  const { data, isLoading, isError } = useGetCsmDashboard(scope);
-  // No page-level "Could not load dashboard" toast: this aggregate query backs
-  // four independent sections (queue, SLA, customers, recent activity), while
-  // the severity matrix loads from a separate source. A global toast wrongly
-  // implies the whole page is dead. Pass isError to each section so the engineer
-  // sees exactly what's missing and what's still trustworthy (§2.2).
-
-  const scopeLabel =
-    scope === "my_abt"
-      ? data?.engineer?.abtName
-        ? `In ${data.engineer.abtName}`
-        : "ABT scope"
-      : "All customers";
+  // Only the engineer-overview header consumes this now; the queue/SLA/customer/
+  // activity widgets are hidden, leaving the standalone severity-by-state matrix
+  // (CaseCountsMatrix, which loads from its own source) as the only widget.
+  const { data, isError } = useGetCsmDashboard(scope);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -67,52 +58,7 @@ export default function CsmDashboardPage(): JSX.Element {
         isError={isError}
       />
       {dashboardKey === "engineer" ? (
-        <>
-          <CaseCountsMatrix />
-          <Box
-            sx={{
-              display: "grid",
-              gap: 2,
-              gridTemplateColumns: {
-                xs: "1fr",
-                md: "repeat(2, minmax(0, 1fr))",
-              },
-            }}
-          >
-            <MyQueueSection
-              queue={data?.queue}
-              isLoading={isLoading}
-              isError={isError}
-            />
-            <SlaAtRiskSection
-              cases={data?.slaAtRisk}
-              isLoading={isLoading}
-              isError={isError}
-            />
-          </Box>
-          <Box
-            sx={{
-              display: "grid",
-              gap: 2,
-              gridTemplateColumns: {
-                xs: "1fr",
-                md: "minmax(0, 7fr) minmax(0, 5fr)",
-              },
-            }}
-          >
-            <CustomerSummarySection
-              customers={data?.customers}
-              isLoading={isLoading}
-              scopeLabel={scopeLabel}
-              isError={isError}
-            />
-            <RecentActivitySection
-              activity={data?.recentActivity}
-              isLoading={isLoading}
-              isError={isError}
-            />
-          </Box>
-        </>
+        <CaseCountsMatrix />
       ) : (
         <DashboardPlaceholder dashboardKey={dashboardKey} />
       )}
