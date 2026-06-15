@@ -107,12 +107,15 @@ function accountOptionsQueryOptions(api: BackendApi) {
  * seeded dataset is filtered, sorted and sliced client-side here.
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
- * limit (≤ {@link BE_MAX_PAGE_LIMIT}).
+ * limit (≤ {@link BE_MAX_PAGE_LIMIT}). `enabled` gates the fetch entirely: the
+ * cases page passes `false` until the user has entered a search or picked a
+ * filter, so navigating to Cases doesn't blindly pull the whole table.
  */
 export function useGetCsmCases(
   filters: CasesFilters,
   page: number,
   pageSize: number,
+  enabled = true,
 ): UseQueryResult<CsmCasesListResponse, Error> {
   const logger = useLogger();
   const api = useBackendApi();
@@ -242,6 +245,7 @@ export function useGetCsmCases(
         hasMore: casesResponse.hasMore ?? false,
       };
     },
+    enabled,
     staleTime: 30_000,
   });
 }

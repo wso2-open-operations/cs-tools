@@ -61,6 +61,7 @@ import type {
 } from "@features/csm-dashboard/types/abtDashboard";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import {
+  countActiveFilters,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
 } from "@features/csm-cases/utils/casesFiltersUrl";
@@ -138,21 +139,6 @@ const SLA_OPTIONS: { value: SlaFilter; label: string }[] = [
   { value: "breached", label: "Breached" },
 ];
 
-/**
- * Count the filters that have non-default values. Search is included
- * separately so the badge correctly reflects "search + N filters".
- */
-function countActiveFilters(f: CasesFilters): number {
-  let n = 0;
-  if (f.search.trim()) n += 1;
-  if (f.severities.length) n += 1;
-  if (f.states.length) n += 1;
-  if (f.sla !== "any") n += 1;
-  if (f.assignees.length) n += 1;
-  if (f.projects.length) n += 1;
-  if (f.products.length) n += 1;
-  return n;
-}
 
 /** Pretty-print an assignee value (handle the @me sentinel). */
 function assigneeLabel(value: string): string {

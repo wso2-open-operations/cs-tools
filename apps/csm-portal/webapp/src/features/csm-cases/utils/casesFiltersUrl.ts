@@ -110,6 +110,24 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
 }
 
 /**
+ * Count the filters that carry a non-default value (search counts as one).
+ * Used for the filter-bar badge and by the cases page to tell whether the user
+ * has expressed any intent yet — 0 means "show the search/filter prompt and
+ * don't load anything".
+ */
+export function countActiveFilters(f: CasesFilters): number {
+  let n = 0;
+  if (f.search.trim()) n += 1;
+  if (f.severities.length) n += 1;
+  if (f.states.length) n += 1;
+  if (f.sla !== "any") n += 1;
+  if (f.assignees.length) n += 1;
+  if (f.projects.length) n += 1;
+  if (f.products.length) n += 1;
+  return n;
+}
+
+/**
  * Convenience: build a `/cases?...` href from a partial filter override.
  * Anything not specified falls back to the defaults.
  */
