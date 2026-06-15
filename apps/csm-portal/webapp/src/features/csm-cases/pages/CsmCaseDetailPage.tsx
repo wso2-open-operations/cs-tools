@@ -229,12 +229,9 @@ function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
  */
 function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
   if (!c.description?.trim()) return null;
-  // Use the shared backend-timestamp parser: `createdAt` arrives in formats a
-  // bare `new Date()` can't parse (e.g. space-separated "YYYY-MM-DD HH:MM:SS"),
-  // and may be missing entirely. A raw `new Date(...).toISOString()` on an
-  // invalid value throws "RangeError: Invalid time value" and crashes the whole
-  // detail page. Offset by 1s only when parseable; otherwise fall back to the
-  // raw value so RelativeTime degrades to "Unknown time" instead of crashing.
+  // `createdAt` may be missing or in a format a bare `new Date()` can't parse,
+  // which made the old raw `.toISOString()` throw and crash the page. Parse
+  // safely; offset 1s when valid, else fall back to the raw value.
   const created = parseBackendTimestamp(c.createdAt);
   const at = created
     ? new Date(created.getTime() + 1000).toISOString()
@@ -818,10 +815,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 ))}
               </Box>
             ) : (
-              // A comments-load failure must not blank the whole timeline: the
-              // description, audit trail, and attachments come from the case
-              // itself and loaded fine. Show them, with a non-blocking notice
-              // that the comments portion is missing (per-section degradation).
+              // A comments failure shouldn't blank the timeline — the
+              // description, audit, and attachments loaded fine. Show them with
+              // an inline notice.
               <>
                 {isCommentsError && (
                   <Typography variant="body2" color="error">
