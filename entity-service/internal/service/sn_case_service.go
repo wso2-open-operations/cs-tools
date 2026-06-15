@@ -38,25 +38,47 @@ type snCasesResponse struct {
 }
 
 type snCase struct {
-	ID              string           `json:"id"`
-	InternalID      string           `json:"internalId"`
-	Number          string           `json:"number"`
-	Title           string           `json:"title"`
-	Description     string           `json:"description"`
-	CreatedOn       string           `json:"createdOn"`
-	UpdatedOn       *string          `json:"updatedOn"`
-	CreatedBy       string           `json:"createdBy"`
-	Project         snCaseEntityRef  `json:"project"`
-	Deployment      snCaseEntityRef  `json:"deployment"`
-	DeployedProduct snCaseEntityRef  `json:"deployedProduct"`
-	State           *snCaseState     `json:"state"`
-	Severity        *snCaseLabel     `json:"severity"`
-	IssueType       *snCaseIssueType `json:"issueType"`
+	ID               string                `json:"id"`
+	InternalID       string                `json:"internalId"`
+	Number           string                `json:"number"`
+	Title            string                `json:"title"`
+	Description      string                `json:"description"`
+	CreatedOn        string                `json:"createdOn"`
+	UpdatedOn        *string               `json:"updatedOn"`
+	CreatedBy        string                `json:"createdBy"`
+	Project          snCaseEntityRef       `json:"project"`
+	Deployment       snCaseEntityRef       `json:"deployment"`
+	DeployedProduct  snCaseDeployedProduct `json:"deployedProduct"`
+	Product          *snCaseEntityRef      `json:"product"`
+	State            *snCaseState          `json:"state"`
+	Severity         *snCaseLabel          `json:"severity"`
+	IssueType        *snCaseIssueType      `json:"issueType"`
+	AssignedEngineer *snCaseEntityRef      `json:"assignedEngineer"`
+	ParentCase       *snCaseRef            `json:"parentCase"`
+	RelatedCase      *snCaseRef            `json:"relatedCase"`
+	Account          *snCaseAccount        `json:"account"`
 }
 
 type snCaseEntityRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type snCaseDeployedProduct struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type snCaseRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+}
+
+type snCaseAccount struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type snCaseState struct {
@@ -103,7 +125,77 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 }
 
 func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
-	return s.pgFallback.GetCaseByID(ctx, id)
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CaseView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	raw, err := s.client.Get(ctx, "/cases/"+id, token)
+	if err != nil {
+		return domain.CaseView{}, err
+	}
+
+	var c snCase
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return domain.CaseView{}, fmt.Errorf("sn get case: parse response: %w", err)
+	}
+
+	createdOn, err := time.Parse(snCreatedOnLayout, c.CreatedOn)
+	if err != nil {
+		return domain.CaseView{}, fmt.Errorf("sn get case: parse createdOn %q: %w", c.CreatedOn, err)
+	}
+	updatedOn := createdOn
+	if c.UpdatedOn != nil && *c.UpdatedOn != "" {
+		updatedOn, err = time.Parse(snCreatedOnLayout, *c.UpdatedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse updatedOn %q: %w", *c.UpdatedOn, err)
+		}
+	}
+
+	state, err := snCaseStateLabelToEnum(c.State)
+	if err != nil {
+		return domain.CaseView{}, fmt.Errorf("sn get case %q: %w", c.ID, err)
+	}
+
+	cv := domain.CaseView{
+		ID:          c.ID,
+		Number:      c.Number,
+		InternalID:  c.InternalID,
+		Subject:     c.Title,
+		Description: c.Description,
+		Priority:    snSeverityToPriority(c.Severity),
+		IssueType:   snIssueTypeToEnum(c.IssueType),
+		State:       state,
+		CreatedOn:   createdOn,
+		UpdatedOn:   updatedOn,
+		CreatedByDetails: domain.UserRef{
+			Email: c.CreatedBy,
+		},
+		ProjectDetails:    domain.EntityRef{ID: c.Project.ID, Name: c.Project.Name},
+		DeploymentDetails: domain.EntityRef{ID: c.Deployment.ID, Name: c.Deployment.Name},
+		DeployedProductDetails: domain.DeployedProductRef{
+			ID:          c.DeployedProduct.ID,
+			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
+		},
+	}
+
+	if c.Product != nil {
+		cv.ProductDetails = domain.EntityRef{ID: c.Product.ID, Name: c.Product.Name}
+	}
+	if c.AssignedEngineer != nil {
+		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: c.AssignedEngineer.ID, Name: c.AssignedEngineer.Name}
+	}
+	if c.ParentCase != nil {
+		cv.ParentCase = &domain.CaseNumberRef{ID: c.ParentCase.ID, Number: c.ParentCase.Number}
+	}
+	if c.RelatedCase != nil {
+		cv.RelatedCase = &domain.CaseNumberRef{ID: c.RelatedCase.ID, Number: c.RelatedCase.Number}
+	}
+	if c.Account != nil {
+		cv.AccountDetails = &domain.AccountRef{ID: c.Account.ID, Name: c.Account.Name, Type: c.Account.Type}
+	}
+
+	return cv, nil
 }
 
 func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
@@ -187,7 +279,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			CreatedBy:              domain.UserIDEmailRef{Email: c.CreatedBy},
 			ProjectDetails:         domain.EntityRef{ID: c.Project.ID, Name: c.Project.Name},
 			DeploymentDetails:      domain.EntityRef{ID: c.Deployment.ID, Name: c.Deployment.Name},
-			DeployedProductDetails: domain.DeployedProductRef{ID: c.DeployedProduct.ID, DisplayName: c.DeployedProduct.Name},
+			DeployedProductDetails: domain.DeployedProductRef{ID: c.DeployedProduct.ID, DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
 		})
 	}
 
