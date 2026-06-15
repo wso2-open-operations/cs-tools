@@ -104,36 +104,66 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 // GetCaseByID implements CaseRepository.
 func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView, error) {
 	var cv domain.CaseView
+	var (
+		aeID, aeName                        *string
+		pcID, pcNum                         *string
+		rcID, rcNum                         *string
+		accountID, accountName, accountTier string
+	)
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
 		        c.subject, c.description, c.priority, c.issue_type, c.state,
-		        c.created_at, c.updated_at, c.closed_at,
+		        c.created_at, c.updated_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
 		        d.id, d.name,
-		        dp.id, prod.name || COALESCE(' ' || pv.version, '')
+		        dp.id, prod.name || COALESCE(' ' || pv.version, ''),
+		        prod.id, prod.name || COALESCE(' ' || pv.version, ''),
+		        a.id, a.name, a.tier,
+		        ae.id, ae.first_name || ' ' || ae.last_name,
+		        pc.id, pc.number,
+		        rc.id, rc.number
 		 FROM cases c
 		 JOIN users u ON u.id = c.created_by
 		 JOIN projects p ON p.id = c.project_id
+		 JOIN accounts a ON a.id = p.account_id
 		 JOIN deployments d ON d.id = c.deployment_id
 		 JOIN deployed_products dp ON dp.id = c.deployed_product_id
 		 JOIN products prod ON prod.id = dp.product_id
 		 LEFT JOIN product_versions pv ON pv.id = dp.product_version_id
+		 LEFT JOIN users ae ON ae.id = c.assigned_engineer
+		 LEFT JOIN cases pc ON pc.id = c.parent_case_id
+		 LEFT JOIN cases rc ON rc.id = c.related_case_id
 		 WHERE c.id = $1`, id,
 	).Scan(
 		&cv.ID, &cv.Number, &cv.InternalID,
 		&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State,
-		&cv.CreatedAt, &cv.UpdatedAt, &cv.ClosedAt,
-		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.DisplayName, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
+		&cv.CreatedOn, &cv.UpdatedOn,
+		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 		&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
 		&cv.DeployedProductDetails.ID, &cv.DeployedProductDetails.DisplayName,
+		&cv.ProductDetails.ID, &cv.ProductDetails.Name,
+		&accountID, &accountName, &accountTier,
+		&aeID, &aeName,
+		&pcID, &pcNum,
+		&rcID, &rcNum,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.CaseView{}, &apierror.NotFoundError{Msg: "case not found"}
 	}
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
+	}
+	cv.AccountDetails = &domain.AccountRef{ID: accountID, Name: accountName, Type: accountTier}
+	if aeID != nil {
+		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: *aeID, Name: *aeName}
+	}
+	if pcID != nil {
+		cv.ParentCase = &domain.CaseNumberRef{ID: *pcID, Number: *pcNum}
+	}
+	if rcID != nil {
+		cv.RelatedCase = &domain.CaseNumberRef{ID: *rcID, Number: *rcNum}
 	}
 	return cv, nil
 }

@@ -482,10 +482,29 @@ type Case struct {
 
 // UserRef is a reference to a user with key display fields.
 type UserRef struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	UserID      string `json:"userId"`
-	Email       string `json:"email"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	UserID string `json:"userId"`
+	Email  string `json:"email"`
+}
+
+// AssignedEngineerRef is a compact reference to an assigned support engineer.
+type AssignedEngineerRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// CaseNumberRef is a compact reference to a case carrying its human-readable number.
+type CaseNumberRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+}
+
+// AccountRef is a compact reference to an account.
+type AccountRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // UserIDEmailRef is a compact user reference carrying only id and email.
@@ -507,25 +526,27 @@ type DeployedProductRef struct {
 	DisplayName string `json:"displayName"`
 }
 
-// CaseView is the enriched read representation of a case. It carries all
-// original Case fields plus display-value references for each FK, resolved via
-// JOIN at query time. ClosedAt is the only nullable field.
+// CaseView is the enriched read representation of a case.
 type CaseView struct {
-	ID                     string             `json:"id"`
-	Number                 string             `json:"number"`
-	InternalID             string             `json:"internalId"`
-	Subject                string             `json:"subject"`
-	Description            string             `json:"description"`
-	Priority               CasePriority       `json:"priority"`
-	IssueType              CaseIssueType      `json:"issueType"`
-	State                  CaseState          `json:"state"`
-	CreatedAt              time.Time          `json:"createdAt"`
-	UpdatedAt              time.Time          `json:"updatedAt"`
-	ClosedAt               *time.Time         `json:"closedAt"`
-	CreatedByDetails       UserRef            `json:"createdBy"`
-	ProjectDetails         EntityRef          `json:"project"`
-	DeploymentDetails      EntityRef          `json:"deployment"`
-	DeployedProductDetails DeployedProductRef `json:"deployedProduct"`
+	ID                     string               `json:"id"`
+	Number                 string               `json:"number"`
+	InternalID             string               `json:"internalId"`
+	Subject                string               `json:"subject"`
+	Description            string               `json:"description"`
+	Priority               CasePriority         `json:"priority"`
+	IssueType              CaseIssueType        `json:"issueType"`
+	State                  CaseState            `json:"state"`
+	CreatedOn              time.Time            `json:"createdOn"`
+	UpdatedOn              time.Time            `json:"updatedOn"`
+	CreatedByDetails       UserRef              `json:"createdBy"`
+	ProjectDetails         EntityRef            `json:"project"`
+	DeploymentDetails      EntityRef            `json:"deployment"`
+	DeployedProductDetails DeployedProductRef   `json:"deployedProduct"`
+	ProductDetails         EntityRef            `json:"product"`
+	AssignedEngineer       *AssignedEngineerRef `json:"assignedEngineer"`
+	ParentCase             *CaseNumberRef       `json:"parentCase"`
+	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
+	AccountDetails         *AccountRef          `json:"account"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
