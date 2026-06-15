@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "CSM_PORTAL_LOCAL_BE=1 vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

@@ -91,6 +91,29 @@ pnpm run test          # Vitest
 pnpm run test:e2e      # Playwright
 ```
 
+## Local Full-Stack Mode (sandboxed dev)
+
+```bash
+pnpm run dev:local     # dev server acting as a local gateway
+```
+
+For environments that cannot reach the hosted identity provider or cloud
+gateway (network-locked devcontainers, headless preview tooling). Sets
+`CSM_PORTAL_LOCAL_BE=1`, which makes the Vite dev server (a) serve
+`/config.js` with overrides — auth base URL pointed at a local mock OIDC
+provider on `:9100`, backend base URL at the same-origin `/local-api`
+path, mocks off — and (b) proxy `/local-api/*` to the local Go backend on
+`:8080`, mapping the incoming `Authorization: Bearer <jwt>` to
+`x-jwt-assertion` exactly as the production gateway does. The app code
+runs unmodified: the real OIDC SDK performs a genuine authorization-code +
+PKCE flow against the mock provider, which signs real RS256 JWTs for any
+username you pick at its login form.
+
+Applies only to the dev `serve` command — `pnpm build` / `pnpm preview`
+can never carry this behaviour. The mock provider, backend, entity service
+and seeded PostgreSQL it talks to must be running separately (the local
+backend stack); this flag only changes the dev server's behaviour.
+
 ## Branching
 
 This webapp lives in the `cs-tools` repo. Work on a feature branch off `v2` (never commit directly to `v2`). Rebase on `origin/v2` before opening a PR.
