@@ -173,8 +173,8 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 	if !validCommentType[req.Type] {
 		return domain.CaseComment{}, &apierror.ValidationError{Msg: "type contains invalid value: " + string(req.Type)}
 	}
-	if req.Body == "" {
-		return domain.CaseComment{}, &apierror.ValidationError{Msg: "body is required"}
+	if req.Content == "" {
+		return domain.CaseComment{}, &apierror.ValidationError{Msg: "content is required"}
 	}
 	return s.repo.CreateCaseComment(ctx, req)
 }

@@ -8,7 +8,7 @@ CREATE TABLE case_comments (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   case_id    UUID NOT NULL REFERENCES cases(id),
   type       comment_type_enum NOT NULL,
-  body       TEXT NOT NULL,
+  content    TEXT NOT NULL,
   created_by TEXT NOT NULL REFERENCES users(id),
   created_at TIMESTAMP DEFAULT NOW()
 );

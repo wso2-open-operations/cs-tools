@@ -646,7 +646,7 @@ type CaseComment struct {
 	ID          string      `json:"id"`
 	CaseID      string      `json:"caseId"`
 	Type      CommentType `json:"type"`
-	Body      string      `json:"body"`
+	Content   string      `json:"content"`
 	CreatedBy string      `json:"createdBy"`
 	CreatedAt time.Time   `json:"createdAt"`
 }
@@ -656,8 +656,8 @@ type CaseComment struct {
 type CreateCaseCommentRequest struct {
 	CaseID string      `json:"-"`
 	Type   CommentType `json:"type"`
-	Body        string      `json:"body"`
-	CreatedBy   string      `json:"createdBy"`
+	Content   string      `json:"content"`
+	CreatedBy string      `json:"createdBy"`
 }
 
 // SearchCaseCommentsRequest is the input for listing comments on a case.

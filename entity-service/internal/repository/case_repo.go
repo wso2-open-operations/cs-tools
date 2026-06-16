@@ -171,14 +171,14 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 // CreateCaseComment implements CaseRepository.
 func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
 	const query = `
-		INSERT INTO case_comments (case_id, type, body, created_by)
+		INSERT INTO case_comments (case_id, type, content, created_by)
 		VALUES ($1, $2::comment_type_enum, $3, $4)
-		RETURNING id, case_id, type, body, created_by, created_at`
+		RETURNING id, case_id, type, content, created_by, created_at`
 
 	var c domain.CaseComment
 	err := r.db.QueryRow(ctx, query,
-		req.CaseID, string(req.Type), req.Body, req.CreatedBy,
-	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Body, &c.CreatedBy, &c.CreatedAt)
+		req.CaseID, string(req.Type), req.Content, req.CreatedBy,
+	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedAt)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
@@ -197,7 +197,7 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
 	const countQuery = `SELECT COUNT(*) FROM case_comments WHERE case_id = $1`
 	const dataQuery = `
-		SELECT id, case_id, type, body, created_by, created_at
+		SELECT id, case_id, type, content, created_by, created_at
 		FROM case_comments
 		WHERE case_id = $1
 		ORDER BY created_at DESC, id
@@ -225,7 +225,7 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 		result := make([]domain.CaseComment, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var c domain.CaseComment
-			if err := rows.Scan(&c.ID, &c.CaseID, &c.Type, &c.Body, &c.CreatedBy, &c.CreatedAt); err != nil {
+			if err := rows.Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedAt); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
 			result = append(result, c)

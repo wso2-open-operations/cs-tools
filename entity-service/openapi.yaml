@@ -1341,13 +1341,13 @@ components:
 
     CreateCaseCommentRequest:
       type: object
-      required: [type, body, createdBy]
+      required: [type, content, createdBy]
       properties:
         type:
           type: string
           enum: [work_note, comment, activity]
           description: work_note is restricted to internal users; activity to internal and system users.
-        body:
+        content:
           type: string
         createdBy:
           type: string
@@ -1363,7 +1363,7 @@ components:
         type:
           type: string
           enum: [work_note, comment, activity]
-        body:
+        content:
           type: string
         createdBy:
           type: string
