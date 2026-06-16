@@ -21,7 +21,7 @@ import {
   TablePagination,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Plus, Search } from "@wso2/oxygen-ui-icons-react";
+import { Plus } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
@@ -42,7 +42,6 @@ import { useGetCsmCases } from "@features/csm-cases/api/useGetCsmCases";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import {
-  countActiveFilters,
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
@@ -81,16 +80,13 @@ export default function CsmCasesPage(): JSX.Element {
     [filters, debouncedSearch],
   );
 
-  // Don't load the whole table on arrival: only fetch once the user has entered
-  // a search or picked at least one filter. Gated on the *effective* (debounced)
-  // query so a half-typed search doesn't briefly fetch everything.
-  const hasQuery = countActiveFilters(queryFilters) > 0;
-
+  // Load straight away with no filters: the backend sorts by last-updated
+  // descending, so arriving on the page shows the most recently updated cases.
+  // Filters/search narrow that set from there.
   const { data, isLoading, isError, error } = useGetCsmCases(
     queryFilters,
     page,
     rowsPerPage,
-    hasQuery,
   );
 
   const handleChangeRowsPerPage = (e: ChangeEvent<HTMLInputElement>): void => {
@@ -100,8 +96,7 @@ export default function CsmCasesPage(): JSX.Element {
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
-  // Filters start expanded so the user is nudged to narrow before any load.
-  const [isFiltersOpen, setIsFiltersOpen] = useState(true);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
@@ -183,13 +178,11 @@ export default function CsmCasesPage(): JSX.Element {
         <Box>
           <Typography variant="h5">Cases</Typography>
           <Typography variant="body2" color="text.secondary">
-            {!hasQuery
-              ? "Search or filter to load cases"
-              : isLoading
-                ? "Loading…"
-                : total === 0
-                  ? "No cases"
-                  : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+            {isLoading
+              ? "Loading…"
+              : total === 0
+                ? "No cases"
+                : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -233,50 +226,20 @@ export default function CsmCasesPage(): JSX.Element {
         availableProducts={availableProducts}
       />
 
-      {hasQuery ? (
-        <>
-          <CasesList cases={cases} isLoading={isLoading} />
+      <CasesList cases={cases} isLoading={isLoading} />
 
-          <TablePagination
-            component="div"
-            count={total}
-            page={page}
-            onPageChange={(_, newPage) => setPage(newPage)}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
-            labelRowsPerPage="Cases per page"
-            showFirstButton
-            showLastButton
-          />
-        </>
-      ) : (
-        <Box
-          sx={{
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 1,
-            px: 3,
-            py: 8,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            textAlign: "center",
-            gap: 1.5,
-          }}
-        >
-          <Search size={32} aria-hidden />
-          <Typography variant="subtitle1">Search for cases</Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ maxWidth: 420 }}
-          >
-            Enter a search term or pick a filter above to find the cases
-            you&apos;re looking for.
-          </Typography>
-        </Box>
-      )}
+      <TablePagination
+        component="div"
+        count={total}
+        page={page}
+        onPageChange={(_, newPage) => setPage(newPage)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+        labelRowsPerPage="Cases per page"
+        showFirstButton
+        showLastButton
+      />
     </Box>
   );
 }

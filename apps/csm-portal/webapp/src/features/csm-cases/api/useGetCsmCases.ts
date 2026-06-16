@@ -107,9 +107,9 @@ function accountOptionsQueryOptions(api: BackendApi) {
  * seeded dataset is filtered, sorted and sliced client-side here.
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
- * limit (≤ {@link BE_MAX_PAGE_LIMIT}). `enabled` gates the fetch entirely: the
- * cases page passes `false` until the user has entered a search or picked a
- * filter, so navigating to Cases doesn't blindly pull the whole table.
+ * limit (≤ {@link BE_MAX_PAGE_LIMIT}). With no filters the backend sorts by
+ * last-updated descending, so the cases page loads the most recently updated
+ * cases on arrival. `enabled` is an optional escape hatch to suspend the fetch.
  */
 export function useGetCsmCases(
   filters: CasesFilters,
