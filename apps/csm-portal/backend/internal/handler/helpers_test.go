@@ -91,7 +91,6 @@ type mockEntityCaseClient struct {
 	searchCaseCommentsFn  func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCasesFn         func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn             func(ctx context.Context, caseID string) ([]byte, error)
-	searchUsersFn         func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -136,12 +135,6 @@ func (m *mockEntityCaseClient) GetCase(ctx context.Context, caseID string) ([]by
 	return []byte(`{}`), nil
 }
 
-func (m *mockEntityCaseClient) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {
-	if m.searchUsersFn != nil {
-		return m.searchUsersFn(ctx, body)
-	}
-	return []byte(`{"users":[{"id":"user-123"}],"total":1}`), nil
-}
 
 // ----- mock updates client -----
 

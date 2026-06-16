@@ -146,6 +146,17 @@ Configured in `internal/db/postgres.go`:
 | Max conn lifetime   | 30 min  |
 | Max idle time       | 5 min   |
 
+## ServiceNow data source (`sn_*` services)
+
+ServiceNow uses 32-character hex sysids (e.g. `abc123...`) while the rest of the platform uses standard UUIDs (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Conversion helpers live in `internal/service/sn_id.go`.
+
+**Rules — apply without exception:**
+
+- **Outbound (request to SN):** convert every UUID to a sysid with `uuidToSysid()` / `uuidsToSysids()` before including it in the SN payload.
+- **Inbound (response from SN):** convert every ID field back to a UUID with `sysidToUUID()` before populating the domain response struct. This includes every ID in every response type — cases, comments, projects, deployments, deployed products, etc.
+
+Missing a `sysidToUUID()` call on a response ID means callers receive a bare sysid they cannot use to call back into the entity service.
+
 ## Security
 
 - Never commit secrets — use environment variables; `.env` is git-ignored

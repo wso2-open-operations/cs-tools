@@ -19,7 +19,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -31,38 +30,6 @@ import (
 
 var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-var errUserNotFound = errors.New("authenticated user not found in entity service")
-
-// resolveUserID looks up the entity-service UUID for the given email via users/search.
-// TODO: remove once DB-level auth propagates the entity UUID directly through the token.
-func resolveUserID(ctx context.Context, entity entityCaseClient, email string) (string, error) {
-	body, err := json.Marshal(map[string]any{
-		"searchQuery": email,
-		"pagination":  map[string]any{"limit": 1, "offset": 0},
-	})
-	if err != nil {
-		return "", err
-	}
-	resp, err := entity.SearchUsers(ctx, body)
-	if err != nil {
-		return "", err
-	}
-	var result struct {
-		Users []struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		} `json:"users"`
-	}
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return "", err
-	}
-	// Verify exact email match — SearchUsers may perform fuzzy/prefix search.
-	if len(result.Users) == 0 || result.Users[0].Email != email {
-		return "", errUserNotFound
-	}
-	return result.Users[0].ID, nil
-}
-
 // stripField removes the named key from a JSON object body, if present.
 func stripField(body []byte, field string) ([]byte, error) {
 	var m map[string]json.RawMessage
@@ -70,23 +37,6 @@ func stripField(body []byte, field string) ([]byte, error) {
 		return nil, err
 	}
 	delete(m, field)
-	return json.Marshal(m)
-}
-
-// injectCreatedBy merges createdBy into a JSON request body.
-func injectCreatedBy(body []byte, userID string) ([]byte, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	if m == nil {
-		m = make(map[string]json.RawMessage)
-	}
-	id, err := json.Marshal(userID)
-	if err != nil {
-		return nil, err
-	}
-	m["createdBy"] = id
 	return json.Marshal(m)
 }
 
@@ -99,7 +49,6 @@ type entityCaseClient interface {
 	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
-	SearchUsers(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -164,7 +113,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateCaseComment handles POST /cases/{id}/comments.
-// createdBy is resolved server-side from the authenticated user's email.
+// createdBy is resolved by the entity service from the forwarded x-user-id-token.
 func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -194,26 +143,9 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	userID, err := resolveUserID(r.Context(), h.entity, user.Email)
+	result, err := h.entity.CreateCaseComment(r.Context(), caseID, body)
 	if err != nil {
-		if errors.Is(err, errUserNotFound) {
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
-			return
-		}
-		slog.ErrorContext(r.Context(), "resolveUserID failed", "email", user.Email, "err", err)
-		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-		return
-	}
-
-	entityBody, err := injectCreatedBy(body, userID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.CreateCaseComment(r.Context(), caseID, entityBody)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCaseComment failed", "userID", userID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateCaseComment failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to create case comment.")
 		return
 	}

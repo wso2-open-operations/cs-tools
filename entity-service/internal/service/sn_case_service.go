@@ -416,7 +416,7 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 	return domain.CreateCaseCommentResponse{
 		Message: snResp.Message,
 		Comment: domain.CaseCommentDetail{
-			ID:        snResp.Comment.ID,
+			ID:        sysidToUUID(snResp.Comment.ID),
 			CreatedOn: createdOn,
 			CreatedBy: snResp.Comment.CreatedBy,
 		},

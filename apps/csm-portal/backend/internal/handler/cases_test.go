@@ -167,12 +167,7 @@ func TestCreateCase(t *testing.T) {
 // ----- CreateCaseComment -----
 
 func TestCreateCaseComment(t *testing.T) {
-	const validPayload = `{"commentType":"comment","body":"Looking into this now."}`
-	const resolvedUserID = "entity-user-uuid-42"
-
-	userSearchOK := func(_ context.Context, _ []byte) ([]byte, error) {
-		return []byte(`{"users":[{"id":"` + resolvedUserID + `","email":"agent@example.com"}],"total":1}`), nil
-	}
+	const validPayload = `{"type":"comment","content":"Looking into this now."}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
@@ -217,15 +212,14 @@ func TestCreateCaseComment(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("resolves createdBy server-side and forwards to upstream", func(t *testing.T) {
+	t.Run("forwards body to entity and returns response", func(t *testing.T) {
 		var capturedCaseID string
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
-			searchUsersFn: userSearchOK,
 			createCaseCommentFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
 				capturedCaseID = caseID
 				capturedBody = body
-				return []byte(`{"id":"comment-1","caseId":"case-1","commentType":"comment","body":"Looking into this now.","createdBy":"` + resolvedUserID + `","createdAt":"2026-06-03T00:00:00Z"}`), nil
+				return []byte(`{"message":"Comment created successfully","comment":{"id":"comment-1","createdOn":"2026-06-03T00:00:00Z","createdBy":"agent@example.com"}}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -240,52 +234,15 @@ func TestCreateCaseComment(t *testing.T) {
 		if capturedCaseID != "case-1" {
 			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, "case-1")
 		}
-
-		var sent map[string]json.RawMessage
-		if err := json.Unmarshal(capturedBody, &sent); err != nil {
-			t.Fatalf("upstream received invalid JSON: %v", err)
-		}
-		var gotID string
-		if err := json.Unmarshal(sent["createdBy"], &gotID); err != nil || gotID != resolvedUserID {
-			t.Errorf("upstream createdBy = %q, want %q", gotID, resolvedUserID)
+		if string(capturedBody) != validPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, validPayload)
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
-		if resp["id"] != "comment-1" {
-			t.Errorf("response id = %v, want comment-1", resp["id"])
+		comment, _ := resp["comment"].(map[string]any)
+		if comment["id"] != "comment-1" {
+			t.Errorf("response comment.id = %v, want comment-1", comment["id"])
 		}
-	})
-
-	t.Run("returns 403 when user not found in entity service", func(t *testing.T) {
-		client := &mockEntityCaseClient{
-			searchUsersFn: func(_ context.Context, _ []byte) ([]byte, error) {
-				return []byte(`{"users":[],"total":0}`), nil
-			},
-		}
-		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
-		r.SetPathValue("id", "case-1")
-		w := httptest.NewRecorder()
-		h.CreateCaseComment(w, r)
-		assertStatus(t, w, http.StatusForbidden)
-		assertErrorMessage(t, w, ErrMsgForbidden)
-		assertContentType(t, w, "application/json")
-	})
-
-	t.Run("returns 500 when user lookup fails", func(t *testing.T) {
-		client := &mockEntityCaseClient{
-			searchUsersFn: func(_ context.Context, _ []byte) ([]byte, error) {
-				return nil, errors.New("entity service unavailable")
-			},
-		}
-		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
-		r.SetPathValue("id", "case-1")
-		w := httptest.NewRecorder()
-		h.CreateCaseComment(w, r)
-		assertStatus(t, w, http.StatusInternalServerError)
-		assertErrorMessage(t, w, ErrMsgInternal)
-		assertContentType(t, w, "application/json")
 	})
 
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
@@ -293,7 +250,6 @@ func TestCreateCaseComment(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					searchUsersFn: userSearchOK,
 					createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
