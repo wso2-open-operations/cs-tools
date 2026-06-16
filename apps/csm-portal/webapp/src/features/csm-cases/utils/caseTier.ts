@@ -21,23 +21,18 @@ import type { CustomerTier } from "@features/csm-cases/types/csmCases";
 // meta band, and the Customer widget can all share it without tripping the
 // react-refresh "components-only export" rule.
 export const TIER_LABEL: Record<CustomerTier, string> = {
-  subscription: "Subscription",
-  managed_cloud: "Managed Cloud",
-  saas: "SaaS",
-  trial: "Trial",
+  basic: "Basic",
+  enterprise: "Enterprise",
 };
 
 // Tier is metadata, not an action, so it must not wear the brand accent
-// (`primary`/orange). subscription is the most common tier, so colouring it
-// orange painted nearly every case header orange and also failed WCAG contrast
-// (white-on-#F87643 ~ 2.7:1). It renders neutral; the chromatic tiers stay on
-// contrast-safe semantic roles (their contrastText is dark in this theme).
+// (`primary`/orange) — that fails WCAG contrast (white-on-#F87643 ~ 2.7:1) and
+// would paint case headers orange. basic renders neutral; enterprise takes a
+// contrast-safe semantic role (its contrastText is dark in this theme).
 export const TIER_COLOR: Record<
   CustomerTier,
   "default" | "info" | "success" | "warning"
 > = {
-  subscription: "default",
-  managed_cloud: "success",
-  saas: "info",
-  trial: "warning",
+  basic: "default",
+  enterprise: "info",
 };

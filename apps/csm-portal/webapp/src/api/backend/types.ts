@@ -321,6 +321,35 @@ export interface BeProject {
   updatedAt?: string;
 }
 
+/** Account summary embedded in the project-detail response. */
+export interface BeProjectAccountRef {
+  id: string;
+  name?: string;
+  tier?: BeAccountTier;
+  region?: string;
+  activationDate?: string | null;
+  agentEnabled?: boolean;
+  kbReferencesEnabled?: boolean;
+}
+
+/**
+ * `GET /projects/{id}` response. Unlike the search shape ({@link BeProject}),
+ * it embeds the linked `account` (id + name + tier + region), so the case
+ * detail can resolve the customer and tier without a separate account lookup.
+ */
+export interface BeProjectDetail {
+  id: string;
+  account?: BeProjectAccountRef;
+  sfId?: string;
+  name?: string;
+  key?: string;
+  subscriptionType?: BeSubscriptionType;
+  startDate?: string;
+  endDate?: string;
+  createdOn?: string;
+  updatedOn?: string;
+}
+
 export interface BeProjectSearchPayload {
   pagination?: BePagination;
   searchQuery?: string;

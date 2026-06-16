@@ -106,8 +106,8 @@ export interface CaseAttachment {
   uploadedAt: string;
 }
 
-/** Plan/tier the customer holds for the affected product. */
-export type CustomerTier = "subscription" | "managed_cloud" | "saas" | "trial";
+/** Account tier, mirroring the entity-service account `tier` enum. */
+export type CustomerTier = "basic" | "enterprise";
 
 export type SlaClockState = "running" | "paused" | "met" | "breached";
 

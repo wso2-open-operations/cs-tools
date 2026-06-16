@@ -20,9 +20,9 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
 import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
 import type {
-  BeAccount,
   BeCaseView,
-  BeProject,
+  BeProjectAccountRef,
+  BeProjectDetail,
 } from "@api/backend/types";
 import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
@@ -39,7 +39,7 @@ const MOCK_LATENCY_MS = 150;
  */
 function detailFromBeCase(
   c: BeCaseView,
-  account?: BeAccount,
+  account?: BeProjectAccountRef,
 ): CsmCaseDetail {
   const customer = account?.name ?? "—";
   const reporter = c.createdBy?.displayName ?? c.createdBy?.email;
@@ -71,12 +71,16 @@ function detailFromBeCase(
     createdByEmail: c.createdBy?.email,
     customerContext: {
       accountName: customer,
-      tier: "subscription",
+      // Real account tier (basic/enterprise) from the embedded project account;
+      // default to basic when the account didn't resolve.
+      tier: account?.tier ?? "basic",
       region: account?.region ?? "—",
       // The reporter (createdBy) is the customer-side person who opened it.
       primaryContact: reporter ?? "—",
       primaryContactEmail: c.createdBy?.email ?? "—",
-      accountManager: account?.ownerId ?? "—",
+      // The embedded project account ref doesn't carry the owner; leave the
+      // account manager unresolved until a dedicated field is available.
+      accountManager: "—",
       openCases: 0,
     },
     productContext: {
@@ -126,23 +130,18 @@ export function useGetCsmCaseDetail(
       if (!beCase) return null;
 
       // The CaseView already embeds project / deployment / deployed-product /
-      // reporter names, so no lookups are needed for those. Only the account
-      // (customer) name is not embedded — resolve it best-effort via the
-      // project's account (the embedded project ref carries id + name only, so
-      // fetch the full project for its accountId, then the account). Failures
-      // degrade gracefully: the case still renders with a "—" customer.
-      let account: BeAccount | undefined;
+      // reporter names, so no lookups are needed for those. The account
+      // (customer name + tier + region) isn't on the CaseView, but the
+      // project-detail response embeds it, so one project fetch resolves it —
+      // no separate account call. Failures degrade gracefully: the case still
+      // renders with a "—" customer.
+      let account: BeProjectAccountRef | undefined;
       if (beCase.project?.id) {
         try {
-          const fullProject = await api.get<BeProject>(
+          const fullProject = await api.get<BeProjectDetail>(
             `/projects/${encodeURIComponent(beCase.project.id)}`,
           );
-          if (fullProject?.accountId) {
-            account =
-              (await api.get<BeAccount>(
-                `/accounts/${encodeURIComponent(fullProject.accountId)}`,
-              )) ?? undefined;
-          }
+          account = fullProject?.account;
         } catch (err) {
           logger.warn(
             `[useGetCsmCaseDetail] account hydrate failed: ${
