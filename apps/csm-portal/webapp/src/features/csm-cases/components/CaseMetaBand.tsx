@@ -18,7 +18,7 @@ import { Box, Card, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
-import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
+import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
 
@@ -106,9 +106,9 @@ function LinkText({
 
 /**
  * Always-visible facts band shown directly under the case header. Engineers
- * see assignee, deployment/product/version, who created the case, and which
- * account/project it belongs to without diving into a tab. The chevron in the
- * top-right collapses the band body into a slim header strip.
+ * see assignee, project type, deployment/product, who created the case, and
+ * which account/project it belongs to without diving into a tab. The chevron in
+ * the top-right collapses the band body into a slim header strip.
  */
 export default function CaseMetaBand({
   detail: c,
@@ -117,13 +117,13 @@ export default function CaseMetaBand({
 }: CaseMetaBandProps): JSX.Element {
   const product = c.productContext;
   const tier = c.customerContext.tier;
-  const versionLabel =
-    product.updateLevel && product.updateLevel.trim().length > 0
-      ? product.updateLevel
-      : product.version || "—";
+  // Project type is encoded as the second " - "-delimited segment of the
+  // project name (e.g. "Acme - Managed Cloud" → "Managed Cloud"). Temporary
+  // until the backend exposes it as a first-class field.
+  const projectType = c.projectName?.split(" - ")[1]?.trim() || "—";
   // One-line digest shown when the band is collapsed, so collapsing doesn't
   // hide every triage fact — account, tier, and who owns the case stay visible.
-  const collapsedSummary = [c.customer, TIER_LABEL[tier], c.assignee]
+  const collapsedSummary = [c.customer, tierLabel(tier), c.assignee]
     .filter(Boolean)
     .join(" · ");
 
@@ -190,7 +190,7 @@ export default function CaseMetaBand({
         >
           <Cell label="Tier">
             <Box sx={{ minWidth: 0 }}>
-              <SemanticChip role={TIER_COLOR[tier]} label={TIER_LABEL[tier]} />
+              <SemanticChip role={tierColor(tier)} label={tierLabel(tier)} />
             </Box>
           </Cell>
           <Cell label="Assignee">
@@ -229,6 +229,11 @@ export default function CaseMetaBand({
               </Typography>
             )}
           </Cell>
+          <Cell label="Project type">
+            <Typography variant="body2" noWrap>
+              {projectType}
+            </Typography>
+          </Cell>
           <Cell label="Deployment">
             <Typography variant="body2" noWrap>
               {product.deployment ?? "—"}
@@ -237,11 +242,6 @@ export default function CaseMetaBand({
           <Cell label="Product">
             <Typography variant="body2" noWrap>
               {product.product ?? "—"}
-            </Typography>
-          </Cell>
-          <Cell label="Version">
-            <Typography variant="body2" noWrap>
-              {versionLabel}
             </Typography>
           </Cell>
         </Box>

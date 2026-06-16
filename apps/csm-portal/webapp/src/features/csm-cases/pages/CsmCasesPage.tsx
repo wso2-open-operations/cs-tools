@@ -96,7 +96,7 @@ export default function CsmCasesPage(): JSX.Element {
   const { data: directoryUsers } = useDirectoryUsers();
   const { showError } = useErrorBanner();
   const hasShownErrorRef = useRef(false);
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(true);
 
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {

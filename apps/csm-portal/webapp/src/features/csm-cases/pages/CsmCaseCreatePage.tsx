@@ -33,7 +33,7 @@ import { useNavigate } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
+import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
@@ -69,17 +69,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
 
-  const projects = useProjectOptions();
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
 
   // When a selector query fails the form becomes non-completable, so surface it
-  // with an explicit retry rather than leaving an empty dropdown.
-  const hasOptionsError =
-    projects.isError || deployments.isError || deployedProducts.isError;
+  // with an explicit retry rather than leaving an empty dropdown. (Projects are
+  // searched on demand by AsyncProjectSelect, which reports its own state.)
+  const hasOptionsError = deployments.isError || deployedProducts.isError;
   const retryOptions = (): void => {
-    if (projects.isError) void projects.refetch();
     if (deployments.isError) void deployments.refetch();
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
@@ -172,22 +170,11 @@ export default function CsmCaseCreatePage(): JSX.Element {
         )}
         <Grid container spacing={2.5}>
           <Grid size={{ xs: 12, md: 4 }}>
-            <FormControl fullWidth size="small" required>
-              <InputLabel id="case-project-label">Project</InputLabel>
-              <Select
-                labelId="case-project-label"
-                label="Project"
-                value={projectId}
-                onChange={(e) => onProjectChange(String(e.target.value))}
-                disabled={projects.isLoading}
-              >
-                {(projects.data ?? []).map((p) => (
-                  <MenuItem key={p.id} value={p.id}>
-                    {p.name ?? p.id}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <AsyncProjectSelect
+              value={projectId}
+              onChange={onProjectChange}
+              required
+            />
           </Grid>
 
           <Grid size={{ xs: 12, md: 4 }}>

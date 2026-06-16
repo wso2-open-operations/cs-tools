@@ -19,11 +19,7 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
 import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
-import type {
-  BeAccount,
-  BeCaseView,
-  BeProject,
-} from "@api/backend/types";
+import type { BeCaseView } from "@api/backend/types";
 import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 
@@ -31,16 +27,14 @@ const MOCK_LATENCY_MS = 150;
 
 /**
  * Build a CsmCaseDetail from the rich `BeCaseView`. The view embeds the
- * project / deployment / deployed-product / reporter as objects, so their
- * display names come straight off the response. Only the account (customer)
- * name is not embedded and is passed in after a best-effort lookup. Side
- * widgets the backend doesn't return yet (SLA clocks, watchers, tags, time
- * logs, attachments, linked items) default to empty / placeholder values.
+ * account / project / deployment / deployed-product / reporter as objects, so
+ * their names (and the account tier) come straight off the response with no
+ * extra lookups. Side widgets the backend doesn't return yet (SLA clocks,
+ * watchers, tags, time logs, attachments, linked items) default to empty /
+ * placeholder values.
  */
-function detailFromBeCase(
-  c: BeCaseView,
-  account?: BeAccount,
-): CsmCaseDetail {
+function detailFromBeCase(c: BeCaseView): CsmCaseDetail {
+  const account = c.account;
   const customer = account?.name ?? "—";
   const reporter = c.createdBy?.displayName ?? c.createdBy?.email;
   const product = c.deployedProduct?.displayName ?? "—";
@@ -71,12 +65,16 @@ function detailFromBeCase(
     createdByEmail: c.createdBy?.email,
     customerContext: {
       accountName: customer,
-      tier: "subscription",
-      region: account?.region ?? "—",
+      // Account tier from the embedded account's `type` (e.g. "Enterprise");
+      // free-form, so tolerated downstream by tierLabel/tierColor.
+      tier: account?.type ?? "",
+      // The CaseView account ref carries only id/name/type, so region and the
+      // account manager aren't available here.
+      region: "—",
       // The reporter (createdBy) is the customer-side person who opened it.
       primaryContact: reporter ?? "—",
       primaryContactEmail: c.createdBy?.email ?? "—",
-      accountManager: account?.ownerId ?? "—",
+      accountManager: "—",
       openCases: 0,
     },
     productContext: {
@@ -125,33 +123,10 @@ export function useGetCsmCaseDetail(
       );
       if (!beCase) return null;
 
-      // The CaseView already embeds project / deployment / deployed-product /
-      // reporter names, so no lookups are needed for those. Only the account
-      // (customer) name is not embedded — resolve it best-effort via the
-      // project's account (the embedded project ref carries id + name only, so
-      // fetch the full project for its accountId, then the account). Failures
-      // degrade gracefully: the case still renders with a "—" customer.
-      let account: BeAccount | undefined;
-      if (beCase.project?.id) {
-        try {
-          const fullProject = await api.get<BeProject>(
-            `/projects/${encodeURIComponent(beCase.project.id)}`,
-          );
-          if (fullProject?.accountId) {
-            account =
-              (await api.get<BeAccount>(
-                `/accounts/${encodeURIComponent(fullProject.accountId)}`,
-              )) ?? undefined;
-          }
-        } catch (err) {
-          logger.warn(
-            `[useGetCsmCaseDetail] account hydrate failed: ${
-              (err as Error).message
-            }`,
-          );
-        }
-      }
-      return detailFromBeCase(beCase, account);
+      // The CaseView embeds account / project / deployment / deployed-product /
+      // reporter, so the whole detail builds from this one response — no
+      // follow-up lookups.
+      return detailFromBeCase(beCase);
     },
     enabled: !!caseId,
     staleTime: 30_000,

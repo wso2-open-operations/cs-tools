@@ -113,10 +113,21 @@ export interface BeDeployedProductRef {
 }
 
 /**
+ * Account summary embedded in the CaseView. `type` is the account/support tier
+ * (e.g. "Enterprise"); it is a free-form string, not the PG `basic|enterprise`
+ * enum, because ServiceNow-sourced cases pass their support tier through as-is.
+ */
+export interface BeCaseAccountRef {
+  id: string;
+  name?: string;
+  type?: string;
+}
+
+/**
  * `GET /cases/{id}` response — the rich CaseView. Unlike {@link BeCase} (the
  * flat create/legacy shape), it embeds the related entities as objects, so the
- * UI gets project / deployment / deployed-product / reporter names without any
- * extra lookups.
+ * UI gets account / project / deployment / deployed-product / reporter names
+ * without any extra lookups.
  */
 export interface BeCaseView {
   id: string;
@@ -130,6 +141,7 @@ export interface BeCaseView {
   state?: BeCaseState;
   nextStates?: BeCaseState[];
   createdBy?: BeUserRef;
+  account?: BeCaseAccountRef;
   project?: BeEntityRef;
   deployment?: BeEntityRef;
   deployedProduct?: BeDeployedProductRef;
@@ -146,6 +158,22 @@ export interface BeCaseCreatePayload {
   description: string;
   priority: BeCasePriority;
   issueType: BeCaseIssueType;
+}
+
+/** The case summary embedded in the `POST /cases` success envelope. */
+export interface BeCreatedCase {
+  id: string;
+  internalId?: string;
+  number?: string;
+  createdBy?: string;
+  createdOn?: string;
+  state?: string;
+}
+
+/** `POST /cases` response: a message plus the created case. */
+export interface BeCaseCreateResponse {
+  message?: string;
+  case: BeCreatedCase;
 }
 
 /**
@@ -417,13 +445,24 @@ export interface BeProductVersionSearchResponse extends BeSearchResponseBase {
 // Deployed products (deployment ↔ product link)
 // ---------------------------------------------------------------------------
 
+/** Product version as embedded in a deployed-product record. */
+export interface BeDeployedProductVersion {
+  id: string;
+  name: string;
+  releasedDate?: string | null;
+  supportEoLDate?: string | null;
+}
+
 export interface BeDeployedProduct {
   id: string;
-  deploymentId?: string;
-  productId?: string;
-  productVersionId?: string;
-  createdAt?: string;
-  updatedAt?: string;
+  deployment?: BeEntityRef;
+  product?: BeEntityRef;
+  version?: BeDeployedProductVersion | null;
+  cores?: number | null;
+  tps?: number | null;
+  category?: string | null;
+  createdOn?: string;
+  updatedOn?: string;
 }
 
 export interface BeDeployedProductSearchPayload {

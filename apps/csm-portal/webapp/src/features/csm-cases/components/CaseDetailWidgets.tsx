@@ -61,7 +61,7 @@ import type {
   CaseWatcher,
   DeploymentCategory,
 } from "@features/csm-cases/types/csmCases";
-import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
+import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
 import {
   SLA_CLOCK_LABEL,
   formatTimeToBreach,
@@ -148,8 +148,8 @@ export function CustomerContextWidget({
       action={
         <Chip
           size="small"
-          label={TIER_LABEL[ctx.tier]}
-          color={TIER_COLOR[ctx.tier]}
+          label={tierLabel(ctx.tier)}
+          color={tierColor(ctx.tier)}
         />
       }
     >

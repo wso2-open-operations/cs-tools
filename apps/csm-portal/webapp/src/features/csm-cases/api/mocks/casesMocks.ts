@@ -495,7 +495,7 @@ export function getMockCsmCaseById(
 const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   "acc-001": {
     accountName: "Acme Financial",
-    tier: "managed_cloud",
+    tier: "enterprise",
     region: "us-east-1",
     primaryContact: "Renee Park",
     primaryContactEmail: "renee.park@acmefinancial.com",
@@ -505,7 +505,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-002": {
     accountName: "Globex Corp",
-    tier: "subscription",
+    tier: "basic",
     region: "eu-west-1",
     primaryContact: "Helena Voss",
     primaryContactEmail: "h.voss@globex.com",
@@ -514,7 +514,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-003": {
     accountName: "Initech Systems",
-    tier: "managed_cloud",
+    tier: "enterprise",
     region: "ap-southeast-1",
     primaryContact: "Peter Gibbons",
     primaryContactEmail: "peter@initech.io",
@@ -524,7 +524,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-004": {
     accountName: "Soylent Industries",
-    tier: "subscription",
+    tier: "basic",
     region: "us-west-2",
     primaryContact: "Marie Sandwitch",
     primaryContactEmail: "marie@soylent.com",
@@ -533,7 +533,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-005": {
     accountName: "Umbrella Health",
-    tier: "saas",
+    tier: "enterprise",
     region: "us-east-1",
     primaryContact: "Albert Wesker",
     primaryContactEmail: "a.wesker@umbrella.health",
@@ -542,7 +542,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-101": {
     accountName: "Wayne Enterprises",
-    tier: "subscription",
+    tier: "basic",
     region: "us-east-1",
     primaryContact: "Lucius Fox",
     primaryContactEmail: "lfox@wayne.com",
@@ -551,7 +551,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-102": {
     accountName: "Stark Industries",
-    tier: "managed_cloud",
+    tier: "enterprise",
     region: "us-west-1",
     primaryContact: "Pepper Potts",
     primaryContactEmail: "pepper@stark.com",
@@ -561,7 +561,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
   },
   "acc-103": {
     accountName: "Tyrell Corp",
-    tier: "subscription",
+    tier: "basic",
     region: "eu-central-1",
     primaryContact: "Eldon Tyrell",
     primaryContactEmail: "eldon@tyrell.corp",
@@ -572,7 +572,7 @@ const CUSTOMER_CONTEXTS: Record<string, CaseCustomerContext> = {
 
 const FALLBACK_CUSTOMER: CaseCustomerContext = {
   accountName: "Unknown Account",
-  tier: "subscription",
+  tier: "basic",
   region: "unknown",
   primaryContact: "(no primary contact)",
   primaryContactEmail: "—",

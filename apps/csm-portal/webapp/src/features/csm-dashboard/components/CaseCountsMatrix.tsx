@@ -49,7 +49,7 @@ function casesHref(severity?: Severity, state?: CaseState): string {
   return qs ? `/cases?${qs}` : "/cases";
 }
 
-/** A count rendered as a link when > 0, muted "0" otherwise. */
+/** A count rendered as a link, styled the same whether the value is 0 or more. */
 function CountCell({
   value,
   href,
@@ -61,28 +61,21 @@ function CountCell({
 }): JSX.Element {
   return (
     <TableCell align="center">
-      {value > 0 ? (
-        <Link
-          component={RouterLink}
-          to={href}
-          underline="hover"
-          color="inherit"
-          sx={{
-            // Larger, heavier numbers so the counts read at a glance from across
-            // the dashboard, not just on close inspection.
-            fontSize: bold ? "1.35rem" : "1.2rem",
-            fontWeight: bold ? 700 : 600,
-            lineHeight: 1,
-          }}
-        >
-          {value}
-        </Link>
-      ) : (
-        // Zeros stay small and muted so the eye lands on the cells that matter.
-        <Typography component="span" variant="body2" color="text.disabled">
-          0
-        </Typography>
-      )}
+      <Link
+        component={RouterLink}
+        to={href}
+        underline="hover"
+        color="inherit"
+        sx={{
+          // Larger, heavier numbers so the counts read at a glance from across
+          // the dashboard, not just on close inspection.
+          fontSize: bold ? "1.35rem" : "1.2rem",
+          fontWeight: bold ? 700 : 600,
+          lineHeight: 1,
+        }}
+      >
+        {value}
+      </Link>
     </TableCell>
   );
 }

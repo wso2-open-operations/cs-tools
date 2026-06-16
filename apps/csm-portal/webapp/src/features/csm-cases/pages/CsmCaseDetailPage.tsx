@@ -61,7 +61,6 @@ import {
   TimeLogsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
-import { TIER_COLOR, TIER_LABEL } from "@features/csm-cases/utils/caseTier";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
@@ -618,11 +617,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
               label={stateLabel(c.state)}
               color={stateColor(c.state)}
               sx={{ fontWeight: 600 }}
-            />
-            <Chip
-              size="small"
-              label={TIER_LABEL[c.customerContext.tier]}
-              color={TIER_COLOR[c.customerContext.tier]}
             />
             {!isClosed && hasSlaData && (
               <Chip

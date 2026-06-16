@@ -106,8 +106,12 @@ export interface CaseAttachment {
   uploadedAt: string;
 }
 
-/** Plan/tier the customer holds for the affected product. */
-export type CustomerTier = "subscription" | "managed_cloud" | "saas" | "trial";
+/**
+ * Account tier as shown on a case. Free-form: the CaseView's `account.type` is
+ * the PG `basic|enterprise` enum for native cases but a raw ServiceNow support
+ * tier (e.g. "Enterprise") for SN-sourced ones, so render it defensively.
+ */
+export type CustomerTier = string;
 
 export type SlaClockState = "running" | "paused" | "met" | "breached";
 

@@ -51,7 +51,15 @@ export default function SemanticChip({
 }: SemanticChipProps): JSX.Element {
   const theme = useTheme();
 
-  if (role === "default") {
+  // Resolve the palette fill defensively: an unexpected role (e.g. a free-form
+  // value that slipped past the type) must degrade to the outlined default
+  // chip, never read `.main` off an undefined palette entry and crash the page.
+  const paletteEntry =
+    role === "default"
+      ? undefined
+      : (theme.palette[role] as { main?: string } | undefined);
+
+  if (!paletteEntry?.main) {
     return (
       <Chip
         size={size}
@@ -62,7 +70,7 @@ export default function SemanticChip({
     );
   }
 
-  const bg = theme.palette[role].main;
+  const bg = paletteEntry.main;
   const fg = pickAccessibleText(bg);
 
   return (

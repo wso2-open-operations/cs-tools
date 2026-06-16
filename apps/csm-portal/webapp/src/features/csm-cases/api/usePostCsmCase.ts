@@ -21,57 +21,59 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
-import type { BeCase, BeCaseCreatePayload } from "@api/backend/types";
+import type {
+  BeCaseCreatePayload,
+  BeCaseCreateResponse,
+  BeCreatedCase,
+} from "@api/backend/types";
 
 const MOCK_LATENCY_MS = 200;
 
 /**
- * Create a case via `POST /cases`. Returns the created case. The mutation
- * also invalidates project-scoped case searches so list views refresh.
+ * Create a case via `POST /cases`. The backend wraps the result in a
+ * `{ message, case }` envelope, so this unwraps and returns the created case
+ * (its `id` drives the post-create redirect). The mutation also invalidates
+ * project-scoped case searches so list views refresh.
  *
  * In MOCK mode the mutation resolves with a fabricated case using the input
  * payload; nothing is persisted server-side.
  */
 export function usePostCsmCase(): UseMutationResult<
-  BeCase,
+  BeCreatedCase,
   Error,
   BeCaseCreatePayload
 > {
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
-  return useMutation<BeCase, Error, BeCaseCreatePayload>({
-    mutationFn: async (input): Promise<BeCase> => {
+  return useMutation<BeCreatedCase, Error, BeCaseCreatePayload>({
+    mutationFn: async (input): Promise<BeCreatedCase> => {
       if (isMockMode()) {
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
         const now = new Date().toISOString();
         return {
           id: `mock-${Math.random().toString(36).slice(2, 10)}`,
           number: `CS-MOCK-${Math.floor(Math.random() * 9000) + 1000}`,
-          projectId: input.projectId,
-          deploymentId: input.deploymentId,
-          deployedProductId: input.deployedProductId,
-          subject: input.subject,
-          description: input.description,
-          priority: input.priority,
-          issueType: input.issueType,
-          state: "open",
-          createdAt: now,
-          updatedAt: now,
+          createdBy: "mock@wso2.com",
+          createdOn: now,
+          state: "Open",
         };
       }
-      return api.post<BeCaseCreatePayload, BeCase>("/cases", input);
+      const res = await api.post<BeCaseCreatePayload, BeCaseCreateResponse>(
+        "/cases",
+        input,
+      );
+      return res.case;
     },
-    onSuccess: (created) => {
-      // Invalidate any project-scoped search for the case's project.
-      if (created.projectId) {
-        queryClient.invalidateQueries({
-          queryKey: [
-            ApiQueryKeys.BACKEND_PROJECT_CASES_SEARCH,
-            created.projectId,
-          ],
-        });
-      }
+    // The create response carries no projectId, so invalidate the project-scoped
+    // search using the submitted payload's project instead.
+    onSuccess: (_created, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: [
+          ApiQueryKeys.BACKEND_PROJECT_CASES_SEARCH,
+          variables.projectId,
+        ],
+      });
       // And the cross-project CSM cases list (fan-out aggregation).
       queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_CASES] });
     },
