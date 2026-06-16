@@ -238,13 +238,13 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 
 	payload := snCreateCasePayload{
 		Type:              "default_case",
-		ProjectID:         req.ProjectID,
-		DeploymentID:      req.DeploymentID,
-		DeployedProductID: req.DeployedProductID,
+		ProjectID:         uuidToSysid(req.ProjectID),
+		DeploymentID:      uuidToSysid(req.DeploymentID),
+		DeployedProductID: uuidToSysid(req.DeployedProductID),
 		Title:             req.Subject,
 		Description:       req.Description,
-		SeverityKey:  snPriorityID[req.Priority],
-		IssueTypeKey: snIssueTypeID[req.IssueType],
+		SeverityKey:       snPriorityID[req.Priority],
+		IssueTypeKey:      snIssueTypeID[req.IssueType],
 	}
 
 	raw, err := s.client.Post(ctx, "/cases", token, payload)
@@ -270,7 +270,7 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	return domain.CreateCaseResponse{
 		Message: snResp.Message,
 		Case: domain.CreateCaseDetails{
-			ID:         snResp.Case.ID,
+			ID:         sysidToUUID(snResp.Case.ID),
 			InternalID: snResp.Case.InternalID,
 			Number:     snResp.Case.Number,
 			CreatedBy:  snResp.Case.CreatedBy,
@@ -286,7 +286,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		return domain.CaseView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	raw, err := s.client.Get(ctx, "/cases/"+id, token)
+	raw, err := s.client.Get(ctx, "/cases/"+uuidToSysid(id), token)
 	if err != nil {
 		return domain.CaseView{}, err
 	}
@@ -314,7 +314,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 
 	cv := domain.CaseView{
-		ID:          c.ID,
+		ID:          sysidToUUID(c.ID),
 		Number:      c.Number,
 		InternalID:  c.InternalID,
 		Subject:     c.Title,
@@ -327,28 +327,28 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		CreatedByDetails: domain.UserRef{
 			Email: c.CreatedBy,
 		},
-		ProjectDetails:    domain.EntityRef{ID: c.Project.ID, Name: c.Project.Name},
-		DeploymentDetails: domain.EntityRef{ID: c.Deployment.ID, Name: c.Deployment.Name},
+		ProjectDetails:    domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+		DeploymentDetails: domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
 		DeployedProductDetails: domain.DeployedProductRef{
-			ID:          c.DeployedProduct.ID,
+			ID:          sysidToUUID(c.DeployedProduct.ID),
 			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
 		},
 	}
 
 	if c.Product != nil {
-		cv.ProductDetails = domain.EntityRef{ID: c.Product.ID, Name: c.Product.Name}
+		cv.ProductDetails = domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
 	}
 	if c.AssignedEngineer != nil {
-		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: c.AssignedEngineer.ID, Name: c.AssignedEngineer.Name}
+		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: sysidToUUID(c.AssignedEngineer.ID), Name: c.AssignedEngineer.Name}
 	}
 	if c.ParentCase != nil {
-		cv.ParentCase = &domain.CaseNumberRef{ID: c.ParentCase.ID, Number: c.ParentCase.Number}
+		cv.ParentCase = &domain.CaseNumberRef{ID: sysidToUUID(c.ParentCase.ID), Number: c.ParentCase.Number}
 	}
 	if c.RelatedCase != nil {
-		cv.RelatedCase = &domain.CaseNumberRef{ID: c.RelatedCase.ID, Number: c.RelatedCase.Number}
+		cv.RelatedCase = &domain.CaseNumberRef{ID: sysidToUUID(c.RelatedCase.ID), Number: c.RelatedCase.Number}
 	}
 	if c.Account != nil {
-		cv.AccountDetails = &domain.AccountRef{ID: c.Account.ID, Name: c.Account.Name, Type: c.Account.Type}
+		cv.AccountDetails = &domain.AccountRef{ID: sysidToUUID(c.Account.ID), Name: c.Account.Name, Type: c.Account.Type}
 	}
 
 	return cv, nil
@@ -384,9 +384,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		Filters: snCaseFilters{
 			CaseTypes:          []string{"default_case"},
 			SearchQuery:        req.SearchQuery,
-			ProjectIDs:         req.ProjectIDs,
-			DeploymentIDs:      req.DeploymentIDs,
-			DeployedProductIDs: req.DeployedProductIDs,
+			ProjectIDs:         uuidsToSysids(req.ProjectIDs),
+			DeploymentIDs:      uuidsToSysids(req.DeploymentIDs),
+			DeployedProductIDs: uuidsToSysids(req.DeployedProductIDs),
 			StateKeys:          domainStatesToSNIDs(req.StateKeys),
 			SeverityKeys:       domainPrioritiesToSNIDs(req.PriorityKeys),
 			IssueTypeKeys:      domainIssueTypesToSNIDs(req.IssueTypeKeys),
@@ -425,7 +425,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		}
 
 		views = append(views, domain.SearchCaseView{
-			ID:                     c.ID,
+			ID:                     sysidToUUID(c.ID),
 			Number:                 c.Number,
 			InternalID:             c.InternalID,
 			Subject:                c.Title,
@@ -436,9 +436,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			CreatedOn:              createdOn,
 			UpdatedOn:              updatedOn,
 			CreatedBy:              domain.UserIDEmailRef{Email: c.CreatedBy},
-			ProjectDetails:         domain.EntityRef{ID: c.Project.ID, Name: c.Project.Name},
-			DeploymentDetails:      domain.EntityRef{ID: c.Deployment.ID, Name: c.Deployment.Name},
-			DeployedProductDetails: domain.DeployedProductRef{ID: c.DeployedProduct.ID, DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
+			ProjectDetails:         domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+			DeploymentDetails:      domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
+			DeployedProductDetails: domain.DeployedProductRef{ID: sysidToUUID(c.DeployedProduct.ID), DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
 		})
 	}
 

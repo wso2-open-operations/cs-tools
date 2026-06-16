@@ -123,7 +123,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 			return domain.SearchProjectsResponse{}, fmt.Errorf("sn projects: project %q: %w", p.ID, err)
 		}
 		views = append(views, domain.ProjectView{
-			ID:               p.ID,
+			ID:               sysidToUUID(p.ID),
 			Name:             p.Name,
 			Key:              p.Key,
 			SubscriptionType: subType,
@@ -165,14 +165,13 @@ type snProjectAccount struct {
 }
 
 // GetProjectByID implements ProjectService by calling the Choreo GET /projects/{id} endpoint.
-// SN sys_ids are 32-char hex strings, not UUIDs, so no UUID validation is applied here.
 func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.ProjectDetailsView{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	raw, err := s.client.Get(ctx, "/projects/"+id, token)
+	raw, err := s.client.Get(ctx, "/projects/"+uuidToSysid(id), token)
 	if err != nil {
 		return domain.ProjectDetailsView{}, err
 	}
@@ -212,7 +211,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 	}
 
 	return domain.ProjectDetailsView{
-		ID:               sn.ID,
+		ID:               sysidToUUID(sn.ID),
 		SfID:             sn.SfID,
 		Name:             sn.Name,
 		Key:              sn.Key,
@@ -222,7 +221,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 		CreatedOn:        createdOn,
 		UpdatedOn:        createdOn,
 		Account: domain.ProjectAccountRef{
-			ID:                  sn.Account.ID,
+			ID:                  sysidToUUID(sn.Account.ID),
 			Name:                sn.Account.Name,
 			ActivationDate:      activationDate,
 			Tier:                sn.Account.SupportTier,

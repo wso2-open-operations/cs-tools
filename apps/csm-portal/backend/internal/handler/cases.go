@@ -63,6 +63,16 @@ func resolveUserID(ctx context.Context, entity entityCaseClient, email string) (
 	return result.Users[0].ID, nil
 }
 
+// stripField removes the named key from a JSON object body, if present.
+func stripField(body []byte, field string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	delete(m, field)
+	return json.Marshal(m)
+}
+
 // injectCreatedBy merges createdBy into a JSON request body.
 func injectCreatedBy(body []byte, userID string) ([]byte, error) {
 	var m map[string]json.RawMessage
@@ -107,10 +117,6 @@ func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 const maxRequestBodyBytes = 1 << 20
 
 // CreateCase handles POST /cases.
-// createdBy is resolved server-side by looking up the authenticated user's email
-// in the entity service and injecting the UUID into the request body.
-// TODO: remove the users/search lookup once DB-level auth propagates the entity
-// UUID directly through the token claims.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -134,27 +140,16 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := resolveUserID(r.Context(), h.entity, user.Email)
-	if err != nil {
-		if errors.Is(err, errUserNotFound) {
-			// Token is valid but the entity service has no record for this user — 403, not 401.
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
-			return
-		}
-		slog.ErrorContext(r.Context(), "resolveUserID failed", "email", user.Email, "err", err)
-		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-		return
-	}
-
-	entityBody, err := injectCreatedBy(body, userID)
+	// Strip any client-supplied createdBy to prevent identity spoofing.
+	body, err = stripField(body, "createdBy")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
 
-	result, err := h.entity.CreateCase(r.Context(), entityBody)
+	result, err := h.entity.CreateCase(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCase failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateCase failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to create case.")
 		return
 	}
