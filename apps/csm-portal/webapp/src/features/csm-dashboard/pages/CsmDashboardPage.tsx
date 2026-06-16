@@ -17,6 +17,7 @@
 import { Box, Card, Chip, Typography } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import AbtDashboardHeader from "@features/csm-dashboard/components/AbtDashboardHeader";
+import CaseCompositionCharts from "@features/csm-dashboard/components/CaseCompositionCharts";
 import CaseCountsMatrix from "@features/csm-dashboard/components/CaseCountsMatrix";
 import { useGetCsmDashboard } from "@features/csm-dashboard/api/useGetCsmDashboard";
 import {
@@ -58,7 +59,10 @@ export default function CsmDashboardPage(): JSX.Element {
         isError={isError}
       />
       {dashboardKey === "engineer" ? (
-        <CaseCountsMatrix />
+        <>
+          <CaseCountsMatrix />
+          <CaseCompositionCharts />
+        </>
       ) : (
         <DashboardPlaceholder dashboardKey={dashboardKey} />
       )}
