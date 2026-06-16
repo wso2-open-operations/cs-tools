@@ -474,9 +474,13 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	if req.Filters != nil && req.Filters.Type != nil {
-		if snType, ok := snCommentTypeMap[*req.Filters.Type]; ok {
-			payload.Filters = &snCommentFilters{Type: snType}
+		snType, ok := snCommentTypeMap[*req.Filters.Type]
+		if !ok {
+			return domain.SearchCaseCommentsResponse{}, &apierror.ValidationError{
+				Msg: "filters.type is not supported for ServiceNow: " + string(*req.Filters.Type),
+			}
 		}
+		payload.Filters = &snCommentFilters{Type: snType}
 	}
 
 	raw, err := s.client.Post(ctx, "/comments/search", token, payload)
@@ -495,9 +499,16 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 		if err != nil {
 			return domain.SearchCaseCommentsResponse{}, fmt.Errorf("sn search comments: parse createdOn %q: %w", c.CreatedOn, err)
 		}
-		commentType := domain.CommentTypeComment
-		if c.Type == "work_note" {
+		var commentType domain.CommentType
+		switch c.Type {
+		case "comments", "comment":
+			commentType = domain.CommentTypeComment
+		case "work_note":
 			commentType = domain.CommentTypeWorkNote
+		case "activity":
+			commentType = domain.CommentTypeActivity
+		default:
+			commentType = domain.CommentTypeComment
 		}
 		comments = append(comments, domain.CaseComment{
 			ID:      sysidToUUID(c.ID),
