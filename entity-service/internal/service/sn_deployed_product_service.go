@@ -84,9 +84,6 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchDeployedProductsResponse{}, err
 	}
-	if err := validateUUIDs("deploymentIds", req.DeploymentIDs); err != nil {
-		return domain.SearchDeployedProductsResponse{}, err
-	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
