@@ -94,7 +94,7 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 	}
 
 	payload := snDeployedProductSearchPayload{
-		Filters:    snDeployedProductFilters{DeploymentIDs: req.DeploymentIDs},
+		Filters:    snDeployedProductFilters{DeploymentIDs: uuidsToSysids(req.DeploymentIDs)},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/deployed-products/search", token, payload)
@@ -136,7 +136,7 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 				eolDate = &t
 			}
 			versionRef = &domain.DeployedProductVersionRef{
-				ID:             dp.Version.ID,
+				ID:             sysidToUUID(dp.Version.ID),
 				Name:           dp.Version.Name,
 				ReleasedDate:   releasedDate,
 				SupportEoLDate: eolDate,
@@ -154,9 +154,9 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 		}
 
 		views = append(views, domain.DeployedProductView{
-			ID:         dp.ID,
-			Deployment: domain.EntityRef{ID: dp.Deployment.ID, Name: dp.Deployment.Name},
-			Product:    domain.EntityRef{ID: dp.Product.ID, Name: dp.Product.Name},
+			ID:         sysidToUUID(dp.ID),
+			Deployment: domain.EntityRef{ID: sysidToUUID(dp.Deployment.ID), Name: dp.Deployment.Name},
+			Product:    domain.EntityRef{ID: sysidToUUID(dp.Product.ID), Name: dp.Product.Name},
 			Version:    versionRef,
 			Cores:      cores,
 			TPS:        tps,

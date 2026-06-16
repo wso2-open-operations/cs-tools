@@ -94,7 +94,7 @@ func (s *snDeploymentService) SearchDeployments(ctx context.Context, req domain.
 	payload := snDeploymentSearchPayload{
 		Filters: snDeploymentFilters{
 			SearchQuery: req.SearchQuery,
-			ProjectIDs:  req.ProjectIDs,
+			ProjectIDs:  uuidsToSysids(req.ProjectIDs),
 		},
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
@@ -123,13 +123,13 @@ func (s *snDeploymentService) SearchDeployments(ctx context.Context, req domain.
 			return domain.SearchDeploymentsResponse{}, fmt.Errorf("sn deployments: deployment %q: %w", d.ID, err)
 		}
 		views = append(views, domain.DeploymentView{
-			ID:          d.ID,
+			ID:          sysidToUUID(d.ID),
 			Number:      d.Number,
 			Name:        d.Name,
 			Type:        deployType,
 			Description: d.Description,
 			CreatedBy:   nil,
-			Project:     domain.EntityRef{ID: d.Project.ID, Name: d.Project.Name},
+			Project:     domain.EntityRef{ID: sysidToUUID(d.Project.ID), Name: d.Project.Name},
 			CreatedOn:   createdOn,
 			UpdatedOn:   updatedOn,
 		})
