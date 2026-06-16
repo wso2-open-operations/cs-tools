@@ -63,6 +63,16 @@ func resolveUserID(ctx context.Context, entity entityCaseClient, email string) (
 	return result.Users[0].ID, nil
 }
 
+// stripField removes the named key from a JSON object body, if present.
+func stripField(body []byte, field string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	delete(m, field)
+	return json.Marshal(m)
+}
+
 // injectCreatedBy merges createdBy into a JSON request body.
 func injectCreatedBy(body []byte, userID string) ([]byte, error) {
 	var m map[string]json.RawMessage
@@ -126,6 +136,13 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// Strip any client-supplied createdBy to prevent identity spoofing.
+	body, err = stripField(body, "createdBy")
+	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}

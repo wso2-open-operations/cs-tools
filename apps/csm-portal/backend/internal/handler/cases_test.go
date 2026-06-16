@@ -118,6 +118,31 @@ func TestCreateCase(t *testing.T) {
 		}
 	})
 
+	t.Run("strips client-supplied createdBy before forwarding", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			createCaseFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"id":"case-1","state":"open"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		payload := `{"projectId":"proj-1","createdBy":"attacker-uuid","subject":"Login failure"}`
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases", strings.NewReader(payload)))
+		w := httptest.NewRecorder()
+		h.CreateCase(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
+		}
+		if _, present := sent["createdBy"]; present {
+			t.Error("upstream received createdBy but it should have been stripped")
+		}
+	})
+
 	t.Run("upstream errors on create are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to create case.") {
 			t.Run(tc.name, func(t *testing.T) {
