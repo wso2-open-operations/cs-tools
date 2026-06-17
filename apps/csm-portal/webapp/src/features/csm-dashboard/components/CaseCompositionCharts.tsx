@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box } from "@wso2/oxygen-ui";
+import { Box, Typography } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
 import {
   COMPOSITION_STATES,
@@ -84,30 +84,46 @@ export default function CaseCompositionCharts(): JSX.Element {
     [data],
   );
 
+  const closedTotal = data?.closedTotal ?? 0;
+
   return (
-    <Box
-      sx={{
-        display: "grid",
-        gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
-        gap: 3,
-      }}
-    >
-      <CompositionDonut
-        title="Cases by severity"
-        description="Share of all cases at each severity level (S0–S4), across every state."
-        slices={severitySlices}
-        total={data?.severityTotal ?? 0}
-        isLoading={isLoading}
-        isError={isError}
-      />
-      <CompositionDonut
-        title="Cases by state"
-        description="Share of all cases in each lifecycle state, regardless of severity."
-        slices={stateSlices}
-        total={data?.stateTotal ?? 0}
-        isLoading={isLoading}
-        isError={isError}
-      />
+    <Box>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+          gap: 3,
+        }}
+      >
+        <CompositionDonut
+          title="Cases by severity"
+          description="Share of active cases at each severity level (S0–S4), excluding closed."
+          slices={severitySlices}
+          total={data?.severityTotal ?? 0}
+          isLoading={isLoading}
+          isError={isError}
+        />
+        <CompositionDonut
+          title="Cases by state"
+          description="Share of active cases in each lifecycle state, excluding closed."
+          slices={stateSlices}
+          total={data?.stateTotal ?? 0}
+          isLoading={isLoading}
+          isError={isError}
+        />
+      </Box>
+      {/* Reconciles the pies with the matrix above: both show active cases only,
+          so the closed count is called out here rather than mixed into a slice. */}
+      {!isLoading && !isError && closedTotal > 0 && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 1.5 }}
+        >
+          These charts and the matrix above show active cases only. Excludes{" "}
+          {closedTotal} closed {closedTotal === 1 ? "case" : "cases"}.
+        </Typography>
+      )}
     </Box>
   );
 }
