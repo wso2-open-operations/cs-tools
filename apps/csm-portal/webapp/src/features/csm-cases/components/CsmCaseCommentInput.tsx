@@ -31,13 +31,22 @@ import {
   Minimize2,
   Send,
 } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useRef, useState, type JSX } from "react";
+import { useCallback, useMemo, useRef, useState, type JSX } from "react";
 import Editor from "@components/rich-text-editor/Editor";
+import { formatBytes } from "@utils/formatBytes";
 
 interface CsmCaseCommentInputProps {
   onSubmit: (html: string, internal: boolean) => Promise<unknown> | void;
   disabled?: boolean;
 }
+
+// Mirrors the BE request-body cap for POST /cases/{id}/comments
+// (handler `maxCommentBodyBytes = 10 << 20`). Comments carry inline images as
+// base64 data URIs, so the body can get large; the BE returns 413 past this.
+const MAX_COMMENT_BODY_BYTES = 10 * 1024 * 1024;
+// Reserve headroom for the JSON envelope ({ type, content }) + string escaping
+// so the FE blocks before the BE rejects with 413.
+const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 
 /** Strip tags + collapse whitespace to decide if the editor is effectively empty. */
 function isEmpty(html: string): boolean {
@@ -65,10 +74,27 @@ export default function CsmCaseCommentInput({
   // per mount).
   const [editorMountKey, setEditorMountKey] = useState(0);
 
+  // UTF-8 byte size of the comment body. The BE caps the whole request body, so
+  // mirror it here to fail fast with a clear message instead of a 413.
+  const bodyBytes = useMemo(
+    () => new TextEncoder().encode(html).length,
+    [html],
+  );
+  const overSizeLimit = bodyBytes > MAX_COMMENT_CONTENT_BYTES;
+  const sizeError = overSizeLimit
+    ? `Comment is too large (${formatBytes(bodyBytes)}). Maximum is ${formatBytes(
+        MAX_COMMENT_BODY_BYTES,
+      )} — remove or shrink inline images.`
+    : null;
+
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
     if (isEmpty(html)) {
       setError("Comment is empty.");
+      return;
+    }
+    if (overSizeLimit) {
+      setError(sizeError);
       return;
     }
     setError(null);
@@ -84,7 +110,7 @@ export default function CsmCaseCommentInput({
     } finally {
       setSubmitting(false);
     }
-  }, [disabled, html, internal, onSubmit, submitting]);
+  }, [disabled, html, internal, onSubmit, overSizeLimit, sizeError, submitting]);
 
   const toggleSourceMode = useCallback(
     (nextSource: boolean) => {
@@ -242,9 +268,10 @@ export default function CsmCaseCommentInput({
       >
         <Typography
           variant="caption"
-          color={error ? "error" : "text.secondary"}
+          color={sizeError || error ? "error" : "text.secondary"}
         >
-          {error ??
+          {sizeError ??
+            error ??
             (sourceMode
               ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
               : "Ctrl/Cmd + Enter to send.")}
@@ -254,7 +281,7 @@ export default function CsmCaseCommentInput({
           color={internal ? "warning" : "primary"}
           size="small"
           startIcon={internal ? <Lock size={16} /> : <Send size={16} />}
-          disabled={disabled || submitting || isEmpty(html)}
+          disabled={disabled || submitting || isEmpty(html) || overSizeLimit}
           onClick={() => {
             void submit();
           }}
