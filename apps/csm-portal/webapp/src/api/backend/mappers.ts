@@ -21,12 +21,14 @@
  */
 
 import type {
+  BeAttachment,
   BeCaseComment,
   BeCreatableCommentType,
   BeCasePriority,
   BeCaseState,
 } from "@api/backend/types";
 import type {
+  CaseAttachment,
   CsmCaseComment,
   CsmCommentAuthorRole,
 } from "@features/csm-cases/types/csmCases";
@@ -132,5 +134,21 @@ export function uiCommentFromBe(comment: BeCaseComment): CsmCaseComment {
     bodyHtml: comment.content ?? "",
     createdAt: comment.createdOn,
     internal: comment.type === "work_note",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/** Map a backend attachment onto the UI's `CaseAttachment` shape. */
+export function uiAttachmentFromBe(att: BeAttachment): CaseAttachment {
+  return {
+    id: att.id,
+    filename: att.name,
+    size: att.sizeBytes,
+    contentType: att.type,
+    uploadedBy: att.createdBy || "Unknown",
+    uploadedAt: att.createdOn,
   };
 }

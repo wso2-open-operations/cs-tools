@@ -275,6 +275,58 @@ export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
 }
 
 // ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/** A case attachment as returned by `POST /cases/{id}/attachments/search`. */
+export interface BeAttachment {
+  id: string;
+  caseId: string;
+  name: string;
+  /** MIME type (e.g. image/png, application/pdf). */
+  type: string;
+  sizeBytes: number;
+  description?: string | null;
+  createdBy: string;
+  createdOn: string;
+  downloadUrl?: string | null;
+  previewUrl?: string | null;
+}
+
+export interface BeAttachmentSearchPayload {
+  pagination?: BePagination;
+}
+
+export interface BeAttachmentSearchResponse extends BeSearchResponseBase {
+  attachments: BeAttachment[];
+}
+
+/**
+ * Upload payload for `POST /cases/{id}/attachments`. `file` is a base64 data
+ * URI (e.g. `data:image/png;base64,...`); the BE caps the decoded size at 10 MB.
+ */
+export interface BeAttachmentCreatePayload {
+  name: string;
+  type: string;
+  file: string;
+  description?: string | null;
+}
+
+/** Thin ack returned by `POST /cases/{id}/attachments`. */
+export interface BeAttachmentDetail {
+  id: string;
+  sizeBytes: number;
+  createdOn: string;
+  createdBy: string;
+  downloadUrl: string;
+}
+
+export interface BeAttachmentCreateResponse {
+  message?: string;
+  attachment?: BeAttachmentDetail;
+}
+
+// ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
 

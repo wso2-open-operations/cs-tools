@@ -42,10 +42,11 @@ import {
   Server,
   Shield,
   TriangleAlert,
+  Upload,
   User,
   Users,
 } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import { useRef, type ChangeEvent, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import { initialsOf } from "@utils/userClaims";
 import { formatBytes } from "@utils/formatBytes";
@@ -666,34 +667,103 @@ export function TimeLogsWidget({
  */
 export function AttachmentsWidget({
   attachments,
+  loading = false,
+  error = false,
+  onRetry,
+  uploading = false,
+  uploadError,
+  onUpload,
   onDownloadAll,
   onDownload,
 }: {
   attachments: CaseAttachment[];
+  /** List query is loading. */
+  loading?: boolean;
+  /** List query failed. */
+  error?: boolean;
+  onRetry?: () => void;
+  /** An upload is in flight. */
+  uploading?: boolean;
+  /** Message shown when the last upload failed (size, network, 413, …). */
+  uploadError?: string | null;
+  onUpload?: (file: File) => void;
   onDownloadAll?: () => void;
   onDownload?: (attachment: CaseAttachment) => void;
 }): JSX.Element {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sorted = [...attachments].sort(
     (a, b) =>
       new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
   );
+
+  const pickFile = (): void => fileInputRef.current?.click();
+  const onFileChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
+    if (file) onUpload?.(file);
+    // Reset so re-selecting the same file still fires onChange.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   return (
     <WidgetCard
       title={`Attachments (${sorted.length})`}
       icon={<Paperclip size={16} />}
       action={
-        <Button
-          size="small"
-          variant="text"
-          startIcon={<Download size={14} />}
-          onClick={onDownloadAll}
-          disabled={sorted.length === 0}
-        >
-          Download all
-        </Button>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          {onUpload && (
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<Upload size={14} />}
+              onClick={pickFile}
+              disabled={uploading}
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </Button>
+          )}
+          <Button
+            size="small"
+            variant="text"
+            startIcon={<Download size={14} />}
+            onClick={onDownloadAll}
+            disabled={sorted.length === 0}
+          >
+            Download all
+          </Button>
+        </Box>
       }
     >
-      {sorted.length === 0 ? (
+      {onUpload && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          hidden
+          onChange={onFileChange}
+          aria-hidden
+        />
+      )}
+      {uploading && <LinearProgress sx={{ mb: 1 }} />}
+      {uploadError && (
+        <Typography variant="body2" color="error" sx={{ mb: 1 }}>
+          {uploadError}
+        </Typography>
+      )}
+      {loading ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading attachments…
+        </Typography>
+      ) : error ? (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+          <Typography variant="body2" color="error">
+            Could not load attachments.
+          </Typography>
+          {onRetry && (
+            <Button size="small" variant="outlined" onClick={onRetry}>
+              Retry
+            </Button>
+          )}
+        </Box>
+      ) : sorted.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           No attachments on this case.
         </Typography>
