@@ -36,7 +36,9 @@ const MOCK_LATENCY_MS = 150;
 function detailFromBeCase(c: BeCaseView): CsmCaseDetail {
   const account = c.account;
   const customer = account?.name ?? "—";
-  const reporter = c.createdBy?.displayName ?? c.createdBy?.email;
+  // createdBy.name can be empty for unhydrated users, so fall back to the email.
+  const reporter = c.createdBy?.name?.trim() || c.createdBy?.email;
+  const assignee = c.assignedEngineer?.name?.trim() || "Unassigned";
   const product = c.deployedProduct?.displayName ?? "—";
   return {
     id: c.id,
@@ -51,9 +53,9 @@ function detailFromBeCase(c: BeCaseView): CsmCaseDetail {
     severity: severityFromPriority(c.priority),
     state: uiStateFromBe(c.state),
     nextStates: (c.nextStates ?? []).map(uiStateFromBe),
-    // The backend has no assignee field yet; `createdBy` is the reporter, not
-    // the assigned engineer, so don't surface it here as the assignee.
-    assignee: "Unassigned",
+    assignee,
+    // "Is me" needs the signed-in user's entity id, which this mapper doesn't
+    // have; left false until the assignee can be compared to the current user.
     assigneeIsMe: false,
     slaClockType: "ack",
     minutesToBreach: 0,
