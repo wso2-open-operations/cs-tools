@@ -27,13 +27,14 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
+import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
@@ -61,7 +62,16 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const navigate = useNavigate();
   const { showError } = useErrorBanner();
 
-  const [projectId, setProjectId] = useState("");
+  // When the form is opened from a project's page (`/cases/new?projectId=…`),
+  // the project is fixed and shown read-only: the engineer can't accidentally
+  // file the case against the wrong project. The id seeds the form's project
+  // state once and the picker is replaced by a locked field. Opened without the
+  // param (the cases-list "New case" entry), the searchable picker is shown.
+  const [searchParams] = useSearchParams();
+  const lockedProjectId = searchParams.get("projectId") ?? "";
+  const isProjectLocked = !!lockedProjectId;
+
+  const [projectId, setProjectId] = useState(lockedProjectId);
   const [deploymentId, setDeploymentId] = useState("");
   const [deployedProductId, setDeployedProductId] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
@@ -72,6 +82,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
+
+  // Resolve the locked project's display name so the read-only field shows the
+  // name (not the raw id). Only fetched when the form is project-scoped.
+  const lockedProject = useGetProject(isProjectLocked ? lockedProjectId : undefined);
+  const lockedProjectLabel = lockedProject.data?.name
+    ? lockedProject.data.name
+    : lockedProject.isLoading
+      ? "Loading project…"
+      : lockedProjectId;
 
   // When a selector query fails the form becomes non-completable, so surface it
   // with an explicit retry rather than leaving an empty dropdown. (Projects are
@@ -170,11 +189,31 @@ export default function CsmCaseCreatePage(): JSX.Element {
         )}
         <Grid container spacing={2.5}>
           <Grid size={{ xs: 12, md: 4 }}>
-            <AsyncProjectSelect
-              value={projectId}
-              onChange={onProjectChange}
-              required
-            />
+            {isProjectLocked ? (
+              <TextField
+                fullWidth
+                size="small"
+                label="Project"
+                required
+                value={lockedProjectLabel}
+                slotProps={{
+                  input: {
+                    readOnly: true,
+                    endAdornment: (
+                      <Lock size={16} aria-hidden style={{ opacity: 0.6 }} />
+                    ),
+                  },
+                  htmlInput: { "aria-readonly": true },
+                }}
+                helperText="Locked to the project you opened this from. To file against another project, open that project first."
+              />
+            ) : (
+              <AsyncProjectSelect
+                value={projectId}
+                onChange={onProjectChange}
+                required
+              />
+            )}
           </Grid>
 
           <Grid size={{ xs: 12, md: 4 }}>

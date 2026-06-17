@@ -59,8 +59,14 @@ const CsmUsersPage = lazy(
 const CsmAccountsPage = lazy(
   () => import("@features/csm-accounts/pages/CsmAccountsPage"),
 );
+const CsmAccountDetailPage = lazy(
+  () => import("@features/csm-accounts/pages/CsmAccountDetailPage"),
+);
 const CsmProjectsPage = lazy(
   () => import("@features/csm-projects/pages/CsmProjectsPage"),
+);
+const CsmProjectDetailPage = lazy(
+  () => import("@features/csm-projects/pages/CsmProjectDetailPage"),
 );
 const CsmUpdatesPage = lazy(
   () => import("@features/updates/pages/CsmUpdatesPage"),
@@ -113,9 +119,11 @@ export default function App(): JSX.Element {
               <Route element={<AuthGuard />}>
                 <Route path="/" element={<RootLanding />} />
 
-                {/* BFF-backed pages (entity-service search endpoints) */}
+                {/* BFF-backed pages (entity-service search + by-id endpoints) */}
                 <Route path="accounts" element={<CsmAccountsPage />} />
+                <Route path="accounts/:id" element={<CsmAccountDetailPage />} />
                 <Route path="projects" element={<CsmProjectsPage />} />
+                <Route path="projects/:id" element={<CsmProjectDetailPage />} />
 
                 {/* Administration — Users tab is real, others are WIP */}
                 <Route path="admin" element={<CsmAdminLayout />}>

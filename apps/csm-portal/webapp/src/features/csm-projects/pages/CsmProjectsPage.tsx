@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { Link as RouterLink } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchProjects } from "@features/csm-projects/api/useSearchProjects";
 import type { SearchProjectsRequest } from "@features/csm-projects/types/csmProjects";
@@ -135,8 +136,22 @@ export default function CsmProjectsPage(): JSX.Element {
               ) : (
                 projects.map((p) => (
                   <TableRow key={p.id} hover>
-                    <TableCell>{p.name}</TableCell>
-                    <TableCell>{p.projectKey}</TableCell>
+                    <TableCell>
+                      <Typography
+                        component={RouterLink}
+                        to={`/projects/${p.id}`}
+                        variant="body2"
+                        sx={(t) => ({
+                          textDecoration: "none",
+                          color: t.palette.primary.dark,
+                          ...t.applyStyles("dark", { color: t.palette.primary.main }),
+                          "&:hover": { textDecoration: "underline" },
+                        })}
+                      >
+                        {p.name}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>{p.key}</TableCell>
                     <TableCell>
                       <Chip
                         size="small"

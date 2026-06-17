@@ -30,12 +30,48 @@ export interface Project {
   accountId: string;
   sfId: string;
   name: string;
-  projectKey: string;
+  // The search endpoint returns this as `key` (not `projectKey`).
+  key: string;
   subscriptionType: SubscriptionType;
   startDate: string;
   endDate: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Parent-account reference embedded in the project detail response
+ * (`GET /projects/{id}`). The backend JOINs the account, so the project view
+ * gets the account name (and a few account facts) with no extra call. `tier` is
+ * free-form here (e.g. "Enterprise"), not the lowercase {@link AccountTier} enum.
+ */
+export interface ProjectAccountRef {
+  id: string;
+  name: string;
+  activationDate: string | null;
+  tier: string;
+  region?: string | null;
+  agentEnabled: boolean;
+  kbReferencesEnabled: boolean;
+}
+
+/**
+ * Enriched single-project shape returned by `GET /projects/{id}`. Distinct from
+ * {@link Project} (the search-result row): it embeds the parent `account`, and
+ * uses `createdOn` / `updatedOn` rather than the search row's
+ * `createdAt` / `updatedAt`.
+ */
+export interface ProjectDetails {
+  id: string;
+  account: ProjectAccountRef;
+  sfId: string;
+  name: string;
+  key: string;
+  subscriptionType: SubscriptionType;
+  startDate: string;
+  endDate: string;
+  createdOn: string;
+  updatedOn: string;
 }
 
 export interface SearchProjectsRequest {
