@@ -188,8 +188,9 @@ export interface BeCaseUpdatePayload {
 }
 
 /** Request body for `POST /cases/search` (the flat, cross-project search). */
-export interface BeCaseSearchPayload {
-  pagination?: BePagination;
+/** Filter block for `POST /cases/search`; all fields are optional. */
+export interface BeCaseSearchFilters {
+  /** Searches across subject, number, and wso2Id (case-insensitive). */
   searchQuery?: string;
   /** Optional project filter; omit for a cross-project search. */
   projectIds?: string[];
@@ -198,6 +199,12 @@ export interface BeCaseSearchPayload {
   stateKeys?: BeCaseState[];
   priorityKeys?: BeCasePriority[];
   issueTypeKeys?: BeCaseIssueType[];
+}
+
+export interface BeCaseSearchPayload {
+  /** All filter fields are nested here; `sortBy`/`pagination` stay top-level. */
+  filters?: BeCaseSearchFilters;
+  pagination?: BePagination;
   sortBy?: {
     field?: BeCaseSortField;
     order?: "asc" | "desc";

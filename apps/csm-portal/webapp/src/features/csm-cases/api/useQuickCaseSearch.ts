@@ -89,7 +89,7 @@ export function useQuickCaseSearch(
         "/cases/search",
         {
           pagination: { offset: 0, limit: QUICK_CASE_LIMIT },
-          searchQuery: q,
+          filters: { searchQuery: q },
         },
       );
       return (res.cases ?? []).map((c) => ({

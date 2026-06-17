@@ -171,17 +171,20 @@ export function useGetCsmCases(
         api.post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
           pagination: { offset, limit: pageSize },
           sortBy: { field: "updated_at", order: "desc" },
-          ...(search.length > 0 && { searchQuery: search }),
-          ...(filters.severities.length > 0 && {
-            priorityKeys: filters.severities.map(priorityFromSeverity),
-          }),
-          ...(filters.states.length > 0 && {
-            stateKeys: filters.states.map(beStateFromUi),
-          }),
-          // `filters.projects` holds project IDs (the filter is id-based).
-          ...(filters.projects.length > 0 && {
-            projectIds: filters.projects,
-          }),
+          // Filter fields are nested under `filters` (BE payload restructure).
+          filters: {
+            ...(search.length > 0 && { searchQuery: search }),
+            ...(filters.severities.length > 0 && {
+              priorityKeys: filters.severities.map(priorityFromSeverity),
+            }),
+            ...(filters.states.length > 0 && {
+              stateKeys: filters.states.map(beStateFromUi),
+            }),
+            // `filters.projects` holds project IDs (the filter is id-based).
+            ...(filters.projects.length > 0 && {
+              projectIds: filters.projects,
+            }),
+          },
         }),
         queryClient.fetchQuery(projectOptionsQueryOptions(api)).catch((err) => {
           logger.warn(
