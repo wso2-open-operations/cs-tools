@@ -109,8 +109,10 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
             MATRIX_SEVERITIES.map((sev) =>
               countTotal({
                 pagination: { offset: 0, limit: 1 },
-                priorityKeys: [priorityFromSeverity(sev)],
-                stateKeys: activeStateKeys,
+                filters: {
+                  priorityKeys: [priorityFromSeverity(sev)],
+                  stateKeys: activeStateKeys,
+                },
               }).then((n) => ({ key: sev, n })),
             ),
           ),
@@ -118,13 +120,13 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
             COMPOSITION_STATES.map((st) =>
               countTotal({
                 pagination: { offset: 0, limit: 1 },
-                stateKeys: [beStateFromUi(st)],
+                filters: { stateKeys: [beStateFromUi(st)] },
               }).then((n) => ({ key: st, n })),
             ),
           ),
           countTotal({
             pagination: { offset: 0, limit: 1 },
-            stateKeys: [beStateFromUi("closed")],
+            filters: { stateKeys: [beStateFromUi("closed")] },
           }),
         ]);
         severityCounts.forEach(({ key, n }) => (bySeverity[key] = n));
