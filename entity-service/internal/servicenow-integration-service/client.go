@@ -187,9 +187,13 @@ func (c *Client) GetBinary(ctx context.Context, path string, userIDToken string)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	const maxBinaryBytes = 10*1024*1024 + 1 // 10 MB + 1 to detect over-limit responses
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinaryBytes))
 	if err != nil {
 		return BinaryResponse{}, fmt.Errorf("snclient: read response body: %w", err)
+	}
+	if len(body) >= maxBinaryBytes {
+		return BinaryResponse{}, &apierror.ValidationError{Msg: "attachment content exceeds maximum allowed size of 10 MB"}
 	}
 
 	switch {

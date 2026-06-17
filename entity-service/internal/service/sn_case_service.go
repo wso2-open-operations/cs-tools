@@ -585,6 +585,11 @@ func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.Cre
 	}
 	rawBase64 := req.File[markerIdx+len(base64Marker):]
 
+	// Early size guard: decoded size ≈ 3/4 of base64 length. Reject before allocating.
+	if len(rawBase64)*3/4 > maxAttachmentBytes {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file exceeds maximum allowed size of 10 MB"}
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(rawBase64)
 	if err != nil {
 		// try URL-safe variant
