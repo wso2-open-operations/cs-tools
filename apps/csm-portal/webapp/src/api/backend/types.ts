@@ -95,7 +95,7 @@ export interface BeCase {
 /** A referenced user, as embedded in case views (not just an id string). */
 export interface BeUserRef {
   id: string;
-  displayName?: string;
+  name?: string;
   userId?: string;
   email?: string;
 }
@@ -141,6 +141,8 @@ export interface BeCaseView {
   state?: BeCaseState;
   nextStates?: BeCaseState[];
   createdBy?: BeUserRef;
+  /** The CS engineer the case is assigned to; null when unassigned. */
+  assignedEngineer?: BeEntityRef | null;
   account?: BeCaseAccountRef;
   project?: BeEntityRef;
   deployment?: BeEntityRef;
