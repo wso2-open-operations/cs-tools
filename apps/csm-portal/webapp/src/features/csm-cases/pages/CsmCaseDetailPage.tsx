@@ -464,12 +464,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const onDownloadAllAttachments = useCallback(() => {
     if (!caseId) return;
-    // No bulk endpoint; fetch each sequentially and save.
-    attachmentList.forEach((a) => {
-      void downloadAttachment(caseId, a).catch((err) =>
-        showError(`Could not download ${a.filename}.`, err),
-      );
-    });
+    // No bulk endpoint; fetch each sequentially (not a parallel burst) and save.
+    void (async () => {
+      for (const a of attachmentList) {
+        try {
+          await downloadAttachment(caseId, a);
+        } catch (err) {
+          showError(`Could not download ${a.filename}.`, err);
+        }
+      }
+    })();
   }, [caseId, attachmentList, downloadAttachment, showError]);
 
   if (isLoading) {
