@@ -298,3 +298,15 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 		HasMore: req.Pagination.Offset+len(cases) < total,
 	}, nil
 }
+
+func (s *caseService) CreateCaseAttachment(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+	return domain.CreateAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
+}
+
+func (s *caseService) SearchCaseAttachments(_ context.Context, _ domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
+	return domain.SearchAttachmentsResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
+}
+
+func (s *caseService) GetCaseAttachmentContent(_ context.Context, _, _ string) ([]byte, string, error) {
+	return nil, "", &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
+}

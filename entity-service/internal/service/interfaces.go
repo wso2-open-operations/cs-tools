@@ -110,4 +110,14 @@ type CaseService interface {
 	// UpdateCase updates the state and/or priority of a case. A ValidationError is
 	// returned for invalid values or malformed UUID; a NotFoundError if no case matches.
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
+	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
+	// A ValidationError is returned for invalid input.
+	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
+	// SearchCaseAttachments returns a paginated list of attachments for the case identified
+	// by req.CaseID. A ValidationError is returned for invalid input.
+	SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error)
+	// GetCaseAttachmentContent returns the raw binary content and its Content-Type
+	// for the attachment identified by attachmentID on the given case.
+	// A NotFoundError is returned if absent.
+	GetCaseAttachmentContent(ctx context.Context, caseID, attachmentID string) (content []byte, contentType string, err error)
 }
