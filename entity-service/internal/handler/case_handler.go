@@ -126,3 +126,49 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// CreateCaseAttachment handles POST /cases/{id}/attachments.
+func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateAttachmentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = r.PathValue("id")
+	resp, err := h.svc.CreateCaseAttachment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SearchCaseAttachments handles POST /cases/{id}/attachments/search.
+func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchAttachmentsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.CaseID = r.PathValue("id")
+	resp, err := h.svc.SearchCaseAttachments(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// GetCaseAttachmentContent handles GET /cases/{case_id}/attachments/{attachment_id}/content.
+func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("case_id")
+	attachmentID := r.PathValue("attachment_id")
+	content, contentType, err := h.svc.GetCaseAttachmentContent(r.Context(), caseID, attachmentID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	_, _ = w.Write(content)
+}

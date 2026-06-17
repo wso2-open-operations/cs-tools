@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -537,6 +538,200 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 
 func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
 	return s.pgFallback.UpdateCase(ctx, req)
+}
+
+type snCreateAttachmentPayload struct {
+	ReferenceID   string  `json:"referenceId"`
+	ReferenceType string  `json:"referenceType"`
+	Name          string  `json:"name"`
+	Type          string  `json:"type"`
+	File          string  `json:"file"`
+	Description   *string `json:"description,omitempty"`
+}
+
+type snCreateAttachmentResponse struct {
+	Message    string `json:"message"`
+	Attachment struct {
+		ID          string `json:"id"`
+		SizeBytes   int    `json:"sizeBytes"`
+		CreatedOn   string `json:"createdOn"`
+		CreatedBy   string `json:"createdBy"`
+		DownloadURL string `json:"downloadUrl"`
+	} `json:"attachment"`
+}
+
+const maxAttachmentBytes = 10 * 1024 * 1024 // 10 MB decoded
+
+func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+	if req.Name == "" {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "name is required"}
+	}
+	if req.Type == "" {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "type is required"}
+	}
+	if req.File == "" {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file is required"}
+	}
+
+	// file must be a data URI: data:<mime>;base64,<encoded>
+	const dataURIPrefix = "data:"
+	const base64Marker = ";base64,"
+	if !strings.HasPrefix(req.File, dataURIPrefix) {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file must be a base64 data URI (e.g. data:image/png;base64,...)"}
+	}
+	markerIdx := strings.Index(req.File, base64Marker)
+	if markerIdx == -1 {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file must be a base64 data URI (e.g. data:image/png;base64,...)"}
+	}
+	rawBase64 := req.File[markerIdx+len(base64Marker):]
+
+	decoded, err := base64.StdEncoding.DecodeString(rawBase64)
+	if err != nil {
+		// try URL-safe variant
+		decoded, err = base64.URLEncoding.DecodeString(rawBase64)
+		if err != nil {
+			return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file contains invalid base64 data"}
+		}
+	}
+	if len(decoded) > maxAttachmentBytes {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file exceeds maximum allowed size of 10 MB"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CreateAttachmentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snCreateAttachmentPayload{
+		ReferenceID:   uuidToSysid(req.CaseID),
+		ReferenceType: "case",
+		Name:          req.Name,
+		Type:          req.Type,
+		File:          rawBase64,
+		Description:   req.Description,
+	}
+
+	raw, err := s.client.Post(ctx, "/attachments", token, payload)
+	if err != nil {
+		return domain.CreateAttachmentResponse{}, err
+	}
+
+	var snResp snCreateAttachmentResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.CreateAttachmentResponse{}, fmt.Errorf("sn create attachment: parse response: %w", err)
+	}
+
+	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Attachment.CreatedOn)
+	if err != nil {
+		return domain.CreateAttachmentResponse{}, fmt.Errorf("sn create attachment: parse createdOn %q: %w", snResp.Attachment.CreatedOn, err)
+	}
+
+	return domain.CreateAttachmentResponse{
+		Message: snResp.Message,
+		Attachment: domain.AttachmentDetail{
+			ID:          sysidToUUID(snResp.Attachment.ID),
+			SizeBytes:   snResp.Attachment.SizeBytes,
+			CreatedOn:   createdOn,
+			CreatedBy:   snResp.Attachment.CreatedBy,
+			DownloadURL: snResp.Attachment.DownloadURL,
+		},
+	}, nil
+}
+
+type snSearchAttachmentsPayload struct {
+	ReferenceID   string             `json:"referenceId"`
+	ReferenceType string             `json:"referenceType"`
+	Pagination    snProjectPagination `json:"pagination"`
+}
+
+type snAttachment struct {
+	ID          string  `json:"id"`
+	ReferenceID string  `json:"referenceId"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`
+	SizeBytes   int     `json:"sizeBytes"`
+	Description *string `json:"description"`
+	CreatedBy   string  `json:"createdBy"`
+	CreatedOn   string  `json:"createdOn"`
+	DownloadURL *string `json:"downloadUrl"`
+	PreviewURL  *string `json:"previewUrl"`
+}
+
+type snSearchAttachmentsResponse struct {
+	Attachments  []snAttachment `json:"attachments"`
+	TotalRecords int            `json:"totalRecords"`
+	Offset       int            `json:"offset"`
+	Limit        int            `json:"limit"`
+}
+
+func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchAttachmentsResponse{}, err
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.SearchAttachmentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snSearchAttachmentsPayload{
+		ReferenceID:   uuidToSysid(req.CaseID),
+		ReferenceType: "case",
+		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/attachments/search", token, payload)
+	if err != nil {
+		return domain.SearchAttachmentsResponse{}, err
+	}
+
+	var snResp snSearchAttachmentsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchAttachmentsResponse{}, fmt.Errorf("sn search attachments: parse response: %w", err)
+	}
+
+	attachments := make([]domain.Attachment, 0, len(snResp.Attachments))
+	for _, a := range snResp.Attachments {
+		createdOn, err := time.Parse(snCreatedOnLayout, a.CreatedOn)
+		if err != nil {
+			return domain.SearchAttachmentsResponse{}, fmt.Errorf("sn search attachments: parse createdOn %q: %w", a.CreatedOn, err)
+		}
+		attachments = append(attachments, domain.Attachment{
+			ID:          sysidToUUID(a.ID),
+			CaseID:      sysidToUUID(a.ReferenceID),
+			Name:        a.Name,
+			Type:        a.Type,
+			SizeBytes:   a.SizeBytes,
+			Description: a.Description,
+			CreatedBy:   a.CreatedBy,
+			CreatedOn:   createdOn,
+			DownloadURL: a.DownloadURL,
+			PreviewURL:  a.PreviewURL,
+		})
+	}
+
+	total := snResp.TotalRecords
+	return domain.SearchAttachmentsResponse{
+		Attachments: attachments,
+		Total:       total,
+		Limit:       req.Pagination.Limit,
+		Offset:      req.Pagination.Offset,
+		HasMore:     req.Pagination.Offset+len(attachments) < total,
+	}, nil
+}
+
+func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, _, attachmentID string) ([]byte, string, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return nil, "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	resp, err := s.client.GetBinary(ctx, "/attachments/"+uuidToSysid(attachmentID)+"/content", token)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return resp.Body, resp.ContentType, nil
 }
 
 // SearchCases implements CaseService by calling the Choreo POST /cases/search endpoint.

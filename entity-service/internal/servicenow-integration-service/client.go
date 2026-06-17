@@ -156,6 +156,62 @@ func (c *Client) Get(ctx context.Context, path string, userIDToken string) (json
 	return c.do(req, path)
 }
 
+// BinaryResponse holds the raw body and the upstream Content-Type for binary downloads.
+type BinaryResponse struct {
+	Body        []byte
+	ContentType string
+}
+
+// GetBinary sends a GET request and returns the raw response body together with
+// the upstream Content-Type header. Use this instead of Get for endpoints that
+// return non-JSON binary content (e.g. file downloads).
+func (c *Client) GetBinary(ctx context.Context, path string, userIDToken string) (BinaryResponse, error) {
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return BinaryResponse{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return BinaryResponse{}, fmt.Errorf("snclient: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("x-user-id-token", userIDToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return BinaryResponse{}, err
+		}
+		return BinaryResponse{}, &apierror.ServiceUnavailableError{Msg: fmt.Sprintf("snclient: %s: %v", path, err)}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return BinaryResponse{}, fmt.Errorf("snclient: read response body: %w", err)
+	}
+
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		ct := resp.Header.Get("Content-Type")
+		if ct == "" {
+			ct = http.DetectContentType(body)
+		}
+		return BinaryResponse{Body: body, ContentType: ct}, nil
+	case resp.StatusCode == http.StatusUnauthorized:
+		return BinaryResponse{}, &apierror.UnauthorizedError{Msg: "invalid or missing x-user-id-token"}
+	case resp.StatusCode == http.StatusForbidden:
+		return BinaryResponse{}, &apierror.ForbiddenError{Msg: "not authorized to access this resource"}
+	case resp.StatusCode == http.StatusNotFound:
+		return BinaryResponse{}, &apierror.NotFoundError{Msg: "resource not found in downstream service"}
+	case resp.StatusCode == http.StatusServiceUnavailable:
+		return BinaryResponse{}, &apierror.ServiceUnavailableError{Msg: "downstream service unavailable"}
+	default:
+		return BinaryResponse{}, fmt.Errorf("snclient: %s: unexpected status %d: %s", path, resp.StatusCode, body)
+	}
+}
+
 // Post sends a POST request to the given path. The OAuth2 bearer token is
 // added as Authorization header; userIDToken is forwarded as x-user-id-token.
 // Returns the raw response body on 2xx.

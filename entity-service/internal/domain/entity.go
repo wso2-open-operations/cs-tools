@@ -703,3 +703,59 @@ type SearchCaseCommentsResponse struct {
 	Offset   int           `json:"offset"`
 	HasMore  bool          `json:"hasMore"`
 }
+
+// Attachment represents a file attachment linked to a case.
+type Attachment struct {
+	ID          string    `json:"id"`
+	CaseID      string    `json:"caseId"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	SizeBytes   int       `json:"sizeBytes"`
+	Description *string   `json:"description"`
+	CreatedBy   string    `json:"createdBy"`
+	CreatedOn   time.Time `json:"createdOn"`
+	DownloadURL *string   `json:"downloadUrl"`
+	PreviewURL  *string   `json:"previewUrl"`
+}
+
+// CreateAttachmentRequest is the input for POST /cases/{id}/attachments.
+// CaseID is populated from the URL path parameter and is not part of the JSON body.
+type CreateAttachmentRequest struct {
+	CaseID      string  `json:"-"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`
+	File        string  `json:"file"`
+	Description *string `json:"description"`
+}
+
+// AttachmentDetail holds the core fields returned after creating an attachment.
+type AttachmentDetail struct {
+	ID          string    `json:"id"`
+	SizeBytes   int       `json:"sizeBytes"`
+	CreatedOn   time.Time `json:"createdOn"`
+	CreatedBy   string    `json:"createdBy"`
+	DownloadURL string    `json:"downloadUrl"`
+}
+
+// CreateAttachmentResponse is the response for POST /cases/{id}/attachments.
+type CreateAttachmentResponse struct {
+	Message    string           `json:"message"`
+	Attachment AttachmentDetail `json:"attachment"`
+}
+
+// SearchAttachmentsRequest is the input for POST /cases/{id}/attachments/search.
+// CaseID is populated from the URL path parameter and is not part of the JSON body.
+type SearchAttachmentsRequest struct {
+	CaseID     string     `json:"-"`
+	Pagination Pagination `json:"pagination"`
+}
+
+// SearchAttachmentsResponse is the paginated result of an attachment search.
+// HasMore is true when additional pages are available beyond the current offset.
+type SearchAttachmentsResponse struct {
+	Attachments []Attachment `json:"attachments"`
+	Total       int          `json:"total"`
+	Limit       int          `json:"limit"`
+	Offset      int          `json:"offset"`
+	HasMore     bool         `json:"hasMore"`
+}
