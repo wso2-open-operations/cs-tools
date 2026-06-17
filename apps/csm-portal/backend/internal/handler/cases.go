@@ -194,7 +194,9 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
 	}
-	if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
+	// TODO: tighten to include workState once entity service ships the field
+	// if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
+	if currentCase.State != "work_in_progress" {
 		writeError(w, http.StatusConflict, ErrMsgCommentNotAllowed)
 		return
 	}
