@@ -763,7 +763,11 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 	}
 
 	var snSortBy *snCaseSort
-	if snField, ok := snSortFieldMap[req.SortBy.Field]; ok {
+	if req.SortBy.Field != "" {
+		snField, ok := snSortFieldMap[req.SortBy.Field]
+		if !ok {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "sortBy.field " + string(req.SortBy.Field) + " is not supported by ServiceNow"}
+		}
 		order := string(req.SortBy.Order)
 		if order == "" {
 			order = "desc"
