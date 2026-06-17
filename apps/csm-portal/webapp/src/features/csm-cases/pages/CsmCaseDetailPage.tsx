@@ -257,12 +257,14 @@ const TAB_DEFS: Array<{
   id: CaseTabId;
   label: string;
   icon: JSX.Element;
+  disabled?: boolean;
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
   { id: "sla", label: "SLA", icon: <Clock size={16} /> },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
-  { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
+  // Time tracking is parked until its backend flow lands; disabled for now.
+  { id: "time", label: "Time tracking", icon: <Layers size={16} />, disabled: true },
 ];
 
 export default function CsmCaseDetailPage(): JSX.Element {
@@ -725,6 +727,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               <Tab
                 key={t.id}
                 value={t.id}
+                disabled={t.disabled}
                 icon={t.icon}
                 iconPosition="start"
                 label={count ? `${t.label} (${count})` : t.label}

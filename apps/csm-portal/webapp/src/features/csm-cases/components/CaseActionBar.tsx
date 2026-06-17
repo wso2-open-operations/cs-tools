@@ -205,6 +205,8 @@ interface SecondaryItem {
   icon: JSX.Element;
   /** If true, render with a divider below in the menu. */
   divider?: boolean;
+  /** If true, the item is greyed out and not clickable. */
+  disabled?: boolean;
 }
 
 /**
@@ -225,18 +227,21 @@ interface SecondaryItem {
  *   - Open in ServiceNow → this platform replaces ServiceNow; no back-link
  */
 function buildSecondaryItems(): SecondaryItem[] {
+  // Only "Copy case link" is wired up for now. The rest are disabled until
+  // their backend flows land, so the menu advertises the roadmap without
+  // exposing dead actions that would no-op or toast a mock message.
   return [
-    { key: "reassign_engineer", label: "Reassign engineer…", icon: <User size={16} /> },
-    { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true },
-    { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} /> },
-    { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} /> },
-    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true },
-    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} /> },
-    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} /> },
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} /> },
-    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true },
-    { key: "request_call", label: "Request a call…", icon: <Phone size={16} /> },
-    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
+    { key: "reassign_engineer", label: "Reassign engineer…", icon: <User size={16} />, disabled: true },
+    { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true, disabled: true },
+    { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
+    { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
+    { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
+    { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, disabled: true },
+    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, disabled: true },
+    { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
+    { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
+    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true, disabled: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
   ];
 }
@@ -353,6 +358,7 @@ export default function CaseActionBar({
         {secondary.map((item) => [
           <MenuItem
             key={item.key}
+            disabled={item.disabled}
             onClick={() => {
               setMenuAnchor(null);
               void onAction({ secondary: item.key });
