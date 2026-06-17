@@ -31,6 +31,7 @@ import { ArrowLeft, Lock } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
+import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
@@ -57,6 +58,16 @@ const ISSUE_TYPES: { value: BeCaseIssueType; label: string }[] = [
 function isEmptyHtml(html: string): boolean {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
 }
+
+// Cap the case-create body, which carries the description HTML (with base64
+// inline images). FOLLOW-UP: the CSM backend currently caps POST /cases at
+// 1 MiB (maxRequestBodyBytes); this 10 MiB FE cap assumes the endpoint is
+// raised to match the comment endpoint (maxCommentBodyBytes = 10 MiB). Until
+// the BE matches, it still returns 413 past 1 MiB.
+const MAX_DESCRIPTION_BODY_BYTES = 10 * 1024 * 1024;
+// Reserve headroom for the other create fields (ids, subject) + JSON envelope
+// so the FE blocks before the BE rejects.
+const MAX_DESCRIPTION_CONTENT_BYTES = MAX_DESCRIPTION_BODY_BYTES - 4 * 1024;
 
 export default function CsmCaseCreatePage(): JSX.Element {
   const navigate = useNavigate();
@@ -101,6 +112,21 @@ export default function CsmCaseCreatePage(): JSX.Element {
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
 
+  // UTF-8 byte size of the description; the BE caps the whole create body, so
+  // mirror it here to fail fast with a clear message instead of a 413.
+  const descriptionBytes = useMemo(
+    () => new TextEncoder().encode(description).length,
+    [description],
+  );
+  const descriptionOverLimit = descriptionBytes > MAX_DESCRIPTION_CONTENT_BYTES;
+  const descriptionError = descriptionOverLimit
+    ? `The case description is too large (${formatBytes(
+        descriptionBytes,
+      )}). Maximum is ${formatBytes(
+        MAX_DESCRIPTION_BODY_BYTES,
+      )} — reduce the size or the number of inline images and try again.`
+    : null;
+
   const canSubmit = useMemo(
     () =>
       !!projectId &&
@@ -110,6 +136,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       !!issueType &&
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
+      !descriptionOverLimit &&
       !postCase.isPending,
     [
       projectId,
@@ -119,6 +146,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       issueType,
       subject,
       description,
+      descriptionOverLimit,
       postCase.isPending,
     ],
   );
@@ -135,7 +163,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
   };
 
   const handleSubmit = (): void => {
-    if (!canSubmit || !severity || !issueType) return;
+    if (!canSubmit || !severity || !issueType || descriptionOverLimit) return;
     postCase.mutate(
       {
         projectId,
@@ -336,6 +364,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 disabled={postCase.isPending}
               />
             </Box>
+            {descriptionError && (
+              <Typography
+                variant="caption"
+                color="error"
+                sx={{ display: "block", mt: 0.5 }}
+              >
+                {descriptionError}
+              </Typography>
+            )}
           </Grid>
         </Grid>
 
