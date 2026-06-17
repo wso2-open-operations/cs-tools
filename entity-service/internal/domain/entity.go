@@ -431,7 +431,6 @@ const (
 	CaseStateWorkInProgress   CaseState = "work_in_progress"
 	CaseStateWaitingOnWSO2    CaseState = "waiting_on_wso2"
 	CaseStateAwaitingInfo     CaseState = "awaiting_info"
-	CaseStateReopened         CaseState = "reopened"
 	CaseStateSolutionProposed CaseState = "solution_proposed"
 	CaseStateClosed           CaseState = "closed"
 )

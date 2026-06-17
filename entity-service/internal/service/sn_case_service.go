@@ -120,7 +120,6 @@ var snStateIDMap = map[domain.CaseState]int{
 	domain.CaseStateWaitingOnWSO2:    1003,
 	domain.CaseStateSolutionProposed: 6,
 	domain.CaseStateClosed:           3,
-	domain.CaseStateReopened:         1006,
 }
 
 // snSeverityIDMap maps domain CasePriority enums to SN numeric severity IDs.
@@ -631,7 +630,7 @@ var snCaseStateMap = map[string]domain.CaseState{
 	"work in progress":  domain.CaseStateWorkInProgress,
 	"waiting on wso2":   domain.CaseStateWaitingOnWSO2,
 	"awaiting info":     domain.CaseStateAwaitingInfo,
-	"reopened":          domain.CaseStateReopened,
+	"reopened":          domain.CaseStateWaitingOnWSO2,
 	"solution proposed": domain.CaseStateSolutionProposed,
 	"closed":            domain.CaseStateClosed,
 }

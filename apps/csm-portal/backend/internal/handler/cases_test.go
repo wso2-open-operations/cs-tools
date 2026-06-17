@@ -795,7 +795,6 @@ func TestGetCase(t *testing.T) {
 			{caseStateWorkInProgress, []string{caseStateWaitingOnWSO2, caseStateAwaitingInfo, caseStateSolutionProposed, caseStateClosed}},
 			{caseStateWaitingOnWSO2, []string{caseStateWorkInProgress}},
 			{caseStateAwaitingInfo, []string{caseStateWaitingOnWSO2}},
-			{caseStateReopened, []string{caseStateWaitingOnWSO2}},
 			{caseStateSolutionProposed, []string{caseStateClosed, caseStateWaitingOnWSO2}},
 			{caseStateClosed, []string{}},
 		}

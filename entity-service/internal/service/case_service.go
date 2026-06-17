@@ -52,7 +52,6 @@ var validCaseState = map[domain.CaseState]bool{
 	domain.CaseStateWorkInProgress:   true,
 	domain.CaseStateWaitingOnWSO2:    true,
 	domain.CaseStateAwaitingInfo:     true,
-	domain.CaseStateReopened:         true,
 	domain.CaseStateSolutionProposed: true,
 	domain.CaseStateClosed:           true,
 }

@@ -1013,7 +1013,7 @@ components:
       properties:
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
           description: The new state to transition the case to.
         priority:
           type: string
@@ -1093,7 +1093,7 @@ components:
           type: array
           items:
             type: string
-            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+            enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
           description: Filter by case states.
         priorityKeys:
           type: array
@@ -1225,7 +1225,7 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
         createdAt:
           type: string
           format: date-time
@@ -1259,7 +1259,7 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
         createdOn:
           type: string
           format: date-time
@@ -1307,7 +1307,7 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
         createdOn:
           type: string
           format: date-time

@@ -23,7 +23,6 @@ const (
 	caseStateWorkInProgress   = "work_in_progress"
 	caseStateWaitingOnWSO2    = "waiting_on_wso2"
 	caseStateAwaitingInfo     = "awaiting_info"
-	caseStateReopened         = "reopened" // deprecated alias for waiting_on_wso2
 	caseStateSolutionProposed = "solution_proposed"
 	caseStateClosed           = "closed"
 )
@@ -40,8 +39,6 @@ func nextStates(state string) []string {
 	case caseStateWaitingOnWSO2:
 		return []string{caseStateWorkInProgress}
 	case caseStateAwaitingInfo:
-		return []string{caseStateWaitingOnWSO2}
-	case caseStateReopened:
 		return []string{caseStateWaitingOnWSO2}
 	case caseStateSolutionProposed:
 		return []string{caseStateClosed, caseStateWaitingOnWSO2}
