@@ -1147,6 +1147,41 @@ function deriveAttachments(c: CsmCaseRow): CaseAttachment[] {
   return sets[seedIdx % 4] ?? [];
 }
 
+// Attachments uploaded during a mock session, keyed by case id, so a mock
+// upload is visible on the next list refetch (the seeded set is deterministic).
+const mockUploadedAttachments = new Map<string, CaseAttachment[]>();
+
+/** Mock attachment list: seeded set plus anything uploaded this session. */
+export function getMockCsmCaseAttachments(caseId: string): CaseAttachment[] {
+  const row = getMockCsmCaseById(caseId);
+  const seeded = row ? deriveAttachments(row) : [];
+  const uploaded = mockUploadedAttachments.get(caseId) ?? [];
+  // Newest first matches how the widget sorts; concat is enough since the
+  // widget re-sorts by uploadedAt.
+  return [...uploaded, ...seeded];
+}
+
+/** Mock attachment upload: records and echoes back a fresh `CaseAttachment`. */
+export function postMockCsmCaseAttachment(input: {
+  caseId: string;
+  filename: string;
+  size: number;
+  contentType: string;
+  uploadedBy: string;
+}): CaseAttachment {
+  const created: CaseAttachment = {
+    id: `att-${input.caseId}-${Date.now()}`,
+    filename: input.filename,
+    size: input.size,
+    contentType: input.contentType,
+    uploadedBy: input.uploadedBy,
+    uploadedAt: new Date().toISOString(),
+  };
+  const existing = mockUploadedAttachments.get(input.caseId) ?? [];
+  mockUploadedAttachments.set(input.caseId, [created, ...existing]);
+  return created;
+}
+
 /**
  * Mirror of the backend transition graph in
  * `apps/csm-portal/backend/internal/handler/state.go` (`nextStates`). The mock

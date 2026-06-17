@@ -37,7 +37,7 @@ import {
   TriangleAlert,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useEffect, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { usePatchCsmCase } from "@features/csm-cases/api/usePatchCsmCase";
@@ -47,6 +47,11 @@ import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
+import {
+  useGetCsmCaseAttachments,
+  usePostCsmCaseAttachment,
+  useDownloadCsmCaseAttachment,
+} from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
@@ -73,7 +78,10 @@ import {
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
-import type { CaseLifecycleAction } from "@features/csm-cases/types/csmCases";
+import type {
+  CaseAttachment,
+  CaseLifecycleAction,
+} from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 function MetaCell({
@@ -182,8 +190,6 @@ const SECONDARY_TOAST: Record<string, string> = {
   request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
-  download_all_attachments: "Preparing all attachments for download (mock).",
-  download_attachment: "Downloading attachment (mock).",
 };
 
 type CaseTabId =
@@ -239,6 +245,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
   const postComment = usePostCsmCaseComment();
+  const {
+    data: attachments,
+    isLoading: isAttachmentsLoading,
+    isError: isAttachmentsError,
+    refetch: refetchAttachments,
+  } = useGetCsmCaseAttachments(caseId);
+  const postAttachment = usePostCsmCaseAttachment();
+  const downloadAttachment = useDownloadCsmCaseAttachment();
   const patchCase = usePatchCsmCase(caseId);
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
@@ -416,6 +430,47 @@ export default function CsmCaseDetailPage(): JSX.Element {
     },
     [data, showError, patchCase],
   );
+
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+
+  const onUploadAttachment = useCallback(
+    (file: File) => {
+      if (!caseId) return;
+      postAttachment.mutate(
+        { caseId, file, uploadedBy: engineerName },
+        {
+          onSuccess: () =>
+            setFeedback({
+              message: `Uploaded ${file.name}.`,
+              severity: "success",
+              sticky: false,
+            }),
+          // Failures surface inline on the widget via postAttachment.error.
+        },
+      );
+    },
+    [caseId, engineerName, postAttachment],
+  );
+
+  const onDownloadAttachment = useCallback(
+    (attachment: CaseAttachment) => {
+      if (!caseId) return;
+      void downloadAttachment(caseId, attachment).catch((err) =>
+        showError(`Could not download ${attachment.filename}.`, err),
+      );
+    },
+    [caseId, downloadAttachment, showError],
+  );
+
+  const onDownloadAllAttachments = useCallback(() => {
+    if (!caseId) return;
+    // No bulk endpoint; fetch each sequentially and save.
+    attachmentList.forEach((a) => {
+      void downloadAttachment(caseId, a).catch((err) =>
+        showError(`Could not download ${a.filename}.`, err),
+      );
+    });
+  }, [caseId, attachmentList, downloadAttachment, showError]);
 
   if (isLoading) {
     return (
@@ -675,7 +730,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
               t.id === "attachments"
-                ? c.attachments.length
+                ? attachmentList.length
                 : t.id === "time"
                   ? c.timeLogs.length
                   : undefined;
@@ -771,7 +826,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={`${safeComments.length + c.audit.length + c.attachments.length} entries`}
+                  label={`${safeComments.length + c.audit.length + attachmentList.length} entries`}
                 />
               )}
             </Box>
@@ -796,7 +851,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <CaseActivitiesFeed
                   comments={safeComments}
                   audit={c.audit}
-                  attachments={c.attachments}
+                  attachments={attachmentList}
                 />
               </>
             )}
@@ -884,9 +939,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
-            attachments={c.attachments}
-            onDownloadAll={() => onAction({ secondary: "download_all_attachments" })}
-            onDownload={() => onAction({ secondary: "download_attachment" })}
+            attachments={attachmentList}
+            loading={isAttachmentsLoading}
+            error={isAttachmentsError}
+            onRetry={() => void refetchAttachments()}
+            uploading={postAttachment.isPending}
+            uploadError={
+              postAttachment.isError
+                ? (postAttachment.error?.message ??
+                  "Could not upload the attachment.")
+                : null
+            }
+            onUpload={onUploadAttachment}
+            onDownloadAll={onDownloadAllAttachments}
+            onDownload={onDownloadAttachment}
           />
         </Box>
       )}
