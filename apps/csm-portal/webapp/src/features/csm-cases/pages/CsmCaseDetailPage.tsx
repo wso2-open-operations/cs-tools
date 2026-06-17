@@ -73,12 +73,7 @@ import {
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
-import { parseBackendTimestamp } from "@utils/dateTime";
-import type {
-  CaseLifecycleAction,
-  CsmCaseComment,
-  CsmCaseDetail,
-} from "@features/csm-cases/types/csmCases";
+import type { CaseLifecycleAction } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 function MetaCell({
@@ -218,51 +213,19 @@ function findVerticalScrollAncestor(el: HTMLElement): HTMLElement {
   return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
 }
 
-/**
- * Synthesize the case description as a virtual "first comment" so it shows up
- * in the activity stream immediately after the `created` audit event. SN does
- * the same thing — the customer's initial problem statement reads as the
- * opening comment of the case.
- *
- * Dated 1 second after `case.createdAt` so chronological sort places it
- * AFTER the `Case created` audit entry (which is exactly at `createdAt`).
- */
-function buildDescriptionComment(c: CsmCaseDetail): CsmCaseComment | null {
-  if (!c.description?.trim()) return null;
-  // `createdAt` may be missing or in a format a bare `new Date()` can't parse,
-  // which made the old raw `.toISOString()` throw and crash the page. Parse
-  // safely; offset 1s when valid, else fall back to the raw value.
-  const created = parseBackendTimestamp(c.createdAt);
-  const at = created
-    ? new Date(created.getTime() + 1000).toISOString()
-    : c.createdAt;
-  // The creator may be a WSO2 engineer (case logged in the CSM portal) or a
-  // customer (customer portal). Infer from the email domain so the badge isn't
-  // always "Customer".
-  const isWso2 = (c.createdByEmail ?? "").toLowerCase().endsWith("@wso2.com");
-  return {
-    id: `description`,
-    caseId: c.id,
-    authorName:
-      c.createdBy || c.customerContext.primaryContact || c.customer,
-    authorRole: isWso2 ? "wso2_engineer" : "customer",
-    // The description is rich HTML (authored in the case-create editor, same as
-    // comments); the comment bubble sanitizes it with DOMPurify before render.
-    bodyHtml: c.description,
-    createdAt: at,
-  };
-}
-
 const TAB_DEFS: Array<{
   id: CaseTabId;
   label: string;
   icon: JSX.Element;
+  disabled?: boolean;
 }> = [
   { id: "activities", label: "Activities", icon: <Activity size={16} /> },
   { id: "details", label: "Details", icon: <ListChecks size={16} /> },
-  { id: "sla", label: "SLA", icon: <Clock size={16} /> },
+  // SLA tab is parked until its backend clock data is wired; disabled for now.
+  { id: "sla", label: "SLA", icon: <Clock size={16} />, disabled: true },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
-  { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
+  // Time tracking is parked until its backend flow lands; disabled for now.
+  { id: "time", label: "Time tracking", icon: <Layers size={16} />, disabled: true },
 ];
 
 export default function CsmCaseDetailPage(): JSX.Element {
@@ -514,15 +477,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const canReopenClosed = (claims?.groups ?? []).some((g) =>
     LEAD_REOPEN_ROLES.has(g),
   );
-  const rawComments = comments ?? [];
-  // The description is the case's opening comment. It is injected into the
-  // stream dated 1s after `created`, so with the default latest-first sort it
-  // sits at the bottom as the oldest entry — read in context after the latest
-  // activity, which is how engineers actually work a case here.
-  const descriptionComment = buildDescriptionComment(c);
-  const safeComments = descriptionComment
-    ? [descriptionComment, ...rawComments]
-    : rawComments;
+  // The case description is already returned by `comments/search` as the
+  // opening comment, so the stream renders it directly — no synthetic entry is
+  // injected (that duplicated the first comment).
+  const safeComments = comments ?? [];
 
   // SLA breach is a live condition, not a dismissible notice: surface it in a
   // persistent banner under the header so it stays visible on every tab, not
@@ -725,6 +683,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               <Tab
                 key={t.id}
                 value={t.id}
+                disabled={t.disabled}
                 icon={t.icon}
                 iconPosition="start"
                 label={count ? `${t.label} (${count})` : t.label}

@@ -26,10 +26,16 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useNavigate } from "react-router";
 import { CSM_NAV_ITEMS } from "@config/csmNavItems";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useRecentViews } from "@features/csm-recent/hooks/useRecentViews";
 import { kindIcon } from "@features/csm-recent/kindMeta";
+import {
+  QUICK_CASE_MIN_QUERY_LEN,
+  useQuickCaseSearch,
+} from "@features/csm-cases/api/useQuickCaseSearch";
+import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 
-type Section = "Pinned" | "Recent" | "Pages";
+type Section = "Cases" | "Pinned" | "Recent" | "Pages";
 
 interface Result {
   key: string;
@@ -53,6 +59,21 @@ export default function QuickNav(): JSX.Element | null {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
+  // Debounce the text fed to the case-search API so each keystroke doesn't fire
+  // a request; the in-memory pinned/recent/page matching still reacts instantly
+  // to `query`.
+  const debouncedQuery = useDebouncedValue(query, 180);
+  const trimmedQuery = query.trim();
+  // Case hits lag the input by the debounce window, so `caseSearch.data` can
+  // describe a previous query. Only surface (and allow navigating to) hits once
+  // the query the API actually ran matches what's typed now — otherwise stale
+  // results stay clickable during the debounce window or after the input shrinks.
+  const caseHitsSettled = trimmedQuery === debouncedQuery.trim();
+
+  // API-backed case lookup: a CS/WSO2 id (or any subject text) resolves to real
+  // cases. Disabled until the query is long enough (see the hook).
+  const caseSearch = useQuickCaseSearch(open ? debouncedQuery : "");
+
   // ⌘K / Ctrl+K toggles the palette — only while signed in, so we don't hijack
   // the browser shortcut on the sign-in screen (where the palette can't render).
   useEffect(() => {
@@ -68,9 +89,28 @@ export default function QuickNav(): JSX.Element | null {
   }, [isSignedIn]);
 
   const results: Result[] = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = trimmedQuery.toLowerCase();
     const match = (...parts: (string | undefined)[]) =>
       !q || parts.some((p) => p?.toLowerCase().includes(q));
+
+    // Live case hits go first — when someone types a case id, the matching case
+    // is the thing they want, ahead of pinned/recent/pages. Only shown once the
+    // debounced query the API ran matches the current input, so stale hits never
+    // stay clickable mid-typing.
+    const cases: Result[] =
+      caseHitsSettled && trimmedQuery.length >= QUICK_CASE_MIN_QUERY_LEN
+        ? (caseSearch.data ?? []).map((c) => {
+            const idLabel = caseIdLabel(c);
+            return {
+              key: `case-${c.id}`,
+              icon: kindIcon("case", 16),
+              label: idLabel || c.subject,
+              sublabel: idLabel ? c.subject : undefined,
+              href: `/cases/${c.id}`,
+              section: "Cases" as const,
+            };
+          })
+        : [];
 
     const pinned: Result[] = recents
       .filter((e) => e.pinned)
@@ -107,8 +147,8 @@ export default function QuickNav(): JSX.Element | null {
       }),
     );
 
-    return [...pinned, ...recent, ...pages];
-  }, [recents, query]);
+    return [...cases, ...pinned, ...recent, ...pages];
+  }, [recents, trimmedQuery, caseHitsSettled, caseSearch.data]);
 
   // Clamp at render so a stale index from shrinking results never points past
   // the end (avoids a setState-in-effect cascade).
@@ -217,7 +257,7 @@ export default function QuickNav(): JSX.Element | null {
             <InputBase
               autoFocus
               fullWidth
-              placeholder="Search pinned, recent, and pages…"
+              placeholder="Search cases by id, or jump to pinned, recent, pages…"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -231,7 +271,10 @@ export default function QuickNav(): JSX.Element | null {
             {results.length === 0 ? (
               <Box sx={{ px: 2, py: 3, textAlign: "center" }}>
                 <Typography variant="body2" color="text.secondary">
-                  No matches.
+                  {trimmedQuery.length >= QUICK_CASE_MIN_QUERY_LEN &&
+                  (caseSearch.isFetching || !caseHitsSettled)
+                    ? "Searching cases…"
+                    : "No matches."}
                 </Typography>
               </Box>
             ) : (

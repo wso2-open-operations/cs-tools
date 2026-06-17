@@ -23,46 +23,48 @@ import type {
   BeCaseSearchResponse,
 } from "@api/backend/types";
 import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
-import { MATRIX_SEVERITIES } from "@features/csm-dashboard/api/useCaseCountsMatrix";
+import {
+  MATRIX_SEVERITIES,
+  MATRIX_STATES,
+} from "@features/csm-dashboard/api/useCaseCountsMatrix";
 import type {
   CaseState,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 
 /**
- * Every case state, including `closed` — the composition pies show the whole
- * population, not just the active states the severity/state matrix tracks.
+ * The states the composition pies break down — the SAME active set the
+ * severity×state matrix tracks, so the pie totals reconcile with the table
+ * above them. `closed` is intentionally excluded from both pies and surfaced
+ * separately as {@link CaseComposition.closedTotal}, so a large backlog of
+ * closed cases can't make the active counts disagree with the matrix.
  */
-export const COMPOSITION_STATES: CaseState[] = [
-  "open",
-  "work_in_progress",
-  "waiting_on_wso2",
-  "awaiting_info",
-  "solution_proposed",
-  "reopened",
-  "closed",
-];
+export const COMPOSITION_STATES: CaseState[] = MATRIX_STATES;
 
 export interface CaseComposition {
-  /** Case count per severity, across all states. */
+  /** Active-case count per severity (excludes closed). */
   bySeverity: Record<Severity, number>;
-  /** Case count per state, across all severities. */
+  /** Active-case count per state (excludes closed). */
   byState: Record<CaseState, number>;
   severityTotal: number;
   stateTotal: number;
+  /** Closed cases — excluded from the pies, shown as a separate figure. */
+  closedTotal: number;
 }
 
 /**
  * Case composition for the dashboard pies: a 1-D breakdown by severity and a
- * 1-D breakdown by state, each over *all* cases (closed included).
+ * 1-D breakdown by state, each over the *active* cases only (closed excluded,
+ * matching the severity×state matrix). The closed count is returned separately.
  *
  * The backend has no aggregation endpoint, so — like the severity×state matrix
  * — this fans out count-only searches (`limit: 1`, read `total`): one per
- * severity (filtered by priority, any state) and one per state (filtered by
- * state, any severity). MOCK mode tallies the seeded cases.
+ * severity (filtered by priority AND the active states) and one per active
+ * state (filtered by state), plus one for the closed total. MOCK mode tallies
+ * the seeded cases.
  *
- * Severity and state each partition the same population, so both totals equal
- * the overall case count (give or take cases the backend leaves unprioritised).
+ * Severity and state each partition the same active population, so both totals
+ * are equal and reconcile with the matrix's grand total.
  */
 export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
   const api = useBackendApi();
@@ -74,9 +76,16 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
       const byState = {} as Record<CaseState, number>;
       MATRIX_SEVERITIES.forEach((s) => (bySeverity[s] = 0));
       COMPOSITION_STATES.forEach((s) => (byState[s] = 0));
+      let closedTotal = 0;
 
       if (isMockMode()) {
         for (const c of getMockCsmCases("all_customers")) {
+          // Closed cases are tallied on their own and kept out of the pies so
+          // the active counts reconcile with the matrix above.
+          if (c.state === "closed") {
+            closedTotal += 1;
+            continue;
+          }
           if (bySeverity[c.severity] !== undefined) bySeverity[c.severity] += 1;
           if (byState[c.state] !== undefined) byState[c.state] += 1;
         }
@@ -89,13 +98,19 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
             )
             .then((r) => r.total ?? 0);
 
-        // All severity + state counts fire in one parallel wave.
-        const [severityCounts, stateCounts] = await Promise.all([
+        // The active states, expressed once for the severity counts so each is
+        // scoped to active cases (priority AND active-state), not the whole
+        // population.
+        const activeStateKeys = COMPOSITION_STATES.map(beStateFromUi);
+
+        // All severity + state counts (plus the closed total) fire in one wave.
+        const [severityCounts, stateCounts, closedCount] = await Promise.all([
           Promise.all(
             MATRIX_SEVERITIES.map((sev) =>
               countTotal({
                 pagination: { offset: 0, limit: 1 },
                 priorityKeys: [priorityFromSeverity(sev)],
+                stateKeys: activeStateKeys,
               }).then((n) => ({ key: sev, n })),
             ),
           ),
@@ -107,9 +122,14 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
               }).then((n) => ({ key: st, n })),
             ),
           ),
+          countTotal({
+            pagination: { offset: 0, limit: 1 },
+            stateKeys: [beStateFromUi("closed")],
+          }),
         ]);
         severityCounts.forEach(({ key, n }) => (bySeverity[key] = n));
         stateCounts.forEach(({ key, n }) => (byState[key] = n));
+        closedTotal = closedCount;
       }
 
       const severityTotal = MATRIX_SEVERITIES.reduce(
@@ -120,7 +140,7 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
         (a, s) => a + byState[s],
         0,
       );
-      return { bySeverity, byState, severityTotal, stateTotal };
+      return { bySeverity, byState, severityTotal, stateTotal, closedTotal };
     },
     staleTime: 60_000,
   });
