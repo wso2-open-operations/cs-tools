@@ -1061,6 +1061,29 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 		if w.Body.String() != "PNG_BYTES" {
 			t.Errorf("body = %q, want %q", w.Body.String(), "PNG_BYTES")
 		}
+		if w.Header().Get("Content-Disposition") != "attachment" {
+			t.Errorf("Content-Disposition = %q, want %q", w.Header().Get("Content-Disposition"), "attachment")
+		}
+		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q, want %q", w.Header().Get("X-Content-Type-Options"), "nosniff")
+		}
+	})
+
+	t.Run("coerces unsafe Content-Type to octet-stream", func(t *testing.T) {
+		t.Parallel()
+		client := &mockEntityCaseClient{
+			getCaseAttachmentContentFn: func(_ context.Context, _, _ string) ([]byte, string, error) {
+				return []byte("<script>alert(1)</script>"), "text/html; charset=utf-8", nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/"+testAttachmentID+"/content", nil))
+		r.SetPathValue("case_id", testCaseID)
+		r.SetPathValue("attachment_id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.GetCaseAttachmentContent(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/octet-stream")
 	})
 
 	t.Run("maps upstream errors", func(t *testing.T) {
