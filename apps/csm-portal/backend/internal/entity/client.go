@@ -184,7 +184,7 @@ func (c *Client) doBinary(ctx context.Context, path string) (body []byte, conten
 
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
-		ct = http.DetectContentType(respBody)
+		ct = "application/octet-stream"
 	}
 	return respBody, ct, nil
 }

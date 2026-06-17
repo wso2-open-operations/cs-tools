@@ -55,10 +55,13 @@ Follow these steps in order:
 
 ## OpenAPI spec
 
+**`openapi.yaml` must be updated whenever the API changes** — new endpoints, removed endpoints, changed request/response shapes, new error codes. It is the contract consumed by the frontend and other teams; an out-of-date spec is worse than no spec.
+
 - Error responses use `$ref: '#/components/schemas/ErrorPayload'`
 - Every endpoint must declare a `403` response
 - Path parameters that expect UUIDs must declare `format: uuid` on the schema
 - The `Case` schema includes a computed `nextStates` read-only field populated server-side from `state`
+- Binary-download endpoints (e.g. attachment content) must document the `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` security headers in their description
 
 ## Response shape
 
