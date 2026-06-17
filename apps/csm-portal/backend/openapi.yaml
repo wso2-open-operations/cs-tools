@@ -1142,25 +1142,17 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
           description: Nature of the issue
 
-    CaseSearchPayload:
+    CaseSearchFilters:
       type: object
-      nullable: true
       properties:
+        searchQuery:
+          type: string
+          description: Searches across subject, number, and wso2Id (case-insensitive)
         projectIds:
           type: array
           items:
             type: string
           description: Filter by project IDs (optional)
-        pagination:
-          allOf:
-            - $ref: '#/components/schemas/Pagination'
-            - properties:
-                limit:
-                  default: 20
-                  maximum: 100
-        searchQuery:
-          type: string
-          description: Searches across subject, number, and wso2Id (case-insensitive)
         deploymentIds:
           type: array
           items:
@@ -1207,6 +1199,13 @@ components:
               - security_or_compliance
               - total_outage
           description: Filter by issue type (optional)
+
+    CaseSearchPayload:
+      type: object
+      nullable: true
+      properties:
+        filters:
+          $ref: '#/components/schemas/CaseSearchFilters'
         sortBy:
           type: object
           properties:
@@ -1218,6 +1217,13 @@ components:
               type: string
               enum: [asc, desc]
               default: desc
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
 
     CaseSearchResponse:
       type: object

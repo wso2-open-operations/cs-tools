@@ -411,7 +411,7 @@ func TestSearchCases(t *testing.T) {
 		}
 		h := NewCaseHandler(client)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
-			strings.NewReader(`{"projectIds":["proj-1"],"stateKeys":["open"],"pagination":{"limit":10,"offset":0}}`)))
+			strings.NewReader(`{"filters":{"projectIds":["proj-1"],"stateKeys":["open"]},"pagination":{"limit":10,"offset":0}}`)))
 		w := httptest.NewRecorder()
 		h.SearchCases(w, r)
 
@@ -422,9 +422,13 @@ func TestSearchCases(t *testing.T) {
 		if err := json.Unmarshal(capturedBody, &sent); err != nil {
 			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
+		var filters map[string]json.RawMessage
+		if err := json.Unmarshal(sent["filters"], &filters); err != nil {
+			t.Fatalf("upstream filters field invalid JSON: %v", err)
+		}
 		var ids []string
-		if err := json.Unmarshal(sent["projectIds"], &ids); err != nil || len(ids) != 1 || ids[0] != "proj-1" {
-			t.Errorf("upstream projectIds = %v, want [\"proj-1\"]", ids)
+		if err := json.Unmarshal(filters["projectIds"], &ids); err != nil || len(ids) != 1 || ids[0] != "proj-1" {
+			t.Errorf("upstream filters.projectIds = %v, want [\"proj-1\"]", ids)
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
@@ -443,7 +447,7 @@ func TestSearchCases(t *testing.T) {
 		}
 		h := NewCaseHandler(client)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search",
-			strings.NewReader(`{"stateKeys":["open"],"pagination":{"limit":10,"offset":0}}`)))
+			strings.NewReader(`{"filters":{"stateKeys":["open"]},"pagination":{"limit":10,"offset":0}}`)))
 		w := httptest.NewRecorder()
 		h.SearchCases(w, r)
 
@@ -452,8 +456,12 @@ func TestSearchCases(t *testing.T) {
 		if err := json.Unmarshal(capturedBody, &sent); err != nil {
 			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
-		if _, exists := sent["projectIds"]; exists {
-			t.Errorf("upstream body unexpectedly contains projectIds: %s", sent["projectIds"])
+		var filters map[string]json.RawMessage
+		if err := json.Unmarshal(sent["filters"], &filters); err != nil {
+			t.Fatalf("upstream filters field invalid JSON: %v", err)
+		}
+		if _, exists := filters["projectIds"]; exists {
+			t.Errorf("upstream filters unexpectedly contains projectIds: %s", filters["projectIds"])
 		}
 	})
 
