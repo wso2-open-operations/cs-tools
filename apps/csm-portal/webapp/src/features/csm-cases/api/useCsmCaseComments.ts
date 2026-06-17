@@ -135,11 +135,17 @@ export function usePostCsmCaseComment(): UseMutationResult<
       >(`/cases/${encodeURIComponent(input.caseId)}/comments`, payload);
       return uiCommentFromBe(created);
     },
-    onSuccess: (newComment, variables) => {
-      queryClient.setQueryData<CsmCaseComment[] | undefined>(
-        [ApiQueryKeys.CSM_CASE_COMMENTS, variables.caseId],
-        (prev) => (prev ? [...prev, newComment] : [newComment]),
-      );
+    onSuccess: (_newComment, variables) => {
+      // The BE create response is a thin ack — it echoes only {id, createdOn,
+      // createdBy(email string)}, not the author's display name, the rendered
+      // content, or the comment type. Appending that partial object renders the
+      // new entry as "Unknown WSO2 —" with no body. Until the BE echoes the full
+      // comment on POST, refetch the list so the new comment is hydrated from
+      // `comments/search`, which returns the full shape. One extra round-trip
+      // per post, but the entry renders correctly.
+      void queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, variables.caseId],
+      });
     },
   });
 }
