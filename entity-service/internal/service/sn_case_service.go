@@ -33,7 +33,7 @@ import (
 // snCasesResponse mirrors the Choreo POST /cases/search response.
 type snCasesResponse struct {
 	Cases        []snCase `json:"cases"`
-	TotalRecords int      `json:"total"`
+	TotalRecords int      `json:"totalRecords"`
 	Offset       int      `json:"offset"`
 	Limit        int      `json:"limit"`
 }
@@ -99,7 +99,19 @@ type snCaseIssueType struct {
 // snCaseSearchPayload is the Choreo POST /cases/search request body.
 type snCaseSearchPayload struct {
 	Filters    snCaseFilters       `json:"filters,omitempty"`
+	SortBy     *snCaseSort         `json:"sortBy,omitempty"`
 	Pagination snProjectPagination `json:"pagination"`
+}
+
+type snCaseSort struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+// snSortFieldMap maps domain CaseSortField values to SN field names.
+var snSortFieldMap = map[domain.CaseSortField]string{
+	domain.CaseSortFieldCreatedAt: "createdOn",
+	domain.CaseSortFieldUpdatedAt: "updatedOn",
 }
 
 type snCaseFilters struct {
@@ -750,6 +762,15 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
+	var snSortBy *snCaseSort
+	if snField, ok := snSortFieldMap[req.SortBy.Field]; ok {
+		order := string(req.SortBy.Order)
+		if order == "" {
+			order = "desc"
+		}
+		snSortBy = &snCaseSort{Field: snField, Order: order}
+	}
+
 	payload := snCaseSearchPayload{
 		Filters: snCaseFilters{
 			CaseTypes:          []string{"default_case"},
@@ -761,6 +782,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			SeverityKeys:       domainPrioritiesToSNIDs(req.Filters.PriorityKeys),
 			IssueTypeKeys:      domainIssueTypesToSNIDs(req.Filters.IssueTypeKeys),
 		},
+		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 
