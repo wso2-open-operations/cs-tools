@@ -387,10 +387,7 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 		return domain.CreateCaseCommentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	snType := string(req.Type)
-	if req.Type == domain.CommentTypeComment {
-		snType = "comments"
-	}
+	snType := snCommentTypeMap[req.Type]
 
 	payload := snCreateCommentPayload{
 		ReferenceID:   uuidToSysid(req.CaseID),
@@ -456,7 +453,7 @@ type snSearchCommentsResponse struct {
 
 var snCommentTypeMap = map[domain.CommentType]string{
 	domain.CommentTypeComment:  "comments",
-	domain.CommentTypeWorkNote: "work_note",
+	domain.CommentTypeWorkNote: "work_notes",
 }
 
 func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error) {
@@ -504,7 +501,7 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 		switch c.Type {
 		case "comments", "comment":
 			commentType = domain.CommentTypeComment
-		case "work_note":
+		case "work_notes", "work_note":
 			commentType = domain.CommentTypeWorkNote
 		case "activity":
 			commentType = domain.CommentTypeActivity
