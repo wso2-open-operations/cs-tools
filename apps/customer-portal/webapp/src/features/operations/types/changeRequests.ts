@@ -100,6 +100,10 @@ export type PatchChangeRequestResponse = AuditMetadata & {
 export type ChangeRequestFilterValues = {
   stateIds?: string[];
   impactIds?: string[];
+  startCreatedDate?: string;
+  endCreatedDate?: string;
+  startUpdatedDate?: string;
+  endUpdatedDate?: string;
 };
 
 /** Change request list sort field for search API `sortBy.field`. */
@@ -115,6 +119,10 @@ export type ChangeRequestSearchFilters = {
   stateKeys?: number[];
   closedStartDate?: string;
   closedEndDate?: string;
+  startCreatedDate?: string;
+  endCreatedDate?: string;
+  startUpdatedDate?: string;
+  endUpdatedDate?: string;
 };
 
 // Request type for searching change requests.

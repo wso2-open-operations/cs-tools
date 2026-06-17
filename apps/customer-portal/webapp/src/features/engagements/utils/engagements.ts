@@ -86,6 +86,10 @@ export function buildEngagementSearchRequest(
       engagementTypeKeys: filters.engagementTypeKey?.length
         ? filters.engagementTypeKey.flatMap((k) => k.split(",").map(Number).filter(Boolean))
         : undefined,
+      startCreatedDate: filters.startCreatedDate,
+      endCreatedDate: filters.endCreatedDate,
+      startUpdatedDate: filters.startUpdatedDate,
+      endUpdatedDate: filters.endUpdatedDate,
     },
     sortBy: {
       field: normalizedSortField,

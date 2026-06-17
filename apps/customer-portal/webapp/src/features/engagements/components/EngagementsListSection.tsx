@@ -29,6 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import ListSearchBar from "@components/list-view/ListSearchBar";
+import DateRangeFilter from "@components/list-view/DateRangeFilter";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListItems from "@components/list-view/ListItems";
@@ -79,6 +80,10 @@ export default function EngagementsListSection({
   const activeFiltersCount = countListSearchAndFilters(searchTerm, {
     statusIds: filters.statusIds,
     engagementTypeKey: filters.engagementTypeKey,
+    startCreatedDate: filters.startCreatedDate,
+    endCreatedDate: filters.endCreatedDate,
+    startUpdatedDate: filters.startUpdatedDate,
+    endUpdatedDate: filters.endUpdatedDate,
   });
 
   return (
@@ -98,7 +103,7 @@ export default function EngagementsListSection({
           isLoading={isProjectContextLoading}
           actionsBeforeClearFilters={actionsBeforeClearFilters}
           filtersContent={
-            <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid container spacing={2} sx={{ mt: 1 }} alignItems="flex-end">
               {filterMetadata?.caseStates && (
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <FormControl fullWidth size="small">
@@ -189,6 +194,24 @@ export default function EngagementsListSection({
                   </FormControl>
                 </Grid>
               )}
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <DateRangeFilter
+                  label="Created Date"
+                  startDate={filters.startCreatedDate}
+                  endDate={filters.endCreatedDate}
+                  onStartChange={(val) => onFilterChange("startCreatedDate", val ?? "")}
+                  onEndChange={(val) => onFilterChange("endCreatedDate", val ?? "")}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <DateRangeFilter
+                  label="Updated Date"
+                  startDate={filters.startUpdatedDate}
+                  endDate={filters.endUpdatedDate}
+                  onStartChange={(val) => onFilterChange("startUpdatedDate", val ?? "")}
+                  onEndChange={(val) => onFilterChange("endUpdatedDate", val ?? "")}
+                />
+              </Grid>
             </Grid>
           }
         />
