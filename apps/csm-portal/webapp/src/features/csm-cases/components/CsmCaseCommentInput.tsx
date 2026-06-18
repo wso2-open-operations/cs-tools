@@ -32,15 +32,31 @@ import {
   Minimize2,
   Send,
 } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useMemo, useRef, useState, type JSX } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type JSX,
+} from "react";
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 
 interface CsmCaseCommentInputProps {
-  onSubmit: (html: string, internal: boolean) => Promise<unknown> | void;
+  onSubmit: (
+    html: string,
+    internal: boolean,
+    files: File[],
+  ) => Promise<unknown> | void;
   disabled?: boolean;
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
   autoFocus?: boolean;
+}
+
+/** Stable identity for an attached File, used to dedupe re-picked files. */
+function fileSignature(f: File): string {
+  return `${f.name}-${f.size}-${f.lastModified}`;
 }
 
 // Mirrors the BE request-body cap for POST /cases/{id}/comments
@@ -68,6 +84,28 @@ export default function CsmCaseCommentInput({
   const [sourceMode, setSourceMode] = useState(false);
   const [internal, setInternal] = useState(false);
   const [maximized, setMaximized] = useState(false);
+  // Files attached to this comment; uploaded to the case on send.
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onAttachmentClick = useCallback(() => fileInputRef.current?.click(), []);
+  const onFilesPicked = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const picked = Array.from(e.target.files ?? []);
+      if (picked.length) {
+        setAttachments((prev) => {
+          const seen = new Set(prev.map(fileSignature));
+          return [...prev, ...picked.filter((f) => !seen.has(fileSignature(f)))];
+        });
+      }
+      // Reset so re-selecting the same file still fires onChange.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [],
+  );
+  const onAttachmentRemove = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   // Incrementing this trigger clears the editor (see Editor's ResetPlugin).
   const resetTriggerRef = useRef(0);
@@ -93,8 +131,9 @@ export default function CsmCaseCommentInput({
 
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
-    if (isEmpty(html)) {
-      setError("Comment is empty.");
+    // Allow an attachment-only post (no text) — the case still gets the files.
+    if (isEmpty(html) && attachments.length === 0) {
+      setError("Add a comment or an attachment.");
       return;
     }
     if (overSizeLimit) {
@@ -104,8 +143,9 @@ export default function CsmCaseCommentInput({
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(html, internal);
+      await onSubmit(html, internal, attachments);
       setHtml("");
+      setAttachments([]);
       resetTriggerRef.current += 1;
       setResetTrigger(resetTriggerRef.current);
       setEditorMountKey((k) => k + 1);
@@ -114,7 +154,16 @@ export default function CsmCaseCommentInput({
     } finally {
       setSubmitting(false);
     }
-  }, [disabled, html, internal, onSubmit, overSizeLimit, sizeError, submitting]);
+  }, [
+    disabled,
+    html,
+    attachments,
+    internal,
+    onSubmit,
+    overSizeLimit,
+    sizeError,
+    submitting,
+  ]);
 
   const toggleSourceMode = useCallback(
     (nextSource: boolean) => {
@@ -259,11 +308,24 @@ export default function CsmCaseCommentInput({
           showKeyboardHint
           autoFocus={autoFocus}
           enterToSubmit={false}
+          onAttachmentClick={onAttachmentClick}
+          attachments={attachments}
+          onAttachmentRemove={onAttachmentRemove}
           onSubmitKeyDown={() => {
             void submit();
           }}
         />
       )}
+
+      {/* Hidden picker driven by the editor toolbar's attach button. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={onFilesPicked}
+        aria-hidden
+      />
 
       <Box
         sx={{
@@ -288,7 +350,12 @@ export default function CsmCaseCommentInput({
           color={internal ? "warning" : "primary"}
           size="small"
           startIcon={internal ? <Lock size={16} /> : <Send size={16} />}
-          disabled={disabled || submitting || isEmpty(html) || overSizeLimit}
+          disabled={
+            disabled ||
+            submitting ||
+            (isEmpty(html) && attachments.length === 0) ||
+            overSizeLimit
+          }
           onClick={() => {
             void submit();
           }}
