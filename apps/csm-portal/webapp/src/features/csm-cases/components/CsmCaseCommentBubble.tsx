@@ -71,11 +71,25 @@ const PURIFY_CONFIG = {
   ALLOWED_ATTR: ["href", "target", "rel", "src", "alt"],
 };
 
+/**
+ * Comment bodies are usually rich-text HTML authored in the editor, but some
+ * (ServiceNow-sourced or API-created notes) are plain text. Detect a real tag so
+ * plain text isn't fed through `innerHTML`, where its line breaks would collapse;
+ * plain text is rendered as text with `white-space: pre-wrap` instead.
+ */
+const HTML_TAG_RE = /<\/?[a-z][a-z0-9]*\b[^>]*>/i;
+function isHtmlContent(s: string): boolean {
+  return HTML_TAG_RE.test(s);
+}
+
 export default function CsmCaseCommentBubble({
   comment,
 }: CsmCaseCommentBubbleProps): JSX.Element {
   const theme = useTheme();
-  const safeHtml = DOMPurify.sanitize(comment.bodyHtml, PURIFY_CONFIG);
+  const isHtml = isHtmlContent(comment.bodyHtml);
+  const safeHtml = isHtml
+    ? DOMPurify.sanitize(comment.bodyHtml, PURIFY_CONFIG)
+    : "";
   const isSystem = comment.authorRole === "system";
 
   if (isSystem) {
@@ -93,18 +107,33 @@ export default function CsmCaseCommentBubble({
         }}
       >
         <SemanticChip role="warning" label="System" />
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            "& p": { m: 0 },
-            "& a": { color: "primary.main" },
-            ...{ "& *": { fontSize: "0.875rem" } },
-          }}
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
+        {isHtml ? (
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              "& p": { m: 0 },
+              "& a": { color: "primary.main" },
+              ...{ "& *": { fontSize: "0.875rem" } },
+            }}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
+          />
+        ) : (
+          <Box
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              whiteSpace: "pre-wrap",
+              fontSize: "0.875rem",
+            }}
+          >
+            {comment.bodyHtml}
+          </Box>
+        )}
         <Typography variant="caption" color="text.secondary">
           <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
         </Typography>
@@ -168,45 +197,60 @@ export default function CsmCaseCommentBubble({
             <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
           </Typography>
         </Box>
-        <Box
-          sx={{
-            minWidth: 0,
-            overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            "& p": { m: 0 },
-            "& p + p": { mt: 0.75 },
-            "& ul, & ol": { ml: 3, my: 0.5 },
-            "& code": {
-              bgcolor: "background.default",
-              px: 0.5,
-              borderRadius: 0.5,
-              fontFamily: "monospace",
-              fontSize: "0.85em",
+        {isHtml ? (
+          <Box
+            sx={{
+              minWidth: 0,
               overflowWrap: "anywhere",
-            },
-            "& pre": {
-              bgcolor: "background.default",
-              p: 1,
-              borderRadius: 1,
-              overflowX: "auto",
-              fontFamily: "monospace",
-              fontSize: "0.85em",
-            },
-            "& a": { color: "primary.main" },
-            "& img": { maxWidth: "100%" },
-            "& blockquote": {
-              borderLeft: 3,
-              borderColor: "divider",
-              pl: 1.5,
-              ml: 0,
-              my: 0.75,
-              color: "text.secondary",
-              fontStyle: "italic",
-            },
-            "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
-          }}
-          dangerouslySetInnerHTML={{ __html: safeHtml }}
-        />
+              wordBreak: "break-word",
+              "& p": { m: 0 },
+              "& p + p": { mt: 0.75 },
+              "& ul, & ol": { ml: 3, my: 0.5 },
+              "& code": {
+                bgcolor: "background.default",
+                px: 0.5,
+                borderRadius: 0.5,
+                fontFamily: "monospace",
+                fontSize: "0.85em",
+                overflowWrap: "anywhere",
+              },
+              "& pre": {
+                bgcolor: "background.default",
+                p: 1,
+                borderRadius: 1,
+                overflowX: "auto",
+                fontFamily: "monospace",
+                fontSize: "0.85em",
+              },
+              "& a": { color: "primary.main" },
+              "& img": { maxWidth: "100%" },
+              "& blockquote": {
+                borderLeft: 3,
+                borderColor: "divider",
+                pl: 1.5,
+                ml: 0,
+                my: 0.75,
+                color: "text.secondary",
+                fontStyle: "italic",
+              },
+              "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
+            }}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
+          />
+        ) : (
+          // Plain-text body: render as text and honour newlines/whitespace.
+          <Typography
+            variant="body2"
+            sx={{
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {comment.bodyHtml}
+          </Typography>
+        )}
       </Paper>
     </Box>
   );
