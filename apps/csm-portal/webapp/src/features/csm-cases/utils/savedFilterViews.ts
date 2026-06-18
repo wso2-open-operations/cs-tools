@@ -40,7 +40,7 @@ const MAX_VIEWS = 50;
  * not yet).
  */
 export const SUGGESTED_FILTER_VIEWS: readonly SavedFilterView[] = [
-  { name: "S0/S1 active", qs: "severities=S0,S1&states=open,work_in_progress,reopened" },
+  { name: "S0/S1 active", qs: "severities=S0,S1&states=open,work_in_progress" },
   { name: "Awaiting info", qs: "states=awaiting_info" },
   { name: "Open (unstarted)", qs: "states=open" },
 ];

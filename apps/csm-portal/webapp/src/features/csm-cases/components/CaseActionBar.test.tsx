@@ -174,17 +174,4 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
     // The state-independent "More" overflow is unaffected.
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
-
-  it("keeps the lead-only Reopen override on a closed case regardless of nextStates", () => {
-    render(
-      <CaseActionBar
-        caseDetail={caseInState("closed", [])}
-        onAction={() => {}}
-        canReopenClosed
-      />,
-    );
-    // The button carries a tooltip, so its accessible name is the tooltip text;
-    // assert the visible "Reopened" label (the BE state name) instead.
-    expect(screen.getByText("Reopened")).toBeInTheDocument();
-  });
 });

@@ -116,7 +116,7 @@ export default function MyQueueSection({
         <StatPill
           label="Action required"
           value={isLoading ? "—" : (queue?.actionRequiredCount ?? 0)}
-          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN], states: ["open", "reopened"] })}
+          href={casesHref({ assignees: [ASSIGNEE_ME_TOKEN], states: ["open"] })}
           onNavigate={go}
         />
         <StatPill

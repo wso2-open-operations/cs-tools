@@ -101,16 +101,6 @@ function MetaCell({
   );
 }
 
-// Reopening a closed case is a lead-only override. We match the lead role from
-// the ID-token group claims.
-// TODO(authz): confirm the exact Asgardeo group(s)/role(s) that designate a
-// "lead" with the gateway/permission model — these identifiers are provisional.
-const LEAD_REOPEN_ROLES = new Set([
-  "cre_lead",
-  "CRE_LEADS_GROUP",
-  "leadership",
-]);
-
 const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   start_work: "Started work on this case.",
   assign_to_me: "Assigned to you.",
@@ -120,7 +110,6 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   resume_work: "Resumed work on this case.",
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
-  reopen: "Case reopened.",
   transition: "Case updated.",
 };
 
@@ -145,7 +134,6 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   resume_work: "info",
   close: "success",
   close_no_response: "success",
-  reopen: "info",
   transition: "info",
 };
 
@@ -162,7 +150,6 @@ const LIFECYCLE_TARGET_STATE: Partial<
   wait_on_wso2: "waiting_on_wso2",
   close: "closed",
   close_no_response: "closed",
-  reopen: "reopened",
 };
 
 const FEEDBACK_PALETTE: Record<
@@ -533,9 +520,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // both wrong and the main source of orange on the screen. Only show SLA
   // affordances when we actually have clock data (mock, and LIVE once wired).
   const hasSlaData = c.slaClocks.length > 0;
-  const canReopenClosed = (claims?.groups ?? []).some((g) =>
-    LEAD_REOPEN_ROLES.has(g),
-  );
   // The case description is already returned by `comments/search` as the
   // opening comment, so the stream renders it directly — no synthetic entry is
   // injected (that duplicated the first comment).
@@ -659,11 +643,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <CaseActionBar
-            caseDetail={c}
-            onAction={onAction}
-            canReopenClosed={canReopenClosed}
-          />
+          <CaseActionBar caseDetail={c} onAction={onAction} />
         </Box>
       </Box>
 
