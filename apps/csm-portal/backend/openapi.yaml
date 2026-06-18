@@ -126,7 +126,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     patch:
-      summary: Update the state and/or priority of a support case.
+      summary: Update a support case.
+      description: |
+        Updates exactly one field of the case. Provide exactly one of: `state`, `priority`,
+        `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        only when the ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
         - name: id
@@ -148,7 +152,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseView'
+                $ref: '#/components/schemas/UpdateCaseResponse'
         "400":
           description: Bad request (e.g. malformed UUID, invalid state value, or invalid state transition).
           content:
@@ -1099,10 +1103,14 @@ components:
 
     UpdateCaseRequest:
       type: object
-      description: At least one of state or priority must be provided.
-      anyOf:
+      description: |
+        Exactly one of `state`, `priority`, `watchList`, or `assigneeEmail` must be provided.
+        `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
+      oneOf:
         - required: [state]
         - required: [priority]
+        - required: [watchList]
+        - required: [assigneeEmail]
       properties:
         state:
           type: string
@@ -1112,6 +1120,67 @@ components:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new priority (severity) of the case.
+        watchList:
+          type: array
+          items:
+            type: string
+            format: email
+          description: List of email addresses to set as the case watch list (ServiceNow only).
+        assigneeEmail:
+          type: string
+          format: email
+          description: Email of the engineer to assign to this case (ServiceNow only).
+
+    UpdateCaseResponse:
+      type: object
+      required: [message, case]
+      properties:
+        message:
+          type: string
+        case:
+          $ref: '#/components/schemas/UpdatedCase'
+
+    UpdatedCase:
+      type: object
+      required: [id, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          description: Email or display name of the user who performed the update.
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+        priority:
+          type: string
+          enum: [catastrophic, critical, high, medium, low]
+        watchList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchListUser'
+        assignedTo:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+
+    WatchListUser:
+      type: object
+      required: [id, userName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
 
     CaseCreatePayload:
       type: object
@@ -1307,7 +1376,7 @@ components:
           nullable: true
           enum:
             - ongoing
-            - on_hold
+            - paused
           description: Sub-state of work_in_progress. Null when state is not work_in_progress.
         closedAt:
           type: string
