@@ -24,8 +24,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { useSessionState } from "@hooks/useSessionState";
-import { Box, Divider, Grid, Stack } from "@wso2/oxygen-ui";
-import DateRangeFilter from "@components/list-view/DateRangeFilter";
+import { Box, Divider, Stack } from "@wso2/oxygen-ui";
 import type { ChangeRequestFilterValues, ChangeRequestItem } from "@features/operations/types/changeRequests";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -324,37 +323,15 @@ export default function ChangeRequestsPage(): JSX.Element {
           activeFiltersCount={countListSearchAndFilters("", filters)}
           onClearFilters={handleClearFilters}
           filtersContent={
-            <>
-              <ListFiltersPanel
-                filterDefinitions={visibleFilterDefinitions}
-                filters={filters}
-                resolveOptions={(def) =>
-                  resolveChangeRequestFilterListOptions(def, filterMetadata)
-                }
-                onFilterChange={handleFilterChange}
-                gridSize={{ xs: 12, sm: 6, md: 4 }}
-              />
-              <Grid container spacing={2} sx={{ mt: 1 }} alignItems="flex-end">
-                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                  <DateRangeFilter
-                    label="Created Date"
-                    startDate={filters.startCreatedDate}
-                    endDate={filters.endCreatedDate}
-                    onStartChange={(val) => handleFilterChange("startCreatedDate", val ?? "")}
-                    onEndChange={(val) => handleFilterChange("endCreatedDate", val ?? "")}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                  <DateRangeFilter
-                    label="Updated Date"
-                    startDate={filters.startUpdatedDate}
-                    endDate={filters.endUpdatedDate}
-                    onStartChange={(val) => handleFilterChange("startUpdatedDate", val ?? "")}
-                    onEndChange={(val) => handleFilterChange("endUpdatedDate", val ?? "")}
-                  />
-                </Grid>
-              </Grid>
-            </>
+            <ListFiltersPanel
+              filterDefinitions={visibleFilterDefinitions}
+              filters={filters}
+              resolveOptions={(def) =>
+                resolveChangeRequestFilterListOptions(def, filterMetadata)
+              }
+              onFilterChange={handleFilterChange}
+              gridSize={{ xs: 12, sm: 6, md: 4 }}
+            />
           }
         />
       )}

@@ -228,10 +228,6 @@ export function buildChangeRequestSearchRequest(
       searchQuery: searchTerm.trim() || undefined,
       stateKeys,
       impactKeys: selectedImpactIds.length > 0 ? selectedImpactIds : undefined,
-      startCreatedDate: filters.startCreatedDate,
-      endCreatedDate: filters.endCreatedDate,
-      startUpdatedDate: filters.startUpdatedDate,
-      endUpdatedDate: filters.endUpdatedDate,
     },
     sortBy: {
       field: sortField,
