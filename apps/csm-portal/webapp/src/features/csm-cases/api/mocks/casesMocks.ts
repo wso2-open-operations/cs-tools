@@ -357,7 +357,7 @@ const ABT_CASE_SEEDS: CaseSeed[] = [
     projectId: "prj-acme-iam-prod",
     projectName: "IAM Production",
     severity: "S2",
-    state: "reopened",
+    state: "waiting_on_wso2",
     assignee: "Sajith Ekanayaka",
     assigneeIsMe: true,
     slaClockType: "ack",
@@ -809,8 +809,6 @@ function deriveTags(c: CsmCaseRow): CaseTag[] {
     tags.push({ id: "t-priority", label: "high-priority", color: "error" });
   if (c.minutesToBreach < 0)
     tags.push({ id: "t-breach", label: "sla-breached", color: "warning" });
-  if (c.state === "reopened")
-    tags.push({ id: "t-reopen", label: "reopened", color: "warning" });
   const subjLower = c.subject.toLowerCase();
   if (subjLower.includes("ldap")) tags.push({ id: "t-ldap", label: "ldap", color: "info" });
   if (subjLower.includes("saml") || subjLower.includes("oidc"))
@@ -915,15 +913,6 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
       kind: "state_change",
       actor: assignee,
       description: "Case closed",
-      createdAt: c.updatedAt,
-    });
-  }
-  if (c.state === "reopened") {
-    events.push({
-      id: `a-${c.id}-3`,
-      kind: "state_change",
-      actor: "Customer",
-      description: "Customer reopened the case",
       createdAt: c.updatedAt,
     });
   }
@@ -1198,7 +1187,6 @@ const MOCK_NEXT_STATES: Record<CaseState, CaseState[]> = {
   ],
   waiting_on_wso2: ["work_in_progress"],
   awaiting_info: ["waiting_on_wso2"],
-  reopened: ["waiting_on_wso2"],
   solution_proposed: ["closed", "waiting_on_wso2"],
   closed: [],
 };

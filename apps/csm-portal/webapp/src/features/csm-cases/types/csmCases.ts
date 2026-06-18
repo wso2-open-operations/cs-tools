@@ -221,7 +221,6 @@ export type CaseLifecycleAction =
   | "resume_work"
   | "close"
   | "close_no_response"
-  | "reopen"
   // Generic transition into a state the frontend has no curated action for
   // (e.g. a state added on the backend). Drives the post-transition toast only;
   // the PATCH target always comes from the backend `nextStates` value.

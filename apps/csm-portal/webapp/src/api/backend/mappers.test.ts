@@ -50,18 +50,12 @@ describe("priorityFromSeverity", () => {
 });
 
 describe("uiStateFromBe / beStateFromUi", () => {
-  it("passes reopened through unchanged (UI and backend now share the spelling)", () => {
-    expect(uiStateFromBe("reopened")).toBe("reopened");
-    expect(beStateFromUi("reopened")).toBe("reopened");
-  });
-
   it("passes through shared states unchanged", () => {
     for (const s of [
       "open",
       "work_in_progress",
       "waiting_on_wso2",
       "awaiting_info",
-      "reopened",
       "solution_proposed",
       "closed",
     ] as const) {

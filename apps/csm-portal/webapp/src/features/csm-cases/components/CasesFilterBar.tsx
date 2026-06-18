@@ -131,7 +131,6 @@ const PRIMARY_STATES: CaseState[] = [
   "awaiting_info",
   "solution_proposed",
   "waiting_on_wso2",
-  "reopened",
   "closed",
 ];
 const SLA_OPTIONS: { value: SlaFilter; label: string }[] = [

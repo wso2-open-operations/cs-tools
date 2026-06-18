@@ -40,7 +40,6 @@ import {
   PauseCircle,
   Phone,
   Play,
-  RotateCcw,
   Send,
   ShieldAlert,
   TriangleAlert,
@@ -85,8 +84,6 @@ type PrimaryButton = TargetConfig & {
 
 const CLOSE_CONFIRM: ActionConfirm = {
   title: "Close this case?",
-  // No "cannot be reopened" claim — reopen is a lead-only override, so that
-  // assertion would be false for leads.
   body: "The customer receives a closure notification and the case moves to “Closed”.",
   confirmLabel: "Close case",
   confirmColor: "warning",
@@ -97,8 +94,7 @@ const CLOSE_CONFIRM: ActionConfirm = {
  * Customer-notifying / hard-to-undo transitions carry a confirm gate so a stray
  * click in a busy queue can't silently close a case or email the customer.
  */
-const TARGET_CONFIG: Record<CaseState, TargetConfig> = {
-  open: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
+const TARGET_CONFIG: Partial<Record<CaseState, TargetConfig>> = {
   work_in_progress: {
     action: "resume_work",
     color: "primary",
@@ -125,7 +121,6 @@ const TARGET_CONFIG: Record<CaseState, TargetConfig> = {
       confirmColor: "primary",
     },
   },
-  reopened: { action: "reopen", color: "primary", icon: <RotateCcw size={16} /> },
   closed: {
     action: "close",
     color: "warning",
@@ -167,7 +162,6 @@ const DISPLAY_ORDER: CaseState[] = [
   "work_in_progress",
   "awaiting_info",
   "waiting_on_wso2",
-  "reopened",
   "open",
   "closed",
 ];
@@ -176,28 +170,6 @@ function orderRank(s: CaseState): number {
   const i = DISPLAY_ORDER.indexOf(s);
   return i === -1 ? CLOSED_RANK - 0.5 : i;
 }
-
-/**
- * Lead-only override to reopen a closed case. Not part of the normal
- * `nextStates` flow — the backend reports a closed case as terminal
- * (`nextStates: []`) — so it is appended for the `closed` state only when the
- * caller grants the `canReopenClosed` capability. Labelled by the BE state it
- * lands in (`reopened` → "Reopened") like every other button.
- */
-const REOPEN_BUTTON: PrimaryButton = {
-  targetState: "reopened",
-  label: stateLabel("reopened"),
-  action: "reopen",
-  color: "warning",
-  icon: <RotateCcw size={16} />,
-  tooltip: "Lead-only: reopen a closed case for an exceptional follow-up.",
-  confirm: {
-    title: "Reopen this closed case?",
-    body: "The case returns to an active state and the customer is notified.",
-    confirmLabel: "Reopen case",
-    confirmColor: "warning",
-  },
-};
 
 interface SecondaryItem {
   key: string;
@@ -252,11 +224,6 @@ interface CaseActionBarProps {
     action: CaseLifecycleAction | { secondary: string },
     targetState?: CaseState,
   ) => void | Promise<unknown>;
-  /**
-   * Grants the lead-only "Reopen" action on a closed case. Defaults to false,
-   * so a closed case is terminal unless the caller is a lead.
-   */
-  canReopenClosed?: boolean;
 }
 
 /**
@@ -269,14 +236,12 @@ interface CaseActionBarProps {
 export default function CaseActionBar({
   caseDetail,
   onAction,
-  canReopenClosed = false,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
     null,
   );
 
-  const from = caseDetail.state;
   // Render a button for every state the backend says the case can move to. The
   // backend `nextStates` is the single source of truth: an empty/terminal list
   // (e.g. Closed) yields no lifecycle buttons, and a missing field also yields
@@ -285,12 +250,7 @@ export default function CaseActionBar({
   const lifecycle = [...new Set(targets)]
     .sort((a, b) => orderRank(a) - orderRank(b))
     .map(buttonFor);
-  const primary = [
-    ...lifecycle,
-    // Lead-only reopen is an override outside the normal `nextStates` flow, so
-    // it is gated by capability rather than by the backend transition list.
-    ...(from === "closed" && canReopenClosed ? [REOPEN_BUTTON] : []),
-  ];
+  const primary = lifecycle;
   const secondary = buildSecondaryItems();
 
   const runPrimary = (p: PrimaryButton): void => {

@@ -67,10 +67,10 @@ describe("savedFilterViews", () => {
   });
 
   it("persists across a fresh hook mount (reload)", () => {
-    act(() => saveFilterView("Persisted", "states=reopened"));
+    act(() => saveFilterView("Persisted", "states=waiting_on_wso2"));
     const remount = renderHook(() => useSavedFilterViews());
     expect(remount.result.current).toEqual([
-      { name: "Persisted", qs: "states=reopened" },
+      { name: "Persisted", qs: "states=waiting_on_wso2" },
     ]);
   });
 

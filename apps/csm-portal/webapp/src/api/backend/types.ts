@@ -68,7 +68,6 @@ export type BeCaseState =
   | "work_in_progress"
   | "waiting_on_wso2"
   | "awaiting_info"
-  | "reopened"
   | "solution_proposed"
   | "closed";
 

@@ -37,7 +37,6 @@ export const MATRIX_STATES: CaseState[] = [
   "waiting_on_wso2",
   "awaiting_info",
   "solution_proposed",
-  "reopened",
 ];
 
 export interface CaseCountsMatrix {
