@@ -857,6 +857,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   comments={safeComments}
                   audit={c.audit}
                   attachments={attachmentList}
+                  onDownloadAttachment={onDownloadAttachment}
                 />
               </>
             )}
