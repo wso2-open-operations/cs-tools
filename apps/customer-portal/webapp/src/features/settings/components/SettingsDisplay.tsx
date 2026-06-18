@@ -16,7 +16,7 @@
 
 import { Box, Paper, Typography, alpha, colors } from "@wso2/oxygen-ui";
 import { Type } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
+import { useRef, type JSX } from "react";
 import {
   useFontSize,
   type FontSizeOption,
@@ -38,6 +38,7 @@ import {
 export default function SettingsDisplay(): JSX.Element {
   const { fontSize, setFontSizeOption } = useFontSize();
   const isDarkMode = useDarkMode();
+  const groupRef = useRef<HTMLDivElement>(null);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -87,6 +88,9 @@ export default function SettingsDisplay(): JSX.Element {
         </Box>
 
         <Box
+          ref={groupRef}
+          role="radiogroup"
+          aria-label={SETTINGS_DISPLAY_FONT_SIZE_TITLE}
           sx={{
             display: "grid",
             gridTemplateColumns: {
@@ -96,20 +100,39 @@ export default function SettingsDisplay(): JSX.Element {
             gap: 1.5,
           }}
         >
-          {SETTINGS_DISPLAY_FONT_SIZE_OPTIONS.map((option) => {
+          {SETTINGS_DISPLAY_FONT_SIZE_OPTIONS.map((option, index) => {
             const isSelected = fontSize === option.id;
             return (
               <Paper
                 key={option.id}
-                role="button"
-                tabIndex={0}
-                aria-pressed={isSelected}
+                role="radio"
+                tabIndex={isSelected ? 0 : -1}
+                aria-checked={isSelected}
                 aria-label={`Font size: ${option.label}`}
                 onClick={() => setFontSizeOption(option.id as FontSizeOption)}
                 onKeyDown={(e) => {
+                  const opts = SETTINGS_DISPLAY_FONT_SIZE_OPTIONS;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     setFontSizeOption(option.id as FontSizeOption);
+                  } else if (
+                    e.key === "ArrowRight" ||
+                    e.key === "ArrowDown"
+                  ) {
+                    e.preventDefault();
+                    const next = (index + 1) % opts.length;
+                    setFontSizeOption(opts[next].id as FontSizeOption);
+                    const radios = groupRef.current?.querySelectorAll<HTMLElement>('[role="radio"]');
+                    radios?.[next]?.focus();
+                  } else if (
+                    e.key === "ArrowLeft" ||
+                    e.key === "ArrowUp"
+                  ) {
+                    e.preventDefault();
+                    const prev = (index - 1 + opts.length) % opts.length;
+                    setFontSizeOption(opts[prev].id as FontSizeOption);
+                    const radios = groupRef.current?.querySelectorAll<HTMLElement>('[role="radio"]');
+                    radios?.[prev]?.focus();
                   }
                 }}
                 sx={{
