@@ -42,6 +42,7 @@ import {
 } from "react";
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
 
 interface CsmCaseCommentInputProps {
   onSubmit: (
@@ -138,6 +139,18 @@ export default function CsmCaseCommentInput({
     }
     if (overSizeLimit) {
       setError(sizeError);
+      return;
+    }
+    // Pre-validate file sizes before posting anything: the send is multi-step
+    // (comment then uploads), so catching an oversized file here avoids posting
+    // the comment and then failing on the upload (which would double-post on retry).
+    const tooLarge = attachments.find((f) => f.size > MAX_ATTACHMENT_SIZE_BYTES);
+    if (tooLarge) {
+      setError(
+        `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
+          MAX_ATTACHMENT_SIZE_BYTES,
+        )}.`,
+      );
       return;
     }
     setError(null);
