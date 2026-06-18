@@ -30,6 +30,7 @@ import {
   SettingsPageTabId,
   SettingsRoleInfoId,
 } from "@features/settings/types/settings";
+import { FONT_SIZE_PX } from "@context/font-size/FontSizeContext";
 import { NULL_PLACEHOLDER as COMMON_NULL_PLACEHOLDER } from "@constants/common";
 
 /** Placeholder for empty/null values in user management UI. */
@@ -75,10 +76,10 @@ export const SETTINGS_DISPLAY_FONT_SIZE_DESCRIPTION =
   "Adjust the text size across the portal";
 
 export const SETTINGS_DISPLAY_FONT_SIZE_OPTIONS = [
-  { id: "small" as const, label: "Small", size: "13px", description: "Compact view" },
-  { id: "medium" as const, label: "Default", size: "16px", description: "Standard view" },
-  { id: "large" as const, label: "Large", size: "18px", description: "Comfortable view" },
-  { id: "xlarge" as const, label: "Extra Large", size: "20px", description: "Accessible view" },
+  { id: "small" as const, label: "Small", size: FONT_SIZE_PX.small, description: "Compact view" },
+  { id: "medium" as const, label: "Default", size: FONT_SIZE_PX.medium, description: "Standard view" },
+  { id: "large" as const, label: "Large", size: FONT_SIZE_PX.large, description: "Comfortable view" },
+  { id: "xlarge" as const, label: "Extra Large", size: FONT_SIZE_PX.xlarge, description: "Accessible view" },
 ];
 
 export const SETTINGS_PROJECT_NOT_FOUND_MESSAGE =

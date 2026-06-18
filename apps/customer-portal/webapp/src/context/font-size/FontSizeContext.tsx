@@ -31,7 +31,7 @@ import {
 
 export type { FontSizeOption };
 
-const FONT_SIZE_PX: Record<FontSizeOption, string> = {
+export const FONT_SIZE_PX: Record<FontSizeOption, string> = {
   small: "13px",
   medium: "16px",
   large: "18px",
@@ -45,6 +45,14 @@ interface FontSizeContextType {
 
 const FontSizeContext = createContext<FontSizeContextType | undefined>(undefined);
 
+/**
+ * Provides font size preference to the component tree.
+ * Reads the initial value from localStorage, applies it to the HTML root element,
+ * and persists changes so they survive page reloads.
+ *
+ * @param {{ children: ReactNode }} props - Component props.
+ * @returns {JSX.Element} The provider wrapping its children.
+ */
 export function FontSizeProvider({
   children,
 }: {
@@ -68,6 +76,12 @@ export function FontSizeProvider({
   );
 }
 
+/**
+ * Returns the current font size preference and a setter from the nearest FontSizeProvider.
+ * Throws if called outside of a FontSizeProvider.
+ *
+ * @returns {FontSizeContextType} The font size context value.
+ */
 export function useFontSize(): FontSizeContextType {
   const context = useContext(FontSizeContext);
   if (context === undefined) {
