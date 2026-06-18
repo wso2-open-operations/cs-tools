@@ -37,18 +37,24 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type JSX,
 } from "react";
 import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
+import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
+
+/** A file staged for upload, with the display name chosen in the modal. */
+export interface CommentAttachmentDraft {
+  file: File;
+  name: string;
+}
 
 interface CsmCaseCommentInputProps {
   onSubmit: (
     html: string,
     internal: boolean,
-    files: File[],
+    attachments: CommentAttachmentDraft[],
   ) => Promise<unknown> | void;
   disabled?: boolean;
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
@@ -86,24 +92,19 @@ export default function CsmCaseCommentInput({
   const [internal, setInternal] = useState(false);
   const [maximized, setMaximized] = useState(false);
   // Files attached to this comment; uploaded to the case on send.
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<CommentAttachmentDraft[]>([]);
+  const [attachModalOpen, setAttachModalOpen] = useState(false);
 
-  const onAttachmentClick = useCallback(() => fileInputRef.current?.click(), []);
-  const onFilesPicked = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const picked = Array.from(e.target.files ?? []);
-      if (picked.length) {
-        setAttachments((prev) => {
-          const seen = new Set(prev.map(fileSignature));
-          return [...prev, ...picked.filter((f) => !seen.has(fileSignature(f)))];
-        });
+  const onAttachmentClick = useCallback(() => setAttachModalOpen(true), []);
+  const onSelectAttachment = useCallback((file: File, name: string) => {
+    setAttachments((prev) => {
+      // Dedupe re-picked files by identity (the chosen name may still differ).
+      if (prev.some((a) => fileSignature(a.file) === fileSignature(file))) {
+        return prev;
       }
-      // Reset so re-selecting the same file still fires onChange.
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    },
-    [],
-  );
+      return [...prev, { file, name }];
+    });
+  }, []);
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
@@ -144,7 +145,9 @@ export default function CsmCaseCommentInput({
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
-    const tooLarge = attachments.find((f) => f.size > MAX_ATTACHMENT_SIZE_BYTES);
+    const tooLarge = attachments.find(
+      (a) => a.file.size > MAX_ATTACHMENT_SIZE_BYTES,
+    );
     if (tooLarge) {
       setError(
         `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
@@ -322,7 +325,7 @@ export default function CsmCaseCommentInput({
           autoFocus={autoFocus}
           enterToSubmit={false}
           onAttachmentClick={onAttachmentClick}
-          attachments={attachments}
+          attachments={attachments.map((a) => a.file)}
           onAttachmentRemove={onAttachmentRemove}
           onSubmitKeyDown={() => {
             void submit();
@@ -330,14 +333,11 @@ export default function CsmCaseCommentInput({
         />
       )}
 
-      {/* Hidden picker driven by the editor toolbar's attach button. */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        onChange={onFilesPicked}
-        aria-hidden
+      {/* Naming picker driven by the editor toolbar's attach button. */}
+      <CsmUploadAttachmentModal
+        open={attachModalOpen}
+        onClose={() => setAttachModalOpen(false)}
+        onSelect={onSelectAttachment}
       />
 
       <Box

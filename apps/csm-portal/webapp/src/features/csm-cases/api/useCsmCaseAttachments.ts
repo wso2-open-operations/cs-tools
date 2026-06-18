@@ -123,6 +123,8 @@ export function useGetCsmCaseAttachments(
 export interface PostCsmCaseAttachmentInput {
   caseId: string;
   file: File;
+  /** Display name for the attachment; defaults to the file's own name. */
+  name?: string;
   /** Optional free-text note stored with the attachment. */
   description?: string;
   /** Display name of the uploader (used by the mock; the BE sets its own). */
@@ -160,7 +162,7 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
         return postMockCsmCaseAttachment({
           caseId: input.caseId,
-          filename: input.file.name,
+          filename: input.name?.trim() || input.file.name,
           size: input.file.size,
           contentType: input.file.type || "application/octet-stream",
           uploadedBy: input.uploadedBy,
@@ -169,7 +171,7 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
 
       const dataUri = await readFileAsDataUrl(input.file);
       const payload: BeAttachmentCreatePayload = {
-        name: input.file.name,
+        name: input.name?.trim() || input.file.name,
         type: input.file.type || "application/octet-stream",
         file: dataUri,
         description: input.description?.trim() || null,

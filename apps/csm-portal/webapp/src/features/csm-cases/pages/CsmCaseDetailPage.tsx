@@ -760,7 +760,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               <CsmCaseCommentInput
                 disabled={!caseId}
                 autoFocus
-                onSubmit={async (bodyHtml, internal, files) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
                   // Post the comment only when there's text; an attachment-only
                   // send skips the comment endpoint and just uploads the files.
@@ -779,10 +779,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   }
                   // Attachments are case-level (no comment linkage on the BE);
                   // upload each sequentially so a failure surfaces clearly.
-                  for (const file of files) {
+                  for (const { file, name } of commentAttachments) {
                     await postAttachment.mutateAsync({
                       caseId,
                       file,
+                      name,
                       uploadedBy: engineerName,
                     });
                   }
