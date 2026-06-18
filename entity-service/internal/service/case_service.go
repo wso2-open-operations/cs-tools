@@ -231,8 +231,18 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if len(req.WatchList) > 0 || req.AssigneeEmail != nil {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList and assigneeEmail are only supported for the ServiceNow data source"}
 	}
-	if req.State == nil && req.Priority == nil {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state or priority must be provided"}
+	fieldCount := 0
+	if req.State != nil {
+		fieldCount++
+	}
+	if req.Priority != nil {
+		fieldCount++
+	}
+	if fieldCount == 0 {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state or priority must be provided"}
+	}
+	if fieldCount > 1 {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state or priority may be provided per request"}
 	}
 	if req.State != nil && !validCaseState[*req.State] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
