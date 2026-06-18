@@ -88,6 +88,12 @@ export interface BackendApi {
   post<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
   patch<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
   postEmpty<TResponse>(path: string): Promise<TResponse>;
+  /**
+   * Authenticated binary GET. Used for endpoints that stream raw file content
+   * (e.g. attachment download) rather than JSON. Unlike {@link BackendApi.get},
+   * a 404 throws like any other error — there is no "null" body for a binary.
+   */
+  getBlob(path: string): Promise<Blob>;
 }
 
 /**
@@ -146,6 +152,11 @@ export function useBackendApi(): BackendApi {
         });
         if (!response.ok) throw await readError(response);
         return (await response.json()) as TResponse;
+      },
+      async getBlob(path: string): Promise<Blob> {
+        const response = await authFetch(buildUrl(path), { method: "GET" });
+        if (!response.ok) throw await readError(response);
+        return await response.blob();
       },
     }),
     [authFetch, buildUrl],

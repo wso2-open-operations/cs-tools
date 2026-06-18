@@ -37,7 +37,7 @@ import {
   TriangleAlert,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useCallback, useEffect, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { usePatchCsmCase } from "@features/csm-cases/api/usePatchCsmCase";
@@ -47,6 +47,11 @@ import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
+import {
+  useGetCsmCaseAttachments,
+  usePostCsmCaseAttachment,
+  useDownloadCsmCaseAttachment,
+} from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
@@ -73,7 +78,10 @@ import {
 } from "@features/csm-dashboard/utils/abtDashboard";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
-import type { CaseLifecycleAction } from "@features/csm-cases/types/csmCases";
+import type {
+  CaseAttachment,
+  CaseLifecycleAction,
+} from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
 function MetaCell({
@@ -93,16 +101,6 @@ function MetaCell({
   );
 }
 
-// Reopening a closed case is a lead-only override. We match the lead role from
-// the ID-token group claims.
-// TODO(authz): confirm the exact Asgardeo group(s)/role(s) that designate a
-// "lead" with the gateway/permission model — these identifiers are provisional.
-const LEAD_REOPEN_ROLES = new Set([
-  "cre_lead",
-  "CRE_LEADS_GROUP",
-  "leadership",
-]);
-
 const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   start_work: "Started work on this case.",
   assign_to_me: "Assigned to you.",
@@ -112,7 +110,6 @@ const LIFECYCLE_TOAST: Record<CaseLifecycleAction, string> = {
   resume_work: "Resumed work on this case.",
   close: "Case closed.",
   close_no_response: "Closed (no response received).",
-  reopen: "Case reopened.",
   transition: "Case updated.",
 };
 
@@ -137,7 +134,6 @@ const LIFECYCLE_SEVERITY: Record<CaseLifecycleAction, FeedbackSeverity> = {
   resume_work: "info",
   close: "success",
   close_no_response: "success",
-  reopen: "info",
   transition: "info",
 };
 
@@ -154,7 +150,6 @@ const LIFECYCLE_TARGET_STATE: Partial<
   wait_on_wso2: "waiting_on_wso2",
   close: "closed",
   close_no_response: "closed",
-  reopen: "reopened",
 };
 
 const FEEDBACK_PALETTE: Record<
@@ -182,8 +177,6 @@ const SECONDARY_TOAST: Record<string, string> = {
   request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
   copy_link: "Case link copied to clipboard.",
-  download_all_attachments: "Preparing all attachments for download (mock).",
-  download_attachment: "Downloading attachment (mock).",
 };
 
 type CaseTabId =
@@ -239,6 +232,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
   const postComment = usePostCsmCaseComment();
+  const {
+    data: attachments,
+    isLoading: isAttachmentsLoading,
+    isError: isAttachmentsError,
+    refetch: refetchAttachments,
+  } = useGetCsmCaseAttachments(caseId);
+  const postAttachment = usePostCsmCaseAttachment();
+  const downloadAttachment = useDownloadCsmCaseAttachment();
   const patchCase = usePatchCsmCase(caseId);
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
@@ -417,6 +418,51 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [data, showError, patchCase],
   );
 
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+
+  const onUploadAttachment = useCallback(
+    (file: File) => {
+      if (!caseId) return;
+      postAttachment.mutate(
+        { caseId, file, uploadedBy: engineerName },
+        {
+          onSuccess: () =>
+            setFeedback({
+              message: `Uploaded ${file.name}.`,
+              severity: "success",
+              sticky: false,
+            }),
+          // Failures surface inline on the widget via postAttachment.error.
+        },
+      );
+    },
+    [caseId, engineerName, postAttachment],
+  );
+
+  const onDownloadAttachment = useCallback(
+    (attachment: CaseAttachment) => {
+      if (!caseId) return;
+      void downloadAttachment(caseId, attachment).catch((err) =>
+        showError(`Could not download ${attachment.filename}.`, err),
+      );
+    },
+    [caseId, downloadAttachment, showError],
+  );
+
+  const onDownloadAllAttachments = useCallback(() => {
+    if (!caseId) return;
+    // No bulk endpoint; fetch each sequentially (not a parallel burst) and save.
+    void (async () => {
+      for (const a of attachmentList) {
+        try {
+          await downloadAttachment(caseId, a);
+        } catch (err) {
+          showError(`Could not download ${a.filename}.`, err);
+        }
+      }
+    })();
+  }, [caseId, attachmentList, downloadAttachment, showError]);
+
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -474,9 +520,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // both wrong and the main source of orange on the screen. Only show SLA
   // affordances when we actually have clock data (mock, and LIVE once wired).
   const hasSlaData = c.slaClocks.length > 0;
-  const canReopenClosed = (claims?.groups ?? []).some((g) =>
-    LEAD_REOPEN_ROLES.has(g),
-  );
   // The case description is already returned by `comments/search` as the
   // opening comment, so the stream renders it directly — no synthetic entry is
   // injected (that duplicated the first comment).
@@ -600,11 +643,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <CaseActionBar
-            caseDetail={c}
-            onAction={onAction}
-            canReopenClosed={canReopenClosed}
-          />
+          <CaseActionBar caseDetail={c} onAction={onAction} />
         </Box>
       </Box>
 
@@ -675,7 +714,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             // Counts shown only where the tab IS the list (unambiguous).
             const count =
               t.id === "attachments"
-                ? c.attachments.length
+                ? attachmentList.length
                 : t.id === "time"
                   ? c.timeLogs.length
                   : undefined;
@@ -720,16 +759,36 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!caseId}
-                onSubmit={async (bodyHtml, internal) => {
+                autoFocus
+                onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  await postComment.mutateAsync({
-                    caseId,
-                    bodyHtml,
-                    authorName: engineerName,
-                    internal,
-                  });
+                  // Post the comment only when there's text; an attachment-only
+                  // send skips the comment endpoint and just uploads the files.
+                  const hasText =
+                    bodyHtml
+                      .replace(/<[^>]*>/g, "")
+                      .replace(/&nbsp;/g, " ")
+                      .trim().length > 0;
+                  if (hasText) {
+                    await postComment.mutateAsync({
+                      caseId,
+                      bodyHtml,
+                      authorName: engineerName,
+                      internal,
+                    });
+                  }
+                  // Attachments are case-level (no comment linkage on the BE);
+                  // upload each sequentially so a failure surfaces clearly.
+                  for (const { file, name } of commentAttachments) {
+                    await postAttachment.mutateAsync({
+                      caseId,
+                      file,
+                      name,
+                      uploadedBy: engineerName,
+                    });
+                  }
                   // Collapse only on success; on error the input keeps its
-                  // draft and surfaces the failure.
+                  // draft + files and surfaces the failure.
                   setComposerOpen(false);
                 }}
               />
@@ -771,7 +830,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={`${safeComments.length + c.audit.length + c.attachments.length} entries`}
+                  label={`${safeComments.length + c.audit.length + attachmentList.length} entries`}
                 />
               )}
             </Box>
@@ -796,7 +855,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 <CaseActivitiesFeed
                   comments={safeComments}
                   audit={c.audit}
-                  attachments={c.attachments}
+                  attachments={attachmentList}
+                  onDownloadAttachment={onDownloadAttachment}
                 />
               </>
             )}
@@ -884,9 +944,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
-            attachments={c.attachments}
-            onDownloadAll={() => onAction({ secondary: "download_all_attachments" })}
-            onDownload={() => onAction({ secondary: "download_attachment" })}
+            attachments={attachmentList}
+            loading={isAttachmentsLoading}
+            error={isAttachmentsError}
+            onRetry={() => void refetchAttachments()}
+            uploading={postAttachment.isPending}
+            uploadError={
+              postAttachment.isError
+                ? (postAttachment.error?.message ??
+                  "Could not upload the attachment.")
+                : null
+            }
+            onUpload={onUploadAttachment}
+            onDownloadAll={onDownloadAllAttachments}
+            onDownload={onDownloadAttachment}
           />
         </Box>
       )}

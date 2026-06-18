@@ -357,7 +357,7 @@ const ABT_CASE_SEEDS: CaseSeed[] = [
     projectId: "prj-acme-iam-prod",
     projectName: "IAM Production",
     severity: "S2",
-    state: "reopened",
+    state: "waiting_on_wso2",
     assignee: "Sajith Ekanayaka",
     assigneeIsMe: true,
     slaClockType: "ack",
@@ -809,8 +809,6 @@ function deriveTags(c: CsmCaseRow): CaseTag[] {
     tags.push({ id: "t-priority", label: "high-priority", color: "error" });
   if (c.minutesToBreach < 0)
     tags.push({ id: "t-breach", label: "sla-breached", color: "warning" });
-  if (c.state === "reopened")
-    tags.push({ id: "t-reopen", label: "reopened", color: "warning" });
   const subjLower = c.subject.toLowerCase();
   if (subjLower.includes("ldap")) tags.push({ id: "t-ldap", label: "ldap", color: "info" });
   if (subjLower.includes("saml") || subjLower.includes("oidc"))
@@ -915,15 +913,6 @@ function deriveAudit(c: CsmCaseRow): CaseAuditEntry[] {
       kind: "state_change",
       actor: assignee,
       description: "Case closed",
-      createdAt: c.updatedAt,
-    });
-  }
-  if (c.state === "reopened") {
-    events.push({
-      id: `a-${c.id}-3`,
-      kind: "state_change",
-      actor: "Customer",
-      description: "Customer reopened the case",
       createdAt: c.updatedAt,
     });
   }
@@ -1147,6 +1136,41 @@ function deriveAttachments(c: CsmCaseRow): CaseAttachment[] {
   return sets[seedIdx % 4] ?? [];
 }
 
+// Attachments uploaded during a mock session, keyed by case id, so a mock
+// upload is visible on the next list refetch (the seeded set is deterministic).
+const mockUploadedAttachments = new Map<string, CaseAttachment[]>();
+
+/** Mock attachment list: seeded set plus anything uploaded this session. */
+export function getMockCsmCaseAttachments(caseId: string): CaseAttachment[] {
+  const row = getMockCsmCaseById(caseId);
+  const seeded = row ? deriveAttachments(row) : [];
+  const uploaded = mockUploadedAttachments.get(caseId) ?? [];
+  // Newest first matches how the widget sorts; concat is enough since the
+  // widget re-sorts by uploadedAt.
+  return [...uploaded, ...seeded];
+}
+
+/** Mock attachment upload: records and echoes back a fresh `CaseAttachment`. */
+export function postMockCsmCaseAttachment(input: {
+  caseId: string;
+  filename: string;
+  size: number;
+  contentType: string;
+  uploadedBy: string;
+}): CaseAttachment {
+  const created: CaseAttachment = {
+    id: `att-${input.caseId}-${Date.now()}`,
+    filename: input.filename,
+    size: input.size,
+    contentType: input.contentType,
+    uploadedBy: input.uploadedBy,
+    uploadedAt: new Date().toISOString(),
+  };
+  const existing = mockUploadedAttachments.get(input.caseId) ?? [];
+  mockUploadedAttachments.set(input.caseId, [created, ...existing]);
+  return created;
+}
+
 /**
  * Mirror of the backend transition graph in
  * `apps/csm-portal/backend/internal/handler/state.go` (`nextStates`). The mock
@@ -1163,7 +1187,6 @@ const MOCK_NEXT_STATES: Record<CaseState, CaseState[]> = {
   ],
   waiting_on_wso2: ["work_in_progress"],
   awaiting_info: ["waiting_on_wso2"],
-  reopened: ["waiting_on_wso2"],
   solution_proposed: ["closed", "waiting_on_wso2"],
   closed: [],
 };

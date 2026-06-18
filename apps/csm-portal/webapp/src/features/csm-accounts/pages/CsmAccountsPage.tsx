@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { Link as RouterLink } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchAccounts } from "@features/csm-accounts/api/useSearchAccounts";
 import type { SearchAccountsRequest } from "@features/csm-accounts/types/csmAccounts";
@@ -132,7 +133,21 @@ export default function CsmAccountsPage(): JSX.Element {
               ) : (
                 accounts.map((a) => (
                   <TableRow key={a.id} hover>
-                    <TableCell>{a.name}</TableCell>
+                    <TableCell>
+                      <Typography
+                        component={RouterLink}
+                        to={`/accounts/${a.id}`}
+                        variant="body2"
+                        sx={(t) => ({
+                          textDecoration: "none",
+                          color: t.palette.primary.dark,
+                          ...t.applyStyles("dark", { color: t.palette.primary.main }),
+                          "&:hover": { textDecoration: "underline" },
+                        })}
+                      >
+                        {a.name}
+                      </Typography>
+                    </TableCell>
                     <TableCell>{a.sfId}</TableCell>
                     <TableCell>
                       <Chip

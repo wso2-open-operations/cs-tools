@@ -15,7 +15,9 @@
 // under the License.
 
 import {
+  Avatar,
   Box,
+  Button,
   Checkbox,
   Chip,
   ListItemText,
@@ -30,6 +32,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   CheckCircle,
+  Download,
   Link as LinkIcon,
   ListFilter,
   Paperclip,
@@ -57,6 +60,8 @@ interface CaseActivitiesFeedProps {
   comments: CsmCaseComment[];
   audit: CaseAuditEntry[];
   attachments: CaseAttachment[];
+  /** Download a file surfaced in the timeline. */
+  onDownloadAttachment?: (attachment: CaseAttachment) => void;
 }
 
 const AUDIT_ICON: Record<CaseAuditEntry["kind"], JSX.Element> = {
@@ -76,6 +81,7 @@ export default function CaseActivitiesFeed({
   comments,
   audit,
   attachments,
+  onDownloadAttachment,
 }: CaseActivitiesFeedProps): JSX.Element {
   const [showWorkNotes, setShowWorkNotes] = useState(true);
   const [showLifecycle, setShowLifecycle] = useState(true);
@@ -240,7 +246,7 @@ export default function CaseActivitiesFeed({
                   >
                     {AUDIT_ICON[e.entry.kind]}
                   </Box>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                     <Typography variant="body2">
                       {e.entry.description}
                     </Typography>
@@ -261,43 +267,95 @@ export default function CaseActivitiesFeed({
                 </Paper>
               );
             }
-            // attachment
+            // attachment — rendered like a comment: avatar + card carrying the
+            // file description and a download action.
             return (
-              <Paper
+              <Box
                 id={e.attachment.id}
                 key={`f-${e.attachment.id}`}
-                variant="outlined"
                 sx={{
-                  p: 1,
                   display: "flex",
-                  alignItems: "center",
-                  gap: 1.25,
-                  backgroundColor: "background.default",
+                  gap: 1.5,
+                  alignItems: "flex-start",
                   scrollMarginTop: 96,
                 }}
               >
-                <Paperclip size={14} />
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2">
-                    <strong>{e.attachment.filename}</strong>{" "}
-                    <Typography
-                      component="span"
-                      variant="caption"
-                      color="text.secondary"
-                    >
-                      ({formatBytes(e.attachment.size)} · {e.attachment.contentType})
+                <Avatar
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    bgcolor: "action.selected",
+                    color: "text.secondary",
+                  }}
+                >
+                  <Paperclip size={16} />
+                </Avatar>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 1.5,
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 0.75,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <Typography variant="subtitle2">
+                      {e.attachment.uploadedBy}
                     </Typography>
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Uploaded by {e.attachment.uploadedBy} ·{" "}
-                    <RelativeTime
-                      iso={e.attachment.uploadedAt}
-                      href={`#${e.attachment.id}`}
-                    />
-                  </Typography>
-                </Box>
-                <Chip size="small" variant="outlined" label="Attachment" />
-              </Paper>
+                    <Chip size="small" variant="outlined" label="Attachment" />
+                    <Typography variant="caption" color="text.secondary">
+                      <RelativeTime
+                        iso={e.attachment.uploadedAt}
+                        href={`#${e.attachment.id}`}
+                      />
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 1,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography
+                        variant="body2"
+                        sx={{ fontWeight: 600, overflowWrap: "anywhere" }}
+                      >
+                        {e.attachment.filename}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatBytes(e.attachment.size)} ·{" "}
+                        {e.attachment.contentType}
+                      </Typography>
+                    </Box>
+                    {onDownloadAttachment && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<Download size={14} />}
+                        onClick={() => onDownloadAttachment(e.attachment)}
+                        aria-label={`Download ${e.attachment.filename}`}
+                        sx={{ flexShrink: 0 }}
+                      >
+                        Download
+                      </Button>
+                    )}
+                  </Box>
+                </Paper>
+              </Box>
             );
           })}
         </Box>

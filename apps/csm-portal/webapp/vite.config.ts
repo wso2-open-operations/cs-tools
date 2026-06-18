@@ -98,7 +98,7 @@ const viteConfig = defineConfig({
   },
   envPrefix: ["CSM_PORTAL_"],
   server: {
-    port: 3001,
+    port: 3000,
     strictPort: true,
   },
 });
@@ -152,6 +152,13 @@ window.config.CSM_PORTAL_AUTH_CLIENT_ID = "csm-local-dev";
 // hits the Vite /local-api proxy instead of a hardcoded localhost that would
 // break the same-origin contract.
 window.config.CSM_PORTAL_BACKEND_BASE_URL = window.location.origin + "/local-api";
+// Sign-in/out redirects back to the dev server's OWN origin. The base config
+// pins these to a fixed host:port (e.g. http://localhost:3000); left unchanged,
+// the mock-IdP PKCE callback redirects to that port instead of the port the dev
+// server actually runs on, so the SPA never completes the code exchange and
+// loops on sign-in. Same same-origin rationale as the backend URL above.
+window.config.CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL = window.location.origin;
+window.config.CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL = window.location.origin;
 window.config.CSM_PORTAL_USE_MOCKS = false;
 // Pin the runtime mock toggle off so a stale localStorage flag cannot
 // silently re-enable mock data in front of the real local backend.

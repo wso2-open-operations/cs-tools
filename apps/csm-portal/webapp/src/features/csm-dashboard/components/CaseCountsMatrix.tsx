@@ -67,9 +67,9 @@ function CountCell({
         underline="hover"
         color="inherit"
         sx={{
-          // Larger, heavier numbers so the counts read at a glance from across
-          // the dashboard, not just on close inspection.
-          fontSize: bold ? "1.35rem" : "1.2rem",
+          // Keep the counts readable but compact — totals a touch larger/heavier
+          // so the row/column sums still stand out from the per-cell values.
+          fontSize: bold ? "1rem" : "0.9rem",
           fontWeight: bold ? 700 : 600,
           lineHeight: 1,
         }}

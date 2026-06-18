@@ -37,7 +37,6 @@ export const MATRIX_STATES: CaseState[] = [
   "waiting_on_wso2",
   "awaiting_info",
   "solution_proposed",
-  "reopened",
 ];
 
 export interface CaseCountsMatrix {
@@ -106,8 +105,10 @@ export function useCaseCountsMatrix(): UseQueryResult<CaseCountsMatrix, Error> {
           api
             .post<BeCaseSearchPayload, BeCaseSearchResponse>("/cases/search", {
               pagination: { offset: 0, limit: 1 },
-              priorityKeys: [priorityFromSeverity(severity)],
-              stateKeys: [beStateFromUi(state)],
+              filters: {
+                priorityKeys: [priorityFromSeverity(severity)],
+                stateKeys: [beStateFromUi(state)],
+              },
             })
             .then((res) => ({ severity, state, count: res.total ?? 0 })),
         ),

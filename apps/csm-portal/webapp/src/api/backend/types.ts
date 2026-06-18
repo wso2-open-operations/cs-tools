@@ -68,7 +68,6 @@ export type BeCaseState =
   | "work_in_progress"
   | "waiting_on_wso2"
   | "awaiting_info"
-  | "reopened"
   | "solution_proposed"
   | "closed";
 
@@ -188,8 +187,9 @@ export interface BeCaseUpdatePayload {
 }
 
 /** Request body for `POST /cases/search` (the flat, cross-project search). */
-export interface BeCaseSearchPayload {
-  pagination?: BePagination;
+/** Filter block for `POST /cases/search`; all fields are optional. */
+export interface BeCaseSearchFilters {
+  /** Searches across subject, number, and wso2Id (case-insensitive). */
   searchQuery?: string;
   /** Optional project filter; omit for a cross-project search. */
   projectIds?: string[];
@@ -198,6 +198,12 @@ export interface BeCaseSearchPayload {
   stateKeys?: BeCaseState[];
   priorityKeys?: BeCasePriority[];
   issueTypeKeys?: BeCaseIssueType[];
+}
+
+export interface BeCaseSearchPayload {
+  /** All filter fields are nested here; `sortBy`/`pagination` stay top-level. */
+  filters?: BeCaseSearchFilters;
+  pagination?: BePagination;
   sortBy?: {
     field?: BeCaseSortField;
     order?: "asc" | "desc";
@@ -272,6 +278,58 @@ export interface BeCaseCommentSearchPayload {
 
 export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
   comments: BeCaseComment[];
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/** A case attachment as returned by `POST /cases/{id}/attachments/search`. */
+export interface BeAttachment {
+  id: string;
+  caseId: string;
+  name: string;
+  /** MIME type (e.g. image/png, application/pdf). */
+  type: string;
+  sizeBytes: number;
+  description?: string | null;
+  createdBy: string;
+  createdOn: string;
+  downloadUrl?: string | null;
+  previewUrl?: string | null;
+}
+
+export interface BeAttachmentSearchPayload {
+  pagination?: BePagination;
+}
+
+export interface BeAttachmentSearchResponse extends BeSearchResponseBase {
+  attachments: BeAttachment[];
+}
+
+/**
+ * Upload payload for `POST /cases/{id}/attachments`. `file` is a base64 data
+ * URI (e.g. `data:image/png;base64,...`); the BE caps the decoded size at 10 MB.
+ */
+export interface BeAttachmentCreatePayload {
+  name: string;
+  type: string;
+  file: string;
+  description?: string | null;
+}
+
+/** Thin ack returned by `POST /cases/{id}/attachments`. */
+export interface BeAttachmentDetail {
+  id: string;
+  sizeBytes: number;
+  createdOn: string;
+  createdBy: string;
+  downloadUrl: string;
+}
+
+export interface BeAttachmentCreateResponse {
+  message?: string;
+  attachment?: BeAttachmentDetail;
 }
 
 // ---------------------------------------------------------------------------

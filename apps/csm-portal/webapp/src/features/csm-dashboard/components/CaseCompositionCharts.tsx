@@ -50,7 +50,6 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
   waiting_on_wso2: paletteColor("amber", 700, "#b45309"),
   awaiting_info: paletteColor("cyan", 500, "#06b6d4"),
   solution_proposed: paletteColor("teal", 500, "#14b8a6"),
-  reopened: paletteColor("deepOrange", 400, "#ff7043"),
   closed: paletteColor("grey", 500, "#6b7280"),
 };
 
