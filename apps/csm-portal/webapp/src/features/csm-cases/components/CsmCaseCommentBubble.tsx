@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
+import { alpha, Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import type { JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
@@ -149,7 +149,9 @@ export default function CsmCaseCommentBubble({
           display: "flex",
           flexDirection: "column",
           gap: 0.75,
-          backgroundColor: isInternal ? "warning.50" : undefined,
+          backgroundColor: isInternal
+            ? alpha(theme.palette.warning.main, 0.15)
+            : undefined,
           borderColor: isInternal ? "warning.main" : undefined,
         }}
       >

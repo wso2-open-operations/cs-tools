@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  alpha,
   Box,
   Button,
   FormControlLabel,
@@ -133,7 +134,9 @@ export default function CsmCaseCommentInput({
         gap: 1,
         p: internal ? 1.25 : 0,
         borderRadius: internal ? 1 : 0,
-        backgroundColor: internal ? "warning.50" : undefined,
+        backgroundColor: internal
+          ? (theme) => alpha(theme.palette.warning.main, 0.15)
+          : undefined,
         border: internal ? 1 : 0,
         borderColor: internal ? "warning.main" : undefined,
       }}

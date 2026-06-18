@@ -778,13 +778,42 @@ export function AttachmentsWidget({
                 borderRadius: 1,
                 border: 1,
                 borderColor: "divider",
+                transition: "background-color 120ms, border-color 120ms",
+                "&:hover": {
+                  borderColor: "primary.main",
+                  backgroundColor: "action.hover",
+                },
               }}
             >
               <Paperclip size={16} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
-                  {a.filename}
-                </Typography>
+                {onDownload ? (
+                  <Typography
+                    component="button"
+                    variant="body2"
+                    noWrap
+                    onClick={() => onDownload(a)}
+                    title={`Download ${a.filename}`}
+                    sx={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      p: 0,
+                      border: 0,
+                      bgcolor: "transparent",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: "primary.main",
+                      "&:hover": { textDecoration: "underline" },
+                    }}
+                  >
+                    {a.filename}
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+                    {a.filename}
+                  </Typography>
+                )}
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
                   {a.uploadedBy} · <RelativeTime iso={a.uploadedAt} />
