@@ -1155,7 +1155,7 @@ components:
           description: Email or display name of the user who performed the update.
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
         priority:
           type: string
           enum: [catastrophic, critical, high, medium, low]

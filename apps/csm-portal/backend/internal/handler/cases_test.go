@@ -658,6 +658,14 @@ func TestPatchCase(t *testing.T) {
 			t.Errorf("upstream received invalid JSON body: %s", capturedBody)
 		}
 
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("decode raw response body: %v; raw: %s", err, w.Body.String())
+		}
+		if _, ok := raw["nextStates"]; ok {
+			t.Errorf("response must not include legacy top-level nextStates")
+		}
+
 		type patchCaseResp struct {
 			Message string `json:"message"`
 			Case    struct {
