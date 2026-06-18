@@ -107,9 +107,10 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state and/or priority of a case. A ValidationError is
-	// returned for invalid values or malformed UUID; a NotFoundError if no case matches.
-	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error)
+	// UpdateCase updates the state, priority, watch list, or assignee of a case.
+	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
+	// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
+	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
 	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
 	// A ValidationError is returned for invalid input.
 	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)

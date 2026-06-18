@@ -63,20 +63,22 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(c)
 }
 
-// PatchCase handles PATCH /cases/{id} and allows updating the case state and priority.
+// PatchCase handles PATCH /cases/{id}.
+// Accepts state, priority (both data sources), or watchList, assigneeEmail (ServiceNow only).
+// Exactly one field must be provided per request.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	var req domain.UpdateCaseRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
 	req.ID = r.PathValue("id")
-	c, err := h.svc.UpdateCase(r.Context(), req)
+	resp, err := h.svc.UpdateCase(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(c)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // CreateCaseComment handles POST /cases/{id}/comments.

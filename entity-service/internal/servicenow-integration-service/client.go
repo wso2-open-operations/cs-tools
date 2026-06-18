@@ -216,6 +216,31 @@ func (c *Client) GetBinary(ctx context.Context, path string, userIDToken string)
 	}
 }
 
+// Patch sends a PATCH request to the given path. The OAuth2 bearer token is
+// added as Authorization header; userIDToken is forwarded as x-user-id-token.
+// Returns the raw response body on 2xx.
+func (c *Client) Patch(ctx context.Context, path string, userIDToken string, payload any) (json.RawMessage, error) {
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("snclient: marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("snclient: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("x-user-id-token", userIDToken)
+
+	return c.do(req, path)
+}
+
 // Post sends a POST request to the given path. The OAuth2 bearer token is
 // added as Authorization header; userIDToken is forwarded as x-user-id-token.
 // Returns the raw response body on 2xx.

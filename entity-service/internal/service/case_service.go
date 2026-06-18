@@ -224,20 +224,35 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 }
 
 // UpdateCase implements CaseService.
-func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
+func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error) {
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
-		return domain.Case{}, err
+		return domain.UpdateCaseResponse{}, err
+	}
+	if len(req.WatchList) > 0 || req.AssigneeEmail != nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList and assigneeEmail are only supported for the ServiceNow data source"}
 	}
 	if req.State == nil && req.Priority == nil {
-		return domain.Case{}, &apierror.ValidationError{Msg: "at least one of state or priority must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state or priority must be provided"}
 	}
 	if req.State != nil && !validCaseState[*req.State] {
-		return domain.Case{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 	}
 	if req.Priority != nil && !validCasePriority[*req.Priority] {
-		return domain.Case{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(*req.Priority)}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(*req.Priority)}
 	}
-	return s.repo.UpdateCase(ctx, req)
+	c, err := s.repo.UpdateCase(ctx, req)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	return domain.UpdateCaseResponse{
+		Message: "Case updated successfully",
+		Case: domain.UpdatedCase{
+			ID:        c.ID,
+			UpdatedOn: c.UpdatedAt,
+			State:     c.State,
+			Priority:  c.Priority,
+		},
+	}, nil
 }
 
 // SearchCases implements CaseService.

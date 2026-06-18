@@ -608,11 +608,39 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// State and Priority may be changed through this endpoint.
+// Exactly one of State, Priority, WatchList, or AssigneeEmail must be provided.
+// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 type UpdateCaseRequest struct {
-	ID       string        `json:"-"`
-	State    *CaseState    `json:"state"`
-	Priority *CasePriority `json:"priority"`
+	ID            string        `json:"-"`
+	State         *CaseState    `json:"state"`
+	Priority      *CasePriority `json:"priority"`
+	WatchList     []string      `json:"watchList"`
+	AssigneeEmail *string       `json:"assigneeEmail"`
+}
+
+// UpdateCaseResponse is the response for PATCH /cases/{id}.
+type UpdateCaseResponse struct {
+	Message string      `json:"message"`
+	Case    UpdatedCase `json:"case"`
+}
+
+// UpdatedCase carries the fields of a case that may change after an update.
+type UpdatedCase struct {
+	ID         string               `json:"id"`
+	UpdatedOn  time.Time            `json:"updatedOn"`
+	UpdatedBy  string               `json:"updatedBy,omitempty"`
+	State      CaseState            `json:"state,omitempty"`
+	Priority   CasePriority         `json:"priority,omitempty"`
+	WatchList  []WatchListUser      `json:"watchList,omitempty"`
+	AssignedTo *AssignedEngineerRef `json:"assignedTo,omitempty"`
+}
+
+// WatchListUser is a compact user reference within the watch list.
+type WatchListUser struct {
+	ID       string `json:"id"`
+	UserName string `json:"userName"`
+	Name     string `json:"name,omitempty"`
+	Email    string `json:"email,omitempty"`
 }
 
 // CreateCaseResponse is the unified response for POST /cases across all data sources.
