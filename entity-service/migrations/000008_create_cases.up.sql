@@ -1,3 +1,8 @@
+CREATE TYPE case_work_state_enum AS ENUM (
+  'ongoing',
+  'paused'
+);
+
 CREATE TYPE case_priority_enum AS ENUM (
   'catastrophic',
   'critical',
@@ -45,6 +50,7 @@ CREATE TABLE cases (
   updated_at          TIMESTAMP DEFAULT NOW(),
   closed_at           TIMESTAMP,
   assigned_engineer   UUID NULL REFERENCES users(id),
+  work_state          case_work_state_enum NULL,
   parent_case_id      UUID NULL REFERENCES cases(id),
   related_case_id     UUID NULL REFERENCES cases(id),
 
@@ -52,7 +58,14 @@ CREATE TABLE cases (
     CHECK (state != 'closed' OR closed_at IS NOT NULL),
 
   CONSTRAINT chk_closed_at_not_on_open
-    CHECK (closed_at IS NULL OR state = 'closed')
+    CHECK (closed_at IS NULL OR state = 'closed'),
+
+  CONSTRAINT chk_work_state_only_on_wip
+    CHECK (
+      (state = 'work_in_progress' AND work_state IS NOT NULL)
+      OR
+      (state != 'work_in_progress' AND work_state IS NULL)
+    )
 );
 
 CREATE OR REPLACE FUNCTION check_case_deployment_belongs_to_project()
@@ -112,6 +125,20 @@ CREATE TRIGGER trg_case_catastrophic_priority
   BEFORE INSERT OR UPDATE ON cases
   FOR EACH ROW EXECUTE FUNCTION check_case_catastrophic_priority();
 
+CREATE OR REPLACE FUNCTION sync_work_state_on_state_change()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.state != 'work_in_progress' THEN
+    NEW.work_state := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_work_state_on_state_change
+  BEFORE INSERT OR UPDATE ON cases
+  FOR EACH ROW EXECUTE FUNCTION sync_work_state_on_state_change();
+
 -- Enable trigram extension for ILIKE '%...%' support
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -133,6 +160,19 @@ CREATE INDEX idx_cases_closed_at           ON cases(closed_at);
 CREATE INDEX idx_cases_project_state         ON cases(project_id, state);
 CREATE INDEX idx_cases_priority_state        ON cases(priority, state);
 CREATE INDEX idx_cases_priority_issue_type   ON cases(priority, issue_type);
+
+-- work_state indexes
+CREATE UNIQUE INDEX uidx_cases_one_ongoing_per_engineer
+  ON cases (assigned_engineer)
+  WHERE work_state = 'ongoing';
+
+CREATE INDEX idx_cases_work_state
+  ON cases(work_state)
+  WHERE work_state IS NOT NULL;
+
+CREATE INDEX idx_cases_engineer_work_state
+  ON cases(assigned_engineer, work_state)
+  WHERE work_state IS NOT NULL;
 
 -- Trigram indexes for ILIKE search on subject, number, internal_id
 CREATE INDEX idx_cases_subject_trgm  ON cases USING GIN (subject  gin_trgm_ops);

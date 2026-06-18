@@ -109,10 +109,11 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		pcID, pcNum                         *string
 		rcID, rcNum                         *string
 		accountID, accountName, accountTier string
+		workState                           *string
 	)
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
-		        c.subject, c.description, c.priority, c.issue_type, c.state,
+		        c.subject, c.description, c.priority, c.issue_type, c.state, c.work_state,
 		        c.created_at, c.updated_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
@@ -137,7 +138,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		 WHERE c.id = $1`, id,
 	).Scan(
 		&cv.ID, &cv.Number, &cv.InternalID,
-		&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State,
+		&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
 		&cv.CreatedOn, &cv.UpdatedOn,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
@@ -156,6 +157,10 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
 	}
 	cv.AccountDetails = &domain.AccountRef{ID: accountID, Name: accountName, Type: accountTier}
+	if workState != nil {
+		ws := domain.CaseWorkState(*workState)
+		cv.WorkState = &ws
+	}
 	if aeID != nil {
 		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: *aeID, Name: *aeName}
 	}
@@ -374,7 +379,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 
 	dataQuery := fmt.Sprintf(
 		`SELECT c.id, c.number, c.internal_id,
-		        c.subject, c.description, c.priority, c.issue_type, c.state,
+		        c.subject, c.description, c.priority, c.issue_type, c.state, c.work_state,
 		        c.created_at, c.updated_at, c.closed_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
@@ -410,9 +415,10 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		for rows.Next() {
 			var cv domain.SearchCaseView
 			var ignoredDisplayName, ignoredUserID string
+			var workState *string
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
-				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State,
+				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
 				&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedAt,
 				&cv.CreatedBy.ID, &ignoredDisplayName, &ignoredUserID, &cv.CreatedBy.Email,
 				&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
@@ -420,6 +426,10 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 				&cv.DeployedProductDetails.ID, &cv.DeployedProductDetails.DisplayName,
 			); err != nil {
 				return fmt.Errorf("scan case: %w", err)
+			}
+			if workState != nil {
+				ws := domain.CaseWorkState(*workState)
+				cv.WorkState = &ws
 			}
 			result = append(result, cv)
 		}

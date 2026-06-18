@@ -435,6 +435,14 @@ const (
 	CaseStateClosed           CaseState = "closed"
 )
 
+// CaseWorkState represents the work sub-state of a work_in_progress case.
+type CaseWorkState string
+
+const (
+	CaseWorkStateOngoing CaseWorkState = "ongoing"
+	CaseWorkStatePaused  CaseWorkState = "paused"
+)
+
 // CaseSortField enumerates the columns available for sorting case search results.
 type CaseSortField string
 
@@ -535,6 +543,7 @@ type CaseView struct {
 	Priority               CasePriority         `json:"priority"`
 	IssueType              CaseIssueType        `json:"issueType"`
 	State                  CaseState            `json:"state"`
+	WorkState              *CaseWorkState       `json:"workState"`
 	CreatedOn              time.Time            `json:"createdOn"`
 	UpdatedOn              time.Time            `json:"updatedOn"`
 	CreatedByDetails       UserRef              `json:"createdBy"`
@@ -578,6 +587,7 @@ type SearchCaseView struct {
 	Priority               CasePriority       `json:"priority"`
 	IssueType              CaseIssueType      `json:"issueType"`
 	State                  CaseState          `json:"state"`
+	WorkState              *CaseWorkState     `json:"workState"`
 	CreatedOn              time.Time          `json:"createdOn"`
 	UpdatedOn              time.Time          `json:"updatedOn"`
 	ClosedAt               *time.Time         `json:"closedAt"`

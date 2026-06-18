@@ -52,6 +52,7 @@ type snCase struct {
 	DeployedProduct  snCaseDeployedProduct `json:"deployedProduct"`
 	Product          *snCaseEntityRef      `json:"product"`
 	State            *snCaseState          `json:"state"`
+	WorkState        *snCaseLabel          `json:"workState"`
 	Severity         *snCaseLabel          `json:"severity"`
 	IssueType        *snCaseIssueType      `json:"issueType"`
 	AssignedEngineer *snCaseEntityRef      `json:"assignedEngineer"`
@@ -334,6 +335,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		Priority:    snSeverityToPriority(c.Severity),
 		IssueType:   snIssueTypeToEnum(c.IssueType),
 		State:       state,
+		WorkState:   snWorkStateLabelToEnum(c.WorkState),
 		CreatedOn:   createdOn,
 		UpdatedOn:   updatedOn,
 		CreatedByDetails: domain.UserRef{
@@ -828,6 +830,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			Priority:               snSeverityToPriority(c.Severity),
 			IssueType:              snIssueTypeToEnum(c.IssueType),
 			State:                  state,
+			WorkState:              snWorkStateLabelToEnum(c.WorkState),
 			CreatedOn:              createdOn,
 			UpdatedOn:              updatedOn,
 			CreatedBy:              domain.UserIDEmailRef{Email: c.CreatedBy},
@@ -902,4 +905,17 @@ func snIssueTypeToEnum(issueType *snCaseIssueType) domain.CaseIssueType {
 		return it
 	}
 	return ""
+}
+
+func snWorkStateLabelToEnum(ws *snCaseLabel) *domain.CaseWorkState {
+	if ws == nil {
+		return nil
+	}
+	v := domain.CaseWorkState(strings.ToLower(ws.Label))
+	switch v {
+	case domain.CaseWorkStateOngoing, domain.CaseWorkStatePaused:
+		return &v
+	default:
+		return nil
+	}
 }
