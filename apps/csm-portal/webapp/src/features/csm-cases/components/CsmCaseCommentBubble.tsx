@@ -96,6 +96,9 @@ export default function CsmCaseCommentBubble({
         <Box
           sx={{
             flex: 1,
+            minWidth: 0,
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
             "& p": { m: 0 },
             "& a": { color: "primary.main" },
             ...{ "& *": { fontSize: "0.875rem" } },
@@ -148,7 +151,6 @@ export default function CsmCaseCommentBubble({
           gap: 0.75,
           backgroundColor: isInternal ? "warning.50" : undefined,
           borderColor: isInternal ? "warning.main" : undefined,
-          borderLeft: isInternal ? 3 : undefined,
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
@@ -159,15 +161,18 @@ export default function CsmCaseCommentBubble({
             color={ROLE_COLOR[comment.authorRole]}
             variant="outlined"
           />
-          {isInternal && (
-            <SemanticChip role="warning" label="Internal work note" />
-          )}
+          {/* A filled chip "bubble" marks the work note; paired with the tinted
+              background it reads as internal without a heavy banner. */}
+          {isInternal && <SemanticChip role="warning" label="Internal note" />}
           <Typography variant="caption" color="text.secondary">
             <RelativeTime iso={comment.createdAt} href={`#${comment.id}`} />
           </Typography>
         </Box>
         <Box
           sx={{
+            minWidth: 0,
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
             "& p": { m: 0 },
             "& p + p": { mt: 0.75 },
             "& ul, & ol": { ml: 3, my: 0.5 },
@@ -177,6 +182,7 @@ export default function CsmCaseCommentBubble({
               borderRadius: 0.5,
               fontFamily: "monospace",
               fontSize: "0.85em",
+              overflowWrap: "anywhere",
             },
             "& pre": {
               bgcolor: "background.default",

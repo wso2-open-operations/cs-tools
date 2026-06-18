@@ -240,7 +240,7 @@ export default function CaseActivitiesFeed({
                   >
                     {AUDIT_ICON[e.entry.kind]}
                   </Box>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                     <Typography variant="body2">
                       {e.entry.description}
                     </Typography>

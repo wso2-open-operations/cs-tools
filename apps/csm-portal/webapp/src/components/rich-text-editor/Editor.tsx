@@ -43,6 +43,7 @@ import Toolbar, {
 } from "@components/rich-text-editor/ToolBar";
 import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
+import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
@@ -312,6 +313,7 @@ const Editor = ({
   id,
   showKeyboardHint = false,
   maxHeight = "300px",
+  autoFocus = false,
   onFocus,
   onBlur,
   overlayElement,
@@ -333,6 +335,8 @@ const Editor = ({
   id?: string;
   showKeyboardHint?: boolean;
   maxHeight?: string | number;
+  /** Focus the editor on mount (e.g. when a reply composer opens). */
+  autoFocus?: boolean;
   onFocus?: () => void;
   onBlur?: () => void;
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
@@ -510,6 +514,7 @@ const Editor = ({
             }
             ErrorBoundary={LexicalErrorBoundary}
           />
+          {autoFocus && <AutoFocusPlugin />}
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />

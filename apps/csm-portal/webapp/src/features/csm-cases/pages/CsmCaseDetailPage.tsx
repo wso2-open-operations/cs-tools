@@ -779,6 +779,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!caseId}
+                autoFocus
                 onSubmit={async (bodyHtml, internal) => {
                   if (!caseId) return;
                   await postComment.mutateAsync({

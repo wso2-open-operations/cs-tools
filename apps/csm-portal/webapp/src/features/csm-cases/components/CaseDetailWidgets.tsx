@@ -20,9 +20,7 @@ import {
   Button,
   Card,
   Chip,
-  IconButton,
   LinearProgress,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -792,15 +790,16 @@ export function AttachmentsWidget({
                   {a.uploadedBy} · <RelativeTime iso={a.uploadedAt} />
                 </Typography>
               </Box>
-              <Tooltip title="Download">
-                <IconButton
-                  size="small"
-                  aria-label={`Download ${a.filename}`}
-                  onClick={() => onDownload?.(a)}
-                >
-                  <Download size={16} />
-                </IconButton>
-              </Tooltip>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Download size={14} />}
+                onClick={() => onDownload?.(a)}
+                aria-label={`Download ${a.filename}`}
+                sx={{ flexShrink: 0 }}
+              >
+                Download
+              </Button>
             </Box>
           ))}
         </Box>
