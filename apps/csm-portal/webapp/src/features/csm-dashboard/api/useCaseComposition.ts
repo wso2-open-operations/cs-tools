@@ -102,6 +102,13 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
         // scoped to active cases (priority AND active-state), not the whole
         // population.
         const activeStateKeys = COMPOSITION_STATES.map(beStateFromUi);
+        // The state/closed counts don't filter by severity. The backend,
+        // however, counts only catastrophic cases when `priorityKeys` is absent
+        // (an empty priority filter is not treated as "all"), which made the
+        // state pie show the S0 row only and disagree with the matrix totals.
+        // Pass every priority explicitly so these counts span all severities.
+        // BE follow-up: treat an absent/empty priorityKeys as "all priorities".
+        const allPriorityKeys = MATRIX_SEVERITIES.map(priorityFromSeverity);
 
         // All severity + state counts (plus the closed total) fire in one wave.
         const [severityCounts, stateCounts, closedCount] = await Promise.all([
@@ -120,13 +127,19 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
             COMPOSITION_STATES.map((st) =>
               countTotal({
                 pagination: { offset: 0, limit: 1 },
-                filters: { stateKeys: [beStateFromUi(st)] },
+                filters: {
+                  stateKeys: [beStateFromUi(st)],
+                  priorityKeys: allPriorityKeys,
+                },
               }).then((n) => ({ key: st, n })),
             ),
           ),
           countTotal({
             pagination: { offset: 0, limit: 1 },
-            filters: { stateKeys: [beStateFromUi("closed")] },
+            filters: {
+              stateKeys: [beStateFromUi("closed")],
+              priorityKeys: allPriorityKeys,
+            },
           }),
         ]);
         severityCounts.forEach(({ key, n }) => (bySeverity[key] = n));
