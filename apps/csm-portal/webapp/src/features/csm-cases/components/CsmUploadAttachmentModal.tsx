@@ -160,7 +160,16 @@ export default function CsmUploadAttachmentModal({
         />
         {!file ? (
           <Box
+            role="button"
+            tabIndex={0}
+            aria-label="Choose a file to attach"
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
             onDrop={onDrop}
             onDragOver={(e) => {
               e.preventDefault();
