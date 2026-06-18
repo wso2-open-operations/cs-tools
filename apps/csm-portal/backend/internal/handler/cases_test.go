@@ -234,9 +234,35 @@ func TestCreateCaseComment(t *testing.T) {
 		}
 	})
 
-	// TODO: re-enable once entity service ships workState
-	// t.Run("rejects comment when work_state is not ongoing", ...)
-	// t.Run("rejects comment when workState is absent", ...)
+	t.Run("rejects comment when work_state is not ongoing", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress","workState":"paused"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
+	})
+
+	t.Run("rejects comment when workState is absent", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"state":"work_in_progress"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
+	})
 
 	t.Run("forwards body to entity and returns response", func(t *testing.T) {
 		var capturedCaseID string
@@ -602,9 +628,10 @@ func TestPatchCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards case ID and body, returns 200 with nextStates injected", func(t *testing.T) {
+	t.Run("forwards case ID and body, returns 200 with upstream response", func(t *testing.T) {
 		var capturedID string
 		var capturedBody []byte
+		const upstreamResp = `{"message":"Case updated successfully","case":{"id":"` + testCaseID + `","updatedOn":"2026-06-18T10:00:00Z","state":"work_in_progress"}}`
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
 				return []byte(`{"id":"` + testCaseID + `","state":"open"}`), nil
@@ -612,7 +639,7 @@ func TestPatchCase(t *testing.T) {
 			patchCaseFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
 				capturedID = caseID
 				capturedBody = body
-				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+				return []byte(upstreamResp), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -632,25 +659,21 @@ func TestPatchCase(t *testing.T) {
 		}
 
 		type patchCaseResp struct {
-			ID         string   `json:"id"`
-			State      string   `json:"state"`
-			NextStates []string `json:"nextStates"`
+			Message string `json:"message"`
+			Case    struct {
+				ID    string `json:"id"`
+				State string `json:"state"`
+			} `json:"case"`
 		}
 		resp := decodeJSON[patchCaseResp](t, w)
-		if resp.ID != testCaseID {
-			t.Errorf("response id = %q, want %q", resp.ID, testCaseID)
+		if resp.Message != "Case updated successfully" {
+			t.Errorf("response message = %q, want %q", resp.Message, "Case updated successfully")
 		}
-		if resp.State != caseStateWorkInProgress {
-			t.Errorf("response state = %q, want %q", resp.State, caseStateWorkInProgress)
+		if resp.Case.ID != testCaseID {
+			t.Errorf("response case.id = %q, want %q", resp.Case.ID, testCaseID)
 		}
-		wantNext := []string{caseStateWaitingOnWSO2, caseStateAwaitingInfo, caseStateSolutionProposed, caseStateClosed}
-		if len(resp.NextStates) != len(wantNext) {
-			t.Fatalf("nextStates = %v, want %v", resp.NextStates, wantNext)
-		}
-		for i, got := range resp.NextStates {
-			if got != wantNext[i] {
-				t.Errorf("nextStates[%d] = %q, want %q", i, got, wantNext[i])
-			}
+		if resp.Case.State != caseStateWorkInProgress {
+			t.Errorf("response case.state = %q, want %q", resp.Case.State, caseStateWorkInProgress)
 		}
 	})
 

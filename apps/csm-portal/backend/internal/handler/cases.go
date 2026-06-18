@@ -194,9 +194,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
 	}
-	// TODO: tighten to include workState once entity service ships the field
-	// if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
-	if currentCase.State != "work_in_progress" {
+	if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
 		writeError(w, http.StatusConflict, ErrMsgCommentNotAllowed)
 		return
 	}
@@ -404,7 +402,7 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 }
 
 // PatchCase handles PATCH /cases/{id}.
-// Accepts {"state":"<new_state>"} and forwards to the entity service.
+// Accepts state, priority, watchList, or assigneeEmail and forwards to the entity service.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -467,13 +465,6 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchCase failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to update case.")
-		return
-	}
-
-	result, err = injectNextStates(result)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
-		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
 		return
 	}
 
