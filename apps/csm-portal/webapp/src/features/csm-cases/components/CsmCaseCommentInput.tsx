@@ -38,6 +38,8 @@ import { formatBytes } from "@utils/formatBytes";
 interface CsmCaseCommentInputProps {
   onSubmit: (html: string, internal: boolean) => Promise<unknown> | void;
   disabled?: boolean;
+  /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
+  autoFocus?: boolean;
 }
 
 // Mirrors the BE request-body cap for POST /cases/{id}/comments
@@ -57,6 +59,7 @@ function isEmpty(html: string): boolean {
 export default function CsmCaseCommentInput({
   onSubmit,
   disabled = false,
+  autoFocus = false,
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
@@ -251,6 +254,7 @@ export default function CsmCaseCommentInput({
           maxHeight={maximized ? 720 : 260}
           toolbarVariant="full"
           showKeyboardHint
+          autoFocus={autoFocus}
           enterToSubmit={false}
           onSubmitKeyDown={() => {
             void submit();
