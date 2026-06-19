@@ -253,7 +253,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Conflict — customer-visible comments (type=comment) can only be posted when the case is work_in_progress with workState=ongoing. Work notes (type=work_note) are exempt and allowed in any state.
+          description: Conflict — comments and activities (type=comment or type=activity) require the case to be work_in_progress with workState=ongoing. Work notes (type=work_note) are exempt and allowed in any state.
           content:
             application/json:
               schema:
@@ -2038,10 +2038,10 @@ components:
     CaseCommentCreatePayload:
       type: object
       required:
-        - commentType
+        - type
         - body
       properties:
-        commentType:
+        type:
           type: string
           enum: [work_note, comment, activity]
           description: work_note is restricted to internal users; activity to internal and system users
@@ -2056,7 +2056,7 @@ components:
           type: string
         caseId:
           type: string
-        commentType:
+        type:
           type: string
           enum: [work_note, comment, activity]
         body:
