@@ -85,7 +85,7 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
 		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State,
-		&c.CreatedAt, &c.UpdatedAt, &c.ClosedAt,
+		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
 	)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
@@ -114,7 +114,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
 		        c.subject, c.description, c.priority, c.issue_type, c.state, c.work_state,
-		        c.created_at, c.updated_at,
+		        c.created_at, c.updated_at, c.closed_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
 		        d.id, d.name,
@@ -139,7 +139,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	).Scan(
 		&cv.ID, &cv.Number, &cv.InternalID,
 		&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
-		&cv.CreatedOn, &cv.UpdatedOn,
+		&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 		&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
@@ -183,7 +183,7 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 	var c domain.CaseComment
 	err := r.db.QueryRow(ctx, query,
 		req.CaseID, string(req.Type), req.Content, req.CreatedBy,
-	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedAt)
+	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedOn)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
@@ -246,7 +246,7 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 			if err := rows.Scan(
 				&c.ID, &c.CaseID, &c.Type, &c.Content,
 				&c.CreatedBy.ID, &c.CreatedBy.FirstName, &c.CreatedBy.LastName,
-				&c.CreatedBy.FullName, &c.CreatedAt,
+				&c.CreatedBy.FullName, &c.CreatedOn,
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
@@ -276,28 +276,38 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 	if req.Priority != nil {
 		priority = string(*req.Priority)
 	}
+	workState := ""
+	if req.WorkState != nil {
+		workState = string(*req.WorkState)
+	}
 	const query = `
 		UPDATE cases
 		SET state      = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
 		    priority   = CASE WHEN $3 <> '' THEN $3::case_priority_enum ELSE priority END,
+		    work_state = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
 		    updated_at = NOW(),
 		    closed_at  = CASE WHEN $2 = 'closed' THEN NOW() WHEN $2 <> '' AND $2 <> 'closed' THEN NULL ELSE closed_at END
 		WHERE id = $1
 		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
-		          subject, description, priority, issue_type, state, created_at, updated_at, closed_at`
+		          subject, description, priority, issue_type, state, work_state, created_at, updated_at, closed_at`
 
 	var c domain.Case
-	err := r.db.QueryRow(ctx, query, req.ID, state, priority).Scan(
+	var workStateRaw *string
+	err := r.db.QueryRow(ctx, query, req.ID, state, priority, workState).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
-		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State,
-		&c.CreatedAt, &c.UpdatedAt, &c.ClosedAt,
+		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State, &workStateRaw,
+		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Case{}, &apierror.NotFoundError{Msg: "case not found"}
 	}
 	if err != nil {
 		return domain.Case{}, fmt.Errorf("update case: %w", err)
+	}
+	if workStateRaw != nil {
+		ws := domain.CaseWorkState(*workStateRaw)
+		c.WorkState = &ws
 	}
 	return c, nil
 }
@@ -419,7 +429,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
 				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
-				&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedAt,
+				&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 				&cv.CreatedBy.ID, &ignoredDisplayName, &ignoredUserID, &cv.CreatedBy.Email,
 				&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 				&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
