@@ -1508,6 +1508,16 @@ components:
           $ref: '#/components/schemas/EntityRef'
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        relatedCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        account:
+          $ref: '#/components/schemas/AccountRef'
         nextStates:
           type: array
           readOnly: true
@@ -1591,16 +1601,12 @@ components:
         product:
           $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
-          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
         parentCase:
-          nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         relatedCase:
-          nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         account:
-          nullable: true
           $ref: '#/components/schemas/AccountRef'
 
     UpdateDescriptionRequest:
@@ -2150,6 +2156,7 @@ components:
       properties:
         id:
           type: string
+          format: uuid
         name:
           type: string
 
@@ -2159,6 +2166,7 @@ components:
       properties:
         id:
           type: string
+          format: uuid
         number:
           type: string
 
@@ -2168,6 +2176,7 @@ components:
       properties:
         id:
           type: string
+          format: uuid
         name:
           type: string
         type:
