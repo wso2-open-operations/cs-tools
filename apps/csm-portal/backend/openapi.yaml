@@ -1165,7 +1165,8 @@ components:
             $ref: '#/components/schemas/WatchListUser'
         assignedTo:
           nullable: true
-          $ref: '#/components/schemas/AssignedEngineerRef'
+          allOf:
+            - $ref: '#/components/schemas/AssignedEngineerRef'
 
     WatchListUser:
       type: object
