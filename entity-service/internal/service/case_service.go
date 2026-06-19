@@ -64,6 +64,11 @@ var validCasePriority = map[domain.CasePriority]bool{
 	domain.CasePriorityLow:          true,
 }
 
+var validCaseWorkState = map[domain.CaseWorkState]bool{
+	domain.CaseWorkStateOngoing: true,
+	domain.CaseWorkStatePaused:  true,
+}
+
 var validCaseIssueType = map[domain.CaseIssueType]bool{
 	domain.CaseIssueTypeError:                  true,
 	domain.CaseIssueTypePartialOutage:          true,
@@ -141,7 +146,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 			InternalID: c.InternalID,
 			Number:     c.Number,
 			CreatedBy:  c.CreatedBy,
-			CreatedOn:  c.CreatedAt,
+			CreatedOn:  c.CreatedOn,
 			State:      string(c.State),
 		},
 	}, nil
@@ -193,7 +198,7 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 		Message: "Comment created successfully",
 		Comment: domain.CaseCommentDetail{
 			ID:        c.ID,
-			CreatedOn: c.CreatedAt,
+			CreatedOn: c.CreatedOn,
 			CreatedBy: user.Email,
 		},
 	}, nil
@@ -238,17 +243,23 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.Priority != nil {
 		fieldCount++
 	}
+	if req.WorkState != nil {
+		fieldCount++
+	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state or priority must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state, priority, or workState must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state or priority may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, priority, or workState may be provided per request"}
 	}
 	if req.State != nil && !validCaseState[*req.State] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 	}
 	if req.Priority != nil && !validCasePriority[*req.Priority] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(*req.Priority)}
+	}
+	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 	}
 	c, err := s.repo.UpdateCase(ctx, req)
 	if err != nil {
@@ -258,9 +269,10 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		Message: "Case updated successfully",
 		Case: domain.UpdatedCase{
 			ID:        c.ID,
-			UpdatedOn: c.UpdatedAt,
+			UpdatedOn: c.UpdatedOn,
 			State:     c.State,
 			Priority:  c.Priority,
+			WorkState: c.WorkState,
 		},
 	}, nil
 }
