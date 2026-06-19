@@ -105,7 +105,7 @@ func (r *accountRepo) SearchAccounts(ctx context.Context, req domain.SearchAccou
 				&a.ActivationDate, &a.DeactivationDate,
 				&a.OwnerID, &a.TechnicalOwnerID,
 				&a.AgentEnabled, &a.KbReferencesEnabled,
-				&a.CreatedAt, &a.UpdatedAt,
+				&a.CreatedOn, &a.UpdatedOn,
 			); err != nil {
 				return fmt.Errorf("scan account: %w", err)
 			}
@@ -138,7 +138,7 @@ func (r *accountRepo) GetAccountByID(ctx context.Context, id string) (domain.Acc
 		&a.ActivationDate, &a.DeactivationDate,
 		&a.OwnerID, &a.TechnicalOwnerID,
 		&a.AgentEnabled, &a.KbReferencesEnabled,
-		&a.CreatedAt, &a.UpdatedAt,
+		&a.CreatedOn, &a.UpdatedOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Account{}, &apierror.NotFoundError{Msg: "account not found"}

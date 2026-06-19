@@ -105,6 +105,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 - Request structs include only the fields a caller can supply; ID fields injected from path params use `json:"-"`
 - Optional fields in request structs use pointer types (`*CasePriority`) so absent fields are distinguishable from zero values
 - Response structs return the full entity row
+- **Date/time field naming:** all timestamp fields in response structs must use the `On` suffix: `createdOn`, `updatedOn`, `closedOn`. Never use `At` (`createdAt`, `updatedAt`, `closedAt`). Domain-specific date fields that carry a business meaning (e.g. `startDate`, `endDate`, `activationDate`) keep the `Date` suffix. This applies to both Go struct field names and JSON tags.
 
 ## Error types (`internal/apierror`)
 

@@ -319,7 +319,7 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `priority`,
-        `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
         only when the ServiceNow data source is active.
       operationId: patchCase
       parameters:
@@ -708,10 +708,10 @@ components:
         userType:
           type: string
           enum: [internal, customer, system]
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -771,10 +771,10 @@ components:
           type: boolean
         kbReferencesEnabled:
           type: boolean
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -922,10 +922,10 @@ components:
         class:
           type: string
           enum: [software, service]
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -977,10 +977,10 @@ components:
           type: string
           format: date-time
           nullable: true
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1151,11 +1151,12 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `priority`, `watchList`, or `assigneeEmail` must be provided.
+        Exactly one of `state`, `priority`, `workState`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
       oneOf:
         - required: [state]
         - required: [priority]
+        - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
       properties:
@@ -1167,6 +1168,10 @@ components:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new priority (severity) of the case.
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          description: The new work sub-state of the case. Only applicable when the case state is work_in_progress.
         watchList:
           type: array
           items:
@@ -1206,6 +1211,11 @@ components:
         priority:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          nullable: true
+          description: Work sub-state after the update. null when state is not work_in_progress.
         watchList:
           type: array
           items:
@@ -1441,13 +1451,13 @@ components:
         state:
           type: string
           enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
-        closedAt:
+        closedOn:
           type: string
           format: date-time
           nullable: true
@@ -1486,6 +1496,11 @@ components:
         updatedOn:
           type: string
           format: date-time
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
           $ref: '#/components/schemas/UserRef'
         project:
@@ -1497,12 +1512,16 @@ components:
         product:
           $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
+          nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
         parentCase:
+          nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         relatedCase:
+          nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
         account:
+          nullable: true
           $ref: '#/components/schemas/AccountRef'
 
     CaseSearchView:
@@ -1539,6 +1558,11 @@ components:
         updatedOn:
           type: string
           format: date-time
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
           $ref: '#/components/schemas/UserIDEmailRef'
         project:
@@ -1547,6 +1571,20 @@ components:
           $ref: '#/components/schemas/EntityRef'
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          nullable: true
+          $ref: '#/components/schemas/CaseNumberRef'
+        relatedCase:
+          nullable: true
+          $ref: '#/components/schemas/CaseNumberRef'
+        account:
+          nullable: true
+          $ref: '#/components/schemas/AccountRef'
 
     SearchCasesResponse:
       type: object
@@ -1589,7 +1627,7 @@ components:
           type: string
         createdBy:
           type: string
-        createdAt:
+        createdOn:
           type: string
           format: date-time
 

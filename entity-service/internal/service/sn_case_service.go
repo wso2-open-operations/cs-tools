@@ -532,7 +532,7 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 				LastName:  c.CreatedByLastName,
 				FullName:  c.CreatedByFullName,
 			},
-			CreatedAt: createdAt,
+			CreatedOn: createdAt,
 		})
 	}
 

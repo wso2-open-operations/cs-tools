@@ -102,7 +102,7 @@ func (r *productVersionRepo) SearchProductVersions(ctx context.Context, req doma
 			if err := rows.Scan(
 				&pv.ID, &pv.ProductID, &pv.Version, &pv.CurrentSupportStatus,
 				&pv.ReleaseDate, &pv.SupportEOLDate, &pv.EarliestPossibleSupportEOLDate,
-				&pv.CreatedAt, &pv.UpdatedAt,
+				&pv.CreatedOn, &pv.UpdatedOn,
 			); err != nil {
 				return fmt.Errorf("scan product_version: %w", err)
 			}
