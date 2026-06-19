@@ -16,6 +16,7 @@
 
 import type {
   CaseState,
+  CaseWorkState,
   DashboardScope,
   Severity,
   SlaClockType,
@@ -50,6 +51,12 @@ export interface CsmCaseRow {
   product: string;
   severity: Severity;
   state: CaseState;
+  /**
+   * Work sub-state of an in-progress case (`ongoing` / `paused`); `null` when
+   * the case is not `work_in_progress`. Drives the comment gate and the paused
+   * indicator. See {@link commentGateReason}.
+   */
+  workState?: CaseWorkState | null;
   /** CRE / engineer working the case. "Unassigned" for cases with no one picked up yet. */
   assignee: string;
   assigneeIsMe: boolean;

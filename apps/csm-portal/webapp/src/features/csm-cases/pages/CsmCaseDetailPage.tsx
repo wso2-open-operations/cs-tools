@@ -54,6 +54,7 @@ import {
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
+import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
@@ -67,6 +68,10 @@ import {
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
+import {
+  publicCommentGateReason,
+  WORK_STATE_LABEL,
+} from "@features/csm-cases/utils/caseWorkState";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -256,6 +261,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [activeTab, setActiveTab] = useState<CaseTabId>("activities");
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  // Email of the signed-in engineer, for the "Assign to me" shortcut.
+  const currentUserEmail = claims?.email ?? undefined;
 
   // Twitter-style permalinks: when the URL has a fragment matching an entry id,
   // jump to the Activities tab, scroll the entry into view vertically, and
@@ -388,6 +396,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Assign / reassign opens the engineer picker; the PATCH happens in
+      // onAssign once an engineer is chosen.
+      if (action.secondary === "reassign_engineer") {
+        setAssignOpen(true);
+        return;
+      }
+
       // Copy-link is async: only confirm success once the clipboard write
       // actually resolves, otherwise a failure shows both a false "copied"
       // toast and an error.
@@ -416,6 +431,29 @@ export default function CsmCaseDetailPage(): JSX.Element {
       });
     },
     [data, showError, patchCase],
+  );
+
+  // Assign the case to the chosen engineer via PATCH { assigneeEmail }. The
+  // detail query is invalidated by the hook, so the assignee display refreshes
+  // on success. (ServiceNow-source only; the BE rejects it for PG cases.)
+  const onAssign = useCallback(
+    (email: string) => {
+      patchCase.mutate(
+        { assigneeEmail: email },
+        {
+          onSuccess: () => {
+            setAssignOpen(false);
+            setFeedback({
+              message: "Case reassigned.",
+              severity: "success",
+              sticky: true,
+            });
+          },
+          onError: (err) => showError("Could not reassign the case.", err),
+        },
+      );
+    },
+    [patchCase, showError],
   );
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
@@ -513,6 +551,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const c = data;
   const isClosed = c.state === "closed";
+  // The backend rejects a customer-visible comment unless the case is
+  // work_in_progress + ongoing. Internal work notes are allowed in any state,
+  // so this only disables the public-reply path in the composer — never work
+  // notes. Mirrors the BFF comment guard so the engineer sees a clear reason
+  // instead of a generic error.
+  const publicReplyGateReason = publicCommentGateReason(c.state, c.workState);
   const breached = c.minutesToBreach < 0;
   // The backend carries no SLA timing yet (LIVE detail leaves slaClocks empty
   // and minutesToBreach at 0). Without this guard the header SLA chip reads
@@ -619,6 +663,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
               color={stateColor(c.state)}
               sx={{ fontWeight: 600 }}
             />
+            {c.state === "work_in_progress" && c.workState && (
+              <Chip
+                size="small"
+                variant="outlined"
+                color={c.workState === "paused" ? "warning" : "default"}
+                label={WORK_STATE_LABEL[c.workState]}
+                sx={{ fontWeight: 600 }}
+              />
+            )}
             {!isClosed && hasSlaData && (
               <Chip
                 size="small"
@@ -737,7 +790,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {/* Comments are latest-in-top (WSO2 convention), so the composer
               belongs at the top. It stays collapsed behind a button to keep
-              the thread the focal point until the engineer chooses to reply. */}
+              the thread the focal point until the engineer chooses to reply.
+              The composer is always available (an internal work note can be
+              added in any state); the public-reply path is gated inside it via
+              `publicReplyGateReason` when the case isn't in-progress/ongoing. */}
           {composerOpen ? (
             <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Box
@@ -759,6 +815,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!caseId}
+                publicCommentDisabledReason={publicReplyGateReason}
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
@@ -819,7 +876,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 },
               }}
             >
-              Compose a reply to the customer…
+              {publicReplyGateReason
+                ? "Add an internal work note…"
+                : "Compose a reply to the customer…"}
             </Button>
           )}
 
@@ -969,6 +1028,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onAdd={() => onAction({ secondary: "log_time" })}
           />
         </Box>
+      )}
+
+      {assignOpen && (
+        <AssignEngineerDialog
+          currentAssignee={c.assignee}
+          currentUserEmail={currentUserEmail}
+          isAssigning={patchCase.isPending}
+          onClose={() => setAssignOpen(false)}
+          onAssign={onAssign}
+        />
       )}
     </Box>
   );

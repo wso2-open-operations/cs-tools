@@ -52,6 +52,7 @@ function detailFromBeCase(c: BeCaseView): CsmCaseDetail {
     product,
     severity: severityFromPriority(c.priority),
     state: uiStateFromBe(c.state),
+    workState: c.workState ?? null,
     nextStates: (c.nextStates ?? []).map(uiStateFromBe),
     assignee,
     // "Is me" needs the signed-in user's entity id, which this mapper doesn't
