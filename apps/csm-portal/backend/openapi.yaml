@@ -253,7 +253,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Conflict — comment posting is not allowed in the current case state (case must be work_in_progress with work_state ongoing).
+          description: Conflict — customer-visible comments (type=comment) can only be posted when the case is work_in_progress with workState=ongoing. Work notes (type=work_note) are exempt and allowed in any state.
           content:
             application/json:
               schema:
