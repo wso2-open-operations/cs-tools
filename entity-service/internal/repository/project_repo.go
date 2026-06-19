@@ -105,7 +105,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 			var p domain.Project
 			if err := rows.Scan(
 				&p.ID, &p.AccountID, &p.SfID, &p.Name, &p.Key, &p.SubscriptionType, &p.ClosureStatus,
-				&p.StartDate, &p.EndDate, &p.CreatedAt, &p.UpdatedAt,
+				&p.StartDate, &p.EndDate, &p.CreatedOn, &p.UpdatedOn,
 			); err != nil {
 				return fmt.Errorf("scan project: %w", err)
 			}

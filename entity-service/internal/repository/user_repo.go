@@ -63,7 +63,7 @@ func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (domain.Use
 	).Scan(
 		&u.ID, &u.UserName, &u.FirstName, &u.LastName,
 		&u.Email, &u.Phone, &u.Timezone, &u.UserType,
-		&u.CreatedAt, &u.UpdatedAt,
+		&u.CreatedOn, &u.UpdatedOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, &apierror.NotFoundError{Msg: "no user found with email: " + email}
@@ -130,7 +130,7 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 			if err := rows.Scan(
 				&u.ID, &u.UserName, &u.FirstName, &u.LastName,
 				&u.Email, &u.Phone, &u.Timezone, &u.UserType,
-				&u.CreatedAt, &u.UpdatedAt,
+				&u.CreatedOn, &u.UpdatedOn,
 			); err != nil {
 				return fmt.Errorf("scan user: %w", err)
 			}

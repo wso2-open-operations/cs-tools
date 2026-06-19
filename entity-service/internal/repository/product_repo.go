@@ -91,7 +91,7 @@ func (r *productRepo) SearchProducts(ctx context.Context, req domain.SearchProdu
 		result := make([]domain.Product, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var p domain.Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.Class, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			if err := rows.Scan(&p.ID, &p.Name, &p.Class, &p.CreatedOn, &p.UpdatedOn); err != nil {
 				return fmt.Errorf("scan product: %w", err)
 			}
 			result = append(result, p)

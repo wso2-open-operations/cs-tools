@@ -467,7 +467,7 @@ type CaseSort struct {
 }
 
 // Case represents a customer support case as stored in the database.
-// ClosedAt and WorkState are the only nullable fields; all others are required.
+// ClosedOn and WorkState are the only nullable fields; all others are required.
 // Used as the response for write operations (create/update).
 type Case struct {
 	ID                string         `json:"id"`
