@@ -43,8 +43,8 @@ type User struct {
 	Phone     *string   `json:"phone"`
 	Timezone  *string   `json:"timezone"`
 	UserType  UserType  `json:"userType"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
 }
 
 // Pagination controls which page of results is returned.
@@ -95,8 +95,8 @@ type Account struct {
 	TechnicalOwnerID    *string     `json:"technicalOwnerId"`
 	AgentEnabled        bool        `json:"agentEnabled"`
 	KbReferencesEnabled bool        `json:"kbReferencesEnabled"`
-	CreatedAt           time.Time   `json:"createdAt"`
-	UpdatedAt           time.Time   `json:"updatedAt"`
+	CreatedOn           time.Time   `json:"createdOn"`
+	UpdatedOn           time.Time   `json:"updatedOn"`
 }
 
 // SearchAccountsRequest is the input for an account search operation.
@@ -154,8 +154,8 @@ type Project struct {
 	ClosureStatus    *ClosureStatus   `json:"closureStatus"`
 	StartDate        time.Time        `json:"startDate"`
 	EndDate          time.Time        `json:"endDate"`
-	CreatedAt        time.Time        `json:"createdAt"`
-	UpdatedAt        time.Time        `json:"updatedAt"`
+	CreatedOn        time.Time        `json:"createdOn"`
+	UpdatedOn        time.Time        `json:"updatedOn"`
 }
 
 // ProjectAccountRef is the embedded account summary returned in project detail responses.
@@ -227,8 +227,8 @@ type Product struct {
 	ID        string       `json:"id"`
 	Name      string       `json:"name"`
 	Class     ProductClass `json:"class"`
-	CreatedAt time.Time    `json:"createdAt"`
-	UpdatedAt time.Time    `json:"updatedAt"`
+	CreatedOn time.Time    `json:"createdOn"`
+	UpdatedOn time.Time    `json:"updatedOn"`
 }
 
 // SearchProductsRequest is the input for a product search operation.
@@ -268,8 +268,8 @@ type ProductVersion struct {
 	ReleaseDate                    time.Time     `json:"releaseDate"`
 	SupportEOLDate                 *time.Time    `json:"supportEolDate"`
 	EarliestPossibleSupportEOLDate *time.Time    `json:"earliestPossibleSupportEolDate"`
-	CreatedAt                      time.Time     `json:"createdAt"`
-	UpdatedAt                      time.Time     `json:"updatedAt"`
+	CreatedOn                      time.Time     `json:"createdOn"`
+	UpdatedOn                      time.Time     `json:"updatedOn"`
 }
 
 // SearchProductVersionsRequest is the input for a product version search operation.
@@ -311,8 +311,8 @@ type Deployment struct {
 	Type        DeploymentType `json:"type"`
 	Description *string        `json:"description"`
 	CreatedBy   string         `json:"createdBy"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	CreatedOn   time.Time      `json:"createdOn"`
+	UpdatedOn   time.Time      `json:"updatedOn"`
 }
 
 // DeploymentView is the enriched search result for a deployment. It embeds
@@ -356,8 +356,8 @@ type DeployedProduct struct {
 	DeploymentID     string    `json:"deploymentId"`
 	ProductID        string    `json:"productId"`
 	ProductVersionID *string   `json:"productVersionId"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	CreatedOn        time.Time `json:"createdOn"`
+	UpdatedOn        time.Time `json:"updatedOn"`
 }
 
 // DeployedProductVersionRef is the version sub-object in a DeployedProductView.
@@ -467,24 +467,25 @@ type CaseSort struct {
 }
 
 // Case represents a customer support case as stored in the database.
-// ClosedAt is the only nullable field; all others are required.
-// Used as the response for write operations (create).
+// ClosedAt and WorkState are the only nullable fields; all others are required.
+// Used as the response for write operations (create/update).
 type Case struct {
-	ID                string        `json:"id"`
-	Number            string        `json:"number"`
-	InternalID        string        `json:"internalId"`
-	CreatedBy         string        `json:"createdBy"`
-	ProjectID         string        `json:"projectId"`
-	DeploymentID      string        `json:"deploymentId"`
-	DeployedProductID string        `json:"deployedProductId"`
-	Subject           string        `json:"subject"`
-	Description       string        `json:"description"`
-	Priority          CasePriority  `json:"priority"`
-	IssueType         CaseIssueType `json:"issueType"`
-	State             CaseState     `json:"state"`
-	CreatedAt         time.Time     `json:"createdAt"`
-	UpdatedAt         time.Time     `json:"updatedAt"`
-	ClosedAt          *time.Time    `json:"closedAt"`
+	ID                string         `json:"id"`
+	Number            string         `json:"number"`
+	InternalID        string         `json:"internalId"`
+	CreatedBy         string         `json:"createdBy"`
+	ProjectID         string         `json:"projectId"`
+	DeploymentID      string         `json:"deploymentId"`
+	DeployedProductID string         `json:"deployedProductId"`
+	Subject           string         `json:"subject"`
+	Description       string         `json:"description"`
+	Priority          CasePriority   `json:"priority"`
+	IssueType         CaseIssueType  `json:"issueType"`
+	State             CaseState      `json:"state"`
+	WorkState         *CaseWorkState `json:"workState"`
+	CreatedOn         time.Time      `json:"createdOn"`
+	UpdatedOn         time.Time      `json:"updatedOn"`
+	ClosedOn          *time.Time     `json:"closedOn"`
 }
 
 // UserRef is a reference to a user with key display fields.
@@ -546,6 +547,7 @@ type CaseView struct {
 	WorkState              *CaseWorkState       `json:"workState"`
 	CreatedOn              time.Time            `json:"createdOn"`
 	UpdatedOn              time.Time            `json:"updatedOn"`
+	ClosedOn               *time.Time           `json:"closedOn"`
 	CreatedByDetails       UserRef              `json:"createdBy"`
 	ProjectDetails         EntityRef            `json:"project"`
 	DeploymentDetails      EntityRef            `json:"deployment"`
@@ -590,7 +592,7 @@ type SearchCaseView struct {
 	WorkState              *CaseWorkState     `json:"workState"`
 	CreatedOn              time.Time          `json:"createdOn"`
 	UpdatedOn              time.Time          `json:"updatedOn"`
-	ClosedAt               *time.Time         `json:"closedAt"`
+	ClosedOn               *time.Time         `json:"closedOn"`
 	CreatedBy              UserIDEmailRef     `json:"createdBy"`
 	ProjectDetails         EntityRef          `json:"project"`
 	DeploymentDetails      EntityRef          `json:"deployment"`
@@ -608,14 +610,15 @@ type SearchCasesResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Priority, WatchList, or AssigneeEmail must be provided.
+// Exactly one of State, Priority, WorkState, WatchList, or AssigneeEmail must be provided.
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 type UpdateCaseRequest struct {
-	ID            string        `json:"-"`
-	State         *CaseState    `json:"state"`
-	Priority      *CasePriority `json:"priority"`
-	WatchList     []string      `json:"watchList"`
-	AssigneeEmail *string       `json:"assigneeEmail"`
+	ID            string         `json:"-"`
+	State         *CaseState     `json:"state"`
+	Priority      *CasePriority  `json:"priority"`
+	WorkState     *CaseWorkState `json:"workState"`
+	WatchList     []string       `json:"watchList"`
+	AssigneeEmail *string        `json:"assigneeEmail"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.
@@ -631,6 +634,7 @@ type UpdatedCase struct {
 	UpdatedBy  string               `json:"updatedBy,omitempty"`
 	State      CaseState            `json:"state,omitempty"`
 	Priority   CasePriority         `json:"priority,omitempty"`
+	WorkState  *CaseWorkState       `json:"workState"`
 	WatchList  []WatchListUser      `json:"watchList,omitempty"`
 	AssignedTo *AssignedEngineerRef `json:"assignedTo,omitempty"`
 }
@@ -697,7 +701,7 @@ type CaseComment struct {
 	Type      CommentType    `json:"type"`
 	Content   string         `json:"content"`
 	CreatedBy CommentUserRef `json:"createdBy"`
-	CreatedAt time.Time      `json:"createdOn"`
+	CreatedOn time.Time      `json:"createdOn"`
 }
 
 // CreateCaseCommentRequest is the input for creating a new case comment.
