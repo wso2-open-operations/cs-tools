@@ -264,6 +264,34 @@ func TestCreateCaseComment(t *testing.T) {
 		assertErrorMessage(t, w, ErrMsgCommentNotAllowed)
 	})
 
+	t.Run("allows work_note in any case state without calling GetCase", func(t *testing.T) {
+		for _, state := range []string{"open", "work_in_progress", "waiting_on_wso2", "awaiting_info", "solution_proposed", "closed"} {
+			state := state
+			t.Run(state, func(t *testing.T) {
+				t.Parallel()
+				getCalled := false
+				client := &mockEntityCaseClient{
+					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+						getCalled = true
+						return []byte(`{"state":"` + state + `"}`), nil
+					},
+					createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return []byte(`{"id":"wn-1"}`), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"type":"work_note","content":"internal note"}`)))
+				r.SetPathValue("id", "case-1")
+				w := httptest.NewRecorder()
+				h.CreateCaseComment(w, r)
+				assertStatus(t, w, http.StatusCreated)
+				if getCalled {
+					t.Errorf("GetCase should not be called for work_note")
+				}
+			})
+		}
+	})
+
 	t.Run("forwards body to entity and returns response", func(t *testing.T) {
 		var capturedCaseID string
 		var capturedBody []byte
