@@ -129,7 +129,7 @@ paths:
       summary: Update a support case.
       description: |
         Updates exactly one field of the case. Provide exactly one of: `state`, `priority`,
-        `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
         only when the ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
@@ -1104,11 +1104,12 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `priority`, `watchList`, or `assigneeEmail` must be provided.
+        Exactly one of `state`, `priority`, `workState`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
       oneOf:
         - required: [state]
         - required: [priority]
+        - required: [workState]
         - required: [watchList]
         - required: [assigneeEmail]
       properties:
@@ -1120,6 +1121,10 @@ components:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new priority (severity) of the case.
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          description: The new work sub-state of the case. Only applicable when the case state is work_in_progress.
         watchList:
           type: array
           items:
@@ -1159,6 +1164,11 @@ components:
         priority:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+        workState:
+          type: string
+          enum: [ongoing, paused]
+          nullable: true
+          description: Work sub-state after the update. null when state is not work_in_progress.
         watchList:
           type: array
           items:
@@ -1371,12 +1381,6 @@ components:
             - reopened
             - solution_proposed
             - closed
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
         workState:
           type: string
           nullable: true
@@ -1384,9 +1388,16 @@ components:
             - ongoing
             - paused
           description: Sub-state of work_in_progress. Null when state is not work_in_progress.
-        closedAt:
+        createdOn:
           type: string
           format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
 
     UserRef:
       type: object
@@ -1471,16 +1482,24 @@ components:
             - reopened
             - solution_proposed
             - closed
-        createdAt:
+        workState:
+          type: string
+          nullable: true
+          enum:
+            - ongoing
+            - paused
+          description: Sub-state of work_in_progress. Null when state is not work_in_progress.
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
-        closedAt:
+        closedOn:
           type: string
           format: date-time
           nullable: true
+          description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
           $ref: '#/components/schemas/UserRef'
         project:
@@ -1489,6 +1508,16 @@ components:
           $ref: '#/components/schemas/EntityRef'
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        relatedCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        account:
+          $ref: '#/components/schemas/AccountRef'
         nextStates:
           type: array
           readOnly: true
@@ -1543,16 +1572,24 @@ components:
             - reopened
             - solution_proposed
             - closed
-        createdAt:
+        workState:
+          type: string
+          nullable: true
+          enum:
+            - ongoing
+            - paused
+          description: Sub-state of work_in_progress. Null when state is not work_in_progress.
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
-        closedAt:
+        closedOn:
           type: string
           format: date-time
           nullable: true
+          description: Timestamp when the case was closed. null if not yet closed.
         createdBy:
           $ref: '#/components/schemas/UserIDEmailRef'
         project:
@@ -1561,6 +1598,16 @@ components:
           $ref: '#/components/schemas/EntityRef'
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
+        product:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          $ref: '#/components/schemas/AssignedEngineerRef'
+        parentCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        relatedCase:
+          $ref: '#/components/schemas/CaseNumberRef'
+        account:
+          $ref: '#/components/schemas/AccountRef'
 
     UpdateDescriptionRequest:
       type: object
@@ -1657,10 +1704,10 @@ components:
         userType:
           type: string
           enum: [internal, customer]
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1723,10 +1770,10 @@ components:
           type: boolean
         kbReferencesEnabled:
           type: boolean
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1792,10 +1839,10 @@ components:
         endDate:
           type: string
           format: date-time
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1869,10 +1916,10 @@ components:
           type: string
         createdBy:
           type: string
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1917,10 +1964,10 @@ components:
         class:
           type: string
           enum: [software, service]
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -1976,10 +2023,10 @@ components:
         earliestPossibleSupportEolDate:
           type: string
           format: date-time
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -2022,10 +2069,10 @@ components:
           type: string
         productVersionId:
           type: string
-        createdAt:
+        createdOn:
           type: string
           format: date-time
-        updatedAt:
+        updatedOn:
           type: string
           format: date-time
 
@@ -2069,7 +2116,7 @@ components:
           type: string
         createdBy:
           type: string
-        createdAt:
+        createdOn:
           type: string
           format: date-time
 
@@ -2102,6 +2149,38 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    AssignedEngineerRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    CaseNumberRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+
+    AccountRef:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
 
     AttachmentCreatePayload:
       type: object
