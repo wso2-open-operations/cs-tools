@@ -37,7 +37,7 @@ var tokenFetchTimeout = 10 * time.Second
 type ctxKey string
 
 const userIDTokenKey ctxKey = "x-user-id-token"
-const correlationIDKey ctxKey = "x-correlation-id"
+const correlationIDKey ctxKey = "x-csm-correlation-id"
 
 // WithUserIDToken returns a copy of ctx carrying the x-user-id-token value to
 // be forwarded on every outgoing entity request.
@@ -51,7 +51,7 @@ func userIDTokenFromContext(ctx context.Context) string {
 }
 
 // WithCorrelationID returns a copy of ctx carrying the correlation ID to be
-// forwarded as X-Correlation-ID on every outgoing entity request.
+// forwarded as X-CSM-Correlation-ID on every outgoing entity request.
 func WithCorrelationID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, correlationIDKey, id)
 }
@@ -121,7 +121,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		req.Header.Set("x-user-id-token", token)
 	}
 	if id := correlationIDFromContext(ctx); id != "" {
-		req.Header.Set("X-Correlation-ID", id)
+		req.Header.Set("X-CSM-Correlation-ID", id)
 	}
 
 	resp, err := c.http.Do(req)
@@ -159,7 +159,7 @@ func (c *Client) doBinary(ctx context.Context, path string) (body []byte, conten
 		req.Header.Set("x-user-id-token", token)
 	}
 	if id := correlationIDFromContext(ctx); id != "" {
-		req.Header.Set("X-Correlation-ID", id)
+		req.Header.Set("X-CSM-Correlation-ID", id)
 	}
 
 	resp, err := c.http.Do(req)

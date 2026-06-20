@@ -27,11 +27,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 )
 
-const correlationIDHeader = "X-Correlation-ID"
+const correlationIDHeader = "X-CSM-Correlation-ID"
 
 type correlationIDKey struct{}
 
-// CorrelationID is an HTTP middleware that reads the X-Correlation-ID request
+// CorrelationID is an HTTP middleware that reads the X-CSM-Correlation-ID request
 // header or generates a UUID v4 if absent. The ID is:
 //   - stored in the context for automatic inclusion in slog records
 //   - stored in the entity client context so it is forwarded on every outgoing

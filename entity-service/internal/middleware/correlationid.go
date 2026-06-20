@@ -25,11 +25,11 @@ import (
 
 // correlationIDHeader is the HTTP header used to propagate the correlation ID
 // across service boundaries.
-const correlationIDHeader = "X-Correlation-ID"
+const correlationIDHeader = "X-CSM-Correlation-ID"
 
 type correlationIDKey struct{}
 
-// CorrelationID is an HTTP middleware that reads the X-Correlation-ID request
+// CorrelationID is an HTTP middleware that reads the X-CSM-Correlation-ID request
 // header (forwarded by the portal BFF) or generates a UUID v4 if absent.
 // The ID is stored in the request context for logging and echoed in the
 // response header so callers can reference it in support requests.
