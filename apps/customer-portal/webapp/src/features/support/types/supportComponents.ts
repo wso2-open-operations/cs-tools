@@ -468,6 +468,7 @@ export type ChatInputProps = {
   forceRichText?: boolean;
   disabled?: boolean;
   typingDisabled?: boolean;
+  onRequestTokens?: () => void;
 };
 
 export type ChatHeaderProps = {
