@@ -68,7 +68,10 @@ func groupByUpdateLevel(src []upstreamUpdateDescription) map[string]UpdateLevelG
 			if d.UpdateType == updateTypeSecurity {
 				updateType = updateTypeSecurity
 			}
-			group = UpdateLevelGroup{UpdateType: updateType}
+			group = UpdateLevelGroup{
+				UpdateType:              updateType,
+				UpdateDescriptionLevels: make([]UpdateDescription, 0),
+			}
 		}
 
 		if d.UpdateType == updateTypeSecurity {
