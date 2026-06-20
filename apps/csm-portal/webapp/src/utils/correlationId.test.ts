@@ -64,7 +64,7 @@ describe("newCorrelationId fallbacks", () => {
 
 describe("CORRELATION_ID_HEADER", () => {
   it("matches the backend header name", () => {
-    expect(CORRELATION_ID_HEADER).toBe("X-Correlation-ID");
+    expect(CORRELATION_ID_HEADER).toBe("X-CSM-Correlation-ID");
   });
 });
 

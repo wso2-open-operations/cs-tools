@@ -6,7 +6,7 @@ Go HTTP server (`net/http`, Go 1.22+) that acts as a backend-for-frontend (BFF) 
 
 `CorrelationID → Auth → Logger → Mux`
 
-- `CorrelationID` (`internal/middleware/correlation.go`): reads `X-Correlation-ID` from the incoming request or generates a UUID v4; stores the ID in context for the slog handler and for the entity client to forward; echoes the ID in the response header
+- `CorrelationID` (`internal/middleware/correlation.go`): reads `X-CSM-Correlation-ID` from the incoming request or generates a UUID v4; stores the ID in context for the slog handler and for the entity client to forward; echoes the ID in the response header
 - `Auth` (`internal/middleware/auth.go`): validates the `x-jwt-assertion` JWT and sets `UserInfo` in context
 - `Logger` (`internal/middleware/logger.go`): logs every completed request (method, path, status, elapsed) via slog; runs after Auth so both `correlationID` and `userID` are present in every record
 

@@ -24,7 +24,7 @@
  * Must match `correlationIDHeader` in
  * `apps/csm-portal/backend/internal/middleware/correlation.go`.
  */
-export const CORRELATION_ID_HEADER = "X-Correlation-ID";
+export const CORRELATION_ID_HEADER = "X-CSM-Correlation-ID";
 
 /**
  * Returns a fresh UUID v4 to use as a request correlation ID.

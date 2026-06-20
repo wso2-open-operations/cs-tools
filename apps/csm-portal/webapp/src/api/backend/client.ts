@@ -40,7 +40,7 @@ export class BackendApiError extends Error {
   payload?: BeErrorPayload;
   /**
    * Correlation ID for this failed request, read back from the response's
-   * `X-Correlation-ID` header (the backend echoes the ID it logged against).
+   * `X-CSM-Correlation-ID` header (the backend echoes the ID it logged against).
    * Surface it to users as a support "Reference ID". `undefined` when the
    * gateway does not expose the header on cross-origin responses (it must be
    * listed in `Access-Control-Expose-Headers`); the FE access log still records
