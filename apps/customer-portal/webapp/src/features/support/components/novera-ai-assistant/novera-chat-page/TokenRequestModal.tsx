@@ -23,7 +23,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 export type TokenRequestModalProps = {
   open: boolean;
@@ -45,6 +45,16 @@ export default function TokenRequestModal({
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setReason("");
+      setIsSubmitting(false);
+      setSubmitted(false);
+      setSubmitError(null);
+    }
+  }, [open]);
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -56,9 +66,12 @@ export default function TokenRequestModal({
   const handleSubmit = async () => {
     if (!reason.trim() || isSubmitting) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await onSubmit(reason.trim());
       setSubmitted(true);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit request. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -89,6 +102,11 @@ export default function TokenRequestModal({
               disabled={isSubmitting}
               autoFocus
             />
+            {submitError && (
+              <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                {submitError}
+              </Typography>
+            )}
           </>
         )}
       </DialogContent>
