@@ -33,9 +33,9 @@ public type Contact record {|
     # Email
     string email;
     # First name
-    string firstName;
+    string? firstName;
     # Last name
-    string lastName;
+    string? lastName;
     # Whether the contact is a customer admin or not
     boolean isCsAdmin;
     # Whether the contact is an Integration user or not
