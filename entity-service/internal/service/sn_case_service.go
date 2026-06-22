@@ -1336,18 +1336,12 @@ func (s *snCaseService) SearchSecurityReportAnalysis(ctx context.Context, req do
 		snSortBy = &snCaseSort{Field: snField, Order: order}
 	}
 
-	// Merge singular deploymentId into deploymentIds for the SN payload.
-	deploymentIDs := uuidsToSysids(req.Filters.DeploymentIDs)
-	if req.Filters.DeploymentID != "" {
-		deploymentIDs = append(deploymentIDs, uuidToSysid(req.Filters.DeploymentID))
-	}
-
 	payload := snCaseSearchPayload{
 		Filters: snCaseFilters{
 			CaseTypes:        []string{"security_report_analysis"},
 			SearchQuery:      req.Filters.SearchQuery,
 			ProjectIDs:       uuidsToSysids(req.Filters.ProjectIDs),
-			DeploymentIDs:    deploymentIDs,
+			DeploymentIDs:    uuidsToSysids(req.Filters.DeploymentIDs),
 			StateKeys:        req.Filters.StateKeys,
 			ClosedStartDate:  formatSNDate(req.Filters.ClosedStartDate),
 			ClosedEndDate:    formatSNDate(req.Filters.ClosedEndDate),

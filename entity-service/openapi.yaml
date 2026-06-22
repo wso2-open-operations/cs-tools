@@ -1968,7 +1968,7 @@ components:
               type: array
               items:
                 type: string
-                description: 32-char hex sysid
+                format: uuid
             searchQuery:
               type: string
             stateKeys:
@@ -1993,14 +1993,11 @@ components:
             endUpdatedDate:
               type: string
               format: date-time
-            deploymentId:
-              type: string
-              description: 32-char hex sysid
             deploymentIds:
               type: array
               items:
                 type: string
-                description: 32-char hex sysid
+                format: uuid
             createdBy:
               type: array
               items:

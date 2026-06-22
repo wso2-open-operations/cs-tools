@@ -692,7 +692,6 @@ type SearchSecurityReportAnalysisFilters struct {
 	EndCreatedDate   *time.Time `json:"endCreatedDate"`
 	StartUpdatedDate *time.Time `json:"startUpdatedDate"`
 	EndUpdatedDate   *time.Time `json:"endUpdatedDate"`
-	DeploymentID     string     `json:"deploymentId"`
 	DeploymentIDs    []string   `json:"deploymentIds"`
 	CreatedBy        []string   `json:"createdBy"`
 	CreatedByMe      bool       `json:"createdByMe"`
