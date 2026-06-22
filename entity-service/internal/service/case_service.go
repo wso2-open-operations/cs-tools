@@ -376,3 +376,7 @@ func (s *caseService) GetCaseAttachmentContent(_ context.Context, _, _ string) (
 func (s *caseService) SearchServiceRequests(_ context.Context, _ domain.SearchServiceRequestsRequest) (domain.SearchServiceRequestsResponse, error) {
 	return domain.SearchServiceRequestsResponse{}, &apierror.ServiceUnavailableError{Msg: "service requests are only supported for the ServiceNow data source"}
 }
+
+func (s *caseService) SearchSecurityReportAnalysis(_ context.Context, _ domain.SearchSecurityReportAnalysisRequest) (domain.SearchSecurityReportAnalysisResponse, error) {
+	return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ServiceUnavailableError{Msg: "security report analysis is only supported for the ServiceNow data source"}
+}
