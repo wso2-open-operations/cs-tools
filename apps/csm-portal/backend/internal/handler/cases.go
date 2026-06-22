@@ -184,7 +184,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 
 	// Work notes are internal-only and exempt from the state gate.
 	var reqMeta struct {
-		Type string `json:"type"`
+		Type string `json:"typeKey"`
 	}
 	_ = json.Unmarshal(body, &reqMeta) // body is already validated JSON
 
@@ -514,7 +514,7 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 }
 
 // PatchCase handles PATCH /cases/{id}.
-// Accepts state, priority, watchList, or assigneeEmail and forwards to the entity service.
+// Accepts stateKey, priorityKey, workStateKey, watchList, or assigneeEmail and forwards to the entity service.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -550,8 +550,8 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 
 	// Validate state transition and workState guard before forwarding to the entity service.
 	var patch struct {
-		State     *string `json:"state"`
-		WorkState *string `json:"workState"`
+		State     *string `json:"stateKey"`
+		WorkState *string `json:"workStateKey"`
 	}
 	if err := json.Unmarshal(body, &patch); err == nil && (patch.State != nil || patch.WorkState != nil) {
 		current, err := h.entity.GetCase(r.Context(), caseID)

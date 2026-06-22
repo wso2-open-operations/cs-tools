@@ -1284,24 +1284,24 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `state`, `priority`, `workState`, `watchList`, or `assigneeEmail` must be provided.
+        Exactly one of `stateKey`, `priorityKey`, `workStateKey`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
       oneOf:
-        - required: [state]
-        - required: [priority]
-        - required: [workState]
+        - required: [stateKey]
+        - required: [priorityKey]
+        - required: [workStateKey]
         - required: [watchList]
         - required: [assigneeEmail]
       properties:
-        state:
+        stateKey:
           type: string
           enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
           description: The new state to transition the case to.
-        priority:
+        priorityKey:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: The new priority (severity) of the case.
-        workState:
+        workStateKey:
           type: string
           enum: [ongoing, paused]
           description: The new work sub-state of the case. Only applicable when the case state is work_in_progress.
@@ -1386,8 +1386,8 @@ components:
         - deployedProductId
         - subject
         - description
-        - priority
-        - issueType
+        - priorityKey
+        - issueTypeKey
       properties:
         projectId:
           type: string
@@ -1404,11 +1404,11 @@ components:
         description:
           type: string
           description: Full description of the issue
-        priority:
+        priorityKey:
           type: string
           enum: [catastrophic, critical, high, medium, low]
           description: Urgency level of the case
-        issueType:
+        issueTypeKey:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
           description: Nature of the issue
@@ -2304,14 +2304,14 @@ components:
     CaseCommentCreatePayload:
       type: object
       required:
-        - type
-        - body
+        - typeKey
+        - content
       properties:
-        type:
+        typeKey:
           type: string
           enum: [work_note, comment, activity]
           description: work_note is restricted to internal users; activity to internal and system users
-        body:
+        content:
           type: string
           description: Comment text
 
@@ -2325,7 +2325,7 @@ components:
         type:
           type: string
           enum: [work_note, comment, activity]
-        body:
+        content:
           type: string
         createdBy:
           type: string
