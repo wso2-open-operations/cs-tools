@@ -119,6 +119,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /cases/{id}/attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{case_id}/attachments/{attachment_id}/content", caseHandler.GetCaseAttachmentContent)
 	mux.HandleFunc("POST /service-requests/search", caseHandler.SearchServiceRequests)
+	mux.HandleFunc("POST /security-report-analyses/search", caseHandler.SearchSecurityReportAnalysis)
 
 	return middleware.CorrelationID(
 		middleware.Recovery(
