@@ -617,6 +617,68 @@ type SearchCasesResponse struct {
 	HasMore bool             `json:"hasMore"`
 }
 
+// SearchServiceRequestsFilters holds optional filter criteria for a service-request search.
+// This endpoint is only supported for the ServiceNow data source.
+type SearchServiceRequestsFilters struct {
+	ProjectIDs       []string   `json:"projectIds"`
+	SearchQuery      string     `json:"searchQuery"`
+	StateKeys        []int      `json:"stateKeys"`
+	ClosedStartDate  *time.Time `json:"closedStartDate"`
+	ClosedEndDate    *time.Time `json:"closedEndDate"`
+	StartCreatedDate *time.Time `json:"startCreatedDate"`
+	EndCreatedDate   *time.Time `json:"endCreatedDate"`
+	StartUpdatedDate *time.Time `json:"startUpdatedDate"`
+	EndUpdatedDate   *time.Time `json:"endUpdatedDate"`
+	DeploymentIDs    []string   `json:"deploymentIds"`
+	CreatedBy        []string   `json:"createdBy"`
+	CreatedByMe      bool       `json:"createdByMe"`
+}
+
+// SearchServiceRequestsRequest is the input for POST /service-requests/search.
+type SearchServiceRequestsRequest struct {
+	Filters    SearchServiceRequestsFilters `json:"filters"`
+	SortBy     CaseSort                     `json:"sortBy"`
+	Pagination Pagination                   `json:"pagination"`
+}
+
+// ServiceRequestWorkStateRef is a compact reference to a service-request work state.
+type ServiceRequestWorkStateRef struct {
+	ID    *int   `json:"id"`
+	Label string `json:"label"`
+}
+
+// ServiceRequestView is the enriched representation of a service request returned in search results.
+type ServiceRequestView struct {
+	ID               string                      `json:"id"`
+	InternalID       string                      `json:"internalId"`
+	Number           string                      `json:"number"`
+	CreatedOn        string                      `json:"createdOn"`
+	CreatedBy        string                      `json:"createdBy"`
+	Title            *string                     `json:"title"`
+	Description      *string                     `json:"description"`
+	State            string                      `json:"state"`
+	Catalog          *EntityRef                  `json:"catalog"`
+	CatalogItem      *EntityRef                  `json:"catalogItem"`
+	AssignedTeam     *EntityRef                  `json:"assignedTeam"`
+	Product          *EntityRef                  `json:"product"`
+	WorkState        *ServiceRequestWorkStateRef `json:"workState"`
+	Project          EntityRef                   `json:"project"`
+	Deployment       EntityRef                   `json:"deployment"`
+	DeployedProduct  EntityRef                   `json:"deployedProduct"`
+	AssignedEngineer *EntityRef                  `json:"assignedEngineer"`
+	ParentCase       *EntityRef                  `json:"parentCase"`
+	RelatedCase      *EntityRef                  `json:"relatedCase"`
+	Conversation     *EntityRef                  `json:"conversation"`
+}
+
+// SearchServiceRequestsResponse is the paginated result of a service-request search.
+type SearchServiceRequestsResponse struct {
+	Cases        []ServiceRequestView `json:"cases"`
+	TotalRecords int                  `json:"totalRecords"`
+	Offset       int                  `json:"offset"`
+	Limit        int                  `json:"limit"`
+}
+
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
 // Exactly one of State, Priority, WorkState, WatchList, or AssigneeEmail must be provided.
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
