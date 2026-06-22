@@ -66,6 +66,7 @@ import ChatHeader from "@features/support/components/novera-ai-assistant/novera-
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageList from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageList";
 import ChatSkeleton from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatSkeleton";
+import TokenRequestModal from "@features/support/components/novera-ai-assistant/novera-chat-page/TokenRequestModal";
 import {
   displayTextFromConversationContent,
   getFinalMessageFromPayload,
@@ -348,6 +349,7 @@ export default function NoveraChatPage(): JSX.Element {
   const [showRichText, setShowRichText] = useState(false);
   const [isInputDisabled, setIsInputDisabled] = useState(false);
   const [isTypingDisabled, setIsTypingDisabled] = useState(false);
+  const [isTokenRequestModalOpen, setIsTokenRequestModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const inputValueRef = useRef("");
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -560,6 +562,9 @@ export default function NoveraChatPage(): JSX.Element {
           }
           break;
         }
+        case "token_request_ack":
+          setIsTokenRequestModalOpen(false);
+          break;
         case "error":
           pendingFinalRef.current = null;
           tokenQueueRef.current = [];
@@ -680,6 +685,19 @@ export default function NoveraChatPage(): JSX.Element {
     return sendViaWebSocket(text);
   }, [isSending, projectId, sendViaWebSocket, setInputValueAndRef]);
 
+  const handleTokenRequestSubmit = useCallback(
+    async (reason: string) => {
+      if (!projectId || !accountId) return;
+      await connect(projectId);
+      await sendUserMessage({
+        type: "token_increase_request",
+        accountId,
+        reason,
+      });
+    },
+    [accountId, connect, projectId, sendUserMessage],
+  );
+
   useEffect(() => {
     if (!initialUserMessage?.trim()) return;
     if (urlConversationId) return;
@@ -752,9 +770,16 @@ export default function NoveraChatPage(): JSX.Element {
             forceRichText={showRichText}
             disabled={isInputDisabled}
             typingDisabled={isTypingDisabled}
+            onRequestTokens={() => setIsTokenRequestModalOpen(true)}
           />
         </Paper>
       </Box>
+
+      <TokenRequestModal
+        open={isTokenRequestModalOpen}
+        onClose={() => setIsTokenRequestModalOpen(false)}
+        onSubmit={handleTokenRequestSubmit}
+      />
     </Box>
   );
 }
