@@ -98,10 +98,10 @@ func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
 		return &apierror.ValidationError{Msg: "description is required"}
 	}
 	if !validCasePriority[req.Priority] {
-		return &apierror.ValidationError{Msg: "priority contains invalid value: " + string(req.Priority)}
+		return &apierror.ValidationError{Msg: "priorityKey contains invalid value: " + string(req.Priority)}
 	}
 	if !validCaseIssueType[req.IssueType] {
-		return &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
+		return &apierror.ValidationError{Msg: "issueTypeKey contains invalid value: " + string(req.IssueType)}
 	}
 	return nil
 }
@@ -172,7 +172,7 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 		return domain.CreateCaseCommentResponse{}, err
 	}
 	if !validCommentType[req.Type] {
-		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + string(req.Type)}
+		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "typeKey contains invalid value: " + string(req.Type)}
 	}
 	if req.Content == "" {
 		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
@@ -250,16 +250,16 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state, priority, or workState must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, priority, or workState may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, priorityKey, or workStateKey may be provided per request"}
 	}
 	if req.State != nil && !validCaseState[*req.State] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "stateKey contains invalid value: " + string(*req.State)}
 	}
 	if req.Priority != nil && !validCasePriority[*req.Priority] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priority contains invalid value: " + string(*req.Priority)}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priorityKey contains invalid value: " + string(*req.Priority)}
 	}
 	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workStateKey contains invalid value: " + string(*req.WorkState)}
 	}
 	c, err := s.repo.UpdateCase(ctx, req)
 	if err != nil {
