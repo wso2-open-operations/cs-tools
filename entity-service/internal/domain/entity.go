@@ -802,9 +802,9 @@ type SearchSecurityReportAnalysisResponse struct {
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 type UpdateCaseRequest struct {
 	ID            string         `json:"-"`
-	State         *CaseState     `json:"state"`
-	Priority      *CasePriority  `json:"priority"`
-	WorkState     *CaseWorkState `json:"workState"`
+	State         *CaseState     `json:"stateKey"`
+	Priority      *CasePriority  `json:"priorityKey"`
+	WorkState     *CaseWorkState `json:"workStateKey"`
 	WatchList     []string       `json:"watchList"`
 	AssigneeEmail *string        `json:"assigneeEmail"`
 }
@@ -861,8 +861,8 @@ type CreateCaseRequest struct {
 	DeployedProductID string        `json:"deployedProductId"`
 	Subject           string        `json:"subject"`
 	Description       string        `json:"description"`
-	Priority          CasePriority  `json:"priority"`
-	IssueType         CaseIssueType `json:"issueType"`
+	Priority          CasePriority  `json:"priorityKey"`
+	IssueType         CaseIssueType `json:"issueTypeKey"`
 }
 
 // CommentType classifies the type of a case comment.
@@ -897,7 +897,7 @@ type CaseComment struct {
 type CreateCaseCommentRequest struct {
 	CaseID    string      `json:"-"`
 	CreatedBy string      `json:"-"`
-	Type      CommentType `json:"type"`
+	Type      CommentType `json:"typeKey"`
 	Content   string      `json:"content"`
 }
 
@@ -924,7 +924,7 @@ type SearchCaseCommentsRequest struct {
 
 // CommentFilters holds optional filter criteria for searching case comments.
 type CommentFilters struct {
-	Type *CommentType `json:"type"`
+	Type *CommentType `json:"typeKey"`
 }
 
 // SearchCaseCommentsResponse is the paginated result of a case comment search.
