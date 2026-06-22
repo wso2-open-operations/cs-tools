@@ -2260,6 +2260,9 @@ components:
           format: uuid
         name:
           type: string
+        email:
+          type: string
+          nullable: true
 
     CaseNumberRef:
       type: object
@@ -2635,21 +2638,17 @@ components:
           nullable: true
         assignedEngineer:
           allOf:
-            - $ref: '#/components/schemas/EntityRef'
+            - $ref: '#/components/schemas/AssignedEngineerRef'
           nullable: true
         parentCase:
           $ref: '#/components/schemas/CaseNumberRef'
         relatedCase:
           $ref: '#/components/schemas/CaseNumberRef'
-        conversation:
-          allOf:
-            - $ref: '#/components/schemas/EntityRef'
-          nullable: true
 
     ServiceRequestSearchResponse:
       type: object
       properties:
-        cases:
+        serviceRequests:
           type: array
           items:
             $ref: '#/components/schemas/ServiceRequestView'
