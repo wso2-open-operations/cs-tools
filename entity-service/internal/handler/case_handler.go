@@ -174,3 +174,18 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(content)
 }
+
+// SearchServiceRequests handles POST /service-request/search.
+func (h *CaseHandler) SearchServiceRequests(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchServiceRequestsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchServiceRequests(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
