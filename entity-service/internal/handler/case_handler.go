@@ -175,7 +175,7 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 	_, _ = w.Write(content)
 }
 
-// SearchServiceRequests handles POST /service-request/search.
+// SearchServiceRequests handles POST /service-requests/search.
 func (h *CaseHandler) SearchServiceRequests(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchServiceRequestsRequest
 	if !decodeRequest(w, r, &req) {
