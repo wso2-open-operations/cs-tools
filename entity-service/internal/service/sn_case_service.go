@@ -1268,6 +1268,170 @@ func (s *snCaseService) SearchServiceRequests(ctx context.Context, req domain.Se
 	}, nil
 }
 
+// snSecurityReportAnalysisCase mirrors the Choreo POST /cases/search response item for security_report_analysis cases.
+type snSecurityReportAnalysisCase struct {
+	ID               string                 `json:"id"`
+	InternalID       string                 `json:"internalId"`
+	Number           string                 `json:"number"`
+	Title            *string                `json:"title"`
+	Description      *string                `json:"description"`
+	CreatedOn        string                 `json:"createdOn"`
+	CreatedBy        string                 `json:"createdBy"`
+	State            *snCaseState           `json:"state"`
+	WorkState        *snCaseLabel           `json:"workState"`
+	Project          snCaseEntityRef        `json:"project"`
+	Deployment       snCaseEntityRef        `json:"deployment"`
+	DeployedProduct  snCaseDeployedProduct  `json:"deployedProduct"`
+	Product          *snCaseEntityRef       `json:"product"`
+	AssignedEngineer *snAssignedEngineerRef `json:"assignedEngineer"`
+	ParentCase       *snCaseRef             `json:"parentCase"`
+	RelatedCase      *snCaseRef             `json:"relatedCase"`
+}
+
+type snSecurityReportAnalysisResponse struct {
+	Cases        []snSecurityReportAnalysisCase `json:"cases"`
+	TotalRecords int                            `json:"totalRecords"`
+	Offset       int                            `json:"offset"`
+	Limit        int                            `json:"limit"`
+}
+
+// SearchSecurityReportAnalysis implements CaseService by calling the Choreo POST /cases/search
+// endpoint with caseTypes filtered to ["security_report_analysis"].
+func (s *snCaseService) SearchSecurityReportAnalysis(ctx context.Context, req domain.SearchSecurityReportAnalysisRequest) (domain.SearchSecurityReportAnalysisResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchSecurityReportAnalysisResponse{}, err
+	}
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+		return domain.SearchSecurityReportAnalysisResponse{}, err
+	}
+
+	if req.Filters.ClosedEndDate != nil && req.Filters.ClosedStartDate != nil &&
+		req.Filters.ClosedEndDate.Before(*req.Filters.ClosedStartDate) {
+		return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
+	}
+	if req.Filters.EndCreatedDate != nil && req.Filters.StartCreatedDate != nil &&
+		req.Filters.EndCreatedDate.Before(*req.Filters.StartCreatedDate) {
+		return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ValidationError{Msg: "endCreatedDate must not be before startCreatedDate"}
+	}
+	if req.Filters.EndUpdatedDate != nil && req.Filters.StartUpdatedDate != nil &&
+		req.Filters.EndUpdatedDate.Before(*req.Filters.StartUpdatedDate) {
+		return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.SearchSecurityReportAnalysisResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	var snSortBy *snCaseSort
+	if req.SortBy.Field != "" {
+		snField, ok := snSortFieldMap[req.SortBy.Field]
+		if !ok {
+			return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ValidationError{Msg: "sortBy.field " + string(req.SortBy.Field) + " is not supported by ServiceNow"}
+		}
+		order := string(req.SortBy.Order)
+		if order == "" {
+			order = "desc"
+		}
+		snSortBy = &snCaseSort{Field: snField, Order: order}
+	}
+
+	// Merge singular deploymentId into deploymentIds for the SN payload.
+	deploymentIDs := uuidsToSysids(req.Filters.DeploymentIDs)
+	if req.Filters.DeploymentID != "" {
+		deploymentIDs = append(deploymentIDs, uuidToSysid(req.Filters.DeploymentID))
+	}
+
+	payload := snCaseSearchPayload{
+		Filters: snCaseFilters{
+			CaseTypes:        []string{"security_report_analysis"},
+			SearchQuery:      req.Filters.SearchQuery,
+			ProjectIDs:       uuidsToSysids(req.Filters.ProjectIDs),
+			DeploymentIDs:    deploymentIDs,
+			StateKeys:        req.Filters.StateKeys,
+			ClosedStartDate:  formatSNDate(req.Filters.ClosedStartDate),
+			ClosedEndDate:    formatSNDate(req.Filters.ClosedEndDate),
+			StartCreatedDate: formatSNDate(req.Filters.StartCreatedDate),
+			EndCreatedDate:   formatSNDate(req.Filters.EndCreatedDate),
+			StartUpdatedDate: formatSNDate(req.Filters.StartUpdatedDate),
+			EndUpdatedDate:   formatSNDate(req.Filters.EndUpdatedDate),
+			CreatedBy:        req.Filters.CreatedBy,
+			CreatedByMe:      req.Filters.CreatedByMe,
+		},
+		SortBy:     snSortBy,
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/cases/search", token, payload)
+	if err != nil {
+		return domain.SearchSecurityReportAnalysisResponse{}, err
+	}
+
+	var snResp snSecurityReportAnalysisResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchSecurityReportAnalysisResponse{}, fmt.Errorf("sn security report analysis: parse response: %w", err)
+	}
+
+	views := make([]domain.SecurityReportAnalysisView, 0, len(snResp.Cases))
+	for _, c := range snResp.Cases {
+		view := domain.SecurityReportAnalysisView{
+			ID:          sysidToUUID(c.ID),
+			InternalID:  c.InternalID,
+			Number:      c.Number,
+			CreatedOn:   c.CreatedOn,
+			CreatedBy:   c.CreatedBy,
+			Title:       c.Title,
+			Description: c.Description,
+			State:     snCaseStateLabel(c.State),
+			WorkState: snCaseLabelPtr(c.WorkState),
+			Project:     domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+			Deployment:  domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
+			DeployedProduct: domain.EntityRef{
+				ID:   sysidToUUID(c.DeployedProduct.ID),
+				Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
+			},
+		}
+		if c.Product != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+			view.Product = &ref
+		}
+		if c.AssignedEngineer != nil {
+			view.AssignedEngineer = &domain.AssignedEngineerRef{ID: sysidToUUID(c.AssignedEngineer.ID), Name: c.AssignedEngineer.Name, Email: c.AssignedEngineer.Email}
+		}
+		if c.ParentCase != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.ParentCase.ID), Name: c.ParentCase.Number}
+			view.ParentCase = &ref
+		}
+		if c.RelatedCase != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.RelatedCase.ID), Name: c.RelatedCase.Number}
+			view.RelatedCase = &ref
+		}
+		views = append(views, view)
+	}
+
+	return domain.SearchSecurityReportAnalysisResponse{
+		SecurityReportAnalyses: views,
+		TotalRecords:           snResp.TotalRecords,
+		Offset:                 req.Pagination.Offset,
+		Limit:                  req.Pagination.Limit,
+	}, nil
+}
+
+func snCaseStateLabel(state *snCaseState) string {
+	if state == nil {
+		return ""
+	}
+	return state.Label
+}
+
+func snCaseLabelPtr(label *snCaseLabel) *string {
+	if label == nil {
+		return nil
+	}
+	s := label.Label
+	return &s
+}
+
 func snServiceRequestStateLabel(state *snCaseState) string {
 	if state == nil {
 		return ""
