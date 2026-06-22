@@ -568,6 +568,14 @@ type SearchCasesFilters struct {
 	StateKeys          []CaseState     `json:"stateKeys"`
 	PriorityKeys       []CasePriority  `json:"priorityKeys"`
 	IssueTypeKeys      []CaseIssueType `json:"issueTypeKeys"`
+	ClosedStartDate    *time.Time      `json:"closedStartDate"`
+	ClosedEndDate      *time.Time      `json:"closedEndDate"`
+	StartCreatedDate   *time.Time      `json:"startCreatedDate"`
+	EndCreatedDate     *time.Time      `json:"endCreatedDate"`
+	StartUpdatedDate   *time.Time      `json:"startUpdatedDate"`
+	EndUpdatedDate     *time.Time      `json:"endUpdatedDate"`
+	CreatedBy          []string        `json:"createdBy"`
+	CreatedByMe        bool            `json:"createdByMe"`
 }
 
 // SearchCasesRequest is the input for a case search operation.

@@ -116,14 +116,22 @@ var snSortFieldMap = map[domain.CaseSortField]string{
 }
 
 type snCaseFilters struct {
-	CaseTypes          []string `json:"caseTypes"`
-	SearchQuery        string   `json:"searchQuery,omitempty"`
-	ProjectIDs         []string `json:"projectIds,omitempty"`
-	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
-	DeployedProductIDs []string `json:"deployedProductIds,omitempty"`
-	StateKeys          []int    `json:"stateKeys,omitempty"`
-	SeverityKeys       []int    `json:"severityKeys,omitempty"`
-	IssueTypeKeys      []int    `json:"issueTypeKeys,omitempty"`
+	CaseTypes          []string  `json:"caseTypes"`
+	SearchQuery        string    `json:"searchQuery,omitempty"`
+	ProjectIDs         []string  `json:"projectIds,omitempty"`
+	DeploymentIDs      []string  `json:"deploymentIds,omitempty"`
+	DeployedProductIDs []string  `json:"deployedProductIds,omitempty"`
+	StateKeys          []int     `json:"stateKeys,omitempty"`
+	SeverityKeys       []int     `json:"severityKeys,omitempty"`
+	IssueTypeKeys      []int     `json:"issueTypeKeys,omitempty"`
+	ClosedStartDate    string    `json:"closedStartDate,omitempty"`
+	ClosedEndDate      string    `json:"closedEndDate,omitempty"`
+	StartCreatedDate   string    `json:"startCreatedDate,omitempty"`
+	EndCreatedDate     string    `json:"endCreatedDate,omitempty"`
+	StartUpdatedDate   string    `json:"startUpdatedDate,omitempty"`
+	EndUpdatedDate     string    `json:"endUpdatedDate,omitempty"`
+	CreatedBy          []string  `json:"createdBy,omitempty"`
+	CreatedByMe        bool      `json:"createdByMe,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -184,6 +192,13 @@ func domainIssueTypesToSNIDs(issueTypes []domain.CaseIssueType) []int {
 		}
 	}
 	return ids
+}
+
+func formatSNDate(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(snCreatedOnLayout)
 }
 
 type snCaseService struct {
@@ -895,6 +910,19 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, err
 	}
 
+	if req.Filters.ClosedEndDate != nil && req.Filters.ClosedStartDate != nil &&
+		req.Filters.ClosedEndDate.Before(*req.Filters.ClosedStartDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
+	}
+	if req.Filters.EndCreatedDate != nil && req.Filters.StartCreatedDate != nil &&
+		req.Filters.EndCreatedDate.Before(*req.Filters.StartCreatedDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "endCreatedDate must not be before startCreatedDate"}
+	}
+	if req.Filters.EndUpdatedDate != nil && req.Filters.StartUpdatedDate != nil &&
+		req.Filters.EndUpdatedDate.Before(*req.Filters.StartUpdatedDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
@@ -923,6 +951,14 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			StateKeys:          domainStatesToSNIDs(req.Filters.StateKeys),
 			SeverityKeys:       domainPrioritiesToSNIDs(req.Filters.PriorityKeys),
 			IssueTypeKeys:      domainIssueTypesToSNIDs(req.Filters.IssueTypeKeys),
+			ClosedStartDate:    formatSNDate(req.Filters.ClosedStartDate),
+			ClosedEndDate:      formatSNDate(req.Filters.ClosedEndDate),
+			StartCreatedDate:   formatSNDate(req.Filters.StartCreatedDate),
+			EndCreatedDate:     formatSNDate(req.Filters.EndCreatedDate),
+			StartUpdatedDate:   formatSNDate(req.Filters.StartUpdatedDate),
+			EndUpdatedDate:     formatSNDate(req.Filters.EndUpdatedDate),
+			CreatedBy:          req.Filters.CreatedBy,
+			CreatedByMe:        req.Filters.CreatedByMe,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},

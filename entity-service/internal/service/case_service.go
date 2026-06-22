@@ -64,11 +64,6 @@ var validCasePriority = map[domain.CasePriority]bool{
 	domain.CasePriorityLow:          true,
 }
 
-var validCaseWorkState = map[domain.CaseWorkState]bool{
-	domain.CaseWorkStateOngoing: true,
-	domain.CaseWorkStatePaused:  true,
-}
-
 var validCaseIssueType = map[domain.CaseIssueType]bool{
 	domain.CaseIssueTypeError:                  true,
 	domain.CaseIssueTypePartialOutage:          true,
@@ -76,6 +71,11 @@ var validCaseIssueType = map[domain.CaseIssueType]bool{
 	domain.CaseIssueTypeQuestion:               true,
 	domain.CaseIssueTypeSecurityOrCompliance:   true,
 	domain.CaseIssueTypeTotalOutage:            true,
+}
+
+var validCaseWorkState = map[domain.CaseWorkState]bool{
+	domain.CaseWorkStateOngoing: true,
+	domain.CaseWorkStatePaused:  true,
 }
 
 // validateCreateCaseRequest validates fields common to all CreateCase data sources.
@@ -309,6 +309,31 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 		if !validCaseIssueType[it] {
 			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "issueTypeKeys contains invalid value: " + string(it)}
 		}
+	}
+
+	if req.Filters.CreatedByMe {
+		token := middleware.UserIDTokenFromContext(ctx)
+		if token == "" {
+			return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required for createdByMe filter"}
+		}
+		email, err := emailFromJWT(token)
+		if err != nil {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		}
+		req.Filters.CreatedBy = append(req.Filters.CreatedBy, email)
+	}
+
+	if req.Filters.ClosedEndDate != nil && req.Filters.ClosedStartDate != nil &&
+		req.Filters.ClosedEndDate.Before(*req.Filters.ClosedStartDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
+	}
+	if req.Filters.EndCreatedDate != nil && req.Filters.StartCreatedDate != nil &&
+		req.Filters.EndCreatedDate.Before(*req.Filters.StartCreatedDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "endCreatedDate must not be before startCreatedDate"}
+	}
+	if req.Filters.EndUpdatedDate != nil && req.Filters.StartUpdatedDate != nil &&
+		req.Filters.EndUpdatedDate.Before(*req.Filters.StartUpdatedDate) {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
 	}
 
 	if req.SortBy.Field == "" {

@@ -367,6 +367,43 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
+	if len(req.Filters.CreatedBy) > 0 {
+		where += fmt.Sprintf(" AND u.email = ANY($%d)", argIdx)
+		filterArgs = append(filterArgs, req.Filters.CreatedBy)
+		argIdx++
+	}
+
+	if req.Filters.ClosedStartDate != nil {
+		where += fmt.Sprintf(" AND c.closed_at >= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.ClosedStartDate)
+		argIdx++
+	}
+	if req.Filters.ClosedEndDate != nil {
+		where += fmt.Sprintf(" AND c.closed_at <= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.ClosedEndDate)
+		argIdx++
+	}
+	if req.Filters.StartCreatedDate != nil {
+		where += fmt.Sprintf(" AND c.created_at >= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.StartCreatedDate)
+		argIdx++
+	}
+	if req.Filters.EndCreatedDate != nil {
+		where += fmt.Sprintf(" AND c.created_at <= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.EndCreatedDate)
+		argIdx++
+	}
+	if req.Filters.StartUpdatedDate != nil {
+		where += fmt.Sprintf(" AND c.updated_at >= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.StartUpdatedDate)
+		argIdx++
+	}
+	if req.Filters.EndUpdatedDate != nil {
+		where += fmt.Sprintf(" AND c.updated_at <= $%d", argIdx)
+		filterArgs = append(filterArgs, req.Filters.EndUpdatedDate)
+		argIdx++
+	}
+
 	if req.Filters.SearchQuery != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.Filters.SearchQuery)
 		pattern := "%" + escaped + "%"
@@ -378,14 +415,14 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	sortCol := "c." + string(req.SortBy.Field)
 	sortDir := string(req.SortBy.Order)
 
-	countQuery := "SELECT COUNT(*) FROM cases c " + where
-
 	joins := `JOIN users u ON u.id = c.created_by
 		 JOIN projects p ON p.id = c.project_id
 		 JOIN deployments d ON d.id = c.deployment_id
 		 JOIN deployed_products dp ON dp.id = c.deployed_product_id
 		 JOIN products prod ON prod.id = dp.product_id
 		 LEFT JOIN product_versions pv ON pv.id = dp.product_version_id`
+
+	countQuery := "SELECT COUNT(*) FROM cases c " + joins + " " + where
 
 	dataQuery := fmt.Sprintf(
 		`SELECT c.id, c.number, c.internal_id,
