@@ -38,6 +38,42 @@ type snCasesResponse struct {
 	Limit        int      `json:"limit"`
 }
 
+// snServiceRequestsResponse mirrors the Choreo POST /cases/search response for service_request cases.
+type snServiceRequestsResponse struct {
+	Cases        []snServiceRequestCase `json:"cases"`
+	TotalRecords int                    `json:"totalRecords"`
+	Offset       int                    `json:"offset"`
+	Limit        int                    `json:"limit"`
+}
+
+type snServiceRequestCase struct {
+	ID               string                     `json:"id"`
+	InternalID       string                     `json:"internalId"`
+	Number           string                     `json:"number"`
+	Title            *string                    `json:"title"`
+	Description      *string                    `json:"description"`
+	CreatedOn        string                     `json:"createdOn"`
+	CreatedBy        string                     `json:"createdBy"`
+	State            *snCaseState               `json:"state"`
+	WorkState        *snServiceRequestWorkState `json:"workState"`
+	Project          snCaseEntityRef            `json:"project"`
+	Deployment       snCaseEntityRef            `json:"deployment"`
+	DeployedProduct  snCaseDeployedProduct      `json:"deployedProduct"`
+	Product          *snCaseEntityRef           `json:"product"`
+	Catalog          *snCaseEntityRef           `json:"catalog"`
+	CatalogItem      *snCaseEntityRef           `json:"catalogItem"`
+	AssignedTeam     *snCaseEntityRef           `json:"assignedTeam"`
+	AssignedEngineer *snCaseEntityRef           `json:"assignedEngineer"`
+	ParentCase       *snCaseRef                 `json:"parentCase"`
+	RelatedCase      *snCaseRef                 `json:"relatedCase"`
+	Conversation     *snCaseEntityRef           `json:"conversation"`
+}
+
+type snServiceRequestWorkState struct {
+	ID    *int   `json:"id"`
+	Label string `json:"label"`
+}
+
 type snCase struct {
 	ID               string                `json:"id"`
 	InternalID       string                `json:"internalId"`
@@ -1091,4 +1127,146 @@ func snWorkStateLabelToEnum(ws *snCaseLabel) *domain.CaseWorkState {
 	default:
 		return nil
 	}
+}
+
+// SearchServiceRequests implements CaseService by calling the Choreo POST /cases/search
+// endpoint with caseTypes filtered to ["service_request"].
+func (s *snCaseService) SearchServiceRequests(ctx context.Context, req domain.SearchServiceRequestsRequest) (domain.SearchServiceRequestsResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchServiceRequestsResponse{}, err
+	}
+	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+		return domain.SearchServiceRequestsResponse{}, err
+	}
+
+	if req.Filters.ClosedEndDate != nil && req.Filters.ClosedStartDate != nil &&
+		req.Filters.ClosedEndDate.Before(*req.Filters.ClosedStartDate) {
+		return domain.SearchServiceRequestsResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
+	}
+	if req.Filters.EndCreatedDate != nil && req.Filters.StartCreatedDate != nil &&
+		req.Filters.EndCreatedDate.Before(*req.Filters.StartCreatedDate) {
+		return domain.SearchServiceRequestsResponse{}, &apierror.ValidationError{Msg: "endCreatedDate must not be before startCreatedDate"}
+	}
+	if req.Filters.EndUpdatedDate != nil && req.Filters.StartUpdatedDate != nil &&
+		req.Filters.EndUpdatedDate.Before(*req.Filters.StartUpdatedDate) {
+		return domain.SearchServiceRequestsResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.SearchServiceRequestsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	var snSortBy *snCaseSort
+	if req.SortBy.Field != "" {
+		snField, ok := snSortFieldMap[req.SortBy.Field]
+		if !ok {
+			return domain.SearchServiceRequestsResponse{}, &apierror.ValidationError{Msg: "sortBy.field " + string(req.SortBy.Field) + " is not supported by ServiceNow"}
+		}
+		order := string(req.SortBy.Order)
+		if order == "" {
+			order = "desc"
+		}
+		snSortBy = &snCaseSort{Field: snField, Order: order}
+	}
+
+	payload := snCaseSearchPayload{
+		Filters: snCaseFilters{
+			CaseTypes:        []string{"service_request"},
+			SearchQuery:      req.Filters.SearchQuery,
+			ProjectIDs:       uuidsToSysids(req.Filters.ProjectIDs),
+			DeploymentIDs:    uuidsToSysids(req.Filters.DeploymentIDs),
+			StateKeys:        req.Filters.StateKeys,
+			ClosedStartDate:  formatSNDate(req.Filters.ClosedStartDate),
+			ClosedEndDate:    formatSNDate(req.Filters.ClosedEndDate),
+			StartCreatedDate: formatSNDate(req.Filters.StartCreatedDate),
+			EndCreatedDate:   formatSNDate(req.Filters.EndCreatedDate),
+			StartUpdatedDate: formatSNDate(req.Filters.StartUpdatedDate),
+			EndUpdatedDate:   formatSNDate(req.Filters.EndUpdatedDate),
+			CreatedBy:        req.Filters.CreatedBy,
+			CreatedByMe:      req.Filters.CreatedByMe,
+		},
+		SortBy:     snSortBy,
+		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
+	}
+
+	raw, err := s.client.Post(ctx, "/cases/search", token, payload)
+	if err != nil {
+		return domain.SearchServiceRequestsResponse{}, err
+	}
+
+	var snResp snServiceRequestsResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.SearchServiceRequestsResponse{}, fmt.Errorf("sn service requests: parse response: %w", err)
+	}
+
+	views := make([]domain.ServiceRequestView, 0, len(snResp.Cases))
+	for _, c := range snResp.Cases {
+		view := domain.ServiceRequestView{
+			ID:          sysidToUUID(c.ID),
+			InternalID:  c.InternalID,
+			Number:      c.Number,
+			CreatedOn:   c.CreatedOn,
+			CreatedBy:   c.CreatedBy,
+			Title:       c.Title,
+			Description: c.Description,
+			State:       snServiceRequestStateLabel(c.State),
+			Project:     domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+			Deployment:  domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
+			DeployedProduct: domain.EntityRef{
+				ID:   sysidToUUID(c.DeployedProduct.ID),
+				Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
+			},
+		}
+		if c.Product != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+			view.Product = &ref
+		}
+		if c.Catalog != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.Catalog.ID), Name: c.Catalog.Name}
+			view.Catalog = &ref
+		}
+		if c.CatalogItem != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.CatalogItem.ID), Name: c.CatalogItem.Name}
+			view.CatalogItem = &ref
+		}
+		if c.AssignedTeam != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.AssignedTeam.ID), Name: c.AssignedTeam.Name}
+			view.AssignedTeam = &ref
+		}
+		if c.AssignedEngineer != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.AssignedEngineer.ID), Name: c.AssignedEngineer.Name}
+			view.AssignedEngineer = &ref
+		}
+		if c.ParentCase != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.ParentCase.ID), Name: c.ParentCase.Number}
+			view.ParentCase = &ref
+		}
+		if c.RelatedCase != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.RelatedCase.ID), Name: c.RelatedCase.Number}
+			view.RelatedCase = &ref
+		}
+		if c.Conversation != nil {
+			ref := domain.EntityRef{ID: sysidToUUID(c.Conversation.ID), Name: c.Conversation.Name}
+			view.Conversation = &ref
+		}
+		if c.WorkState != nil {
+			view.WorkState = &domain.ServiceRequestWorkStateRef{ID: c.WorkState.ID, Label: c.WorkState.Label}
+		}
+		views = append(views, view)
+	}
+
+	return domain.SearchServiceRequestsResponse{
+		Cases:        views,
+		TotalRecords: snResp.TotalRecords,
+		Offset:       req.Pagination.Offset,
+		Limit:        req.Pagination.Limit,
+	}, nil
+}
+
+func snServiceRequestStateLabel(state *snCaseState) string {
+	if state == nil {
+		return ""
+	}
+	return state.Label
 }
