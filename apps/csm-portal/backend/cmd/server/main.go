@@ -120,9 +120,11 @@ func main() {
 	slog.Info("CSM Portal Backend started", "addr", addr)
 
 	srv := &http.Server{
-		Handler: middleware.CorrelationID(
-			middleware.Auth(authCfg)(
-				middleware.Logger(mux),
+		Handler: middleware.SecurityHeaders(
+			middleware.CorrelationID(
+				middleware.Auth(authCfg)(
+					middleware.Logger(mux),
+				),
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
