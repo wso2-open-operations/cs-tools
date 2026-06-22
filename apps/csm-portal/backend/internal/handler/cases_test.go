@@ -1163,9 +1163,6 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 		if w.Header().Get("Content-Disposition") != "attachment" {
 			t.Errorf("Content-Disposition = %q, want %q", w.Header().Get("Content-Disposition"), "attachment")
 		}
-		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
-			t.Errorf("X-Content-Type-Options = %q, want %q", w.Header().Get("X-Content-Type-Options"), "nosniff")
-		}
 	})
 
 	t.Run("coerces unsafe Content-Type to octet-stream", func(t *testing.T) {

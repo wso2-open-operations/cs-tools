@@ -510,7 +510,6 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Disposition", "attachment")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(content)
 }
 
