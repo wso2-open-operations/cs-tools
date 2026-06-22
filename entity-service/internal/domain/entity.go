@@ -714,7 +714,7 @@ type SearchEngagementsFilters struct {
 	ProjectIDs          []string            `json:"projectIds"`
 	CaseTypes           []string            `json:"caseTypes"`
 	SearchQuery         string              `json:"searchQuery"`
-	EngagementTypeKeys  []EngagementTypeKey `json:"engagementTypeKeys"`
+	TypeKeys            []EngagementTypeKey `json:"typeKeys"`
 	ClosedStartDate     *time.Time          `json:"closedStartDate"`
 	ClosedEndDate       *time.Time          `json:"closedEndDate"`
 	StartCreatedDate    *time.Time          `json:"startCreatedDate"`

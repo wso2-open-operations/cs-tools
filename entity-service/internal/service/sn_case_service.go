@@ -1503,7 +1503,7 @@ func (s *snCaseService) SearchEngagements(ctx context.Context, req domain.Search
 		return domain.SearchEngagementsResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
 	}
 
-	for _, k := range req.Filters.EngagementTypeKeys {
+	for _, k := range req.Filters.TypeKeys {
 		if _, ok := snEngagementTypeIDMap[k]; !ok {
 			return domain.SearchEngagementsResponse{}, &apierror.ValidationError{Msg: "engagementTypeKeys contains unknown value: " + string(k)}
 		}
@@ -1533,7 +1533,7 @@ func (s *snCaseService) SearchEngagements(ctx context.Context, req domain.Search
 			SearchQuery:        req.Filters.SearchQuery,
 			ProjectIDs:         uuidsToSysids(req.Filters.ProjectIDs),
 			DeploymentIDs:      uuidsToSysids(req.Filters.DeploymentIDs),
-			EngagementTypeKeys: domainEngagementTypesToSNIDs(req.Filters.EngagementTypeKeys),
+			EngagementTypeKeys: domainEngagementTypesToSNIDs(req.Filters.TypeKeys),
 			ClosedStartDate:    formatSNDate(req.Filters.ClosedStartDate),
 			ClosedEndDate:      formatSNDate(req.Filters.ClosedEndDate),
 			StartCreatedDate:   formatSNDate(req.Filters.StartCreatedDate),

@@ -2135,7 +2135,7 @@ components:
                 type: string
             searchQuery:
               type: string
-            engagementTypeKeys:
+            typeKeys:
               type: array
               items:
                 type: string
