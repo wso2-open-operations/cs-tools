@@ -606,8 +606,15 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 type snUpdateCasePayload struct {
 	StateKey      *int     `json:"stateKey,omitempty"`
 	SeverityKey   *int     `json:"severityKey,omitempty"`
+	WorkStateKey  *int     `json:"workStateKey,omitempty"`
 	WatchList     []string `json:"watchList,omitempty"`
 	AssigneeEmail *string  `json:"assigneeEmail,omitempty"`
+}
+
+// snWorkStateIDMap maps domain CaseWorkState enums to SN numeric work state IDs.
+var snWorkStateIDMap = map[domain.CaseWorkState]int{
+	domain.CaseWorkStateOngoing: 1,
+	domain.CaseWorkStatePaused:  2,
 }
 
 type snUpdateCaseResponse struct {
@@ -643,6 +650,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.Priority != nil {
 		fieldCount++
 	}
+	if req.WorkState != nil {
+		fieldCount++
+	}
 	if len(req.WatchList) > 0 {
 		fieldCount++
 	}
@@ -650,10 +660,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		fieldCount++
 	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, priority, watchList, or assigneeEmail must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, priority, workState, watchList, or assigneeEmail must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, priority, watchList, or assigneeEmail may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, priority, workState, watchList, or assigneeEmail may be provided per request"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -681,6 +691,16 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priority " + string(*req.Priority) + " is not supported by ServiceNow"}
 		}
 		payload.SeverityKey = &id
+	}
+	if req.WorkState != nil {
+		if !validCaseWorkState[*req.WorkState] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
+		}
+		id, ok := snWorkStateIDMap[*req.WorkState]
+		if !ok {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState " + string(*req.WorkState) + " is not supported by ServiceNow"}
+		}
+		payload.WorkStateKey = &id
 	}
 	if len(req.WatchList) > 0 {
 		payload.WatchList = req.WatchList
