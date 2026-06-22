@@ -204,3 +204,18 @@ func (h *CaseHandler) SearchSecurityReportAnalysis(w http.ResponseWriter, r *htt
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// SearchEngagements handles POST /engagements/search.
+func (h *CaseHandler) SearchEngagements(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchEngagementsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchEngagements(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

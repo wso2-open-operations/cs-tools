@@ -697,6 +697,71 @@ type SearchSecurityReportAnalysisFilters struct {
 	CreatedByMe      bool       `json:"createdByMe"`
 }
 
+// EngagementTypeKey classifies the type of an engagement case.
+type EngagementTypeKey string
+
+const (
+	EngagementTypeMigration             EngagementTypeKey = "migration"
+	EngagementTypeConsultancy           EngagementTypeKey = "consultancy"
+	EngagementTypeNewFeatureImprovement EngagementTypeKey = "new_feature_improvement"
+	EngagementTypeFollowUp              EngagementTypeKey = "follow_up"
+	EngagementTypeOnboarding            EngagementTypeKey = "onboarding"
+)
+
+// SearchEngagementsFilters holds optional filter criteria for an engagement search.
+// This endpoint is only supported for the ServiceNow data source.
+type SearchEngagementsFilters struct {
+	ProjectIDs          []string            `json:"projectIds"`
+	CaseTypes           []string            `json:"caseTypes"`
+	SearchQuery         string              `json:"searchQuery"`
+	TypeKeys            []EngagementTypeKey `json:"typeKeys"`
+	ClosedStartDate     *time.Time          `json:"closedStartDate"`
+	ClosedEndDate       *time.Time          `json:"closedEndDate"`
+	StartCreatedDate    *time.Time          `json:"startCreatedDate"`
+	EndCreatedDate      *time.Time          `json:"endCreatedDate"`
+	StartUpdatedDate    *time.Time          `json:"startUpdatedDate"`
+	EndUpdatedDate      *time.Time          `json:"endUpdatedDate"`
+	DeploymentIDs       []string            `json:"deploymentIds"`
+	CreatedBy           []string            `json:"createdBy"`
+	CreatedByMe         bool                `json:"createdByMe"`
+}
+
+// SearchEngagementsRequest is the input for POST /engagements/search.
+type SearchEngagementsRequest struct {
+	Filters    SearchEngagementsFilters `json:"filters"`
+	SortBy     CaseSort                 `json:"sortBy"`
+	Pagination Pagination               `json:"pagination"`
+}
+
+// EngagementView is the enriched representation of an engagement returned in search results.
+type EngagementView struct {
+	ID               string               `json:"id"`
+	InternalID       string               `json:"internalId"`
+	Number           string               `json:"number"`
+	CreatedOn        string               `json:"createdOn"`
+	CreatedBy        string               `json:"createdBy"`
+	Title            *string              `json:"title"`
+	Description      *string              `json:"description"`
+	State            string               `json:"state"`
+	WorkState        *string              `json:"workState"`
+	Type             *string              `json:"type"`
+	Product          *EntityRef           `json:"product"`
+	Project          EntityRef            `json:"project"`
+	Deployment       EntityRef            `json:"deployment"`
+	DeployedProduct  EntityRef            `json:"deployedProduct"`
+	AssignedEngineer *AssignedEngineerRef `json:"assignedEngineer"`
+	ParentCase       *EntityRef           `json:"parentCase"`
+	RelatedCase      *EntityRef           `json:"relatedCase"`
+}
+
+// SearchEngagementsResponse is the paginated result of an engagement search.
+type SearchEngagementsResponse struct {
+	Engagements  []EngagementView `json:"engagements"`
+	TotalRecords int              `json:"totalRecords"`
+	Offset       int              `json:"offset"`
+	Limit        int              `json:"limit"`
+}
+
 // SearchSecurityReportAnalysisRequest is the input for POST /security-report-analysis/search.
 type SearchSecurityReportAnalysisRequest struct {
 	Filters    SearchSecurityReportAnalysisFilters `json:"filters"`

@@ -380,3 +380,7 @@ func (s *caseService) SearchServiceRequests(_ context.Context, _ domain.SearchSe
 func (s *caseService) SearchSecurityReportAnalysis(_ context.Context, _ domain.SearchSecurityReportAnalysisRequest) (domain.SearchSecurityReportAnalysisResponse, error) {
 	return domain.SearchSecurityReportAnalysisResponse{}, &apierror.ServiceUnavailableError{Msg: "security report analysis is only supported for the ServiceNow data source"}
 }
+
+func (s *caseService) SearchEngagements(_ context.Context, _ domain.SearchEngagementsRequest) (domain.SearchEngagementsResponse, error) {
+	return domain.SearchEngagementsResponse{}, &apierror.ServiceUnavailableError{Msg: "engagements are only supported for the ServiceNow data source"}
+}

@@ -127,4 +127,7 @@ type CaseService interface {
 	// SearchSecurityReportAnalysis returns a paginated list of security report analyses.
 	// Only supported for the ServiceNow data source; returns ServiceUnavailableError otherwise.
 	SearchSecurityReportAnalysis(ctx context.Context, req domain.SearchSecurityReportAnalysisRequest) (domain.SearchSecurityReportAnalysisResponse, error)
+	// SearchEngagements returns a paginated list of engagements.
+	// Only supported for the ServiceNow data source; returns ServiceUnavailableError otherwise.
+	SearchEngagements(ctx context.Context, req domain.SearchEngagementsRequest) (domain.SearchEngagementsResponse, error)
 }
