@@ -121,4 +121,7 @@ type CaseService interface {
 	// for the attachment identified by attachmentID on the given case.
 	// A NotFoundError is returned if absent.
 	GetCaseAttachmentContent(ctx context.Context, caseID, attachmentID string) (content []byte, contentType string, err error)
+	// SearchServiceRequests returns a paginated list of service requests.
+	// Only supported for the ServiceNow data source; returns ServiceUnavailableError otherwise.
+	SearchServiceRequests(ctx context.Context, req domain.SearchServiceRequestsRequest) (domain.SearchServiceRequestsResponse, error)
 }
