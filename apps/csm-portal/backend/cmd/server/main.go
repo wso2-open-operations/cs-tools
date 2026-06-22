@@ -93,6 +93,7 @@ func main() {
 	mux.HandleFunc("POST /cases/{id}/attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{case_id}/attachments/{attachment_id}/content", caseHandler.GetCaseAttachmentContent)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
+	mux.HandleFunc("POST /service-requests/search", caseHandler.SearchServiceRequests)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	mux.HandleFunc("GET /users/me", usersHandler.GetMe)

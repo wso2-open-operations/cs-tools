@@ -35,6 +35,12 @@ func (c *Client) SearchCases(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/cases/search", body)
 }
 
+// SearchServiceRequests calls POST /service-requests/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchServiceRequests(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/service-requests/search", body)
+}
+
 // GetCase calls GET /cases/{id} on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) GetCase(ctx context.Context, caseID string) ([]byte, error) {
