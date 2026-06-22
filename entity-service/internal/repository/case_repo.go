@@ -80,7 +80,7 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 	var c domain.Case
 	err := r.db.QueryRow(ctx, query,
 		req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
-		req.Subject, req.Description, string(req.Priority), string(req.IssueType),
+		req.Subject, req.Description, string(req.PriorityKey), string(req.IssueTypeKey),
 	).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
@@ -182,7 +182,7 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 
 	var c domain.CaseComment
 	err := r.db.QueryRow(ctx, query,
-		req.CaseID, string(req.Type), req.Content, req.CreatedBy,
+		req.CaseID, string(req.TypeKey), req.Content, req.CreatedBy,
 	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedOn)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
@@ -202,8 +202,8 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
 	args := []any{req.CaseID}
 	typeFilter := ""
-	if req.Filters != nil && req.Filters.Type != nil {
-		args = append(args, string(*req.Filters.Type))
+	if req.Filters != nil && req.Filters.TypeKey != nil {
+		args = append(args, string(*req.Filters.TypeKey))
 		typeFilter = fmt.Sprintf(" AND cc.type = $%d::comment_type_enum", len(args))
 	}
 
@@ -269,16 +269,16 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // UpdateCase implements CaseRepository.
 func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
 	state := ""
-	if req.State != nil {
-		state = string(*req.State)
+	if req.StateKey != nil {
+		state = string(*req.StateKey)
 	}
 	priority := ""
-	if req.Priority != nil {
-		priority = string(*req.Priority)
+	if req.PriorityKey != nil {
+		priority = string(*req.PriorityKey)
 	}
 	workState := ""
-	if req.WorkState != nil {
-		workState = string(*req.WorkState)
+	if req.WorkStateKey != nil {
+		workState = string(*req.WorkStateKey)
 	}
 	const query = `
 		UPDATE cases
