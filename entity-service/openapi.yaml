@@ -1084,6 +1084,7 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: Filter by project UUIDs.
         deploymentTypeKeys:
           type: array
@@ -1157,6 +1158,7 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: Filter by deployment UUIDs.
 
     DeployedProductVersionRef:
@@ -1367,16 +1369,19 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: Filter by project UUIDs.
         deploymentIds:
           type: array
           items:
             type: string
+            format: uuid
           description: Filter by deployment UUIDs.
         deployedProductIds:
           type: array
           items:
             type: string
+            format: uuid
           description: Filter by deployed product UUIDs.
         stateKeys:
           type: array
@@ -1831,7 +1836,7 @@ components:
               type: array
               items:
                 type: string
-                description: 32-char hex sysid
+                format: uuid
             searchQuery:
               type: string
             stateKeys:
@@ -1860,7 +1865,7 @@ components:
               type: array
               items:
                 type: string
-                description: 32-char hex sysid
+                format: uuid
             createdBy:
               type: array
               items:
