@@ -865,6 +865,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /security-report-analyses/search:
+    post:
+      summary: Search security report analyses.
+      description: Only supported for the ServiceNow data source; returns 503 otherwise.
+      operationId: postSecurityReportAnalysesSearch
+      requestBody:
+        description: Security report analysis search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityReportAnalysisSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityReportAnalysisSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable (Postgres data source does not support security report analyses).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /deployments/search:
     post:
       summary: Search deployments.
@@ -2406,3 +2462,149 @@ components:
           type: string
         credits:
           type: string
+
+    SecurityReportAnalysisSearchFilters:
+      type: object
+      properties:
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by project UUIDs (optional)
+        searchQuery:
+          type: string
+          description: Searches across title and number (case-insensitive)
+        stateKeys:
+          type: array
+          items:
+            type: integer
+          description: Filter by state keys (optional)
+        closedStartDate:
+          type: string
+          format: date-time
+          description: Filter analyses closed on or after this UTC datetime (optional)
+        closedEndDate:
+          type: string
+          format: date-time
+          description: Filter analyses closed on or before this UTC datetime (optional)
+        startCreatedDate:
+          type: string
+          format: date-time
+          description: Filter analyses created on or after this UTC datetime (optional)
+        endCreatedDate:
+          type: string
+          format: date-time
+          description: Filter analyses created on or before this UTC datetime (optional)
+        startUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter analyses updated on or after this UTC datetime (optional)
+        endUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter analyses updated on or before this UTC datetime (optional)
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by deployment UUIDs (optional)
+        createdBy:
+          type: array
+          items:
+            type: string
+            format: email
+          description: Filter to analyses created by these email addresses (optional)
+        createdByMe:
+          type: boolean
+          description: When true, the caller's email (from JWT) is appended to createdBy (optional)
+
+    SecurityReportAnalysisSearchPayload:
+      type: object
+      nullable: true
+      properties:
+        filters:
+          $ref: '#/components/schemas/SecurityReportAnalysisSearchFilters'
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+              default: createdOn
+            order:
+              type: string
+              enum: [asc, desc]
+              default: desc
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    SecurityReportAnalysisView:
+      type: object
+      properties:
+        id:
+          type: string
+        internalId:
+          type: string
+          nullable: true
+        number:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        state:
+          type: string
+        workState:
+          type: string
+          nullable: true
+        product:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          allOf:
+            - $ref: '#/components/schemas/AssignedEngineerRef'
+          nullable: true
+        parentCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        relatedCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    SecurityReportAnalysisSearchResponse:
+      type: object
+      properties:
+        securityReportAnalyses:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecurityReportAnalysisView'
+        totalRecords:
+          type: integer
+          description: Total number of matching security report analyses
+        offset:
+          type: integer
+        limit:
+          type: integer
