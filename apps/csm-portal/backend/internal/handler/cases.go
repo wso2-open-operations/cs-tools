@@ -548,11 +548,12 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate state transition before forwarding to the entity service.
+	// Validate state transition and workState guard before forwarding to the entity service.
 	var patch struct {
-		State *string `json:"state"`
+		State     *string `json:"state"`
+		WorkState *string `json:"workState"`
 	}
-	if err := json.Unmarshal(body, &patch); err == nil && patch.State != nil {
+	if err := json.Unmarshal(body, &patch); err == nil && (patch.State != nil || patch.WorkState != nil) {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "entity GetCase failed during state validation", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -567,8 +568,12 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
-		if !isValidStateTransition(currentCase.State, *patch.State) {
+		if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
 			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
+			return
+		}
+		if patch.WorkState != nil && currentCase.State != caseStateWorkInProgress {
+			writeError(w, http.StatusBadRequest, ErrMsgWorkStateNotAllowed)
 			return
 		}
 	}

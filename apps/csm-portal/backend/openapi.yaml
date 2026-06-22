@@ -154,7 +154,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/UpdateCaseResponse'
         "400":
-          description: Bad request (e.g. malformed UUID, invalid state value, or invalid state transition).
+          description: Bad request (e.g. malformed UUID, invalid state value, invalid state transition, or workState update attempted when case is not work_in_progress).
           content:
             application/json:
               schema:

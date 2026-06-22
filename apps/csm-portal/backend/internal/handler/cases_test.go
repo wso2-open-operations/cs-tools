@@ -730,6 +730,48 @@ func TestPatchCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects workState update when case is not work_in_progress", func(t *testing.T) {
+		t.Parallel()
+		for _, state := range []string{"open", "waiting_on_wso2", "awaiting_info", "solution_proposed", "closed"} {
+			state := state
+			t.Run("current_state="+state, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+						return []byte(`{"id":"` + testCaseID + `","state":"` + state + `"}`), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workState":"ongoing"}`)))
+				r.SetPathValue("id", testCaseID)
+				w := httptest.NewRecorder()
+				h.PatchCase(w, r)
+				assertStatus(t, w, http.StatusBadRequest)
+				assertErrorMessage(t, w, ErrMsgWorkStateNotAllowed)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+
+	t.Run("allows workState update when case is work_in_progress", func(t *testing.T) {
+		t.Parallel()
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress","workState":"paused"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workState":"paused"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
 	t.Run("allows priority-only update without state validation", func(t *testing.T) {
 		client := &mockEntityCaseClient{
 			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
