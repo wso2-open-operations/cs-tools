@@ -674,7 +674,7 @@ type ServiceRequestView struct {
 
 // SearchServiceRequestsResponse is the paginated result of a service-request search.
 type SearchServiceRequestsResponse struct {
-	Cases        []ServiceRequestView `json:"cases"`
+	ServiceRequests []ServiceRequestView `json:"serviceRequests"`
 	TotalRecords int                  `json:"totalRecords"`
 	Offset       int                  `json:"offset"`
 	Limit        int                  `json:"limit"`

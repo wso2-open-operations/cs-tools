@@ -1261,7 +1261,7 @@ func (s *snCaseService) SearchServiceRequests(ctx context.Context, req domain.Se
 	}
 
 	return domain.SearchServiceRequestsResponse{
-		Cases:        views,
+		ServiceRequests: views,
 		TotalRecords: snResp.TotalRecords,
 		Offset:       req.Pagination.Offset,
 		Limit:        req.Pagination.Limit,

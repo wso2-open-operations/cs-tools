@@ -1911,7 +1911,7 @@ components:
     SearchServiceRequestsResponse:
       type: object
       properties:
-        cases:
+        serviceRequests:
           type: array
           items:
             $ref: '#/components/schemas/ServiceRequestView'
