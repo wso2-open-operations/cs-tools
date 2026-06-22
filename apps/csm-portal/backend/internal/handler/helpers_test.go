@@ -90,8 +90,10 @@ type mockEntityCaseClient struct {
 	createCaseCommentFn         func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCaseCommentsFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCasesFn               func(ctx context.Context, body []byte) ([]byte, error)
-	searchServiceRequestsFn     func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseFn                   func(ctx context.Context, caseID string) ([]byte, error)
+	searchServiceRequestsFn          func(ctx context.Context, body []byte) ([]byte, error)
+	searchSecurityReportAnalysesFn   func(ctx context.Context, body []byte) ([]byte, error)
+	searchEngagementsFn              func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseFn                        func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn      func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	searchCaseAttachmentsFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	getCaseAttachmentContentFn  func(ctx context.Context, caseID, attachmentID string) ([]byte, string, error)
@@ -135,6 +137,20 @@ func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]
 func (m *mockEntityCaseClient) SearchServiceRequests(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchServiceRequestsFn != nil {
 		return m.searchServiceRequestsFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchSecurityReportAnalyses(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchSecurityReportAnalysesFn != nil {
+		return m.searchSecurityReportAnalysesFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchEngagements(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchEngagementsFn != nil {
+		return m.searchEngagementsFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }

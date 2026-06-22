@@ -921,6 +921,118 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /security-report-analyses/search:
+    post:
+      summary: Search security report analyses.
+      description: Only supported for the ServiceNow data source; returns 503 otherwise.
+      operationId: postSecurityReportAnalysesSearch
+      requestBody:
+        description: Security report analysis search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityReportAnalysisSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityReportAnalysisSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable (Postgres data source does not support security report analyses).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagements/search:
+    post:
+      summary: Search engagements.
+      description: Only supported for the ServiceNow data source; returns 503 otherwise.
+      operationId: postEngagementsSearch
+      requestBody:
+        description: Engagement search payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngagementSearchPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementSearchResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: Upstream service unavailable (Postgres data source does not support engagements).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /deployments/search:
     post:
       summary: Search deployments.
@@ -2655,6 +2767,305 @@ components:
         totalRecords:
           type: integer
           description: Total number of matching service requests
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SecurityReportAnalysisSearchFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Searches across title and number (case-insensitive)
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by project UUIDs (optional)
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by deployment UUIDs (optional)
+        stateKeys:
+          type: array
+          items:
+            type: integer
+          description: Filter by state keys (optional)
+        closedStartDate:
+          type: string
+          format: date-time
+          description: Filter records closed on or after this UTC datetime (optional)
+        closedEndDate:
+          type: string
+          format: date-time
+          description: Filter records closed on or before this UTC datetime (optional)
+        startCreatedDate:
+          type: string
+          format: date-time
+          description: Filter records created on or after this UTC datetime (optional)
+        endCreatedDate:
+          type: string
+          format: date-time
+          description: Filter records created on or before this UTC datetime (optional)
+        startUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter records updated on or after this UTC datetime (optional)
+        endUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter records updated on or before this UTC datetime (optional)
+        createdBy:
+          type: array
+          items:
+            type: string
+            format: email
+          description: Filter to records created by these email addresses (optional)
+        createdByMe:
+          type: boolean
+          description: When true, the caller's email (from JWT) is appended to createdBy (optional)
+
+    SecurityReportAnalysisSearchPayload:
+      type: object
+      nullable: true
+      properties:
+        filters:
+          $ref: '#/components/schemas/SecurityReportAnalysisSearchFilters'
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+              default: createdOn
+            order:
+              type: string
+              enum: [asc, desc]
+              default: desc
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    SecurityReportAnalysisView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        internalId:
+          type: string
+          nullable: true
+        number:
+          type: string
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        state:
+          type: string
+        workState:
+          type: string
+          nullable: true
+        product:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          allOf:
+            - $ref: '#/components/schemas/AssignedEngineerRef'
+          nullable: true
+        parentCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        relatedCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    SecurityReportAnalysisSearchResponse:
+      type: object
+      properties:
+        securityReportAnalyses:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecurityReportAnalysisView'
+        totalRecords:
+          type: integer
+          description: Total number of matching security report analyses
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    EngagementSearchFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Searches across title and number (case-insensitive)
+        projectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by project UUIDs (optional)
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by deployment UUIDs (optional)
+        typeKeys:
+          type: array
+          items:
+            type: string
+            enum: [migration, consultancy, new_feature_improvement, follow_up, onboarding]
+          description: Filter by engagement type keys (optional)
+        closedStartDate:
+          type: string
+          format: date-time
+          description: Filter engagements closed on or after this UTC datetime (optional)
+        closedEndDate:
+          type: string
+          format: date-time
+          description: Filter engagements closed on or before this UTC datetime (optional)
+        startCreatedDate:
+          type: string
+          format: date-time
+          description: Filter engagements created on or after this UTC datetime (optional)
+        endCreatedDate:
+          type: string
+          format: date-time
+          description: Filter engagements created on or before this UTC datetime (optional)
+        startUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter engagements updated on or after this UTC datetime (optional)
+        endUpdatedDate:
+          type: string
+          format: date-time
+          description: Filter engagements updated on or before this UTC datetime (optional)
+        createdBy:
+          type: array
+          items:
+            type: string
+            format: email
+          description: Filter to engagements created by these email addresses (optional)
+        createdByMe:
+          type: boolean
+          description: When true, the caller's email (from JWT) is appended to createdBy (optional)
+
+    EngagementSearchPayload:
+      type: object
+      nullable: true
+      properties:
+        filters:
+          $ref: '#/components/schemas/EngagementSearchFilters'
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+              default: createdOn
+            order:
+              type: string
+              enum: [asc, desc]
+              default: desc
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    EngagementView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        internalId:
+          type: string
+          nullable: true
+        number:
+          type: string
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        state:
+          type: string
+        workState:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+          description: Engagement type label returned by ServiceNow (e.g. "Migration", "Consultancy")
+        product:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+        assignedEngineer:
+          allOf:
+            - $ref: '#/components/schemas/AssignedEngineerRef'
+          nullable: true
+        parentCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        relatedCase:
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+          nullable: true
+
+    EngagementSearchResponse:
+      type: object
+      properties:
+        engagements:
+          type: array
+          items:
+            $ref: '#/components/schemas/EngagementView'
+        totalRecords:
+          type: integer
+          description: Total number of matching engagements
         offset:
           type: integer
         limit:
