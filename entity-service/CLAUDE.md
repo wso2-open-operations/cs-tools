@@ -106,6 +106,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 - Optional fields in request structs use pointer types (`*CasePriority`) so absent fields are distinguishable from zero values
 - Response structs return the full entity row
 - **Date/time field naming:** all timestamp fields in response structs must use the `On` suffix: `createdOn`, `updatedOn`, `closedOn`. Never use `At` (`createdAt`, `updatedAt`, `closedAt`). Domain-specific date fields that carry a business meaning (e.g. `startDate`, `endDate`, `activationDate`) keep the `Date` suffix. This applies to both Go struct field names and JSON tags.
+- **Request enum field naming:** enum fields in **request** structs (both JSON tags and openapi spec) must use the `Key` / `Keys` suffix — singular for a single value, plural for an array. Examples: `priorityKey`, `issueTypeKey`, `stateKey`, `workStateKey`, `typeKey`; `stateKeys`, `priorityKeys`, `issueTypeKeys`, `deploymentTypeKeys`. UUID ID fields follow a separate convention: `projectId` / `projectIds` (no `Key` suffix). Response structs are unaffected — they use the plain field name (e.g. `state`, `priority`).
 
 ## Error types (`internal/apierror`)
 
