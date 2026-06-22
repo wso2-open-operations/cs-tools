@@ -634,7 +634,7 @@ type SearchServiceRequestsFilters struct {
 	CreatedByMe      bool       `json:"createdByMe"`
 }
 
-// SearchServiceRequestsRequest is the input for POST /service-request/search.
+// SearchServiceRequestsRequest is the input for POST /service-requests/search.
 type SearchServiceRequestsRequest struct {
 	Filters    SearchServiceRequestsFilters `json:"filters"`
 	SortBy     CaseSort                     `json:"sortBy"`
