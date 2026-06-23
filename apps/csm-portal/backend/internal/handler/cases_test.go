@@ -56,7 +56,7 @@ func upstreamErrors(fallback string) []upstreamErrorCase {
 // ----- CreateCase -----
 
 func TestCreateCase(t *testing.T) {
-	const validPayload = `{"projectId":"proj-1","deploymentId":"dep-1","deployedProductId":"dp-1","subject":"Login failure","description":"Users cannot log in","priority":"high","issueType":"error"}`
+	const validPayload = `{"projectId":"proj-1","deploymentId":"dep-1","deployedProductId":"dp-1","subject":"Login failure","description":"Users cannot log in","priorityKey":"high","issueTypeKey":"error"}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
@@ -167,7 +167,7 @@ func TestCreateCase(t *testing.T) {
 // ----- CreateCaseComment -----
 
 func TestCreateCaseComment(t *testing.T) {
-	const validPayload = `{"type":"comment","content":"Looking into this now."}`
+	const validPayload = `{"typeKey":"comment","content":"Looking into this now."}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
@@ -280,7 +280,7 @@ func TestCreateCaseComment(t *testing.T) {
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"type":"work_note","content":"internal note"}`)))
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"typeKey":"work_note","content":"internal note"}`)))
 				r.SetPathValue("id", "case-1")
 				w := httptest.NewRecorder()
 				h.CreateCaseComment(w, r)
@@ -406,7 +406,7 @@ func TestSearchCaseComments(t *testing.T) {
 			searchCaseCommentsFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
 				capturedCaseID = caseID
 				capturedBody = body
-				return []byte(`{"comments":[{"id":"c-1","caseId":"case-42","commentType":"comment","body":"First comment","createdBy":"user-1","createdAt":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
+				return []byte(`{"comments":[{"id":"c-1","caseId":"case-42","type":"comment","content":"First comment","createdBy":"user-1","createdOn":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -576,7 +576,7 @@ func TestSearchCases(t *testing.T) {
 
 func TestPatchCase(t *testing.T) {
 	const testCaseID = "11111111-1111-1111-1111-111111111111"
-	const validPayload = `{"state":"work_in_progress"}`
+	const validPayload = `{"stateKey":"work_in_progress"}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
@@ -721,7 +721,7 @@ func TestPatchCase(t *testing.T) {
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"state":"work_in_progress"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"stateKey":"work_in_progress"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
@@ -742,7 +742,7 @@ func TestPatchCase(t *testing.T) {
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workState":"ongoing"}`)))
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workStateKey":"ongoing"}`)))
 				r.SetPathValue("id", testCaseID)
 				w := httptest.NewRecorder()
 				h.PatchCase(w, r)
@@ -764,7 +764,7 @@ func TestPatchCase(t *testing.T) {
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workState":"paused"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"workStateKey":"paused"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
@@ -779,7 +779,7 @@ func TestPatchCase(t *testing.T) {
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"priority":"high"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"priorityKey":"high"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
