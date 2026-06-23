@@ -17,16 +17,11 @@
 import { useAsgardeo } from "@asgardeo/react";
 import { ASGARDEO_UNAUTHENTICATED_CODE } from "@constants/apiConstants";
 
-// Max time to wait for a silent token refresh before giving up. signInSilently()
-// drives a hidden auth iframe; if third-party cookies are blocked it can hang
-// indefinitely, so we cap it and fall back to a full sign-in redirect.
-const SILENT_SIGN_IN_TIMEOUT_MS = 10000;
-
 // Shared across every caller's hook instance. Each useAuthApiClient() call
-// creates its own authFetch closure, so the in-flight refresh promise must live
-// at module scope to single-flight concurrent refreshes (one signInSilently()
-// instead of N, and no duplicate sign-in redirects).
-let refreshInFlight: Promise<boolean> | null = null;
+// creates its own authFetch closure, so this lives at module scope to ensure
+// only ONE full sign-in redirect is triggered even when many concurrent calls
+// fail authentication at once.
+let signInInFlight = false;
 
 // Only the Asgardeo "unauthenticated" code means the token was expired/missing
 // when the call ran. Everything else (network failures, real backend 5xx) must
@@ -39,7 +34,7 @@ const isTokenExpiredError = (error: unknown): boolean =>
 
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken, signInSilently, signIn } = useAsgardeo();
+  const { getIdToken, signIn } = useAsgardeo();
 
   /**
    * Builds request headers with auth and payload defaults.
@@ -94,29 +89,19 @@ export function useAuthApiClient() {
     });
   };
 
-  // Re-mint tokens off the still-live IdP session via the hidden auth iframe.
-  // Single-flighted through the module-scoped promise so concurrent callers
-  // share one refresh. Resolves false on failure or timeout so the caller can
-  // fall back to a full redirect rather than hang.
-  const ensureFreshToken = (): Promise<boolean> => {
-    if (!refreshInFlight) {
-      refreshInFlight = new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(
-          () => resolve(false),
-          SILENT_SIGN_IN_TIMEOUT_MS,
-        );
-        signInSilently()
-          .then((result) => Boolean(result))
-          .catch(() => false)
-          .then((refreshed) => {
-            clearTimeout(timeout);
-            resolve(refreshed);
-          });
-      }).finally(() => {
-        refreshInFlight = null;
+  // Redirect to a full sign-in, single-flighted so concurrent auth failures
+  // don't fire multiple redirects. Returns a never-resolving promise so callers
+  // don't fall through to an error page while the browser navigates away.
+  const redirectToSignIn = (): Promise<Response> => {
+    if (!signInInFlight) {
+      signInInFlight = true;
+      // Best-effort: navigation takes over from here. Reset on the rare chance
+      // the redirect itself rejects so a later attempt can retry.
+      void Promise.resolve(signIn()).finally(() => {
+        signInInFlight = false;
       });
     }
-    return refreshInFlight;
+    return new Promise<Response>(() => {});
   };
 
   const authFetch = async (
@@ -132,18 +117,25 @@ export function useAuthApiClient() {
         throw error;
       }
 
-      // The session was dead. Try to silently re-mint tokens off the live IdP
-      // session and replay the original request once.
-      const refreshed = await ensureFreshToken();
-      if (refreshed) {
-        return attemptFetch(input, options);
-      }
+      // A concurrent caller, or the provider's periodic background refresh
+      // (periodicTokenRefresh on AsgardeoProvider), may have re-minted the
+      // token in the meantime, so retry once to pick it up. getIdToken() itself
+      // only reads the stored token; if nothing refreshed it the retry fails
+      // again and we fall through to the sign-in redirect below.
+      try {
+        return await attemptFetch(input, options);
+      } catch (retryError) {
+        // Retry failed for a non-auth reason (e.g. a transient network blip on
+        // the second attempt): surface it to existing error handling instead of
+        // bouncing the user to sign-in.
+        if (!isTokenExpiredError(retryError)) {
+          throw retryError;
+        }
 
-      // The IdP session is gone too — redirect for a full sign-in. Return a
-      // never-resolving promise so callers don't fall through to an error page
-      // while the browser navigates away.
-      await signIn();
-      return new Promise<Response>(() => {});
+        // Still unauthenticated after the retry — the session is gone. Redirect
+        // for a full sign-in.
+        return redirectToSignIn();
+      }
     }
   };
 

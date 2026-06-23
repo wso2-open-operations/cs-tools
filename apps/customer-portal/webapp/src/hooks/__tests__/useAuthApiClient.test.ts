@@ -20,13 +20,11 @@ import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { ASGARDEO_UNAUTHENTICATED_CODE } from "@constants/apiConstants";
 
 const getIdTokenMock = vi.fn();
-const signInSilentlyMock = vi.fn();
 const signInMock = vi.fn();
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: getIdTokenMock,
-    signInSilently: signInSilentlyMock,
     signIn: signInMock,
   }),
 }));
@@ -40,7 +38,6 @@ describe("useAuthApiClient", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getIdTokenMock.mockResolvedValue("token-abc");
-    signInSilentlyMock.mockResolvedValue(true);
     signInMock.mockResolvedValue(undefined);
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true }) as typeof fetch;
   });
@@ -82,50 +79,65 @@ describe("useAuthApiClient", () => {
     await expect(result.current("https://api.test")).rejects.toThrow(
       "network down",
     );
-    expect(signInSilentlyMock).not.toHaveBeenCalled();
     expect(signInMock).not.toHaveBeenCalled();
   });
 
-  it("silently refreshes and retries once on an expired token", async () => {
+  it("retries once and recovers when the token is refreshed between attempts", async () => {
     getIdTokenMock
       .mockRejectedValueOnce(unauthenticatedError())
       .mockResolvedValue("token-fresh");
-    signInSilentlyMock.mockResolvedValueOnce(true);
 
     const { result } = renderHook(() => useAuthApiClient());
     await result.current("https://api.test/resource");
 
-    expect(signInSilentlyMock).toHaveBeenCalledTimes(1);
-    expect(signInMock).not.toHaveBeenCalled();
+    expect(getIdTokenMock).toHaveBeenCalledTimes(2);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(signInMock).not.toHaveBeenCalled();
   });
 
-  it("redirects to full sign-in when silent refresh fails", async () => {
-    getIdTokenMock.mockRejectedValue(unauthenticatedError());
-    signInSilentlyMock.mockResolvedValueOnce(false);
+  it("rethrows a non-auth error that surfaces on the retry", async () => {
+    getIdTokenMock
+      .mockRejectedValueOnce(unauthenticatedError())
+      .mockRejectedValueOnce(new Error("network down"));
 
     const { result } = renderHook(() => useAuthApiClient());
-    // The recovery path returns a never-resolving promise while navigating away,
+    await expect(result.current("https://api.test/resource")).rejects.toThrow(
+      "network down",
+    );
+    expect(signInMock).not.toHaveBeenCalled();
+  });
+
+  it("redirects to full sign-in when still unauthenticated after the retry", async () => {
+    getIdTokenMock.mockRejectedValue(unauthenticatedError());
+
+    const { result } = renderHook(() => useAuthApiClient());
+    // The redirect path returns a never-resolving promise while navigating away,
     // so assert on the side effects rather than awaiting the call.
     void result.current("https://api.test/resource");
     await vi.waitFor(() => expect(signInMock).toHaveBeenCalledTimes(1));
 
-    expect(signInSilentlyMock).toHaveBeenCalledTimes(1);
+    expect(getIdTokenMock).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("single-flights concurrent refreshes into one silent sign-in", async () => {
-    getIdTokenMock
-      .mockRejectedValueOnce(unauthenticatedError())
-      .mockRejectedValueOnce(unauthenticatedError())
-      .mockResolvedValue("token-fresh");
-    signInSilentlyMock.mockResolvedValueOnce(true);
+  // Keep this last: it intentionally leaves signIn() pending to hold the
+  // module-scoped single-flight guard during the assertion.
+  it("single-flights the sign-in redirect across concurrent auth failures", async () => {
+    getIdTokenMock.mockRejectedValue(unauthenticatedError());
+    let releaseSignIn: () => void = () => {};
+    signInMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseSignIn = resolve;
+      }),
+    );
 
     const { result } = renderHook(() => useAuthApiClient());
-    await Promise.all([
-      result.current("https://api.test/a"),
-      result.current("https://api.test/b"),
-    ]);
+    void result.current("https://api.test/a");
+    void result.current("https://api.test/b");
 
-    expect(signInSilentlyMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(signInMock).toHaveBeenCalledTimes(1));
+    expect(signInMock).toHaveBeenCalledTimes(1);
+
+    releaseSignIn();
   });
 });
