@@ -64,6 +64,14 @@ describe("useAuthApiClient", () => {
     expect(headers.get("Content-Type")).toBe("application/json");
   });
 
+  it("throws when ID token is missing", async () => {
+    getIdTokenMock.mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() => useAuthApiClient());
+    await expect(result.current("https://api.test")).rejects.toThrow(
+      "Unable to retrieve ID token",
+    );
+  });
+
   it("rethrows non-auth errors without attempting recovery", async () => {
     getIdTokenMock.mockRejectedValueOnce(new Error("network down"));
     const { result } = renderHook(() => useAuthApiClient());
