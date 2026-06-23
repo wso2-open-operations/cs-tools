@@ -42,6 +42,9 @@ export const SETTINGS_NULL_PLACEHOLDER = NULL_PLACEHOLDER;
 /** Role that can see AI Assistant tab and User Management Add/Delete. */
 export const SETTINGS_CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
 
+/** ServiceNow partner role — triggers list view in ProjectHub when >4 projects. */
+export const SETTINGS_PARTNER_ROLE = "sn_customerservice.partner";
+
 export const SETTINGS_PAGE_TABS = [
   {
     id: SettingsPageTabId.USERS,
