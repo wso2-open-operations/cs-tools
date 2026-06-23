@@ -17,10 +17,12 @@
 import type { ReactNode } from "react";
 import type { UsageAggregatedMetricDefinition } from "@features/project-details/types/usage";
 import type {
+  DataSource,
   UsageEnvironmentProduct,
   UsageInstanceChartBlock,
   UsageProductInstanceRow,
   UsageTimeRange,
+  MetricTypeSummary,
 } from "@features/project-details/types/usage";
 
 /** ISO date strings (YYYY-MM-DD) for usage API filters. */
@@ -82,6 +84,17 @@ export type UsageOverviewPanelProps = {
   expandedEnvironmentIds: Set<string>;
   onToggleEnvironment: (id: string) => void;
   timeRangeSelector?: ReactNode;
+  dataSource?: DataSource | null;
+};
+
+export type DataSourceStatCardProps = {
+  summary: MetricTypeSummary;
+  isLoading?: boolean;
+};
+
+export type DataSourceToggleProps = {
+  value: DataSource | null;
+  onChange: (value: DataSource | null) => void;
 };
 
 export type UsageEnvironmentProductsPanelProps = {

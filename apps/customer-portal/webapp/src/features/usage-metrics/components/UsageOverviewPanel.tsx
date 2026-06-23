@@ -37,6 +37,14 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useMemo } from "react";
+import usePostProjectInstancesUsagesStats from "@features/project-details/api/usePostProjectInstancesUsagesStats";
+import DataSourceStatCard from "@features/usage-metrics/components/DataSourceStatCard";
+import type { MetricTypeSummary } from "@features/project-details/types/usage";
+import {
+  METRIC_TYPE_LABELS,
+  USAGE_METRICS_DATA_SOURCE_STATS_SECTION,
+  USAGE_METRICS_NO_DATA_SOURCE_STATS,
+} from "@features/usage-metrics/constants/usageMetricsConstants";
 import { usePostProjectDeploymentsSearchAll } from "@api/usePostProjectDeploymentsSearch";
 import usePostProjectInstancesSearch from "@features/project-details/api/usePostProjectInstancesSearch";
 import usePostProjectInstancesUsagesSearch from "@features/project-details/api/usePostProjectInstancesUsagesSearch";
@@ -399,12 +407,48 @@ function EnvironmentBreakdownAccordion({
  * @param onToggleEnvironment - Toggle handler for an environment row id.
  * @returns {JSX.Element} Overview tab content.
  */
+function deriveMetricSummaries(
+  stats: Record<string, Record<string, number>>,
+): MetricTypeSummary[] {
+  const metricKeys = new Set<string>();
+  for (const dayStats of Object.values(stats)) {
+    for (const key of Object.keys(dayStats)) {
+      metricKeys.add(key);
+    }
+  }
+
+  const sortedDates = Object.keys(stats).sort();
+  const summaries: MetricTypeSummary[] = [];
+
+  for (const key of metricKeys) {
+    const values = sortedDates.map((d) => stats[d][key] ?? 0);
+    const nonZero = values.filter((v) => v > 0);
+    if (nonZero.length === 0) continue;
+    const curr = values[values.length - 1] ?? 0;
+    const min = Math.min(...nonZero);
+    const max = Math.max(...nonZero);
+    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+    summaries.push({
+      id: key,
+      label: METRIC_TYPE_LABELS[key] ?? key,
+      curr,
+      min,
+      max,
+      avg,
+      trend: sortedDates.map((d) => ({ date: d, value: stats[d][key] ?? 0 })),
+    });
+  }
+
+  return summaries;
+}
+
 export default function UsageOverviewPanel({
   projectId,
   dateRange,
   expandedEnvironmentIds,
   onToggleEnvironment,
   timeRangeSelector,
+  dataSource,
 }: UsageOverviewPanelProps): JSX.Element {
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("sm"));
@@ -465,6 +509,31 @@ export default function UsageOverviewPanel({
     statsError;
 
   const isStatCardsLoading = statsLoading;
+
+  // ── Data source stats ──────────────────────────────────────────────────────
+  const dataSourceStatsPayload = useMemo(
+    () => ({
+      filters: {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        dataSource: dataSource ?? undefined,
+      },
+    }),
+    [dateRange, dataSource],
+  );
+
+  const {
+    data: dataSourceStatsData,
+    isLoading: dataSourceStatsLoading,
+  } = usePostProjectInstancesUsagesStats(
+    dataSource != null ? projectId : undefined,
+    dataSourceStatsPayload,
+  );
+
+  const dataSourceSummaries = useMemo(() => {
+    if (!dataSourceStatsData?.stats) return [];
+    return deriveMetricSummaries(dataSourceStatsData.stats);
+  }, [dataSourceStatsData]);
 
   // ── Overview summary stats ─────────────────────────────────────────────────
   const overviewStats = useMemo(() => {
@@ -593,6 +662,38 @@ export default function UsageOverviewPanel({
       </Grid>
 
       {timeRangeSelector && <Box sx={{ mt: 1 }}>{timeRangeSelector}</Box>}
+
+      {dataSource != null && (
+        <Box>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+            {USAGE_METRICS_DATA_SOURCE_STATS_SECTION}
+          </Typography>
+          {dataSourceStatsLoading ? (
+            <Grid container spacing={2}>
+              {[0, 1, 2].map((i) => (
+                <Grid key={i} size={{ xs: 12, sm: 6, md: 4 }}>
+                  <DataSourceStatCard
+                    summary={{ id: "", label: "", curr: 0, min: 0, max: 0, avg: 0, trend: [] }}
+                    isLoading
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          ) : dataSourceSummaries.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              {USAGE_METRICS_NO_DATA_SOURCE_STATS}
+            </Typography>
+          ) : (
+            <Grid container spacing={2}>
+              {dataSourceSummaries.map((summary) => (
+                <Grid key={summary.id} size={{ xs: 12, sm: 6, md: 4 }}>
+                  <DataSourceStatCard summary={summary} />
+                </Grid>
+              ))}
+            </Grid>
+          )}
+        </Box>
+      )}
 
       <Box>
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>

@@ -1769,6 +1769,8 @@ public type InstanceUsageStatsPayload record {|
         entity:Date startDate;
         # End date filter, required
         entity:Date endDate;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 
@@ -1780,6 +1782,8 @@ public type InstanceMetricStatsPayload record {|
         entity:Date startDate;
         # End date filter, required
         entity:Date endDate;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 

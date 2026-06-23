@@ -2338,6 +2338,8 @@ public type InstanceUsageStatsPayload record {|
         IdString[] deploymentIds?;
         # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
         IdString[] deployedProductIds?;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 
@@ -2355,6 +2357,8 @@ public type InstanceMetricStatsPayload record {|
         IdString[] deploymentIds?;
         # List of deployed product IDs (mutually exclusive with projectIds and deploymentIds)
         IdString[] deployedProductIds?;
+        # Data source filter: 1 = API Call, 2 = File Upload
+        int dataSource?;
     |} filters;
 |};
 

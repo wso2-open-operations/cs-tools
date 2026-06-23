@@ -14,11 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button } from "@wso2/oxygen-ui";
+import { Box, Button, ToggleButton, ToggleButtonGroup } from "@wso2/oxygen-ui";
 import { Upload } from "@wso2/oxygen-ui-icons-react";
 import type { ReactNode } from "react";
 import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
+import { DataSource } from "@features/project-details/types/usage";
+import {
+  USAGE_METRICS_DATA_SOURCE_API_CALL,
+  USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD,
+  USAGE_METRICS_DATA_SOURCE_LABEL,
+} from "@features/usage-metrics/constants/usageMetricsConstants";
 import { useParams } from "react-router";
 import TabBar from "@components/tab-bar/TabBar";
 import UsageOverviewPanel from "@features/usage-metrics/components/UsageOverviewPanel";
@@ -59,6 +65,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
+  const [dataSource, setDataSource] = useState<DataSource | null>(null);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
@@ -131,6 +138,31 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     setTimeRange(UsageTimeRange.ONE_MONTH);
   };
 
+  const dataSourceToggle: ReactNode = (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+      <Box
+        component="span"
+        sx={{ fontSize: "0.75rem", color: "text.secondary", whiteSpace: "nowrap" }}
+      >
+        {USAGE_METRICS_DATA_SOURCE_LABEL}
+      </Box>
+      <ToggleButtonGroup
+        size="small"
+        exclusive
+        value={dataSource}
+        onChange={(_e, val: DataSource | null) => setDataSource(val)}
+        aria-label="data source filter"
+      >
+        <ToggleButton value={DataSource.API_CALL} aria-label={USAGE_METRICS_DATA_SOURCE_API_CALL}>
+          {USAGE_METRICS_DATA_SOURCE_API_CALL}
+        </ToggleButton>
+        <ToggleButton value={DataSource.FILE_UPLOAD} aria-label={USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}>
+          {USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD}
+        </ToggleButton>
+      </ToggleButtonGroup>
+    </Box>
+  );
+
   const uploadButton: ReactNode = (
     <Button
       variant="outlined"
@@ -157,7 +189,12 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
       onCancelCustom={handleCancelCustom}
       appliedCustomStart={appliedCustomStart}
       appliedCustomEnd={appliedCustomEnd}
-      rightAction={uploadButton}
+      rightAction={
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexShrink: 0 }}>
+          {dataSourceToggle}
+          {uploadButton}
+        </Box>
+      }
     />
   );
 
@@ -242,6 +279,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
           expandedEnvironmentIds={expandedEnvironmentIds}
           onToggleEnvironment={toggleEnvironment}
           timeRangeSelector={timeRangeSelector}
+          dataSource={dataSource}
         />
       )}
 

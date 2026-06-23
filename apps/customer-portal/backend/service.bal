@@ -5684,7 +5684,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         projectIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {
@@ -5747,7 +5748,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         deploymentIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {
@@ -5810,7 +5812,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     filters: {
                         deployedProductIds: [id],
                         startDate: payload.filters.startDate,
-                        endDate: payload.filters.endDate
+                        endDate: payload.filters.endDate,
+                        dataSource: payload.filters.dataSource
                     }
                 });
         if response is error {

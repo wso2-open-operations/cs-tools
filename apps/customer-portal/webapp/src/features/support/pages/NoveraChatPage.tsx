@@ -693,6 +693,7 @@ export default function NoveraChatPage(): JSX.Element {
         type: "token_increase_request",
         accountId,
         reason,
+        period: "daily",
       });
     },
     [accountId, connect, projectId, sendUserMessage],

@@ -154,3 +154,27 @@ export const USAGE_AGGREGATED_ORG_COUNT_CAPTION =
 export const USAGE_METRICS_TREND_LINE_AVERAGE = "Average";
 
 export const USAGE_METRICS_TREND_LINE_CURRENT_FALLBACK = "Current";
+
+export const USAGE_METRICS_DATA_SOURCE_LABEL = "Data Source:";
+
+export const USAGE_METRICS_DATA_SOURCE_API_CALL = "API Call";
+
+export const USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD = "File Upload";
+
+export const USAGE_METRICS_DATA_SOURCE_STATS_SECTION = "Usage by Data Source";
+
+export const USAGE_METRICS_STAT_CURR = "Current";
+
+export const USAGE_METRICS_STAT_MIN = "Min";
+
+export const USAGE_METRICS_STAT_MAX = "Max";
+
+export const USAGE_METRICS_STAT_AVG = "Avg";
+
+export const USAGE_METRICS_NO_DATA_SOURCE_STATS = "No data available for the selected data source and date range.";
+
+export const METRIC_TYPE_LABELS: Record<string, string> = {
+  TRANSACTION_COUNT: "Transactions",
+  TOTAL_USERS: "Total Users",
+  TOTAL_ROOT_ORGS: "Organizations",
+};

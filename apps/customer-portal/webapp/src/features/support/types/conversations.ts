@@ -249,6 +249,7 @@ export type ChatWebSocketPayload =
       type: "token_increase_request";
       accountId: string;
       reason: string;
+      period: "daily" | "monthly";
     };
 
 // Model type for chat WebSocket hook options.

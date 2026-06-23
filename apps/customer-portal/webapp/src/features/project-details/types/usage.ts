@@ -202,6 +202,31 @@ export type UsageAggregatedMetricDefinition = {
   secondaryName?: string;
 };
 
+// Data source values for filtering usage stats.
+export enum DataSource {
+  API_CALL = 1,
+  FILE_UPLOAD = 2,
+}
+
+// Response type for POST .../instances/stats/usages/search.
+export type InstanceUsageStatsResponse = {
+  stats: Record<string, Record<string, number>>;
+  totalRecords: number;
+  startDate: string;
+  endDate: string;
+};
+
+// Summary statistics derived from a date-keyed stats map for a single metric type.
+export type MetricTypeSummary = {
+  id: string;
+  label: string;
+  curr: number;
+  min: number;
+  max: number;
+  avg: number;
+  trend: { date: string; value: number }[];
+};
+
 // Item type for a mini line chart shown when an instance row is expanded.
 export type UsageInstanceChartBlock = {
   title: string;
