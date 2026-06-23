@@ -3,6 +3,14 @@ CREATE TYPE case_work_state_enum AS ENUM (
   'paused'
 );
 
+CREATE TYPE case_type_enum AS ENUM (
+  'support',
+  'service_request',
+  'security_report_analysis',
+  'announcement',
+  'engagement'
+);
+
 CREATE TYPE case_severity_enum AS ENUM (
   'catastrophic',
   'critical',
@@ -30,6 +38,13 @@ CREATE TYPE case_issue_type_enum AS ENUM (
   'total_outage'
 );
 
+CREATE TYPE engagement_type_enum AS ENUM (
+  'consultancy',
+  'new_feature_improvement',
+  'follow_up',
+  'onboarding'
+);
+
 CREATE SEQUENCE cases_number_seq START 1 INCREMENT 1;
 CREATE SEQUENCE cases_internal_id_seq START 1 INCREMENT 1;
 
@@ -41,11 +56,13 @@ CREATE TABLE cases (
   project_id          UUID NOT NULL REFERENCES projects(id),
   deployment_id       UUID NOT NULL REFERENCES deployments(id),
   deployed_product_id UUID NOT NULL REFERENCES deployed_products(id),
+  type                case_type_enum NOT NULL DEFAULT 'support',
   subject             VARCHAR NOT NULL,
   description         TEXT NOT NULL,
-  severity            case_severity_enum NOT NULL,
+  severity            case_severity_enum NULL,
   issue_type          case_issue_type_enum NOT NULL,
   state               case_state_enum NOT NULL,
+  engagement_type     engagement_type_enum NULL,
   created_at          TIMESTAMP DEFAULT NOW(),
   updated_at          TIMESTAMP DEFAULT NOW(),
   closed_at           TIMESTAMP,
@@ -65,7 +82,19 @@ CREATE TABLE cases (
       (state = 'work_in_progress' AND work_state IS NOT NULL)
       OR
       (state != 'work_in_progress' AND work_state IS NULL)
-    )
+    ),
+
+  CONSTRAINT chk_severity_required_for_support
+    CHECK (type != 'support' OR severity IS NOT NULL),
+
+  CONSTRAINT chk_severity_null_for_non_support
+    CHECK (type = 'support' OR severity IS NULL),
+
+  CONSTRAINT chk_engagement_type_required_for_engagement
+    CHECK (type != 'engagement' OR engagement_type IS NOT NULL),
+
+  CONSTRAINT chk_engagement_type_null_for_non_engagement
+    CHECK (type = 'engagement' OR engagement_type IS NULL)
 );
 
 CREATE OR REPLACE FUNCTION check_case_deployment_belongs_to_project()
@@ -147,9 +176,11 @@ CREATE INDEX idx_cases_created_by          ON cases(created_by);
 CREATE INDEX idx_cases_project_id          ON cases(project_id);
 CREATE INDEX idx_cases_deployment_id       ON cases(deployment_id);
 CREATE INDEX idx_cases_deployed_product_id ON cases(deployed_product_id);
-CREATE INDEX idx_cases_severity            ON cases(severity);
+CREATE INDEX idx_cases_type                ON cases(type);
+CREATE INDEX idx_cases_severity            ON cases(severity) WHERE severity IS NOT NULL;
 CREATE INDEX idx_cases_state               ON cases(state);
 CREATE INDEX idx_cases_issue_type          ON cases(issue_type);
+CREATE INDEX idx_cases_engagement_type     ON cases(engagement_type) WHERE engagement_type IS NOT NULL;
 
 -- Sort indexes
 CREATE INDEX idx_cases_created_at          ON cases(created_at);
@@ -158,8 +189,9 @@ CREATE INDEX idx_cases_closed_at           ON cases(closed_at);
 
 -- Composite indexes
 CREATE INDEX idx_cases_project_state         ON cases(project_id, state);
-CREATE INDEX idx_cases_severity_state        ON cases(severity, state);
-CREATE INDEX idx_cases_severity_issue_type   ON cases(severity, issue_type);
+CREATE INDEX idx_cases_type_state            ON cases(type, state);
+CREATE INDEX idx_cases_severity_state        ON cases(severity, state) WHERE severity IS NOT NULL;
+CREATE INDEX idx_cases_severity_issue_type   ON cases(severity, issue_type) WHERE severity IS NOT NULL;
 
 -- work_state indexes
 CREATE UNIQUE INDEX uidx_cases_one_ongoing_per_engineer
@@ -175,6 +207,6 @@ CREATE INDEX idx_cases_engineer_work_state
   WHERE work_state IS NOT NULL;
 
 -- Trigram indexes for ILIKE search on subject, number, internal_id
-CREATE INDEX idx_cases_subject_trgm  ON cases USING GIN (subject  gin_trgm_ops);
-CREATE INDEX idx_cases_number_trgm   ON cases USING GIN (number   gin_trgm_ops);
-CREATE INDEX idx_cases_internal_id_trgm  ON cases USING GIN (internal_id  gin_trgm_ops);
+CREATE INDEX idx_cases_subject_trgm     ON cases USING GIN (subject     gin_trgm_ops);
+CREATE INDEX idx_cases_number_trgm      ON cases USING GIN (number      gin_trgm_ops);
+CREATE INDEX idx_cases_internal_id_trgm ON cases USING GIN (internal_id gin_trgm_ops);
