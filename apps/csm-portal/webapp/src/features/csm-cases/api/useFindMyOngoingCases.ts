@@ -91,7 +91,7 @@ export function useFindMyOngoingCases(): (
         )
         .map((c) => ({
           id: c.id,
-          label: c.internalId || c.number || c.subject || c.id,
+          label: c.internalId || c.number || c.title || c.id,
         }));
     },
     [api, myEmail],

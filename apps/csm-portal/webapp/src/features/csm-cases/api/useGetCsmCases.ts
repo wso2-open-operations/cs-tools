@@ -218,12 +218,15 @@ export function useGetCsmCases(
           id: c.id,
           caseNumber: c.number,
           wso2CaseId: c.internalId,
-          subject: c.subject ?? "(no subject)",
+          // Search returns the title under `title` (the GET view uses `subject`).
+          subject: c.title ?? "(no subject)",
           customer: accountName.get(accountId) ?? "—",
           accountId,
           projectId,
           projectName: c.project?.name ?? "—",
-          product: c.deployedProduct?.displayName ?? "—",
+          // Search embeds deployedProduct as { id, name } (name includes the
+          // version); the GET view uses a displayName-shaped ref instead.
+          product: c.deployedProduct?.name ?? "—",
           severity: severityFromPriority(c.severity),
           state: uiStateFromBe(c.state),
           workState: c.workState ?? null,

@@ -296,23 +296,32 @@ export interface BeCaseSearchView {
   number?: string;
   /** Project-scoped WSO2 case reference (customer portal calls this the same). */
   internalId?: string;
-  subject?: string;
+  /**
+   * Case title. NOTE: the search response uses `title` (not `subject` like the
+   * `GET /cases/{id}` CaseView) — a backend naming inconsistency. The BFF
+   * openapi documents this as `subject`, but the entity returns `title`.
+   */
+  title?: string;
   description?: string;
   severity?: BeCaseSeverity;
   issueType?: BeCaseIssueType;
-  type?: BeCaseType;
+  /** Case type (entity `caseType` on the search view). */
+  caseType?: BeCaseType;
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
   /** The CS engineer the case is assigned to; null when unassigned. */
   assignedEngineer?: BeAssignedEngineerRef | null;
   createdOn?: string;
+  /** Often absent on the search view (unlike the GET view); tolerate it missing. */
   updatedOn?: string;
-  closedAt?: string | null;
-  createdBy?: BeUserRef;
+  /** Created-by is a bare email string here (not a UserRef like the GET view). */
+  createdBy?: string;
   project?: BeEntityRef;
   deployment?: BeEntityRef;
-  deployedProduct?: BeDeployedProductRef;
+  /** Embedded as `{ id, name }` (name already includes the version), not the
+   * `displayName`-shaped ref the GET view uses. */
+  deployedProduct?: BeEntityRef;
 }
 
 export interface BeCaseSearchResponse extends BeSearchResponseBase {
