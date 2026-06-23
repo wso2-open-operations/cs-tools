@@ -37,9 +37,18 @@ func NewCaseService(repo repository.CaseRepository, userRepo repository.UserRepo
 }
 
 var validCaseSortField = map[domain.CaseSortField]bool{
-	domain.CaseSortFieldCreatedAt: true,
-	domain.CaseSortFieldUpdatedAt: true,
-	domain.CaseSortFieldClosedAt:  true,
+	domain.CaseSortFieldCreatedOn: true,
+	domain.CaseSortFieldUpdatedOn: true,
+	domain.CaseSortFieldSeverity:  true,
+	domain.CaseSortFieldState:     true,
+}
+
+var validEngagementType = map[domain.EngagementType]bool{
+	domain.EngagementTypeMigration:             true,
+	domain.EngagementTypeConsultancy:           true,
+	domain.EngagementTypeNewFeatureImprovement: true,
+	domain.EngagementTypeFollowUp:              true,
+	domain.EngagementTypeOnboarding:            true,
 }
 
 var validCaseSortOrder = map[domain.CaseSortOrder]bool{
@@ -52,6 +61,7 @@ var validCaseState = map[domain.CaseState]bool{
 	domain.CaseStateWorkInProgress:   true,
 	domain.CaseStateWaitingOnWSO2:    true,
 	domain.CaseStateAwaitingInfo:     true,
+	domain.CaseStateReopened:         true,
 	domain.CaseStateSolutionProposed: true,
 	domain.CaseStateClosed:           true,
 }
@@ -282,6 +292,9 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
+	if req.Pagination.Limit > 50 {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "limit cannot exceed 50"}
+	}
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
@@ -291,23 +304,25 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if err := validateUUIDs("deploymentIds", req.Filters.DeploymentIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
-	if err := validateUUIDs("deployedProductIds", req.Filters.DeployedProductIDs); err != nil {
-		return domain.SearchCasesResponse{}, err
-	}
 
 	for _, s := range req.Filters.StateKeys {
 		if !validCaseState[s] {
 			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "stateKeys contains invalid value: " + string(s)}
 		}
 	}
-	for _, p := range req.Filters.SeverityKeys {
-		if !validCaseSeverity[p] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "severityKeys contains invalid value: " + string(p)}
+	for _, s := range req.Filters.SeverityKeys {
+		if !validCaseSeverity[s] {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "severityKeys contains invalid value: " + string(s)}
 		}
 	}
 	for _, it := range req.Filters.IssueTypeKeys {
 		if !validCaseIssueType[it] {
 			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "issueTypeKeys contains invalid value: " + string(it)}
+		}
+	}
+	for _, et := range req.Filters.EngagementTypeKeys {
+		if !validEngagementType[et] {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "engagementTypeKeys contains invalid value: " + string(et)}
 		}
 	}
 
@@ -337,9 +352,9 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}
 
 	if req.SortBy.Field == "" {
-		req.SortBy.Field = domain.CaseSortFieldCreatedAt
+		req.SortBy.Field = domain.CaseSortFieldCreatedOn
 	} else if !validCaseSortField[req.SortBy.Field] {
-		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "sortBy.field must be one of: created_at, updated_at, closed_at"}
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "sortBy.field must be one of: createdOn, updatedOn, severity, state"}
 	}
 	if req.SortBy.Order == "" {
 		req.SortBy.Order = domain.CaseSortOrderDesc
@@ -353,11 +368,10 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}
 
 	return domain.SearchCasesResponse{
-		Cases:   cases,
-		Total:   total,
-		Limit:   req.Pagination.Limit,
-		Offset:  req.Pagination.Offset,
-		HasMore: req.Pagination.Offset+len(cases) < total,
+		Cases:        cases,
+		TotalRecords: total,
+		Limit:        req.Pagination.Limit,
+		Offset:       req.Pagination.Offset,
 	}, nil
 }
 
