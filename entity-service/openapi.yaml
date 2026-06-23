@@ -318,8 +318,8 @@ paths:
     patch:
       summary: Update a support case.
       description: |
-        Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        Updates exactly one field of the case. Provide exactly one of: `stateKey`, `severityKey`,
+        `workStateKey`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
         only when the ServiceNow data source is active.
       operationId: patchCase
       parameters:
@@ -1164,7 +1164,7 @@ components:
       properties:
         stateKey:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
           description: The new state to transition the case to.
         severityKey:
           type: string
@@ -1209,7 +1209,7 @@ components:
           description: Email or display name of the user who performed the update.
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
@@ -1494,7 +1494,7 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
         createdOn:
           type: string
           format: date-time
@@ -1528,7 +1528,7 @@ components:
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
         state:
           type: string
-          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
+          enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, reopened, solution_proposed, closed]
         workState:
           type: string
           enum: [ongoing, paused]
