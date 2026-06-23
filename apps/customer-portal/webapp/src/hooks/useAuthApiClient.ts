@@ -17,9 +17,29 @@
 import { useAsgardeo } from "@asgardeo/react";
 import { ASGARDEO_UNAUTHENTICATED_CODE } from "@constants/apiConstants";
 
+// Max time to wait for a silent token refresh before giving up. signInSilently()
+// drives a hidden auth iframe; if third-party cookies are blocked it can hang
+// indefinitely, so we cap it and fall back to a full sign-in redirect.
+const SILENT_SIGN_IN_TIMEOUT_MS = 10000;
+
+// Shared across every caller's hook instance. Each useAuthApiClient() call
+// creates its own authFetch closure, so the in-flight refresh promise must live
+// at module scope to single-flight concurrent refreshes (one signInSilently()
+// instead of N, and no duplicate sign-in redirects).
+let refreshInFlight: Promise<boolean> | null = null;
+
+// Only the Asgardeo "unauthenticated" code means the token was expired/missing
+// when the call ran. Everything else (network failures, real backend 5xx) must
+// propagate untouched so existing error handling and error pages still work.
+const isTokenExpiredError = (error: unknown): boolean =>
+  error != null &&
+  typeof error === "object" &&
+  "code" in error &&
+  (error as { code: string }).code === ASGARDEO_UNAUTHENTICATED_CODE;
+
 // A custom hook that automatically fetches a fresh ID Token from Asgardeo.
 export function useAuthApiClient() {
-  const { getIdToken } = useAsgardeo();
+  const { getIdToken, signInSilently, signIn } = useAsgardeo();
 
   /**
    * Builds request headers with auth and payload defaults.
@@ -74,6 +94,31 @@ export function useAuthApiClient() {
     });
   };
 
+  // Re-mint tokens off the still-live IdP session via the hidden auth iframe.
+  // Single-flighted through the module-scoped promise so concurrent callers
+  // share one refresh. Resolves false on failure or timeout so the caller can
+  // fall back to a full redirect rather than hang.
+  const ensureFreshToken = (): Promise<boolean> => {
+    if (!refreshInFlight) {
+      refreshInFlight = new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(
+          () => resolve(false),
+          SILENT_SIGN_IN_TIMEOUT_MS,
+        );
+        signInSilently()
+          .then((result) => Boolean(result))
+          .catch(() => false)
+          .then((refreshed) => {
+            clearTimeout(timeout);
+            resolve(refreshed);
+          });
+      }).finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  };
+
   const authFetch = async (
     input: RequestInfo | URL,
     options?: RequestInit,
@@ -81,18 +126,24 @@ export function useAuthApiClient() {
     try {
       return await attemptFetch(input, options);
     } catch (error) {
-      // SPA-AUTH_CLIENT-VM-IV02 means the token was expired when this call ran.
-      // A concurrent call may have already refreshed the token — retry once to pick it up.
-      const isTokenExpiredError =
-        error != null &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error as { code: string }).code === ASGARDEO_UNAUTHENTICATED_CODE;
+      // Only an expired/missing token is recoverable here; anything else
+      // (network, real backend 5xx) must surface to existing error handling.
+      if (!isTokenExpiredError(error)) {
+        throw error;
+      }
 
-      if (isTokenExpiredError) {
+      // The session was dead. Try to silently re-mint tokens off the live IdP
+      // session and replay the original request once.
+      const refreshed = await ensureFreshToken();
+      if (refreshed) {
         return attemptFetch(input, options);
       }
-      throw error;
+
+      // The IdP session is gone too — redirect for a full sign-in. Return a
+      // never-resolving promise so callers don't fall through to an error page
+      // while the browser navigates away.
+      await signIn();
+      return new Promise<Response>(() => {});
     }
   };
 
