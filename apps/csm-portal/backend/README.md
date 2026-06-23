@@ -159,25 +159,13 @@ backend/
 
 - `POST /cases` — Create a case
 - `GET /cases/{id}` — Get case by ID
-- `PATCH /cases/{id}` — Update a case (state, priority, workState, watchList, or assigneeEmail)
+- `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail)
 - `POST /cases/search` — Search cases
 - `POST /cases/{id}/comments` — Create a comment on a case
 - `POST /cases/{id}/comments/search` — Search comments on a case
 - `POST /cases/{id}/attachments` — Upload an attachment to a case
 - `POST /cases/{id}/attachments/search` — Search attachments on a case
 - `GET /cases/{case_id}/attachments/{attachment_id}/content` — Download an attachment
-
-### Service Requests
-
-- `POST /service-requests/search` — Search service requests (ServiceNow only)
-
-### Security Report Analyses
-
-- `POST /security-report-analyses/search` — Search security report analyses (ServiceNow only)
-
-### Engagements
-
-- `POST /engagements/search` — Search engagements (ServiceNow only)
 
 ### Users
 

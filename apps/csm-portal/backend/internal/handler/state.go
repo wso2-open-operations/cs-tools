@@ -25,6 +25,7 @@ const (
 	caseStateAwaitingInfo     = "awaiting_info"
 	caseStateSolutionProposed = "solution_proposed"
 	caseStateClosed           = "closed"
+	caseStateReopened         = "reopened"
 )
 
 // nextStates returns the valid next states reachable from the given case state.
@@ -42,7 +43,11 @@ func nextStates(state string) []string {
 		return []string{caseStateWaitingOnWSO2}
 	case caseStateSolutionProposed:
 		return []string{caseStateClosed, caseStateWaitingOnWSO2}
-	default: // caseStateClosed and any unknown values are terminal
+	case caseStateClosed:
+		return []string{caseStateReopened}
+	case caseStateReopened:
+		return []string{caseStateWorkInProgress}
+	default: // unknown values are terminal
 		return []string{}
 	}
 }

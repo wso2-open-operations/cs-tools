@@ -56,7 +56,7 @@ func upstreamErrors(fallback string) []upstreamErrorCase {
 // ----- CreateCase -----
 
 func TestCreateCase(t *testing.T) {
-	const validPayload = `{"projectId":"proj-1","deploymentId":"dep-1","deployedProductId":"dp-1","subject":"Login failure","description":"Users cannot log in","priorityKey":"high","issueTypeKey":"error"}`
+	const validPayload = `{"projectId":"proj-1","deploymentId":"dep-1","deployedProductId":"dp-1","subject":"Login failure","description":"Users cannot log in","severityKey":"high","issueTypeKey":"error"}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
@@ -772,14 +772,14 @@ func TestPatchCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("allows priority-only update without state validation", func(t *testing.T) {
+	t.Run("allows severity-only update without state validation", func(t *testing.T) {
 		client := &mockEntityCaseClient{
 			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
-				return []byte(`{"id":"` + testCaseID + `","state":"open","priority":"high"}`), nil
+				return []byte(`{"id":"` + testCaseID + `","state":"open","severity":"high"}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"priorityKey":"high"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"severityKey":"high"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
@@ -937,7 +937,8 @@ func TestGetCase(t *testing.T) {
 			{caseStateWaitingOnWSO2, []string{caseStateWorkInProgress}},
 			{caseStateAwaitingInfo, []string{caseStateWaitingOnWSO2}},
 			{caseStateSolutionProposed, []string{caseStateClosed, caseStateWaitingOnWSO2}},
-			{caseStateClosed, []string{}},
+			{caseStateClosed, []string{caseStateReopened}},
+			{caseStateReopened, []string{caseStateWorkInProgress}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.state, func(t *testing.T) {
