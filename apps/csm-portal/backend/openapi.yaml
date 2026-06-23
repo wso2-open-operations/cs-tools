@@ -128,8 +128,8 @@ paths:
     patch:
       summary: Update a support case.
       description: |
-        Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
-        `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
+        Updates exactly one field of the case. Provide exactly one of: `stateKey`, `severityKey`,
+        `workStateKey`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
         only when the ServiceNow data source is active.
       operationId: patchCasesId
       parameters:
@@ -1590,6 +1590,7 @@ components:
               - work_in_progress
               - waiting_on_wso2
               - awaiting_info
+              - reopened
               - solution_proposed
               - closed
 
