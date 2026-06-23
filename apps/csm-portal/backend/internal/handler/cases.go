@@ -48,9 +48,6 @@ type entityCaseClient interface {
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
-	SearchServiceRequests(ctx context.Context, body []byte) ([]byte, error)
-	SearchSecurityReportAnalyses(ctx context.Context, body []byte) ([]byte, error)
-	SearchEngagements(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCaseAttachments(ctx context.Context, caseID string, body []byte) ([]byte, error)
@@ -295,108 +292,6 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// SearchServiceRequests handles POST /service-requests/search.
-func (h *CaseHandler) SearchServiceRequests(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchServiceRequests(r.Context(), body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchServiceRequests failed", "userID", user.UserID, "err", err)
-		mapUpstreamError(w, err, "Failed to search service requests.")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// SearchSecurityReportAnalyses handles POST /security-report-analyses/search.
-func (h *CaseHandler) SearchSecurityReportAnalyses(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchSecurityReportAnalyses(r.Context(), body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchSecurityReportAnalyses failed", "userID", user.UserID, "err", err)
-		mapUpstreamError(w, err, "Failed to search security report analyses.")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// SearchEngagements handles POST /engagements/search.
-func (h *CaseHandler) SearchEngagements(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchEngagements(r.Context(), body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchEngagements failed", "userID", user.UserID, "err", err)
-		mapUpstreamError(w, err, "Failed to search engagements.")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
 // CreateCaseAttachment handles POST /cases/{id}/attachments.
 func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -514,7 +409,7 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 }
 
 // PatchCase handles PATCH /cases/{id}.
-// Accepts stateKey, priorityKey, workStateKey, watchList, or assigneeEmail and forwards to the entity service.
+// Accepts stateKey, severityKey, workStateKey, watchList, or assigneeEmail and forwards to the entity service.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
