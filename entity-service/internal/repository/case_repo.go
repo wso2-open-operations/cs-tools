@@ -69,11 +69,12 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 	const query = `
 		INSERT INTO cases (
 			created_by, project_id, deployment_id, deployed_product_id,
-			subject, description, severity, issue_type, state
+			type, subject, description, severity, issue_type, state
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7::case_severity_enum, $8::case_issue_type_enum,
+			$1, $2, $3, $4,
+			$5::case_type_enum, $6, $7,
+			$8::case_severity_enum, $9::case_issue_type_enum,
 			'open'::case_state_enum
 		)
 		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -82,7 +83,7 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 	var c domain.Case
 	err := r.db.QueryRow(ctx, query,
 		req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
-		req.Subject, req.Description, string(req.SeverityKey), string(req.IssueTypeKey),
+		req.TypeKey, req.Subject, req.Description, string(req.SeverityKey), string(req.IssueTypeKey),
 	).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
