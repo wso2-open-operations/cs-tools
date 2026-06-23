@@ -431,6 +431,7 @@ const (
 	CaseStateWorkInProgress   CaseState = "work_in_progress"
 	CaseStateWaitingOnWSO2    CaseState = "waiting_on_wso2"
 	CaseStateAwaitingInfo     CaseState = "awaiting_info"
+	CaseStateReopened         CaseState = "reopened"
 	CaseStateSolutionProposed CaseState = "solution_proposed"
 	CaseStateClosed           CaseState = "closed"
 )
@@ -443,13 +444,25 @@ const (
 	CaseWorkStatePaused  CaseWorkState = "paused"
 )
 
+// EngagementType classifies the type of an engagement case.
+type EngagementType string
+
+const (
+	EngagementTypeMigration             EngagementType = "migration"
+	EngagementTypeConsultancy           EngagementType = "consultancy"
+	EngagementTypeNewFeatureImprovement EngagementType = "new_feature_improvement"
+	EngagementTypeFollowUp              EngagementType = "follow_up"
+	EngagementTypeOnboarding            EngagementType = "onboarding"
+)
+
 // CaseSortField enumerates the columns available for sorting case search results.
 type CaseSortField string
 
 const (
-	CaseSortFieldCreatedAt CaseSortField = "created_at"
-	CaseSortFieldUpdatedAt CaseSortField = "updated_at"
-	CaseSortFieldClosedAt  CaseSortField = "closed_at"
+	CaseSortFieldCreatedOn CaseSortField = "createdOn"
+	CaseSortFieldUpdatedOn CaseSortField = "updatedOn"
+	CaseSortFieldSeverity  CaseSortField = "severity"
+	CaseSortFieldState     CaseSortField = "state"
 )
 
 // CaseSortOrder controls the sort direction.
@@ -561,62 +574,70 @@ type CaseView struct {
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
+// StateKeys, SeverityKeys, IssueTypeKeys, and EngagementTypeKeys use the same
+// integer IDs as the ServiceNow integration layer.
 type SearchCasesFilters struct {
-	SearchQuery        string          `json:"searchQuery"`
-	ProjectIDs         []string        `json:"projectIds"`
-	DeploymentIDs      []string        `json:"deploymentIds"`
-	DeployedProductIDs []string        `json:"deployedProductIds"`
-	StateKeys          []CaseState     `json:"stateKeys"`
-	SeverityKeys       []CaseSeverity  `json:"severityKeys"`
-	IssueTypeKeys      []CaseIssueType `json:"issueTypeKeys"`
-	ClosedStartDate    *time.Time      `json:"closedStartDate"`
-	ClosedEndDate      *time.Time      `json:"closedEndDate"`
-	StartCreatedDate   *time.Time      `json:"startCreatedDate"`
-	EndCreatedDate     *time.Time      `json:"endCreatedDate"`
-	StartUpdatedDate   *time.Time      `json:"startUpdatedDate"`
-	EndUpdatedDate     *time.Time      `json:"endUpdatedDate"`
-	CreatedBy          []string        `json:"createdBy"`
-	CreatedByMe        bool            `json:"createdByMe"`
+	TypeKeys           []string         `json:"typeKeys"`
+	SearchQuery        string           `json:"searchQuery"`
+	ProjectIDs         []string         `json:"projectIds"`
+	DeploymentIDs      []string         `json:"deploymentIds"`
+	StateKeys          []CaseState      `json:"stateKeys"`
+	SeverityKeys       []CaseSeverity   `json:"severityKeys"`
+	IssueTypeKeys      []CaseIssueType  `json:"issueTypeKeys"`
+	EngagementTypeKeys []EngagementType `json:"engagementTypeKeys"`
+	ClosedStartDate    *time.Time `json:"closedStartDate"`
+	ClosedEndDate      *time.Time `json:"closedEndDate"`
+	StartCreatedDate   *time.Time `json:"startCreatedDate"`
+	EndCreatedDate     *time.Time `json:"endCreatedDate"`
+	StartUpdatedDate   *time.Time `json:"startUpdatedDate"`
+	EndUpdatedDate     *time.Time `json:"endUpdatedDate"`
+	CreatedBy          []string   `json:"createdBy"`
+	CreatedByMe        bool       `json:"createdByMe"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
-// All filter fields are optional and nested under Filters. SortBy defaults to created_at.
+// All filter fields are optional and nested under Filters. SortBy defaults to createdOn desc.
 type SearchCasesRequest struct {
 	Filters    SearchCasesFilters `json:"filters"`
 	SortBy     CaseSort           `json:"sortBy"`
 	Pagination Pagination         `json:"pagination"`
 }
 
-// SearchCaseView is the enriched read representation of a case returned in search
-// results. It is identical to CaseView except createdBy carries only {id, email}.
+// SearchCaseView is the unified case representation returned in search results.
+// Fields absent for a given data source are nil.
 type SearchCaseView struct {
-	ID                     string             `json:"id"`
-	Number                 string             `json:"number"`
-	InternalID             string             `json:"internalId"`
-	Subject                string             `json:"subject"`
-	Description            string             `json:"description"`
-	Severity               CaseSeverity       `json:"severity"`
-	IssueType              CaseIssueType      `json:"issueType"`
-	State                  CaseState          `json:"state"`
-	WorkState              *CaseWorkState     `json:"workState"`
-	CreatedOn              time.Time          `json:"createdOn"`
-	UpdatedOn              time.Time          `json:"updatedOn"`
-	ClosedOn               *time.Time         `json:"closedOn"`
-	CreatedBy              UserIDEmailRef       `json:"createdBy"`
-	AssignedEngineer       *AssignedEngineerRef `json:"assignedEngineer"`
-	ProjectDetails         EntityRef            `json:"project"`
-	DeploymentDetails      EntityRef            `json:"deployment"`
-	DeployedProductDetails DeployedProductRef   `json:"deployedProduct"`
+	ID               string               `json:"id"`
+	InternalID       string               `json:"internalId"`
+	Number           string               `json:"number"`
+	CreatedOn        string               `json:"createdOn"`
+	CreatedBy        string               `json:"createdBy"`
+	Title            *string              `json:"title"`
+	Description      *string              `json:"description"`
+	IssueType        *string              `json:"issueType"`
+	State            string               `json:"state"`
+	Severity         *string              `json:"severity"`
+	Catalog          *EntityRef           `json:"catalog"`
+	CatalogItem      *EntityRef           `json:"catalogItem"`
+	AssignedTeam     *EntityRef           `json:"assignedTeam"`
+	Product          *EntityRef           `json:"product"`
+	EngagementType   *string              `json:"engagementType"`
+	WorkState        *string              `json:"workState"`
+	CaseType         string               `json:"caseType"`
+	Project          EntityRef            `json:"project"`
+	Deployment       EntityRef            `json:"deployment"`
+	DeployedProduct  EntityRef            `json:"deployedProduct"`
+	AssignedEngineer *AssignedEngineerRef `json:"assignedEngineer"`
+	ParentCase       *EntityRef           `json:"parentCase"`
+	RelatedCase      *EntityRef           `json:"relatedCase"`
+	Conversation     *EntityRef           `json:"conversation"`
 }
 
 // SearchCasesResponse is the paginated result of a case search.
-// HasMore is true when additional pages are available beyond the current offset.
 type SearchCasesResponse struct {
-	Cases   []SearchCaseView `json:"cases"`
-	Total   int              `json:"total"`
-	Limit   int              `json:"limit"`
-	Offset  int              `json:"offset"`
-	HasMore bool             `json:"hasMore"`
+	Cases        []SearchCaseView `json:"cases"`
+	TotalRecords int              `json:"totalRecords"`
+	Offset       int              `json:"offset"`
+	Limit        int              `json:"limit"`
 }
 
 
