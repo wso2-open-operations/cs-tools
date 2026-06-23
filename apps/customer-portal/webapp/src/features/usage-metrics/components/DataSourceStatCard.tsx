@@ -19,7 +19,6 @@ import type { JSX } from "react";
 import type { DataSourceStatCardProps } from "@features/usage-metrics/types/usageMetrics";
 import {
   USAGE_METRICS_STAT_AVG,
-  USAGE_METRICS_STAT_CURR,
   USAGE_METRICS_STAT_MAX,
   USAGE_METRICS_STAT_MIN,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
