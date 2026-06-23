@@ -186,14 +186,14 @@ var snStateIDMap = map[domain.CaseState]int{
 	domain.CaseStateClosed:           3,
 }
 
-// snSeverityIDMap maps domain CasePriority enums to SN numeric severity IDs.
-// CasePriorityCatastrophic is intentionally absent: ServiceNow's severity scale
+// snSeverityIDMap maps domain CaseSeverity enums to SN numeric severity IDs.
+// CaseSeverityCatastrophic is intentionally absent: ServiceNow's severity scale
 // only goes up to Critical (P1=10) and has no catastrophic equivalent.
-var snSeverityIDMap = map[domain.CasePriority]int{
-	domain.CasePriorityCritical: 10,
-	domain.CasePriorityHigh:     11,
-	domain.CasePriorityMedium:   12,
-	domain.CasePriorityLow:      13,
+var snSeverityIDMap = map[domain.CaseSeverity]int{
+	domain.CaseSeverityCritical: 10,
+	domain.CaseSeverityHigh:     11,
+	domain.CaseSeverityMedium:   12,
+	domain.CaseSeverityLow:      13,
 }
 
 // snIssueTypeIDMap maps domain CaseIssueType enums to SN numeric issue type IDs.
@@ -216,7 +216,7 @@ func domainStatesToSNIDs(states []domain.CaseState) []int {
 	return ids
 }
 
-func domainPrioritiesToSNIDs(priorities []domain.CasePriority) []int {
+func domainSeveritiesToSNIDs(priorities []domain.CaseSeverity) []int {
 	ids := make([]int, 0, len(priorities))
 	for _, p := range priorities {
 		if id, ok := snSeverityIDMap[p]; ok {
@@ -254,13 +254,13 @@ func NewServiceNowCaseService(client *integrationservice.Client, pgFallback Case
 	return &snCaseService{client: client, pgFallback: pgFallback}
 }
 
-// snPriorityID maps domain CasePriority to the ServiceNow severity choice-list value.
-var snPriorityID = map[domain.CasePriority]int{
-	domain.CasePriorityCatastrophic: 14,
-	domain.CasePriorityCritical:     10,
-	domain.CasePriorityHigh:         11,
-	domain.CasePriorityMedium:       12,
-	domain.CasePriorityLow:          13,
+// snSeverityMap maps domain CaseSeverity to the ServiceNow severity choice-list value.
+var snSeverityMap = map[domain.CaseSeverity]int{
+	domain.CaseSeverityCatastrophic: 14,
+	domain.CaseSeverityCritical:     10,
+	domain.CaseSeverityHigh:         11,
+	domain.CaseSeverityMedium:       12,
+	domain.CaseSeverityLow:          13,
 }
 
 // snIssueTypeID maps domain CaseIssueType to the ServiceNow issue-type choice-list value.
@@ -313,7 +313,7 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		DeployedProductID: uuidToSysid(req.DeployedProductID),
 		Title:             req.Subject,
 		Description:       req.Description,
-		SeverityKey:       snPriorityID[req.PriorityKey],
+		SeverityKey:       snSeverityMap[req.SeverityKey],
 		IssueTypeKey:      snIssueTypeID[req.IssueTypeKey],
 	}
 
@@ -389,7 +389,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		InternalID:  c.InternalID,
 		Subject:     c.Title,
 		Description: c.Description,
-		Priority:    snSeverityToPriority(c.Severity),
+		Severity:      snSeverityToSeverity(c.Severity),
 		IssueType:   snIssueTypeToEnum(c.IssueType),
 		State:       state,
 		WorkState:   snWorkStateLabelToEnum(c.WorkState),
@@ -647,7 +647,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if req.StateKey != nil {
 		fieldCount++
 	}
-	if req.PriorityKey != nil {
+	if req.SeverityKey != nil {
 		fieldCount++
 	}
 	if req.WorkStateKey != nil {
@@ -660,10 +660,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		fieldCount++
 	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of stateKey, priorityKey, workStateKey, watchList, or assigneeEmail must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of stateKey, severityKey, workStateKey, watchList, or assigneeEmail must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, priorityKey, workStateKey, watchList, or assigneeEmail may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, severityKey, workStateKey, watchList, or assigneeEmail may be provided per request"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -682,13 +682,13 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 		payload.StateKey = &id
 	}
-	if req.PriorityKey != nil {
-		if !validCasePriority[*req.PriorityKey] {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priorityKey contains invalid value: " + string(*req.PriorityKey)}
+	if req.SeverityKey != nil {
+		if !validCaseSeverity[*req.SeverityKey] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(*req.SeverityKey)}
 		}
-		id, ok := snSeverityIDMap[*req.PriorityKey]
+		id, ok := snSeverityIDMap[*req.SeverityKey]
 		if !ok {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priority " + string(*req.PriorityKey) + " is not supported by ServiceNow"}
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey " + string(*req.SeverityKey) + " is not supported by ServiceNow"}
 		}
 		payload.SeverityKey = &id
 	}
@@ -740,7 +740,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		}
 	}
 	if snResp.Case.Severity != nil {
-		resp.Case.Priority = snSeverityToPriority(snResp.Case.Severity)
+		resp.Case.Severity = snSeverityToSeverity(snResp.Case.Severity)
 	}
 	if snResp.Case.AssignedTo != nil {
 		resp.Case.AssignedTo = &domain.AssignedEngineerRef{
@@ -1011,7 +1011,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			DeploymentIDs:      uuidsToSysids(req.Filters.DeploymentIDs),
 			DeployedProductIDs: uuidsToSysids(req.Filters.DeployedProductIDs),
 			StateKeys:          domainStatesToSNIDs(req.Filters.StateKeys),
-			SeverityKeys:       domainPrioritiesToSNIDs(req.Filters.PriorityKeys),
+			SeverityKeys:       domainSeveritiesToSNIDs(req.Filters.SeverityKeys),
 			IssueTypeKeys:      domainIssueTypesToSNIDs(req.Filters.IssueTypeKeys),
 			ClosedStartDate:    formatSNDate(req.Filters.ClosedStartDate),
 			ClosedEndDate:      formatSNDate(req.Filters.ClosedEndDate),
@@ -1062,7 +1062,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			InternalID:             c.InternalID,
 			Subject:                c.Title,
 			Description:            c.Description,
-			Priority:               snSeverityToPriority(c.Severity),
+			Severity:      snSeverityToSeverity(c.Severity),
 			IssueType:              snIssueTypeToEnum(c.IssueType),
 			State:                  state,
 			WorkState:              snWorkStateLabelToEnum(c.WorkState),
@@ -1112,16 +1112,16 @@ func snCaseStateLabelToEnum(state *snCaseState) (domain.CaseState, error) {
 
 // snSeverityLabel extracts the priority word from SN severity labels like
 // "Low (P4)", "2 - High", "3 - Moderate" → "low", "high", "medium".
-var snSeverityLabelMap = map[string]domain.CasePriority{
-	"catastrophic": domain.CasePriorityCatastrophic,
-	"critical":     domain.CasePriorityCritical,
-	"high":         domain.CasePriorityHigh,
-	"moderate":     domain.CasePriorityMedium,
-	"medium":       domain.CasePriorityMedium,
-	"low":          domain.CasePriorityLow,
+var snSeverityLabelMap = map[string]domain.CaseSeverity{
+	"catastrophic": domain.CaseSeverityCatastrophic,
+	"critical":     domain.CaseSeverityCritical,
+	"high":         domain.CaseSeverityHigh,
+	"moderate":     domain.CaseSeverityMedium,
+	"medium":       domain.CaseSeverityMedium,
+	"low":          domain.CaseSeverityLow,
 }
 
-func snSeverityToPriority(severity *snCaseLabel) domain.CasePriority {
+func snSeverityToSeverity(severity *snCaseLabel) domain.CaseSeverity {
 	if severity == nil {
 		return ""
 	}

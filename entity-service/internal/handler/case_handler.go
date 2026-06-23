@@ -64,7 +64,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchCase handles PATCH /cases/{id}.
-// Accepts state, priority (both data sources), or watchList, assigneeEmail (ServiceNow only).
+// Accepts state, severity (both data sources), or watchList, assigneeEmail (ServiceNow only).
 // Exactly one field must be provided per request.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	var req domain.UpdateCaseRequest

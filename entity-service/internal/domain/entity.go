@@ -412,15 +412,15 @@ const (
 	CaseIssueTypeTotalOutage            CaseIssueType = "total_outage"
 )
 
-// CasePriority represents the urgency level of a support case.
-type CasePriority string
+// CaseSeverity represents the urgency level of a support case.
+type CaseSeverity string
 
 const (
-	CasePriorityCatastrophic CasePriority = "catastrophic"
-	CasePriorityCritical     CasePriority = "critical"
-	CasePriorityHigh         CasePriority = "high"
-	CasePriorityMedium       CasePriority = "medium"
-	CasePriorityLow          CasePriority = "low"
+	CaseSeverityCatastrophic CaseSeverity = "catastrophic"
+	CaseSeverityCritical     CaseSeverity = "critical"
+	CaseSeverityHigh         CaseSeverity = "high"
+	CaseSeverityMedium       CaseSeverity = "medium"
+	CaseSeverityLow          CaseSeverity = "low"
 )
 
 // CaseState represents the current workflow state of a support case.
@@ -479,7 +479,7 @@ type Case struct {
 	DeployedProductID string         `json:"deployedProductId"`
 	Subject           string         `json:"subject"`
 	Description       string         `json:"description"`
-	Priority          CasePriority   `json:"priority"`
+	Severity          CaseSeverity   `json:"severity"`
 	IssueType         CaseIssueType  `json:"issueType"`
 	State             CaseState      `json:"state"`
 	WorkState         *CaseWorkState `json:"workState"`
@@ -542,7 +542,7 @@ type CaseView struct {
 	InternalID             string               `json:"internalId"`
 	Subject                string               `json:"subject"`
 	Description            string               `json:"description"`
-	Priority               CasePriority         `json:"priority"`
+	Severity               CaseSeverity         `json:"severity"`
 	IssueType              CaseIssueType        `json:"issueType"`
 	State                  CaseState            `json:"state"`
 	WorkState              *CaseWorkState       `json:"workState"`
@@ -567,7 +567,7 @@ type SearchCasesFilters struct {
 	DeploymentIDs      []string        `json:"deploymentIds"`
 	DeployedProductIDs []string        `json:"deployedProductIds"`
 	StateKeys          []CaseState     `json:"stateKeys"`
-	PriorityKeys       []CasePriority  `json:"priorityKeys"`
+	SeverityKeys       []CaseSeverity  `json:"severityKeys"`
 	IssueTypeKeys      []CaseIssueType `json:"issueTypeKeys"`
 	ClosedStartDate    *time.Time      `json:"closedStartDate"`
 	ClosedEndDate      *time.Time      `json:"closedEndDate"`
@@ -595,7 +595,7 @@ type SearchCaseView struct {
 	InternalID             string             `json:"internalId"`
 	Subject                string             `json:"subject"`
 	Description            string             `json:"description"`
-	Priority               CasePriority       `json:"priority"`
+	Severity               CaseSeverity       `json:"severity"`
 	IssueType              CaseIssueType      `json:"issueType"`
 	State                  CaseState          `json:"state"`
 	WorkState              *CaseWorkState     `json:"workState"`
@@ -798,12 +798,12 @@ type SearchSecurityReportAnalysisResponse struct {
 }
 
 // UpdateCaseRequest is the input for PATCH /cases/{id}.
-// Exactly one of State, Priority, WorkState, WatchList, or AssigneeEmail must be provided.
+// Exactly one of State, Severity, WorkState, WatchList, or AssigneeEmail must be provided.
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 type UpdateCaseRequest struct {
 	ID            string         `json:"-"`
 	StateKey      *CaseState     `json:"stateKey"`
-	PriorityKey   *CasePriority  `json:"priorityKey"`
+	SeverityKey   *CaseSeverity  `json:"severityKey"`
 	WorkStateKey  *CaseWorkState `json:"workStateKey"`
 	WatchList     []string       `json:"watchList"`
 	AssigneeEmail *string        `json:"assigneeEmail"`
@@ -821,7 +821,7 @@ type UpdatedCase struct {
 	UpdatedOn  time.Time            `json:"updatedOn"`
 	UpdatedBy  string               `json:"updatedBy,omitempty"`
 	State      CaseState            `json:"state,omitempty"`
-	Priority   CasePriority         `json:"priority,omitempty"`
+	Severity   CaseSeverity         `json:"severity,omitempty"`
 	WorkState  *CaseWorkState       `json:"workState"`
 	WatchList  []WatchListUser      `json:"watchList,omitempty"`
 	AssignedTo *AssignedEngineerRef `json:"assignedTo,omitempty"`
@@ -861,7 +861,7 @@ type CreateCaseRequest struct {
 	DeployedProductID string        `json:"deployedProductId"`
 	Subject           string        `json:"subject"`
 	Description       string        `json:"description"`
-	PriorityKey       CasePriority  `json:"priorityKey"`
+	SeverityKey       CaseSeverity  `json:"severityKey"`
 	IssueTypeKey      CaseIssueType `json:"issueTypeKey"`
 }
 

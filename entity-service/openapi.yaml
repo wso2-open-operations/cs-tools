@@ -318,7 +318,7 @@ paths:
     patch:
       summary: Update a support case.
       description: |
-        Updates exactly one field of the case. Provide exactly one of: `state`, `priority`,
+        Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
         `workState`, `watchList`, or `assigneeEmail`. `watchList` and `assigneeEmail` are supported
         only when the ServiceNow data source is active.
       operationId: patchCase
@@ -1261,11 +1261,11 @@ components:
     UpdateCaseRequest:
       type: object
       description: |
-        Exactly one of `stateKey`, `priorityKey`, `workStateKey`, `watchList`, or `assigneeEmail` must be provided.
+        Exactly one of `stateKey`, `severityKey`, `workStateKey`, `watchList`, or `assigneeEmail` must be provided.
         `watchList` and `assigneeEmail` are supported only for the ServiceNow data source.
       oneOf:
         - required: [stateKey]
-        - required: [priorityKey]
+        - required: [severityKey]
         - required: [workStateKey]
         - required: [watchList]
         - required: [assigneeEmail]
@@ -1274,10 +1274,10 @@ components:
           type: string
           enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
           description: The new state to transition the case to.
-        priorityKey:
+        severityKey:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: The new priority (severity) of the case.
+          description: The new severity of the case.
         workStateKey:
           type: string
           enum: [ongoing, paused]
@@ -1318,7 +1318,7 @@ components:
         state:
           type: string
           enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
-        priority:
+        severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
         workState:
@@ -1351,7 +1351,7 @@ components:
 
     CreateCaseRequest:
       type: object
-      required: [projectId, deploymentId, deployedProductId, subject, description, priorityKey, issueTypeKey]
+      required: [projectId, deploymentId, deployedProductId, subject, description, severityKey, issueTypeKey]
       properties:
         projectId:
           type: string
@@ -1366,7 +1366,7 @@ components:
           type: string
         description:
           type: string
-        priorityKey:
+        severityKey:
           type: string
           enum: [catastrophic, critical, high, medium, low]
         issueTypeKey:
@@ -1425,7 +1425,7 @@ components:
             type: string
             enum: [open, work_in_progress, waiting_on_wso2, awaiting_info, solution_proposed, closed]
           description: Filter by case states.
-        priorityKeys:
+        severityKeys:
           type: array
           items:
             type: string
@@ -1558,7 +1558,7 @@ components:
           type: string
         description:
           type: string
-        priority:
+        severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
         issueType:
@@ -1592,7 +1592,7 @@ components:
           type: string
         description:
           type: string
-        priority:
+        severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
         issueType:
@@ -1654,7 +1654,7 @@ components:
           type: string
         description:
           type: string
-        priority:
+        severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
         issueType:

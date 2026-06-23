@@ -97,7 +97,7 @@ type CaseService interface {
 	// ValidationError is returned for a malformed UUID; a NotFoundError if no case matches.
 	GetCaseByID(ctx context.Context, id string) (domain.CaseView, error)
 	// SearchCases returns a paginated list of cases filtered by optional project IDs,
-	// deployment IDs, deployed product IDs, state keys, priority keys, and search query.
+	// deployment IDs, deployed product IDs, state keys, severity keys, and search query.
 	// A ValidationError is returned for invalid input; any other error indicates an
 	// infrastructure failure.
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error)
@@ -107,7 +107,7 @@ type CaseService interface {
 	// SearchCaseComments returns a paginated list of comments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error)
-	// UpdateCase updates the state, priority, watch list, or assignee of a case.
+	// UpdateCase updates the state, severity, watch list, or assignee of a case.
 	// A ValidationError is returned for invalid values or malformed UUID; a NotFoundError if no case matches.
 	// WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)

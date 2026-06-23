@@ -67,24 +67,24 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 	const query = `
 		INSERT INTO cases (
 			created_by, project_id, deployment_id, deployed_product_id,
-			subject, description, priority, issue_type, state
+			subject, description, severity, issue_type, state
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7::case_priority_enum, $8::case_issue_type_enum,
+			$7::case_severity_enum, $8::case_issue_type_enum,
 			'open'::case_state_enum
 		)
 		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
-		          subject, description, priority, issue_type, state, created_at, updated_at, closed_at`
+		          subject, description, severity, issue_type, state, created_at, updated_at, closed_at`
 
 	var c domain.Case
 	err := r.db.QueryRow(ctx, query,
 		req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
-		req.Subject, req.Description, string(req.PriorityKey), string(req.IssueTypeKey),
+		req.Subject, req.Description, string(req.SeverityKey), string(req.IssueTypeKey),
 	).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
-		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State,
+		&c.Subject, &c.Description, &c.Severity, &c.IssueType, &c.State,
 		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
 	)
 	if err != nil {
@@ -113,7 +113,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	)
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
-		        c.subject, c.description, c.priority, c.issue_type, c.state, c.work_state,
+		        c.subject, c.description, c.severity, c.issue_type, c.state, c.work_state,
 		        c.created_at, c.updated_at, c.closed_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
@@ -138,7 +138,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		 WHERE c.id = $1`, id,
 	).Scan(
 		&cv.ID, &cv.Number, &cv.InternalID,
-		&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
+		&cv.Subject, &cv.Description, &cv.Severity, &cv.IssueType, &cv.State, &workState,
 		&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
@@ -272,9 +272,9 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 	if req.StateKey != nil {
 		state = string(*req.StateKey)
 	}
-	priority := ""
-	if req.PriorityKey != nil {
-		priority = string(*req.PriorityKey)
+	severity := ""
+	if req.SeverityKey != nil {
+		severity = string(*req.SeverityKey)
 	}
 	workState := ""
 	if req.WorkStateKey != nil {
@@ -283,20 +283,20 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 	const query = `
 		UPDATE cases
 		SET state      = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
-		    priority   = CASE WHEN $3 <> '' THEN $3::case_priority_enum ELSE priority END,
+		    severity   = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
 		    work_state = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
 		    updated_at = NOW(),
 		    closed_at  = CASE WHEN $2 = 'closed' THEN NOW() WHEN $2 <> '' AND $2 <> 'closed' THEN NULL ELSE closed_at END
 		WHERE id = $1
 		RETURNING id, number, internal_id, created_by, project_id, deployment_id, deployed_product_id,
-		          subject, description, priority, issue_type, state, work_state, created_at, updated_at, closed_at`
+		          subject, description, severity, issue_type, state, work_state, created_at, updated_at, closed_at`
 
 	var c domain.Case
 	var workStateRaw *string
-	err := r.db.QueryRow(ctx, query, req.ID, state, priority, workState).Scan(
+	err := r.db.QueryRow(ctx, query, req.ID, state, severity, workState).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
-		&c.Subject, &c.Description, &c.Priority, &c.IssueType, &c.State, &workStateRaw,
+		&c.Subject, &c.Description, &c.Severity, &c.IssueType, &c.State, &workStateRaw,
 		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -347,13 +347,13 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
-	if len(req.Filters.PriorityKeys) > 0 {
-		priorityStrings := make([]string, len(req.Filters.PriorityKeys))
-		for i, p := range req.Filters.PriorityKeys {
-			priorityStrings[i] = string(p)
+	if len(req.Filters.SeverityKeys) > 0 {
+		severityStrings := make([]string, len(req.Filters.SeverityKeys))
+		for i, p := range req.Filters.SeverityKeys {
+			severityStrings[i] = string(p)
 		}
-		where += fmt.Sprintf(" AND c.priority = ANY($%d::case_priority_enum[])", argIdx)
-		filterArgs = append(filterArgs, priorityStrings)
+		where += fmt.Sprintf(" AND c.severity = ANY($%d::case_severity_enum[])", argIdx)
+		filterArgs = append(filterArgs, severityStrings)
 		argIdx++
 	}
 
@@ -426,7 +426,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 
 	dataQuery := fmt.Sprintf(
 		`SELECT c.id, c.number, c.internal_id,
-		        c.subject, c.description, c.priority, c.issue_type, c.state, c.work_state,
+		        c.subject, c.description, c.severity, c.issue_type, c.state, c.work_state,
 		        c.created_at, c.updated_at, c.closed_at,
 		        u.id, u.first_name || ' ' || u.last_name, u.user_name, u.email,
 		        p.id, p.name,
@@ -465,7 +465,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			var workState *string
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
-				&cv.Subject, &cv.Description, &cv.Priority, &cv.IssueType, &cv.State, &workState,
+				&cv.Subject, &cv.Description, &cv.Severity, &cv.IssueType, &cv.State, &workState,
 				&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 				&cv.CreatedBy.ID, &ignoredDisplayName, &ignoredUserID, &cv.CreatedBy.Email,
 				&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,

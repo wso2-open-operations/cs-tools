@@ -56,12 +56,12 @@ var validCaseState = map[domain.CaseState]bool{
 	domain.CaseStateClosed:           true,
 }
 
-var validCasePriority = map[domain.CasePriority]bool{
-	domain.CasePriorityCatastrophic: true,
-	domain.CasePriorityCritical:     true,
-	domain.CasePriorityHigh:         true,
-	domain.CasePriorityMedium:       true,
-	domain.CasePriorityLow:          true,
+var validCaseSeverity = map[domain.CaseSeverity]bool{
+	domain.CaseSeverityCatastrophic: true,
+	domain.CaseSeverityCritical:     true,
+	domain.CaseSeverityHigh:         true,
+	domain.CaseSeverityMedium:       true,
+	domain.CaseSeverityLow:          true,
 }
 
 var validCaseIssueType = map[domain.CaseIssueType]bool{
@@ -97,8 +97,8 @@ func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
 	if req.Description == "" {
 		return &apierror.ValidationError{Msg: "description is required"}
 	}
-	if !validCasePriority[req.PriorityKey] {
-		return &apierror.ValidationError{Msg: "priorityKey contains invalid value: " + string(req.PriorityKey)}
+	if !validCaseSeverity[req.SeverityKey] {
+		return &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(req.SeverityKey)}
 	}
 	if !validCaseIssueType[req.IssueTypeKey] {
 		return &apierror.ValidationError{Msg: "issueTypeKey contains invalid value: " + string(req.IssueTypeKey)}
@@ -240,23 +240,23 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.StateKey != nil {
 		fieldCount++
 	}
-	if req.PriorityKey != nil {
+	if req.SeverityKey != nil {
 		fieldCount++
 	}
 	if req.WorkStateKey != nil {
 		fieldCount++
 	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state, priority, or workState must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of stateKey, severityKey, or workStateKey must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, priorityKey, or workStateKey may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, severityKey, or workStateKey may be provided per request"}
 	}
 	if req.StateKey != nil && !validCaseState[*req.StateKey] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "stateKey contains invalid value: " + string(*req.StateKey)}
 	}
-	if req.PriorityKey != nil && !validCasePriority[*req.PriorityKey] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "priorityKey contains invalid value: " + string(*req.PriorityKey)}
+	if req.SeverityKey != nil && !validCaseSeverity[*req.SeverityKey] {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(*req.SeverityKey)}
 	}
 	if req.WorkStateKey != nil && !validCaseWorkState[*req.WorkStateKey] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workStateKey contains invalid value: " + string(*req.WorkStateKey)}
@@ -271,7 +271,7 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 			ID:        c.ID,
 			UpdatedOn: c.UpdatedOn,
 			State:     c.State,
-			Priority:  c.Priority,
+			Severity:  c.Severity,
 			WorkState: c.WorkState,
 		},
 	}, nil
@@ -300,9 +300,9 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "stateKeys contains invalid value: " + string(s)}
 		}
 	}
-	for _, p := range req.Filters.PriorityKeys {
-		if !validCasePriority[p] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "priorityKeys contains invalid value: " + string(p)}
+	for _, p := range req.Filters.SeverityKeys {
+		if !validCaseSeverity[p] {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "severityKeys contains invalid value: " + string(p)}
 		}
 	}
 	for _, it := range req.Filters.IssueTypeKeys {

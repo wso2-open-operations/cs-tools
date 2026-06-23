@@ -3,7 +3,7 @@ CREATE TYPE case_work_state_enum AS ENUM (
   'paused'
 );
 
-CREATE TYPE case_priority_enum AS ENUM (
+CREATE TYPE case_severity_enum AS ENUM (
   'catastrophic',
   'critical',
   'high',
@@ -43,7 +43,7 @@ CREATE TABLE cases (
   deployed_product_id UUID NOT NULL REFERENCES deployed_products(id),
   subject             VARCHAR NOT NULL,
   description         TEXT NOT NULL,
-  priority            case_priority_enum NOT NULL,
+  severity            case_severity_enum NOT NULL,
   issue_type          case_issue_type_enum NOT NULL,
   state               case_state_enum NOT NULL,
   created_at          TIMESTAMP DEFAULT NOW(),
@@ -106,24 +106,24 @@ CREATE TRIGGER trg_case_deployed_product_belongs_to_deployment
   BEFORE INSERT OR UPDATE ON cases
   FOR EACH ROW EXECUTE FUNCTION check_case_deployed_product_belongs_to_deployment();
 
-CREATE OR REPLACE FUNCTION check_case_catastrophic_priority()
+CREATE OR REPLACE FUNCTION check_case_catastrophic_severity()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.priority = 'catastrophic' AND NOT EXISTS (
+  IF NEW.severity = 'catastrophic' AND NOT EXISTS (
     SELECT 1 FROM projects
     WHERE id                = NEW.project_id
       AND subscription_type = 'managed_cloud_subscription'
   ) THEN
     RAISE EXCEPTION
-      'catastrophic priority is only allowed for managed_cloud_subscription projects. project_id % has a different subscription type.', NEW.project_id;
+      'catastrophic severity is only allowed for managed_cloud_subscription projects. project_id % has a different subscription type.', NEW.project_id;
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_case_catastrophic_priority
+CREATE TRIGGER trg_case_catastrophic_severity
   BEFORE INSERT OR UPDATE ON cases
-  FOR EACH ROW EXECUTE FUNCTION check_case_catastrophic_priority();
+  FOR EACH ROW EXECUTE FUNCTION check_case_catastrophic_severity();
 
 CREATE OR REPLACE FUNCTION sync_work_state_on_state_change()
 RETURNS TRIGGER AS $$
@@ -147,7 +147,7 @@ CREATE INDEX idx_cases_created_by          ON cases(created_by);
 CREATE INDEX idx_cases_project_id          ON cases(project_id);
 CREATE INDEX idx_cases_deployment_id       ON cases(deployment_id);
 CREATE INDEX idx_cases_deployed_product_id ON cases(deployed_product_id);
-CREATE INDEX idx_cases_priority            ON cases(priority);
+CREATE INDEX idx_cases_severity            ON cases(severity);
 CREATE INDEX idx_cases_state               ON cases(state);
 CREATE INDEX idx_cases_issue_type          ON cases(issue_type);
 
@@ -158,8 +158,8 @@ CREATE INDEX idx_cases_closed_at           ON cases(closed_at);
 
 -- Composite indexes
 CREATE INDEX idx_cases_project_state         ON cases(project_id, state);
-CREATE INDEX idx_cases_priority_state        ON cases(priority, state);
-CREATE INDEX idx_cases_priority_issue_type   ON cases(priority, issue_type);
+CREATE INDEX idx_cases_severity_state        ON cases(severity, state);
+CREATE INDEX idx_cases_severity_issue_type   ON cases(severity, issue_type);
 
 -- work_state indexes
 CREATE UNIQUE INDEX uidx_cases_one_ongoing_per_engineer
