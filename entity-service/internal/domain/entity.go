@@ -838,3 +838,108 @@ type SearchAttachmentsResponse struct {
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
 }
+
+// ChangeRequestType classifies the change request type.
+type ChangeRequestType string
+
+const (
+	ChangeRequestTypeStandard           ChangeRequestType = "standard"
+	ChangeRequestTypeNormal             ChangeRequestType = "normal"
+	ChangeRequestTypeEmergency          ChangeRequestType = "emergency"
+	ChangeRequestTypeModel              ChangeRequestType = "model"
+	ChangeRequestTypeSiteReliabilityOps ChangeRequestType = "site_reliability_ops"
+	ChangeRequestTypeAzure              ChangeRequestType = "azure"
+)
+
+// ChangeRequestState represents the current workflow state of a change request.
+type ChangeRequestState string
+
+const (
+	ChangeRequestStateCustomerApproval ChangeRequestState = "customer_approval"
+	ChangeRequestStateScheduled        ChangeRequestState = "scheduled"
+	ChangeRequestStateImplement        ChangeRequestState = "implement"
+	ChangeRequestStateReview           ChangeRequestState = "review"
+	ChangeRequestStateCustomerReview   ChangeRequestState = "customer_review"
+	ChangeRequestStateRollback         ChangeRequestState = "rollback"
+	ChangeRequestStateClosed           ChangeRequestState = "closed"
+	ChangeRequestStateCanceled         ChangeRequestState = "canceled"
+)
+
+// ChangeRequestImpact represents the impact level of a change request.
+type ChangeRequestImpact string
+
+const (
+	ChangeRequestImpactHigh   ChangeRequestImpact = "high"
+	ChangeRequestImpactMedium ChangeRequestImpact = "medium"
+	ChangeRequestImpactLow    ChangeRequestImpact = "low"
+)
+
+// ChangeRequestSortField enumerates the columns available for sorting change request search results.
+type ChangeRequestSortField string
+
+const (
+	ChangeRequestSortFieldCreatedOn ChangeRequestSortField = "createdOn"
+	ChangeRequestSortFieldUpdatedOn ChangeRequestSortField = "updatedOn"
+)
+
+// ChangeRequestSortOrder controls the sort direction.
+type ChangeRequestSortOrder string
+
+const (
+	ChangeRequestSortOrderAsc  ChangeRequestSortOrder = "asc"
+	ChangeRequestSortOrderDesc ChangeRequestSortOrder = "desc"
+)
+
+// ChangeRequestSort specifies the sort field and direction for change request search results.
+type ChangeRequestSort struct {
+	Field ChangeRequestSortField `json:"field"`
+	Order ChangeRequestSortOrder `json:"order"`
+}
+
+// SearchChangeRequestsFilters holds all optional filter criteria for a change request search.
+type SearchChangeRequestsFilters struct {
+	ProjectIDs      []string              `json:"projectIds"`
+	SearchQuery     string                `json:"searchQuery"`
+	StateKeys       []ChangeRequestState  `json:"stateKeys"`
+	ImpactKeys      []ChangeRequestImpact `json:"impactKeys"`
+	ClosedStartDate *time.Time            `json:"closedStartDate"`
+	ClosedEndDate   *time.Time            `json:"closedEndDate"`
+}
+
+// SearchChangeRequestsRequest is the input for a change request search operation.
+type SearchChangeRequestsRequest struct {
+	Filters    SearchChangeRequestsFilters `json:"filters"`
+	SortBy     ChangeRequestSort           `json:"sortBy"`
+	Pagination Pagination                  `json:"pagination"`
+}
+
+// SearchChangeRequestView is the unified change request representation returned in search results.
+type SearchChangeRequestView struct {
+	ID               string     `json:"id"`
+	Number           string     `json:"number"`
+	Subject          *string    `json:"subject"`
+	Description      *string    `json:"description"`
+	Project          EntityRef  `json:"project"`
+	Case             *EntityRef `json:"case"`
+	Deployment       *EntityRef `json:"deployment"`
+	DeployedProduct  *EntityRef `json:"deployedProduct"`
+	Product          *EntityRef `json:"product"`
+	AssignedEngineer *EntityRef `json:"assignedEngineer"`
+	AssignedTeam     *EntityRef `json:"assignedTeam"`
+	PlannedStartOn   *string    `json:"plannedStartOn"`
+	PlannedEndOn     *string    `json:"plannedEndOn"`
+	Duration         *string    `json:"duration"`
+	Impact           string     `json:"impact"`
+	State            string     `json:"state"`
+	Type             string     `json:"type"`
+	CreatedOn        string     `json:"createdOn"`
+	UpdatedOn        string     `json:"updatedOn"`
+}
+
+// SearchChangeRequestsResponse is the paginated result of a change request search.
+type SearchChangeRequestsResponse struct {
+	ChangeRequests []SearchChangeRequestView `json:"changeRequests"`
+	TotalRecords   int                       `json:"totalRecords"`
+	Offset         int                       `json:"offset"`
+	Limit          int                       `json:"limit"`
+}
