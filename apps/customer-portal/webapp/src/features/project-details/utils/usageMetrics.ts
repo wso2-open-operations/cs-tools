@@ -222,64 +222,68 @@ export function computeSeriesSummary(values: number[]): CurrMinMaxAvg {
 }
 
 /**
- * Derives per-date counts for instances, products, and environments from metrics.
- * Returns curr/avg/min/max for each dimension over the selected date range.
+ * Derives per-period counts for instances, products, and environments.
+ * - Instances: derived from metric dataPoints (per date, count distinct instanceIds).
+ * - Products / Environments: derived from usage periodSummaries (per period, count distinct IDs).
+ *   Usages reliably carry deployment.id and deployedProduct.id; metrics often have them null.
  *
  * @param metrics - Project-wide instance metric entries.
+ * @param usages - Project-wide instance usage entries.
  * @returns Summary stats for instances, products, and environments.
  */
-export function computeOverviewSummaries(metrics: InstanceMetricEntry[]): {
+export function computeOverviewSummaries(
+  metrics: InstanceMetricEntry[],
+  usages: InstanceUsageEntry[],
+): {
   instanceSummary: CurrMinMaxAvg;
   productSummary: CurrMinMaxAvg;
   environmentSummary: CurrMinMaxAvg;
 } {
+  // Instances — from metric dataPoints (daily granularity)
   const dayInstances = new Map<string, Set<string>>();
-  const dayProducts = new Map<string, Set<string>>();
-  const dayEnvironments = new Map<string, Set<string>>();
-
   for (const m of metrics) {
     for (const dp of m.dataPoints) {
       if (!dp.date) continue;
+      const s = dayInstances.get(dp.date) ?? new Set<string>();
+      s.add(m.instanceId);
+      dayInstances.set(dp.date, s);
+    }
+  }
+  const sortedDays = Array.from(dayInstances.keys()).sort();
+  const instanceSummary = computeSeriesSummary(
+    sortedDays.map((d) => dayInstances.get(d)?.size ?? 0),
+  );
 
-      const instSet = dayInstances.get(dp.date) ?? new Set<string>();
-      instSet.add(m.instanceId);
-      dayInstances.set(dp.date, instSet);
-
-      const prodId = m.deployedProduct?.id ?? m.product?.id;
+  // Products / Environments — from usage periodSummaries (period granularity)
+  const periodProducts = new Map<string, Set<string>>();
+  const periodEnvironments = new Map<string, Set<string>>();
+  for (const u of usages) {
+    const prodId = u.deployedProduct?.id ?? u.product?.id;
+    const envId = u.deployment?.id;
+    for (const ps of u.periodSummaries) {
       if (prodId) {
-        const prodSet = dayProducts.get(dp.date) ?? new Set<string>();
-        prodSet.add(prodId);
-        dayProducts.set(dp.date, prodSet);
+        const s = periodProducts.get(ps.period) ?? new Set<string>();
+        s.add(prodId);
+        periodProducts.set(ps.period, s);
       }
-
-      const envId = m.deployment?.id;
       if (envId) {
-        const envSet = dayEnvironments.get(dp.date) ?? new Set<string>();
-        envSet.add(envId);
-        dayEnvironments.set(dp.date, envSet);
+        const s = periodEnvironments.get(ps.period) ?? new Set<string>();
+        s.add(envId);
+        periodEnvironments.set(ps.period, s);
       }
     }
   }
-
-  const sortedDates = Array.from(
-    new Set([
-      ...dayInstances.keys(),
-      ...dayProducts.keys(),
-      ...dayEnvironments.keys(),
-    ]),
+  const sortedPeriods = Array.from(
+    new Set([...periodProducts.keys(), ...periodEnvironments.keys()]),
   ).sort();
+  const productSummary = computeSeriesSummary(
+    sortedPeriods.map((p) => periodProducts.get(p)?.size ?? 0),
+  );
+  const environmentSummary = computeSeriesSummary(
+    sortedPeriods.map((p) => periodEnvironments.get(p)?.size ?? 0),
+  );
 
-  return {
-    instanceSummary: computeSeriesSummary(
-      sortedDates.map((d) => dayInstances.get(d)?.size ?? 0),
-    ),
-    productSummary: computeSeriesSummary(
-      sortedDates.map((d) => dayProducts.get(d)?.size ?? 0),
-    ),
-    environmentSummary: computeSeriesSummary(
-      sortedDates.map((d) => dayEnvironments.get(d)?.size ?? 0),
-    ),
-  };
+  return { instanceSummary, productSummary, environmentSummary };
 }
 
 /**

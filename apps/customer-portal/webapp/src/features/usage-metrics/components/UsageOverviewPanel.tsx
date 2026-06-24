@@ -41,6 +41,7 @@ import usePostProjectInstancesUsagesStats from "@features/project-details/api/us
 import DataSourceStatCard from "@features/usage-metrics/components/DataSourceStatCard";
 import type { MetricTypeSummary } from "@features/project-details/types/usage";
 import {
+  DATA_SOURCE_STAT_KEYS,
   METRIC_TYPE_LABELS,
   USAGE_METRICS_DATA_SOURCE_STATS_SECTION,
   USAGE_METRICS_NO_DATA_SOURCE_STATS,
@@ -51,6 +52,7 @@ import usePostProjectInstancesUsagesSearch from "@features/project-details/api/u
 import usePostProjectInstancesMetricsSearch from "@features/project-details/api/usePostProjectInstancesMetricsSearch";
 import usePostDeploymentInstancesSearch from "@features/project-details/api/usePostDeploymentInstancesSearch";
 import usePostDeploymentInstancesUsagesSearch from "@features/project-details/api/usePostDeploymentInstancesUsagesSearch";
+import useGetProjectUsageStats from "@features/project-details/api/useGetProjectUsageStats";
 import type { UsageAggregatedMetricDefinition } from "@features/project-details/types/usage";
 import type {
   InstanceItem,
@@ -276,8 +278,8 @@ function DeploymentExpandedView({
     >();
 
     for (const inst of instances) {
-      const pid = inst.deployedProduct?.id;
-      const label = inst.deployedProduct?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
+      const pid = inst.deployedProduct?.id ?? inst.product?.id;
+      const label = inst.deployedProduct?.label ?? inst.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
       if (!pid) continue;
       const existing = productMap.get(pid) ?? {
         label,
@@ -292,10 +294,10 @@ function DeploymentExpandedView({
 
     // Accumulate transactions from deployment-scoped usages per deployedProduct
     for (const usage of usages) {
-      const pid = usage.deployedProduct?.id;
+      const pid = usage.deployedProduct?.id ?? usage.product?.id;
       if (!pid) continue;
       // Ensure entry exists if it came only from usages (edge case)
-      const label = usage.deployedProduct?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
+      const label = usage.deployedProduct?.label ?? usage.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
       const existing = productMap.get(pid) ?? {
         label,
         instanceCount: 0,
@@ -354,6 +356,43 @@ function EnvironmentBreakdownAccordion({
   dateRange,
 }: EnvironmentBreakdownAccordionProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(row.kind);
+
+  // Instances fetched eagerly — needed for collapsed row header counts (product/instance).
+  const { data: depInstancesData } = usePostDeploymentInstancesSearch(row.deploymentId);
+
+  const metricsPayload = useMemo(
+    () => ({ filters: { startDate: dateRange.startDate, endDate: dateRange.endDate } }),
+    [dateRange],
+  );
+
+  // Usages only fetched when expanded — avoids N concurrent calls on mount.
+  const { data: depUsagesData } = usePostDeploymentInstancesUsagesSearch(
+    expanded ? row.deploymentId : undefined,
+    metricsPayload,
+  );
+
+  const { productCount, instanceCount, totalCores, transactionsLabel } = useMemo(() => {
+    const instances = depInstancesData?.instances ?? [];
+    const usages = depUsagesData?.usages ?? [];
+    const productIds = new Set([
+      ...instances.map((i) => i.deployedProduct?.id ?? i.product?.id).filter(Boolean),
+      ...usages.map((u) => u.deployedProduct?.id ?? u.product?.id).filter(Boolean),
+    ]);
+    const totalTx = usages.reduce(
+      (sum, u) => sum + sumUsageEntryTransactions(u),
+      0,
+    );
+    return {
+      productCount: depInstancesData ? productIds.size : row.productCount,
+      instanceCount: depInstancesData ? instances.length : row.instanceCount,
+      totalCores: depInstancesData
+        ? instances.reduce((sum, i) => sum + (i.metadata?.coreCount ?? 0), 0)
+        : row.totalCores,
+      transactionsLabel: depUsagesData
+        ? formatUsageMetricCount(totalTx)
+        : row.transactionsLabel,
+    };
+  }, [depInstancesData, depUsagesData, row]);
 
   return (
     <Accordion
@@ -414,11 +453,11 @@ function EnvironmentBreakdownAccordion({
                 {row.title}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {row.productCount} product{row.productCount !== 1 ? "s" : ""}
+                {productCount} product{productCount !== 1 ? "s" : ""}
                 <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>
                   |
                 </Box>
-                {row.instanceCount} instance{row.instanceCount !== 1 ? "s" : ""}
+                {instanceCount} instance{instanceCount !== 1 ? "s" : ""}
               </Typography>
             </Box>
           </Box>
@@ -434,7 +473,7 @@ function EnvironmentBreakdownAccordion({
                 {USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {row.totalCores}
+                {totalCores}
               </Typography>
             </Box>
             <Box sx={{ textAlign: "right" }}>
@@ -442,7 +481,7 @@ function EnvironmentBreakdownAccordion({
                 {USAGE_METRICS_ENVIRONMENT_ROW_TRANSACTIONS}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {row.transactionsLabel}
+                {transactionsLabel}
               </Typography>
             </Box>
           </Box>
@@ -492,7 +531,9 @@ function deriveMetricSummaries(
   const sortedDates = Object.keys(stats).sort();
   const summaries: MetricTypeSummary[] = [];
 
-  for (const key of metricKeys) {
+  const orderedKeys = DATA_SOURCE_STAT_KEYS.filter((k) => metricKeys.has(k));
+
+  for (const key of orderedKeys) {
     const values = sortedDates.map((d) => stats[d][key] ?? 0);
     const nonZero = values.filter((v) => v > 0);
     if (nonZero.length === 0) continue;
@@ -561,18 +602,27 @@ export default function UsageOverviewPanel({
     isError: metricsError,
   } = usePostProjectInstancesMetricsSearch(projectId, metricsPayload);
 
+  // Current totals — for the curr value on the top 3 stat cards
+  const {
+    data: statsData,
+    isLoading: statsLoading,
+    isError: statsError,
+  } = useGetProjectUsageStats(projectId);
+
   const isLoading =
     deploymentsLoading ||
     instancesLoading ||
     usagesLoading ||
-    metricsLoading;
+    metricsLoading ||
+    statsLoading;
   const isError =
     deploymentsError ||
     instancesError ||
     usagesError ||
-    metricsError;
+    metricsError ||
+    statsError;
 
-  const isStatCardsLoading = metricsLoading;
+  const isStatCardsLoading = metricsLoading || statsLoading;
 
   // ── Data source stats ──────────────────────────────────────────────────────
   const dataSourceStatsPayload = useMemo(
@@ -599,19 +649,26 @@ export default function UsageOverviewPanel({
     return deriveMetricSummaries(dataSourceStatsData.stats);
   }, [dataSourceStatsData]);
 
-  // ── Overview summary stats (derived from metrics time-series) ─────────────
+  // ── Overview summary stats — curr from stats API, min/avg/max from time-series
   const overviewSummaries = useMemo(() => {
     const metrics = metricsData?.metrics ?? [];
-    if (metrics.length === 0) {
-      const fallback: CurrMinMaxAvg = { curr: 0, avg: 0, min: 0, max: 0 };
-      return {
-        instanceSummary: fallback,
-        productSummary: fallback,
-        environmentSummary: fallback,
-      };
-    }
-    return computeOverviewSummaries(metrics);
-  }, [metricsData]);
+    const usages = usagesData?.usages ?? [];
+    const base = computeOverviewSummaries(metrics, usages);
+    return {
+      environmentSummary: {
+        ...base.environmentSummary,
+        curr: statsData?.deploymentCount ?? base.environmentSummary.curr,
+      },
+      productSummary: {
+        ...base.productSummary,
+        curr: statsData?.deployedProductCount ?? base.productSummary.curr,
+      },
+      instanceSummary: {
+        ...base.instanceSummary,
+        curr: statsData?.instanceCount ?? base.instanceSummary.curr,
+      },
+    };
+  }, [metricsData, usagesData, statsData]);
 
   // ── Environment breakdown rows ─────────────────────────────────────────────
   const environmentBreakdown = useMemo((): EnvironmentBreakdownRow[] => {
@@ -620,9 +677,13 @@ export default function UsageOverviewPanel({
 
     return deploymentsData.map((dep) => {
       const depInstances = instances.filter((i) => i.deployment?.id === dep.id);
-      const productIds = new Set(
-        depInstances.map((i) => i.deployedProduct?.id).filter(Boolean),
+      const depUsagesForDep = (usagesData?.usages ?? []).filter(
+        (u) => u.deployment?.id === dep.id,
       );
+      const productIds = new Set([
+        ...depInstances.map((i) => i.deployedProduct?.id ?? i.product?.id).filter(Boolean),
+        ...depUsagesForDep.map((u) => u.deployedProduct?.id ?? u.product?.id).filter(Boolean),
+      ]);
       const productCount = productIds.size;
       const instanceCount = depInstances.length;
       const totalCores = depInstances.reduce(
@@ -639,9 +700,7 @@ export default function UsageOverviewPanel({
         instanceCount,
         totalCores,
         transactionsLabel: (() => {
-          const depUsages = (usagesData?.usages ?? []).filter(
-            (u) => u.deployment?.id === dep.id,
-          );
+          const depUsages = depUsagesForDep;
           const total = depUsages.reduce(
             (sum, u) => sum + sumUsageEntryTransactions(u),
             0,

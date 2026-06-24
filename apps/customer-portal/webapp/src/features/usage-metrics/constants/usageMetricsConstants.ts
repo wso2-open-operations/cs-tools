@@ -177,9 +177,16 @@ export const METRIC_TYPE_LABELS: Record<string, string> = {
   TRANSACTION_COUNT: "Transactions",
   TOTAL_USERS: "Total Users",
   TOTAL_ROOT_ORGS: "Organizations",
-  TOTAL_B2B_ORGS: "Organizations",
   API_COUNT: "API Count",
 };
+
+// Ordered list of stat keys to display in the data source stats section.
+export const DATA_SOURCE_STAT_KEYS = [
+  "TRANSACTION_COUNT",
+  "TOTAL_USERS",
+  "TOTAL_ROOT_ORGS",
+  "API_COUNT",
+];
 
 export const USAGE_METRICS_PRODUCT_INSTANCE_METRICS = "Instance Metrics";
 
