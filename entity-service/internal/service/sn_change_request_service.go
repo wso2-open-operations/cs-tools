@@ -380,6 +380,10 @@ func (s *snChangeRequestService) GetChangeRequest(ctx context.Context, id string
 		return domain.ChangeRequest{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ChangeRequest{}, err
+	}
+
 	raw, err := s.client.Get(ctx, "/change-requests/"+uuidToSysid(id), token)
 	if err != nil {
 		return domain.ChangeRequest{}, err
