@@ -383,7 +383,11 @@ function EnvironmentBreakdownAccordion({
       0,
     );
     return {
-      productCount: depInstancesData ? productIds.size : row.productCount,
+      // productCount needs both instances+usages to be accurate; fall back to
+      // row.productCount until usages have been fetched at least once (React
+      // Query keeps cached usages data even when the query is disabled, so after
+      // the first expansion the count stays stable on collapse).
+      productCount: depInstancesData && depUsagesData ? productIds.size : row.productCount,
       instanceCount: depInstancesData ? instances.length : row.instanceCount,
       totalCores: depInstancesData
         ? instances.reduce((sum, i) => sum + (i.metadata?.coreCount ?? 0), 0)
