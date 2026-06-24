@@ -202,6 +202,14 @@ export type UsageAggregatedMetricDefinition = {
   secondaryName?: string;
 };
 
+// Curr/Avg/Min/Max summary for a metric over a time range.
+export type CurrMinMaxAvg = {
+  curr: number;
+  avg: number;
+  min: number;
+  max: number;
+};
+
 // Data source values for filtering usage stats.
 export enum DataSource {
   API_CALL = 1,
@@ -251,7 +259,7 @@ export type UsageProductInstanceRow = {
   javaVersion: string;
   u2Level: string;
   transactionsLabel: string;
-  coreCount: number;
+  coreSummary: CurrMinMaxAvg;
   charts: UsageInstanceCharts;
 };
 
@@ -274,4 +282,6 @@ export type UsageEnvironmentProduct = {
   transactionTrend: UsageTrendRow[];
   coreUsageTrend: UsageTrendRow[];
   instances: UsageProductInstanceRow[];
+  instanceSummary: CurrMinMaxAvg;
+  coreSummary: CurrMinMaxAvg;
 };

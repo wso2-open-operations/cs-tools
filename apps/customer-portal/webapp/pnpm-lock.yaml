@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@asgardeo/react':
-        specifier: 0.25.5
-        version: 0.25.5(@types/react@19.2.5)(react@19.2.0)
+        specifier: 0.25.6
+        version: 0.25.6(@types/react@19.2.5)(react@19.2.0)
       '@asgardeo/react-router':
         specifier: 2.0.0
-        version: 2.0.0(@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)
+        version: 2.0.0(@asgardeo/react@0.25.6(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)
       '@lexical/code':
         specifier: 0.40.0
         version: 0.40.0
@@ -177,8 +177,8 @@ packages:
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
 
-  '@asgardeo/browser@0.7.9':
-    resolution: {integrity: sha512-kwQ+brGx5+AqVwHaupLBRv13HNSjqcH7qkDNktL2b4oL0dVwWqrs3oeGFcNxbaS71Fege1cN5KMHGnh6hGszqg==}
+  '@asgardeo/browser@0.7.10':
+    resolution: {integrity: sha512-5KSO6xqFCl4YMNvIwQik+fxWrsoofQgvhKLipEkzYHk3o8tpOcFldi26lszARwFBhvRW+qUF6UfY323CsrEBmw==}
 
   '@asgardeo/i18n@0.4.5':
     resolution: {integrity: sha512-p1DVVI7lNu7KeDqhRNgAuSrHvVgCbbVXc04koyiiwjDx+sJaXychuC9pwVJ2PDUnIyEp3Xgdb3KqMq+Sx4e7xA==}
@@ -193,8 +193,8 @@ packages:
       react: '>=16.8.0'
       react-router: '>=6.30.1'
 
-  '@asgardeo/react@0.25.5':
-    resolution: {integrity: sha512-ng8G9f55mSFciG1+L9n93q3wJWFx/kB+6Gge2lNZ+Hjnmw82AJVa15mbKFvH4FS9qm3G0cI7FSYhEW67PYkugw==}
+  '@asgardeo/react@0.25.6':
+    resolution: {integrity: sha512-tjnqwRQXfAVOmUmC1Q5TJt4wPcUtiHG/ksR3VtSWgsOKR8E7Spbn/jGtXR8Mn4Kz0jfSGObdneW8Q11TVYY2qQ==}
     peerDependencies:
       '@types/react': '>=16.8.0'
       react: '>=16.8.0'
@@ -3226,7 +3226,7 @@ snapshots:
 
   '@asamuzakjp/nwsapi@2.3.9': {}
 
-  '@asgardeo/browser@0.7.9':
+  '@asgardeo/browser@0.7.10':
     dependencies:
       '@asgardeo/javascript': 0.23.0
       base64url: 3.0.1
@@ -3250,16 +3250,16 @@ snapshots:
       jose: 5.10.0
       tslib: 2.8.1
 
-  '@asgardeo/react-router@2.0.0(@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)':
+  '@asgardeo/react-router@2.0.0(@asgardeo/react@0.25.6(@types/react@19.2.5)(react@19.2.0))(react-router@7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)':
     dependencies:
-      '@asgardeo/react': 0.25.5(@types/react@19.2.5)(react@19.2.0)
+      '@asgardeo/react': 0.25.6(@types/react@19.2.5)(react@19.2.0)
       react: 19.2.0
       react-router: 7.1.5(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       tslib: 2.8.1
 
-  '@asgardeo/react@0.25.5(@types/react@19.2.5)(react@19.2.0)':
+  '@asgardeo/react@0.25.6(@types/react@19.2.5)(react@19.2.0)':
     dependencies:
-      '@asgardeo/browser': 0.7.9
+      '@asgardeo/browser': 0.7.10
       '@asgardeo/i18n': 0.4.5
       '@emotion/css': 11.13.5
       '@floating-ui/react': 0.27.12(react-dom@19.2.4(react@19.2.0))(react@19.2.0)

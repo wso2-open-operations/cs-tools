@@ -21,9 +21,9 @@ import {
   Alert,
   Box,
   Card,
+  Divider,
   Grid,
   Skeleton,
-  StatCard,
   Typography,
   useTheme,
   useMediaQuery,
@@ -41,6 +41,7 @@ import usePostProjectInstancesUsagesStats from "@features/project-details/api/us
 import DataSourceStatCard from "@features/usage-metrics/components/DataSourceStatCard";
 import type { MetricTypeSummary } from "@features/project-details/types/usage";
 import {
+  DATA_SOURCE_STAT_KEYS,
   METRIC_TYPE_LABELS,
   USAGE_METRICS_DATA_SOURCE_STATS_SECTION,
   USAGE_METRICS_NO_DATA_SOURCE_STATS,
@@ -83,11 +84,84 @@ import type {
 } from "@features/usage-metrics/types/usageMetrics";
 import { deriveAggregatedMetrics } from "@features/usage-metrics/utils/usageMetricsAggregated";
 import { getUsageOverviewAccentForTypeId } from "@features/usage-metrics/utils/usageMetricsAccent";
-import { formatUsageMetricCount, sumUsageEntryTransactions } from "@features/project-details/utils/usageMetrics";
+import {
+  computeOverviewSummaries,
+  formatUsageMetricCount,
+  sumUsageEntryTransactions,
+} from "@features/project-details/utils/usageMetrics";
+import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
+import {
+  USAGE_METRICS_STAT_LABEL_AVG,
+  USAGE_METRICS_STAT_LABEL_MIN,
+  USAGE_METRICS_STAT_LABEL_MAX,
+} from "@features/usage-metrics/constants/usageMetricsConstants";
 
 function EnvironmentIcon({ typeId }: { typeId: string }): JSX.Element {
   const color = getUsageOverviewAccentForTypeId(typeId).iconColor;
   return <Server size={20} color={color} />;
+}
+
+// ─── Flat overview summary card (replaces plain StatCard) ────────────────────
+
+function OverviewSummaryCard({
+  label,
+  icon,
+  iconColor,
+  summary,
+  isLoading,
+}: {
+  label: string;
+  icon: JSX.Element;
+  iconColor: string;
+  summary: CurrMinMaxAvg;
+  isLoading: boolean;
+}): JSX.Element {
+  if (isLoading) {
+    return (
+      <Card variant="outlined" sx={{ p: 2 }}>
+        <Skeleton variant="text" width={100} height={20} sx={{ mb: 1 }} />
+        <Skeleton variant="text" width={60} height={36} sx={{ mb: 1.5 }} />
+        <Skeleton variant="rounded" height={28} />
+      </Card>
+    );
+  }
+
+  return (
+    <Card variant="outlined" sx={{ p: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+        <Box sx={{ color: iconColor, display: "flex" }}>{icon}</Box>
+        <Typography variant="subtitle2" color="text.secondary">
+          {label}
+        </Typography>
+      </Box>
+      <Typography variant="h5" fontWeight={700} sx={{ mb: 1.5 }}>
+        {summary.curr}
+      </Typography>
+      <Divider sx={{ mb: 1.5 }} />
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: 1,
+        }}
+      >
+        {[
+          { label: USAGE_METRICS_STAT_LABEL_MIN, value: summary.min },
+          { label: USAGE_METRICS_STAT_LABEL_MAX, value: summary.max },
+          { label: USAGE_METRICS_STAT_LABEL_AVG, value: summary.avg },
+        ].map(({ label: l, value: v }) => (
+          <Box key={l} sx={{ textAlign: "center" }}>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {l}
+            </Typography>
+            <Typography variant="body2" fontWeight={600}>
+              {v}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Card>
+  );
 }
 
 // ─── Per-deployment expanded product cards (sourced from deployment-scoped APIs) ───
@@ -160,6 +234,7 @@ function DeploymentExpandedView({
   deploymentId,
   typeId,
   dateRange,
+  expanded,
 }: DeploymentExpandedViewProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(typeId);
 
@@ -177,12 +252,15 @@ function DeploymentExpandedView({
     isError: instancesError,
   } = usePostDeploymentInstancesSearch(deploymentId);
 
-  // Fetch usages for this deployment — gives us transactions per deployedProduct
+  // Fetch usages only when expanded — avoids firing for every collapsed row.
   const {
     data: usagesData,
     isLoading: usagesLoading,
     isError: usagesError,
-  } = usePostDeploymentInstancesUsagesSearch(deploymentId, metricsPayload);
+  } = usePostDeploymentInstancesUsagesSearch(
+    expanded ? deploymentId : undefined,
+    metricsPayload,
+  );
 
   const isLoading = instancesLoading || usagesLoading;
   const isError = instancesError || usagesError;
@@ -204,8 +282,8 @@ function DeploymentExpandedView({
     >();
 
     for (const inst of instances) {
-      const pid = inst.deployedProduct?.id;
-      const label = inst.deployedProduct?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
+      const pid = inst.deployedProduct?.id ?? inst.product?.id;
+      const label = inst.deployedProduct?.label ?? inst.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
       if (!pid) continue;
       const existing = productMap.get(pid) ?? {
         label,
@@ -220,10 +298,10 @@ function DeploymentExpandedView({
 
     // Accumulate transactions from deployment-scoped usages per deployedProduct
     for (const usage of usages) {
-      const pid = usage.deployedProduct?.id;
+      const pid = usage.deployedProduct?.id ?? usage.product?.id;
       if (!pid) continue;
       // Ensure entry exists if it came only from usages (edge case)
-      const label = usage.deployedProduct?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
+      const label = usage.deployedProduct?.label ?? usage.product?.label ?? USAGE_METRICS_UNKNOWN_LABEL;
       const existing = productMap.get(pid) ?? {
         label,
         instanceCount: 0,
@@ -235,7 +313,7 @@ function DeploymentExpandedView({
     }
 
     return Array.from(productMap.entries()).map(([id, p]) => ({ id, ...p }));
-  }, [instancesData, usagesData, deploymentId]);
+  }, [instancesData, usagesData]);
 
   if (isError) {
     return (
@@ -282,6 +360,45 @@ function EnvironmentBreakdownAccordion({
   dateRange,
 }: EnvironmentBreakdownAccordionProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(row.kind);
+
+  const metricsPayload = useMemo(
+    () => ({ filters: { startDate: dateRange.startDate, endDate: dateRange.endDate } }),
+    [dateRange],
+  );
+
+  // Both hooks gated on expanded — avoids N concurrent calls on mount and prevents
+  // API gateway throttling when many accordion rows are rendered simultaneously.
+  const { data: depInstancesData } = usePostDeploymentInstancesSearch(
+    expanded ? row.deploymentId : undefined,
+  );
+  const { data: depUsagesData } = usePostDeploymentInstancesUsagesSearch(
+    expanded ? row.deploymentId : undefined,
+    metricsPayload,
+  );
+
+  const { productCount, instanceCount, totalCores, transactionsLabel } = useMemo(() => {
+    if (!expanded || !depInstancesData) {
+      return {
+        productCount: row.productCount,
+        instanceCount: row.instanceCount,
+        totalCores: row.totalCores,
+        transactionsLabel: row.transactionsLabel,
+      };
+    }
+    const instances = depInstancesData.instances ?? [];
+    const usages = depUsagesData?.usages ?? [];
+    const productIds = new Set([
+      ...instances.map((i) => i.deployedProduct?.id ?? i.product?.id).filter(Boolean),
+      ...usages.map((u) => u.deployedProduct?.id ?? u.product?.id).filter(Boolean),
+    ]);
+    const totalTx = usages.reduce((sum, u) => sum + sumUsageEntryTransactions(u), 0);
+    return {
+      productCount: productIds.size,
+      instanceCount: instances.length,
+      totalCores: instances.reduce((sum, i) => sum + (i.metadata?.coreCount ?? 0), 0),
+      transactionsLabel: formatUsageMetricCount(totalTx),
+    };
+  }, [expanded, depInstancesData, depUsagesData, row]);
 
   return (
     <Accordion
@@ -342,11 +459,11 @@ function EnvironmentBreakdownAccordion({
                 {row.title}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {row.productCount} product{row.productCount !== 1 ? "s" : ""}
+                {productCount} product{productCount !== 1 ? "s" : ""}
                 <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>
                   |
                 </Box>
-                {row.instanceCount} instance{row.instanceCount !== 1 ? "s" : ""}
+                {instanceCount} instance{instanceCount !== 1 ? "s" : ""}
               </Typography>
             </Box>
           </Box>
@@ -362,7 +479,7 @@ function EnvironmentBreakdownAccordion({
                 {USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {row.totalCores}
+                {totalCores}
               </Typography>
             </Box>
             <Box sx={{ textAlign: "right" }}>
@@ -370,7 +487,7 @@ function EnvironmentBreakdownAccordion({
                 {USAGE_METRICS_ENVIRONMENT_ROW_TRANSACTIONS}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {row.transactionsLabel}
+                {transactionsLabel}
               </Typography>
             </Box>
           </Box>
@@ -390,6 +507,7 @@ function EnvironmentBreakdownAccordion({
           deploymentId={row.deploymentId}
           typeId={row.kind}
           dateRange={dateRange}
+          expanded={expanded}
         />
       </AccordionDetails>
     </Accordion>
@@ -420,7 +538,9 @@ function deriveMetricSummaries(
   const sortedDates = Object.keys(stats).sort();
   const summaries: MetricTypeSummary[] = [];
 
-  for (const key of metricKeys) {
+  const orderedKeys = DATA_SOURCE_STAT_KEYS.filter((k) => metricKeys.has(k));
+
+  for (const key of orderedKeys) {
     const values = sortedDates.map((d) => stats[d][key] ?? 0);
     const nonZero = values.filter((v) => v > 0);
     if (nonZero.length === 0) continue;
@@ -488,7 +608,7 @@ export default function UsageOverviewPanel({
     isError: metricsError,
   } = usePostProjectInstancesMetricsSearch(projectId, metricsPayload);
 
-  // Project-wide stats — for the 3 top stat cards
+  // Current totals — for the curr value on the top 3 stat cards
   const {
     data: statsData,
     isLoading: statsLoading,
@@ -508,7 +628,7 @@ export default function UsageOverviewPanel({
     metricsError ||
     statsError;
 
-  const isStatCardsLoading = statsLoading;
+  const isStatCardsLoading = metricsLoading || statsLoading || usagesLoading;
 
   // ── Data source stats ──────────────────────────────────────────────────────
   const dataSourceStatsPayload = useMemo(
@@ -535,14 +655,26 @@ export default function UsageOverviewPanel({
     return deriveMetricSummaries(dataSourceStatsData.stats);
   }, [dataSourceStatsData]);
 
-  // ── Overview summary stats ─────────────────────────────────────────────────
-  const overviewStats = useMemo(() => {
+  // ── Overview summary stats — curr from stats API, min/avg/max from time-series
+  const overviewSummaries = useMemo(() => {
+    const metrics = metricsData?.metrics ?? [];
+    const usages = usagesData?.usages ?? [];
+    const base = computeOverviewSummaries(metrics, usages);
     return {
-      environments: statsData?.deploymentCount ?? 0,
-      products: statsData?.deployedProductCount ?? 0,
-      instances: statsData?.instanceCount ?? 0,
+      environmentSummary: {
+        ...base.environmentSummary,
+        curr: statsData?.deploymentCount ?? base.environmentSummary.curr,
+      },
+      productSummary: {
+        ...base.productSummary,
+        curr: statsData?.deployedProductCount ?? base.productSummary.curr,
+      },
+      instanceSummary: {
+        ...base.instanceSummary,
+        curr: statsData?.instanceCount ?? base.instanceSummary.curr,
+      },
     };
-  }, [statsData]);
+  }, [metricsData, usagesData, statsData]);
 
   // ── Environment breakdown rows ─────────────────────────────────────────────
   const environmentBreakdown = useMemo((): EnvironmentBreakdownRow[] => {
@@ -551,9 +683,13 @@ export default function UsageOverviewPanel({
 
     return deploymentsData.map((dep) => {
       const depInstances = instances.filter((i) => i.deployment?.id === dep.id);
-      const productIds = new Set(
-        depInstances.map((i) => i.deployedProduct?.id).filter(Boolean),
+      const depUsagesForDep = (usagesData?.usages ?? []).filter(
+        (u) => u.deployment?.id === dep.id,
       );
+      const productIds = new Set([
+        ...depInstances.map((i) => i.deployedProduct?.id ?? i.product?.id).filter(Boolean),
+        ...depUsagesForDep.map((u) => u.deployedProduct?.id ?? u.product?.id).filter(Boolean),
+      ]);
       const productCount = productIds.size;
       const instanceCount = depInstances.length;
       const totalCores = depInstances.reduce(
@@ -570,9 +706,7 @@ export default function UsageOverviewPanel({
         instanceCount,
         totalCores,
         transactionsLabel: (() => {
-          const depUsages = (usagesData?.usages ?? []).filter(
-            (u) => u.deployment?.id === dep.id,
-          );
+          const depUsages = depUsagesForDep;
           const total = depUsages.reduce(
             (sum, u) => sum + sumUsageEntryTransactions(u),
             0,
@@ -618,45 +752,30 @@ export default function UsageOverviewPanel({
         sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
       >
         <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
-          <StatCard
+          <OverviewSummaryCard
             label={USAGE_METRICS_STAT_ENVIRONMENTS}
-            value={
-              isStatCardsLoading
-                ? ((
-                    <Skeleton variant="rounded" width={60} height={24} />
-                  ) as unknown as number)
-                : overviewStats.environments
-            }
-            icon={<Layers />}
-            iconColor="info"
+            icon={<Layers size={18} />}
+            iconColor="var(--oxygen-palette-info-main, #0288d1)"
+            summary={overviewSummaries.environmentSummary}
+            isLoading={isStatCardsLoading}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
-          <StatCard
+          <OverviewSummaryCard
             label={USAGE_METRICS_STAT_PRODUCTS}
-            value={
-              isStatCardsLoading
-                ? ((
-                    <Skeleton variant="rounded" width={60} height={24} />
-                  ) as unknown as number)
-                : overviewStats.products
-            }
-            icon={<Package />}
-            iconColor="primary"
+            icon={<Package size={18} />}
+            iconColor="var(--oxygen-palette-primary-main, #8457ad)"
+            summary={overviewSummaries.productSummary}
+            isLoading={isStatCardsLoading}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }} sx={{ minWidth: 0 }}>
-          <StatCard
+          <OverviewSummaryCard
             label={USAGE_METRICS_STAT_INSTANCES}
-            value={
-              isStatCardsLoading
-                ? ((
-                    <Skeleton variant="rounded" width={60} height={24} />
-                  ) as unknown as number)
-                : overviewStats.instances
-            }
-            icon={<ServerIcon />}
-            iconColor="success"
+            icon={<ServerIcon size={18} />}
+            iconColor="var(--oxygen-palette-success-main, #2e7d32)"
+            summary={overviewSummaries.instanceSummary}
+            isLoading={isStatCardsLoading}
           />
         </Grid>
       </Grid>

@@ -25,6 +25,8 @@ import type {
 import {
   buildCoreAverageTrendFromMetrics,
   buildUsageTrendFromUsages,
+  computeInstanceAndCoreSummary,
+  computeSeriesSummary,
   computeUsageHeadlineDeltaSigned,
   formatUsageMetricCount,
 } from "@features/project-details/utils/usageMetrics";
@@ -151,15 +153,19 @@ export function deriveUsageEnvironmentProducts(
         const instCoreTrend = instMetric
           ? buildCoreAverageTrendFromMetrics([instMetric])
           : [];
-        const lastCore =
-          instMetric?.dataPoints.at(-1)?.coreCount ??
-          (instMetric?.dataPoints.at(-1)?.deploymentMetadata?.numberOfCores !=
-          null
-            ? Number(
-                instMetric.dataPoints.at(-1)!.deploymentMetadata!.numberOfCores,
-              )
-            : 0) ??
-          0;
+
+        const instCoreValues = (instMetric?.dataPoints ?? [])
+          .slice()
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .map((dp) =>
+            dp.coreCount != null
+              ? dp.coreCount
+              : dp.deploymentMetadata?.numberOfCores != null
+                ? Number(dp.deploymentMetadata.numberOfCores)
+                : 0,
+          );
+        const instCoreSummary = computeSeriesSummary(instCoreValues);
+
         const coreHD = computeUsageHeadlineDeltaSigned(
           instCoreTrend.map((r) => ({ name: r.name, value: r.current })),
         );
@@ -185,7 +191,7 @@ export function deriveUsageEnvironmentProducts(
         const coresBlock: UsageInstanceChartBlock = {
           title: USAGE_METRICS_INSTANCE_CHART_CORE_TITLE,
           caption: USAGE_METRICS_INSTANCE_CHART_CORE_CAPTION,
-          headlineValue: String(lastCore),
+          headlineValue: String(instCoreSummary.curr),
           deltaLabel: coreHD.delta,
           deltaPositive: coreHD.deltaPositive,
           stroke: colors.orange?.[500] ?? "#F97316",
@@ -194,14 +200,17 @@ export function deriveUsageEnvironmentProducts(
 
         return {
           id: u.instanceId,
-          hostName: u.instanceId,
+          hostName: u.instanceKey,
           javaVersion: javaVer,
           u2Level,
           transactionsLabel: instTxHD.headline,
-          coreCount: lastCore,
+          coreSummary: instCoreSummary,
           charts: { transactions: txBlock, cores: coresBlock },
         };
       });
+
+      const { instanceSummary, coreSummary } =
+        computeInstanceAndCoreSummary(pMetrics);
 
       return {
         id: pid,
@@ -224,6 +233,8 @@ export function deriveUsageEnvironmentProducts(
         transactionTrend: txTrend,
         coreUsageTrend: coreTrend,
         instances: instanceRows,
+        instanceSummary,
+        coreSummary,
       };
     },
   );

@@ -50,16 +50,21 @@ import {
   USAGE_METRICS_INSTANCE_U2,
   USAGE_METRICS_NO_INSTANCE_DATA,
   USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT,
-  USAGE_METRICS_PRODUCT_CORE_METRIC_INSTANCES,
-  USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES,
   USAGE_METRICS_PRODUCT_PANEL_TOTAL_TRANSACTIONS,
   USAGE_METRICS_PRODUCT_TREND_CORE_SECTION,
   USAGE_METRICS_PRODUCT_TREND_TX_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
+  USAGE_METRICS_PRODUCT_INSTANCE_METRICS,
+  USAGE_METRICS_PRODUCT_CORE_METRICS,
+  USAGE_METRICS_STAT_LABEL_CURR,
+  USAGE_METRICS_STAT_LABEL_AVG,
+  USAGE_METRICS_STAT_LABEL_MIN,
+  USAGE_METRICS_STAT_LABEL_MAX,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
 import usePostDeploymentInstancesUsagesSearch from "@features/project-details/api/usePostDeploymentInstancesUsagesSearch";
 import usePostDeploymentInstancesMetricsSearch from "@features/project-details/api/usePostDeploymentInstancesMetricsSearch";
+import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
 import type {
   InstanceAccordionRowProps,
   InstanceMiniTrendCardProps,
@@ -349,7 +354,7 @@ function InstanceAccordionRow({
             <MetricPill
               icon={<Cpu size={16} color={colors.grey?.[400]} />}
               label={USAGE_METRICS_INSTANCE_CORE_COUNT}
-              value={String(instance.coreCount)}
+              value={`Curr ${instance.coreSummary.curr} / Avg ${instance.coreSummary.avg} / Min ${instance.coreSummary.min} / Max ${instance.coreSummary.max}`}
             />
           </Box>
         </Box>
@@ -375,6 +380,52 @@ function InstanceAccordionRow({
         </Grid>
       </AccordionDetails>
     </Accordion>
+  );
+}
+
+// ─── Curr/Avg/Min/Max metric block ────────────────────────────────────────────
+
+function CurrMinMaxBlock({
+  label,
+  summary,
+}: {
+  label: string;
+  summary: CurrMinMaxAvg;
+}): JSX.Element {
+  const cols = [
+    { l: USAGE_METRICS_STAT_LABEL_CURR, v: summary.curr, highlight: true },
+    { l: USAGE_METRICS_STAT_LABEL_AVG, v: summary.avg, highlight: false },
+    { l: USAGE_METRICS_STAT_LABEL_MIN, v: summary.min, highlight: false },
+    { l: USAGE_METRICS_STAT_LABEL_MAX, v: summary.max, highlight: false },
+  ];
+
+  return (
+    <Box>
+      <Typography
+        variant="body2"
+        sx={{ fontWeight: 700, display: "block", mb: 1 }}
+      >
+        {label}
+      </Typography>
+      <Box sx={{ display: "flex", gap: 2 }}>
+        {cols.map(({ l, v, highlight }) => (
+          <Box key={l} sx={{ textAlign: "left" }}>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.25 }}>
+              {l}
+            </Typography>
+            <Typography
+              variant="body1"
+              sx={{
+                fontWeight: 700,
+                color: highlight ? "primary.main" : "text.primary",
+              }}
+            >
+              {v}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Box>
   );
 }
 
@@ -425,7 +476,7 @@ function ProductAccordionRow({
           sx={{
             display: "flex",
             flexDirection: { xs: "column", lg: "row" },
-            alignItems: { xs: "stretch", lg: "flex-start" },
+            alignItems: { xs: "stretch", lg: "center" },
             gap: 2,
             width: "100%",
             minWidth: 0,
@@ -437,7 +488,8 @@ function ProductAccordionRow({
               display: "flex",
               alignItems: "center",
               gap: 2,
-              minWidth: { lg: 250 },
+              minWidth: { lg: 240 },
+              maxWidth: { lg: 280 },
             }}
           >
             <Box
@@ -448,10 +500,10 @@ function ProductAccordionRow({
                 flexShrink: 0,
               }}
             >
-              <Package size={24} color={a.iconColor} />
+              <Package size={20} color={a.iconColor} />
             </Box>
-            <Box sx={{ textAlign: "left" }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            <Box sx={{ textAlign: "left", minWidth: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
                 {product.name}
               </Typography>
             </Box>
@@ -461,46 +513,37 @@ function ProductAccordionRow({
             sx={{
               flex: 1,
               minWidth: 0,
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", sm: "repeat(4, 1fr)" },
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: { xs: "flex-start", sm: "space-between" },
+              alignItems: "flex-start",
               gap: 2,
-              alignItems: "start",
             }}
           >
-            <Box sx={{ textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
                 {USAGE_METRICS_PRODUCT_PANEL_TOTAL_TRANSACTIONS}
               </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              <Typography variant="body1" sx={{ fontWeight: 700 }}>
                 {product.transactionsLabel}
               </Typography>
             </Box>
-            <Box sx={{ textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
                 {product.thirdMetricLabel}
               </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              <Typography variant="body1" sx={{ fontWeight: 700 }}>
                 {product.thirdMetricValue}
               </Typography>
             </Box>
-            <Box sx={{ textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">
-                {product.coreMetrics[0]?.label ||
-                  USAGE_METRICS_PRODUCT_CORE_METRIC_TOTAL_CORES}
-              </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                {product.coreMetrics[0]?.value}
-              </Typography>
-            </Box>
-            <Box sx={{ textAlign: "center" }}>
-              <Typography variant="caption" color="text.secondary">
-                {product.coreMetrics[1]?.label ||
-                  USAGE_METRICS_PRODUCT_CORE_METRIC_INSTANCES}
-              </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                {product.coreMetrics[1]?.value}
-              </Typography>
-            </Box>
+            <CurrMinMaxBlock
+              label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
+              summary={product.instanceSummary}
+            />
+            <CurrMinMaxBlock
+              label={USAGE_METRICS_PRODUCT_CORE_METRICS}
+              summary={product.coreSummary}
+            />
           </Box>
         </Box>
       </AccordionSummary>

@@ -90,9 +90,9 @@ export function deriveAggregatedMetrics(
     "TOTAL_USERS",
     periodLabel,
   );
-  const b2bTrend = buildUsageTrendFromUsages(
+  const rootOrgTrend = buildUsageTrendFromUsages(
     usages,
-    "TOTAL_B2B_ORGS",
+    "TOTAL_ROOT_ORGS",
     periodLabel,
   );
   const coreTrend = buildDailyCoreTrendFromMetrics(metrics, dateLabel);
@@ -100,7 +100,7 @@ export function deriveAggregatedMetrics(
   const txHD = computeUsageHeadlineDelta(txTrend);
   const apiHD = computeUsageHeadlineDelta(apiTrend);
   const userHD = computeUsageHeadlineDelta(userTrend);
-  const b2bHD = computeUsageHeadlineDelta(b2bTrend);
+  const rootOrgHD = computeUsageHeadlineDelta(rootOrgTrend);
   const coreHD = computeUsageHeadlineDelta(coreTrend);
 
   return [
@@ -150,12 +150,12 @@ export function deriveAggregatedMetrics(
       id: UsageAggregatedMetricCardId.TOTAL_ORGANIZATION_COUNT,
       title: USAGE_AGGREGATED_ORG_COUNT_TITLE,
       caption: USAGE_AGGREGATED_ORG_COUNT_CAPTION,
-      headlineValue: b2bHD.headline,
-      deltaLabel: b2bHD.delta,
+      headlineValue: rootOrgHD.headline,
+      deltaLabel: rootOrgHD.delta,
       stroke: resolveAggregatedMetricStroke(
         UsageAggregatedMetricCardId.TOTAL_ORGANIZATION_COUNT,
       ),
-      data: b2bTrend,
+      data: rootOrgTrend,
     },
   ];
 }
