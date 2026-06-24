@@ -144,12 +144,12 @@ export default function CsmCasesPage(): JSX.Element {
     setPage(lastPage);
   }
 
-  // When hasMore is true the backend guarantees more pages exist, but total may
-  // reflect only the current page's count rather than the full dataset size.
-  // count={-1} tells MUI the total is unknown → keeps Next enabled; Last is
-  // hidden automatically. When hasMore is false, use exact total for accurate
-  // pagination controls.
-  const paginationCount = data?.hasMore ? -1 : total;
+  // During loading data is undefined; treat the total as unknown (-1) so the
+  // page index never goes out of range and Next stays enabled mid-transition.
+  // When hasMore is true the backend guarantees more pages exist but total may
+  // only reflect the current page count — also use -1. Only use the exact total
+  // when data has loaded and the backend says there are no more pages.
+  const paginationCount = data === undefined || data.hasMore ? -1 : total;
 
   // Counts reflect the current page only (the backend exposes no SLA/assignee
   // breakdown across pages); both are inert in LIVE where that data is absent.
