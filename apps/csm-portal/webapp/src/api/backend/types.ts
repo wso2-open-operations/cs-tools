@@ -63,9 +63,9 @@ export type BeCaseIssueType =
   | "security_or_compliance"
   | "total_outage";
 
-/** Case type (entity `typeKey`). Only `support` is creatable from the portal. */
+/** Case type (entity `type`). Only `case` is creatable from the portal. */
 export type BeCaseType =
-  | "support"
+  | "case"
   | "service_request"
   | "security_report_analysis"
   | "announcement"
@@ -166,7 +166,9 @@ export interface BeCaseView {
   description?: string;
   severity?: BeCaseSeverity;
   issueType?: BeCaseIssueType;
-  type?: BeCaseType;
+  type?: BeCaseType | null;
+  /** Engagement type; only meaningful for `engagement` cases. Null otherwise. */
+  engagementType?: string | null;
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
@@ -176,16 +178,23 @@ export interface BeCaseView {
   assignedEngineer?: BeAssignedEngineerRef | null;
   account?: BeCaseAccountRef;
   project?: BeEntityRef;
-  deployment?: BeEntityRef;
-  deployedProduct?: BeDeployedProductRef;
+  /** Nullable: ServiceNow-sourced cases may have no deployment / product. */
+  deployment?: BeEntityRef | null;
+  deployedProduct?: BeDeployedProductRef | null;
+  /** SR catalog refs (managed-cloud); null for non-catalog cases. */
+  catalog?: BeEntityRef | null;
+  catalogItem?: BeEntityRef | null;
+  /** Assigned team and linked chat conversation; null when not set. */
+  assignedTeam?: BeEntityRef | null;
+  conversation?: BeEntityRef | null;
   createdOn?: string;
   updatedOn?: string;
   closedAt?: string | null;
 }
 
 export interface BeCaseCreatePayload {
-  /** Case type. The portal only creates `support` cases. */
-  type: "support";
+  /** Case type. The portal only creates `case` (standard support) cases. */
+  type: "case";
   projectId: string;
   deploymentId: string;
   deployedProductId: string;
@@ -307,6 +316,8 @@ export interface BeCaseSearchView {
   description?: string;
   severity?: BeCaseSeverity;
   issueType?: BeCaseIssueType;
+  /** Case type (e.g. `case`, `service_request`). */
+  type?: BeCaseType;
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
   workState?: BeCaseWorkState | null;
@@ -318,10 +329,11 @@ export interface BeCaseSearchView {
   /** Created-by is a bare email string here (not a UserRef like the GET view). */
   createdBy?: string;
   project?: BeEntityRef;
-  deployment?: BeEntityRef;
+  /** Nullable: ServiceNow-sourced cases may have no deployment / product. */
+  deployment?: BeEntityRef | null;
   /** Embedded as `{ id, name }` (name already includes the version), not the
    * `displayName`-shaped ref the GET view uses. */
-  deployedProduct?: BeEntityRef;
+  deployedProduct?: BeEntityRef | null;
 }
 
 export interface BeCaseSearchResponse extends BeSearchResponseBase {

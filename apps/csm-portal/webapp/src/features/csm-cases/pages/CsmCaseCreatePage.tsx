@@ -166,7 +166,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
     if (!canSubmit || !severity || !issueType || descriptionOverLimit) return;
     postCase.mutate(
       {
-        type: "support",
+        type: "case",
         projectId,
         deploymentId,
         deployedProductId,

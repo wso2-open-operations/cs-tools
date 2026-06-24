@@ -23,7 +23,7 @@ import type { BeCaseType } from "@api/backend/types";
 
 /** All case types, in the order they appear in the type dropdown. */
 export const ALL_CASE_TYPES: BeCaseType[] = [
-  "support",
+  "case",
   "service_request",
   "security_report_analysis",
   "announcement",
@@ -32,7 +32,7 @@ export const ALL_CASE_TYPES: BeCaseType[] = [
 
 /** Human-readable label per case type. */
 export const CASE_TYPE_LABEL: Record<BeCaseType, string> = {
-  support: "Support",
+  case: "Case",
   service_request: "Service request",
   security_report_analysis: "Security report",
   announcement: "Announcement",

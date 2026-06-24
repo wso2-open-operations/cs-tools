@@ -213,6 +213,7 @@ export function useGetCsmCases(
           product: c.deployedProduct?.name ?? "—",
           severity: severityFromPriority(c.severity),
           state: uiStateFromBe(c.state),
+          caseType: c.type,
           workState: c.workState ?? null,
           assignee,
           assigneeIsMe,
