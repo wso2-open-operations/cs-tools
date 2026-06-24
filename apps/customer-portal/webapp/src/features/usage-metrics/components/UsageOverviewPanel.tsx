@@ -36,7 +36,7 @@ import {
   Server as ServerIcon,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import usePostProjectInstancesUsagesStats from "@features/project-details/api/usePostProjectInstancesUsagesStats";
 import DataSourceStatCard from "@features/usage-metrics/components/DataSourceStatCard";
 import type { MetricTypeSummary } from "@features/project-details/types/usage";
@@ -361,12 +361,13 @@ function EnvironmentBreakdownAccordion({
 }: EnvironmentBreakdownAccordionProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(row.kind);
 
-  // Track whether this row has ever been expanded. Once true the hooks stay
-  // enabled so the query key remains stable and React Query can serve cached
-  // data on collapse — without making any calls on initial mount.
+  // Track whether this row has ever been expanded so hooks stay enabled after
+  // the first expansion and React Query can serve cached data on collapse.
   const hasExpandedRef = useRef(false);
-  if (expanded) hasExpandedRef.current = true;
-  const fetchDeploymentId = hasExpandedRef.current ? row.deploymentId : undefined;
+  useEffect(() => {
+    if (expanded) hasExpandedRef.current = true;
+  }, [expanded]);
+  const fetchDeploymentId = (expanded || hasExpandedRef.current) ? row.deploymentId : undefined;
 
   const metricsPayload = useMemo(
     () => ({ filters: { startDate: dateRange.startDate, endDate: dateRange.endDate } }),
