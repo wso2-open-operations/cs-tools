@@ -16,7 +16,14 @@
 
 import { buildCsvContent, downloadCsvFile } from "@utils/csv";
 import { downloadPdfFile, type PdfColumnStyle } from "@utils/pdf";
-import type { ProjectListItem } from "@features/project-hub/types/projects";
+import type { ProjectListItem, SearchProjectsResponse } from "@features/project-hub/types/projects";
+
+export type AuthFetchFn = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+const EXPORT_ALL_PAGE_SIZE = 100;
 
 const EXPORT_HEADERS = [
   "Project Key",
@@ -72,6 +79,49 @@ function mapProjectsToRows(projects: ProjectListItem[]): string[][] {
     String(p.actionRequiredCount ?? 0),
     String(p.outstandingCount ?? 0),
   ]);
+}
+
+/**
+ * Fetches every page of projects matching an optional search query.
+ * Use this to collect the full dataset before exporting.
+ */
+export async function fetchAllProjectsForExport(
+  authFetch: AuthFetchFn,
+  searchQuery?: string,
+): Promise<ProjectListItem[]> {
+  const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
+  if (!baseUrl) throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
+
+  const allProjects: ProjectListItem[] = [];
+  let offset = 0;
+
+  for (;;) {
+    const body = {
+      pagination: { offset, limit: EXPORT_ALL_PAGE_SIZE },
+      ...(searchQuery?.trim() ? { filters: { searchQuery: searchQuery.trim() } } : {}),
+    };
+
+    const response = await authFetch(`${baseUrl}/projects/search`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error fetching projects for export: ${response.statusText}`);
+    }
+
+    const data: SearchProjectsResponse = await response.json();
+    const page = data.projects ?? [];
+    allProjects.push(...page);
+
+    const nextOffset = offset + EXPORT_ALL_PAGE_SIZE;
+    if (page.length === 0 || allProjects.length >= data.totalRecords || nextOffset <= offset) {
+      break;
+    }
+    offset = nextOffset;
+  }
+
+  return allProjects;
 }
 
 export function downloadProjectListCsv(projects: ProjectListItem[]): void {
