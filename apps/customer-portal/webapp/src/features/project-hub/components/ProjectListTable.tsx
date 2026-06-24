@@ -168,8 +168,8 @@ const ProjectListTable = ({
               <TableCell>Status</TableCell>
               <TableCell>Start Date</TableCell>
               <TableCell>End Date</TableCell>
-              <TableCell align="right">Action Required Items</TableCell>
-              <TableCell align="right">Outstanding Items</TableCell>
+              <TableCell>Action Required Items</TableCell>
+              <TableCell>Outstanding Items</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -226,12 +226,12 @@ const ProjectListTable = ({
                         {formatDate(project.endDate)}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell>
                       <Typography variant="body2">
                         {project.actionRequiredCount ?? 0}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell>
                       <Typography variant="body2">
                         {project.outstandingCount ?? 0}
                       </Typography>
