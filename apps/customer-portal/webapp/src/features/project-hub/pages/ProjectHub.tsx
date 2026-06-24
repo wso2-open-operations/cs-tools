@@ -38,6 +38,9 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import ProjectCard from "@features/project-hub/components/ProjectCard";
 import ProjectCardSkeleton from "@features/project-hub/components/project-card/ProjectCardSkeleton";
+import ProjectListTable from "@features/project-hub/components/ProjectListTable";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import { SETTINGS_PARTNER_ROLE } from "@features/settings/constants/settingsConstants";
 import { ChevronUp, FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
@@ -51,6 +54,7 @@ import {
   PROJECT_HUB_EMPTY_SEARCH_TITLE,
   PROJECT_HUB_ERROR_SUBTITLE,
   PROJECT_HUB_ERROR_TITLE,
+  PROJECT_HUB_PARTNER_LIST_VIEW_THRESHOLD,
   PROJECT_HUB_PROJECTS_PAGE_SIZE,
   PROJECT_HUB_REDIRECT_LOADER_MESSAGE,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS,
@@ -80,6 +84,7 @@ export default function ProjectHub(): JSX.Element {
   const { showLoader, hideLoader } = useLoader();
   const { isLoading: isAuthLoading } = useAsgardeo();
   useGetMetadata();
+  const { data: userDetails } = useGetUserDetails();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const debouncedSearchQuery = useDebouncedValue(
     searchQuery,
@@ -103,15 +108,13 @@ export default function ProjectHub(): JSX.Element {
   const totalRecords = getTotalRecords(data);
 
   // Track the unfiltered total separately so the title never shows a search-result count.
-  // Only update while not loading so the skeleton can use the previously known count.
-  const totalProjectsRef = useRef(0);
-  if (!debouncedSearchQuery && !isLoading) {
-    totalProjectsRef.current = totalRecords;
+  // Render-time setState: React re-renders synchronously in the same pass, no cascading.
+  const [cachedTotalProjects, setCachedTotalProjects] = useState(0);
+  if (!debouncedSearchQuery && !isLoading && totalRecords !== cachedTotalProjects) {
+    setCachedTotalProjects(totalRecords);
   }
   const titleTotalRecords =
-    !isLoading && !debouncedSearchQuery
-      ? totalRecords
-      : totalProjectsRef.current;
+    !isLoading && !debouncedSearchQuery ? totalRecords : cachedTotalProjects;
 
   const [showBackToTop, setShowBackToTop] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -262,10 +265,14 @@ export default function ProjectHub(): JSX.Element {
   const headerTitle = resolveProjectHubHeaderTitle(titleTotalRecords);
   const headerSubtitle = resolveProjectHubHeaderSubtitle();
 
+  const isPartner = (userDetails?.roles ?? []).includes(SETTINGS_PARTNER_ROLE);
+  const isPartnerListView =
+    isPartner && totalRecords > PROJECT_HUB_PARTNER_LIST_VIEW_THRESHOLD;
+
   const colsPerRow = isXlUp ? 5 : isLgUp ? 4 : 3;
   // During loading use the cached count so the skeleton mirrors the expected layout.
-  const effectiveCount = isLoading ? totalProjectsRef.current : projects.length;
-  const isCenteredLayout = effectiveCount <= colsPerRow;
+  const effectiveCount = isLoading ? cachedTotalProjects : projects.length;
+  const isCenteredLayout = !isPartnerListView && effectiveCount <= colsPerRow;
   // When effectiveCount is 0 (first-ever load), fill one full row of skeleton cards.
   const displayCount = effectiveCount === 0 ? colsPerRow : effectiveCount;
 
@@ -427,6 +434,19 @@ export default function ProjectHub(): JSX.Element {
           </Box>
         );
       case ProjectHubContentView.PROJECT_LIST: {
+        if (isPartnerListView) {
+          return (
+            <>
+              <ProjectListTable
+                projects={projects}
+                isFetchingNextPage={isFetchingNextPage}
+              />
+              {/* sentinel triggers infinite scroll to load all projects into the table */}
+              <Box ref={sentinelRef} sx={{ height: 1 }} />
+            </>
+          );
+        }
+
         const grid = (
           <Box sx={gridSx}>
             {projects.map((project) => (

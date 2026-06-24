@@ -71,6 +71,9 @@ export const PROJECT_CARD_ERROR_ENTITY_OUTSTANDING_CASES =
 
 export const PROJECT_CARD_ERROR_ENTITY_ACTIVE_CHATS = "Active Chats";
 
+/** Project count threshold above which partners see the list table instead of card grid. */
+export const PROJECT_HUB_PARTNER_LIST_VIEW_THRESHOLD = 4;
+
 /** ServiceNow deep-link redirect (`ServiceNowCaseRedirectPage`). */
 export const SERVICENOW_REDIRECT_NO_CASE_ID =
   "No case ID provided in the URL.";
