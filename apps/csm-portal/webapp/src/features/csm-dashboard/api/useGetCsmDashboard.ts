@@ -23,10 +23,15 @@ import type {
 } from "@features/csm-dashboard/types/abtDashboard";
 
 /**
- * Loads the CSM ABT dashboard payload.
+ * Loads the CSM ABT dashboard payload from `GET ${BACKEND_BASE_URL}/csm/dashboard`.
  *
- * Calls `GET ${BACKEND_BASE_URL}/csm/dashboard?scope=...`.
+ * NOTE: that endpoint does not exist on the backend yet, so the query is
+ * **disabled** — it never fires (avoiding a guaranteed 404 on every dashboard
+ * load). The fetch logic is kept so it can be re-enabled in one line once the
+ * BE ships `/csm/dashboard`: flip `DASHBOARD_ENDPOINT_READY` to true.
  */
+const DASHBOARD_ENDPOINT_READY = false;
+
 export function useGetCsmDashboard(
   scope: DashboardScope,
 ): UseQueryResult<CsmAbtDashboardData, Error> {
@@ -49,6 +54,7 @@ export function useGetCsmDashboard(
       }
       return (await response.json()) as CsmAbtDashboardData;
     },
+    enabled: DASHBOARD_ENDPOINT_READY,
     staleTime: 30_000,
   });
 }

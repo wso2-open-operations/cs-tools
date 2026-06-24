@@ -43,10 +43,11 @@ export default function CsmDashboardPage(): JSX.Element {
   // Locked to the Engineer dashboard: the switcher is disabled in the header
   // (the other dashboards are mock placeholders), so this never changes today.
   const [dashboardKey, setDashboardKey] = useState<DashboardKey>("engineer");
-  // Only the engineer-overview header consumes this now; the queue/SLA/customer/
-  // activity widgets are hidden, leaving the standalone severity-by-state matrix
-  // (CaseCountsMatrix, which loads from its own source) as the only widget.
-  const { data, isError } = useGetCsmDashboard(scope);
+  // The engineer-overview header would consume this, but `/csm/dashboard` isn't
+  // implemented yet so the query is disabled (see useGetCsmDashboard) — `data`
+  // stays undefined and the header shows a neutral subtitle. The only live
+  // widget is the severity-by-state matrix (CaseCountsMatrix, own source).
+  const { data } = useGetCsmDashboard(scope);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -56,7 +57,6 @@ export default function CsmDashboardPage(): JSX.Element {
         onScopeChange={setScope}
         dashboardKey={dashboardKey}
         onDashboardChange={setDashboardKey}
-        isError={isError}
       />
       {dashboardKey === "engineer" ? (
         <>
