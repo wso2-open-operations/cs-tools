@@ -665,6 +665,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests/{id}:
+    get:
+      summary: Get a single change request by ID (ServiceNow data source only).
+      operationId: getChangeRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The change request detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequest'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /change-requests/search:
     post:
       summary: Search change requests (ServiceNow data source only).
@@ -1976,6 +2013,42 @@ components:
           type: integer
         limit:
           type: integer
+
+    ChangeRequest:
+      allOf:
+        - $ref: '#/components/schemas/SearchChangeRequestView'
+        - type: object
+          properties:
+            createdBy:
+              type: string
+            justification:
+              type: string
+              nullable: true
+            impactDescription:
+              type: string
+              nullable: true
+            serviceOutage:
+              type: string
+              nullable: true
+            communicationPlan:
+              type: string
+              nullable: true
+            rollbackPlan:
+              type: string
+              nullable: true
+            testPlan:
+              type: string
+              nullable: true
+            hasCustomerApproved:
+              type: boolean
+            hasCustomerReviewed:
+              type: boolean
+            approvedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            approvedOn:
+              type: string
+              nullable: true
 
     ErrorResponse:
       type: object
