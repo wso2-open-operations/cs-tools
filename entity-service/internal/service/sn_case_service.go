@@ -126,7 +126,7 @@ type snCaseSort struct {
 
 // snCaseTypeMap maps domain case type strings to the ServiceNow caseType values.
 var snCaseTypeMap = map[string]string{
-	"support":                    "default_case",
+	"case":                       "default_case",
 	"service_request":            "service_request",
 	"security_report_analysis":   "security_report_analysis",
 	"announcement":               "announcement",
@@ -314,8 +314,8 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	if req.Type != "support" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"support\" for case creation"}
+	if req.Type != "case" {
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"case\" for case creation"}
 	}
 	snType := snCaseTypeMap[req.Type]
 
