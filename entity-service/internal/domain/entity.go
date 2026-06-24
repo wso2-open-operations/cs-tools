@@ -927,9 +927,9 @@ type SearchChangeRequestView struct {
 	PlannedStartOn   *string    `json:"plannedStartOn"`
 	PlannedEndOn     *string    `json:"plannedEndOn"`
 	Duration         *string    `json:"duration"`
-	Impact           string     `json:"impact"`
-	State            string     `json:"state"`
-	Type             string     `json:"type"`
+	Impact           *string    `json:"impact"`
+	State            *string    `json:"state"`
+	Type             *string    `json:"type"`
 	CreatedOn        string     `json:"createdOn"`
 	UpdatedOn        string     `json:"updatedOn"`
 }
@@ -940,4 +940,21 @@ type SearchChangeRequestsResponse struct {
 	Total          int                       `json:"total"`
 	Offset         int                       `json:"offset"`
 	Limit          int                       `json:"limit"`
+}
+
+// ChangeRequest is the full change request detail returned by GET /change-requests/{id}.
+// It extends SearchChangeRequestView with additional fields.
+type ChangeRequest struct {
+	SearchChangeRequestView
+	CreatedBy           string     `json:"createdBy"`
+	Justification       *string    `json:"justification"`
+	ImpactDescription   *string    `json:"impactDescription"`
+	ServiceOutage       *string    `json:"serviceOutage"`
+	CommunicationPlan   *string    `json:"communicationPlan"`
+	RollbackPlan        *string    `json:"rollbackPlan"`
+	TestPlan            *string    `json:"testPlan"`
+	HasCustomerApproved bool       `json:"hasCustomerApproved"`
+	HasCustomerReviewed bool       `json:"hasCustomerReviewed"`
+	ApprovedBy          *EntityRef `json:"approvedBy"`
+	ApprovedOn          *string    `json:"approvedOn"`
 }

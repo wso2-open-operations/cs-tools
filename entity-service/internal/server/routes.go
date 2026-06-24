@@ -126,6 +126,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	if changeRequestHandler != nil {
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
+		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 	}
 
 	return middleware.CorrelationID(

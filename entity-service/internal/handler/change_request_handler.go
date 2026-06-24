@@ -48,3 +48,16 @@ func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// GetChangeRequest handles GET /change-requests/{id}.
+func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	result, err := h.svc.GetChangeRequest(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+

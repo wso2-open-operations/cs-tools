@@ -130,4 +130,8 @@ type ChangeRequestService interface {
 	// A ValidationError is returned for invalid input; any other error indicates an
 	// infrastructure failure.
 	SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest) (domain.SearchChangeRequestsResponse, error)
+
+	// GetChangeRequest returns the full detail of a single change request by its UUID.
+	// A NotFoundError is returned if the change request does not exist.
+	GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error)
 }
