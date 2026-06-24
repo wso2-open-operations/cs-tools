@@ -14,9 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Chip, useTheme } from "@wso2/oxygen-ui";
+import { Chip } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { pickAccessibleText } from "@utils/contrastText";
 
 /** The semantic palette roles a chip may carry. */
 export type SemanticRole = "error" | "warning" | "info" | "success" | "default";
@@ -32,15 +31,12 @@ interface SemanticChipProps {
 }
 
 /**
- * A chip whose filled label always clears WCAG AA.
- *
- * A plain `<Chip color="error">` uses MUI's `contrastText`, computed against a
- * 3:1 floor, so white-on-saturated chip labels (~13px) sit around 3:1 and fail
- * AA (4.5:1) — in every theme, because it is the contrast-target that is wrong,
- * not the palette. This keeps the vivid `*.main` fill but picks the label colour
- * (near-black vs white) by the fill's measured luminance, which clears 4.5:1 for
- * the saturated semantic colours in all shipped themes and both colour modes.
- * The `default`/grey role has no accessible solid fill, so it renders outlined.
+ * A semantic status chip that delegates colouring to MUI's built-in `color`
+ * prop so it works correctly in CSS-variables themes (where
+ * `theme.palette.info.main` returns a CSS variable reference, not a hex colour,
+ * making a manual `bgcolor` sx override unreliable). The `default` role uses
+ * the filled variant (subtle grey) rather than `outlined`, so all states render
+ * consistently as status badges rather than button-like bordered outlines.
  */
 export default function SemanticChip({
   role,
@@ -49,39 +45,14 @@ export default function SemanticChip({
   bold = false,
   clickable = false,
 }: SemanticChipProps): JSX.Element {
-  const theme = useTheme();
-
-  // Resolve the palette fill defensively: an unexpected role (e.g. a free-form
-  // value that slipped past the type) must degrade to the outlined default
-  // chip, never read `.main` off an undefined palette entry and crash the page.
-  const paletteEntry =
-    role === "default"
-      ? undefined
-      : (theme.palette[role] as { main?: string } | undefined);
-
-  if (!paletteEntry?.main) {
-    return (
-      <Chip
-        size={size}
-        variant="outlined"
-        label={label}
-        sx={clickable ? { cursor: "pointer" } : undefined}
-      />
-    );
-  }
-
-  const bg = paletteEntry.main;
-  const fg = pickAccessibleText(bg);
-
   return (
     <Chip
       size={size}
+      // "default" is a valid MUI Chip color — filled grey, no border.
+      color={role}
       label={label}
       sx={{
-        bgcolor: bg,
-        color: fg,
-        ...(bold ? { fontWeight: 600 } : {}),
-        "& .MuiChip-label": { color: fg },
+        ...(bold ? { "& .MuiChip-label": { fontWeight: 600 } } : {}),
         ...(clickable ? { cursor: "pointer" } : {}),
       }}
     />

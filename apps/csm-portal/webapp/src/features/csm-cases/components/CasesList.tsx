@@ -82,7 +82,7 @@ export default function CasesList({
             key={label}
             variant="caption"
             color="text.secondary"
-            sx={{ fontWeight: 600 }}
+            sx={{ fontWeight: 600, textAlign: "left" }}
           >
             {label}
           </Typography>
@@ -194,8 +194,12 @@ export default function CasesList({
               <Typography variant="body2" noWrap>
                 {c.product}
               </Typography>
-              <SeverityChip severity={c.severity} clickable />
-              <StateChip state={c.state} clickable />
+              <Box sx={{ justifySelf: "start" }}>
+                <SeverityChip severity={c.severity} clickable />
+              </Box>
+              <Box sx={{ justifySelf: "start" }}>
+                <StateChip state={c.state} clickable />
+              </Box>
               <Typography variant="caption" color="text.secondary" noWrap>
                 <RelativeTime iso={c.updatedAt} />
               </Typography>

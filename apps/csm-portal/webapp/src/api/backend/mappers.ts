@@ -46,23 +46,16 @@ import type {
  * UI's S0-S4 severity scale. Until the BE adds explicit severity, priority
  * doubles as the source.
  */
-export function severityFromPriority(
-  priority: BeCaseSeverity | undefined,
-): Severity {
-  switch (priority) {
-    case "catastrophic":
-      return "S0";
-    case "critical":
-      return "S1";
-    case "high":
-      return "S2";
-    case "medium":
-      return "S3";
-    case "low":
-      return "S4";
-    default:
-      return "S3";
-  }
+export function severityFromPriority(priority: string | undefined): Severity {
+  if (!priority) return "S3";
+  const s = priority.toLowerCase();
+  // Match both P-notation ("Low (P4)", "P4") and legacy English names.
+  if (s.includes("p0") || s === "catastrophic") return "S0";
+  if (s.includes("p1") || s === "critical") return "S1";
+  if (s.includes("p2") || s === "high") return "S2";
+  if (s.includes("p3") || s === "medium") return "S3";
+  if (s.includes("p4") || s === "low") return "S4";
+  return "S3";
 }
 
 export function priorityFromSeverity(severity: Severity): BeCaseSeverity {

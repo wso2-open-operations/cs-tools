@@ -26,7 +26,7 @@ import {
 } from "./mappers";
 
 describe("severityFromPriority", () => {
-  it("maps each backend priority onto the S0-S4 scale", () => {
+  it("maps legacy English names onto the S0-S4 scale", () => {
     expect(severityFromPriority("catastrophic")).toBe("S0");
     expect(severityFromPriority("critical")).toBe("S1");
     expect(severityFromPriority("high")).toBe("S2");
@@ -34,8 +34,17 @@ describe("severityFromPriority", () => {
     expect(severityFromPriority("low")).toBe("S4");
   });
 
+  it("maps the backend display-string format 'Label (Px)' onto S0-S4", () => {
+    expect(severityFromPriority("Catastrophic (P0)")).toBe("S0");
+    expect(severityFromPriority("Critical (P1)")).toBe("S1");
+    expect(severityFromPriority("High (P2)")).toBe("S2");
+    expect(severityFromPriority("Medium (P3)")).toBe("S3");
+    expect(severityFromPriority("Low (P4)")).toBe("S4");
+  });
+
   it("falls back to S3 for an unknown/undefined priority", () => {
     expect(severityFromPriority(undefined)).toBe("S3");
+    expect(severityFromPriority("unknown_value")).toBe("S3");
   });
 });
 

@@ -164,7 +164,8 @@ export interface BeCaseView {
   internalId?: string;
   subject?: string;
   description?: string;
-  severity?: BeCaseSeverity;
+  /** Free-form display string from the backend, e.g. "Critical (P1)", "Low (P4)". */
+  severity?: string;
   issueType?: BeCaseIssueType;
   type?: BeCaseType;
   state?: BeCaseState;
@@ -305,7 +306,8 @@ export interface BeCaseSearchView {
    */
   subject?: string;
   description?: string;
-  severity?: BeCaseSeverity;
+  /** Free-form display string from the backend, e.g. "Low (P4)", "Critical (P1)". */
+  severity?: string;
   issueType?: BeCaseIssueType;
   state?: BeCaseState;
   /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
