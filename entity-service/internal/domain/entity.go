@@ -559,6 +559,8 @@ type CaseView struct {
 	IssueType              CaseIssueType        `json:"issueType"`
 	State                  CaseState            `json:"state"`
 	WorkState              *CaseWorkState       `json:"workState"`
+	CaseType               *string              `json:"caseType"`
+	EngagementType         *string              `json:"engagementType"`
 	CreatedOn              time.Time            `json:"createdOn"`
 	UpdatedOn              time.Time            `json:"updatedOn"`
 	ClosedOn               *time.Time           `json:"closedOn"`
@@ -567,6 +569,10 @@ type CaseView struct {
 	DeploymentDetails      EntityRef            `json:"deployment"`
 	DeployedProductDetails DeployedProductRef   `json:"deployedProduct"`
 	ProductDetails         EntityRef            `json:"product"`
+	Catalog                *EntityRef           `json:"catalog"`
+	CatalogItem            *EntityRef           `json:"catalogItem"`
+	AssignedTeam           *EntityRef           `json:"assignedTeam"`
+	Conversation           *EntityRef           `json:"conversation"`
 	AssignedEngineer       *AssignedEngineerRef `json:"assignedEngineer"`
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`

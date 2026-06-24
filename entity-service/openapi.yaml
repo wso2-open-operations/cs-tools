@@ -1619,6 +1619,14 @@ components:
           enum: [ongoing, paused]
           nullable: true
           description: Work sub-state, present only when state is work_in_progress.
+        caseType:
+          type: string
+          nullable: true
+          description: Case type label. Populated for ServiceNow cases; null for Postgres cases.
+        engagementType:
+          type: string
+          nullable: true
+          description: Engagement type label. Populated for ServiceNow cases; null for Postgres cases.
         createdOn:
           type: string
           format: date-time
@@ -1640,6 +1648,22 @@ components:
           $ref: '#/components/schemas/DeployedProductRef'
         product:
           $ref: '#/components/schemas/EntityRef'
+        catalog:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog entry. Populated for ServiceNow cases; null for Postgres cases.
+        catalogItem:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog item. Populated for ServiceNow cases; null for Postgres cases.
+        assignedTeam:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Team assigned to the case. Populated for ServiceNow cases; null for Postgres cases.
+        conversation:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
         assignedEngineer:
           nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'

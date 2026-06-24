@@ -396,16 +396,24 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		return domain.CaseView{}, fmt.Errorf("sn get case %q: %w", c.ID, err)
 	}
 
+	caseType := ""
+	if c.CaseType != nil {
+		caseType = c.CaseType.Name
+	}
+	engagementType := snLabelStr(c.EngagementType)
+
 	cv := domain.CaseView{
 		ID:          sysidToUUID(c.ID),
 		Number:      c.Number,
 		InternalID:  c.InternalID,
 		Subject:     c.Title,
 		Description: c.Description,
-		Severity:      snSeverityToSeverity(c.Severity),
+		Severity:    snSeverityToSeverity(c.Severity),
 		IssueType:   snIssueTypeToEnum(c.IssueType),
 		State:       state,
 		WorkState:   snWorkStateLabelToEnum(c.WorkState),
+		CaseType:    &caseType,
+		EngagementType: engagementType,
 		CreatedOn:   createdOn,
 		UpdatedOn:   updatedOn,
 		CreatedByDetails: domain.UserRef{
@@ -421,6 +429,18 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 
 	if c.Product != nil {
 		cv.ProductDetails = domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+	}
+	if c.Catalog != nil {
+		cv.Catalog = &domain.EntityRef{ID: sysidToUUID(c.Catalog.ID), Name: c.Catalog.Name}
+	}
+	if c.CatalogItem != nil {
+		cv.CatalogItem = &domain.EntityRef{ID: sysidToUUID(c.CatalogItem.ID), Name: c.CatalogItem.Name}
+	}
+	if c.AssignedTeam != nil {
+		cv.AssignedTeam = &domain.EntityRef{ID: sysidToUUID(c.AssignedTeam.ID), Name: c.AssignedTeam.Name}
+	}
+	if c.Conversation != nil {
+		cv.Conversation = &domain.EntityRef{ID: sysidToUUID(c.Conversation.ID), Name: c.Conversation.Name}
 	}
 	if c.AssignedEngineer != nil {
 		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: sysidToUUID(c.AssignedEngineer.ID), Name: c.AssignedEngineer.Name, Email: c.AssignedEngineer.Email}
