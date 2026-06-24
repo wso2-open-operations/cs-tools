@@ -57,6 +57,7 @@ export default function usePostDeploymentInstancesUsagesSearch(
     },
     enabled: !!deploymentId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });

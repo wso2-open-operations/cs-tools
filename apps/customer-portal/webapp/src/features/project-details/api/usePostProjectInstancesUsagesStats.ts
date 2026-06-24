@@ -54,6 +54,7 @@ export default function usePostProjectInstancesUsagesStats(
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });

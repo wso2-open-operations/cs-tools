@@ -136,6 +136,7 @@ export function usePostProjectDeploymentsSearchInfinite(
     },
     enabled: enabled && !!projectId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -218,6 +219,7 @@ export function usePostProjectDeploymentsSearchAll(
     },
     enabled: enabled && !!projectId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });

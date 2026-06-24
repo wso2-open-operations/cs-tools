@@ -47,6 +47,7 @@ export default function useGetProjectUsageStats(projectId: string | undefined) {
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });

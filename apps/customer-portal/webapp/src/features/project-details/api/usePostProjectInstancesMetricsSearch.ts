@@ -58,6 +58,7 @@ export default function usePostProjectInstancesMetricsSearch(
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
     staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
