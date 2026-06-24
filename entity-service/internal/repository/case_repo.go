@@ -512,7 +512,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 				return fmt.Errorf("scan case: %w", err)
 			}
 			cv.CaseType = caseType
-			cv.Title = &subject
+			cv.Subject = &subject
 			cv.Description = &description
 			cv.Severity = severity
 			cv.IssueType = issueType

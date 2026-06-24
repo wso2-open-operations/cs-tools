@@ -611,7 +611,7 @@ type SearchCaseView struct {
 	Number           string               `json:"number"`
 	CreatedOn        string               `json:"createdOn"`
 	CreatedBy        string               `json:"createdBy"`
-	Title            *string              `json:"title"`
+	Subject          *string              `json:"subject"`
 	Description      *string              `json:"description"`
 	IssueType        *string              `json:"issueType"`
 	State            string               `json:"state"`

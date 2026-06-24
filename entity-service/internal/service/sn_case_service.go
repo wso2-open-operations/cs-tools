@@ -1083,7 +1083,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			InternalID:      c.InternalID,
 			CreatedOn:       c.CreatedOn,
 			CreatedBy:       c.CreatedBy,
-			Title:           &title,
+			Subject:         &title,
 			Description:     &description,
 			IssueType:       issueTypeLabel,
 			State:           stateLabel,
