@@ -1129,9 +1129,13 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			EngagementType:  engagementTypeLabel,
 			WorkState:       workStateLabel,
 			Type:            caseTypeDomain,
-			Project:         domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
-			Deployment:      domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
-			DeployedProduct: domain.EntityRef{ID: sysidToUUID(c.DeployedProduct.ID), Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
+			Project: domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+		}
+		if depID := sysidToUUID(c.Deployment.ID); depID != "" {
+			cv.Deployment = &domain.EntityRef{ID: depID, Name: c.Deployment.Name}
+		}
+		if dpID := sysidToUUID(c.DeployedProduct.ID); dpID != "" {
+			cv.DeployedProduct = &domain.EntityRef{ID: dpID, Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)}
 		}
 		if c.Product != nil {
 			cv.Product = &domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}

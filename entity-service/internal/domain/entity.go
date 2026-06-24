@@ -628,8 +628,8 @@ type SearchCaseView struct {
 	WorkState        *string              `json:"workState"`
 	Type             string               `json:"type"`
 	Project          EntityRef            `json:"project"`
-	Deployment       EntityRef            `json:"deployment"`
-	DeployedProduct  EntityRef            `json:"deployedProduct"`
+	Deployment       *EntityRef           `json:"deployment"`
+	DeployedProduct  *EntityRef           `json:"deployedProduct"`
 	AssignedEngineer *AssignedEngineerRef `json:"assignedEngineer"`
 	ParentCase       *EntityRef           `json:"parentCase"`
 	RelatedCase      *EntityRef           `json:"relatedCase"`

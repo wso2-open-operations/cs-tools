@@ -500,14 +500,16 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			var pcID, pcNumber *string
 			var rcID, rcNumber *string
 			var prodID, prodName string
+			var depID, depName string
+			var dpID, dpName string
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
 				&caseType, &subject, &description, &severity, &issueType, &cv.State,
 				&engagementType, &workState, &createdAt,
 				&cv.CreatedBy,
 				&cv.Project.ID, &cv.Project.Name,
-				&cv.Deployment.ID, &cv.Deployment.Name,
-				&cv.DeployedProduct.ID, &cv.DeployedProduct.Name,
+				&depID, &depName,
+				&dpID, &dpName,
 				&prodID, &prodName,
 				&aeID, &aeName,
 				&pcID, &pcNumber,
@@ -515,6 +517,8 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			); err != nil {
 				return fmt.Errorf("scan case: %w", err)
 			}
+			cv.Deployment = &domain.EntityRef{ID: depID, Name: depName}
+			cv.DeployedProduct = &domain.EntityRef{ID: dpID, Name: dpName}
 			cv.Type = caseType
 			cv.Subject = &subject
 			cv.Description = &description
