@@ -665,6 +665,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests/search:
+    post:
+      summary: Search change requests (ServiceNow data source only).
+      operationId: searchChangeRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchChangeRequestsRequest'
+      responses:
+        "200":
+          description: Change requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchChangeRequestsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     Pagination:
@@ -1815,6 +1845,131 @@ components:
           type: integer
         hasMore:
           type: boolean
+
+    SearchChangeRequestsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            projectIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+            searchQuery:
+              type: string
+            stateKeys:
+              type: array
+              items:
+                type: string
+                enum: [customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
+            impactKeys:
+              type: array
+              items:
+                type: string
+                enum: [high, medium, low]
+            closedStartDate:
+              type: string
+              format: date-time
+              description: "ISO-8601 UTC datetime (YYYY-MM-DDTHH:MM:SSZ)"
+            closedEndDate:
+              type: string
+              format: date-time
+              description: "ISO-8601 UTC datetime (YYYY-MM-DDTHH:MM:SSZ)"
+        sortBy:
+          type: object
+          required: [field, order]
+          properties:
+            field:
+              type: string
+              enum: [createdOn, updatedOn]
+            order:
+              type: string
+              enum: [asc, desc]
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    SearchChangeRequestView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        subject:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        project:
+          $ref: '#/components/schemas/EntityRef'
+        case:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        deployment:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        deployedProduct:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        product:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedEngineer:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        assignedTeam:
+          $ref: '#/components/schemas/EntityRef'
+          nullable: true
+        plannedStartOn:
+          type: string
+          nullable: true
+        plannedEndOn:
+          type: string
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        impact:
+          type: string
+          description: Impact label (e.g. "high", "medium", "low").
+        state:
+          type: string
+          description: State label (e.g. "review", "closed").
+        type:
+          type: string
+          description: Type label (e.g. "standard", "normal").
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+
+    SearchChangeRequestsResponse:
+      type: object
+      properties:
+        changeRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchChangeRequestView'
+        totalRecords:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
 
     ErrorResponse:
       type: object
