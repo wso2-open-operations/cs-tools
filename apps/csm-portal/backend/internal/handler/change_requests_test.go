@@ -24,6 +24,89 @@ import (
 	"testing"
 )
 
+const testCRID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+func TestGetChangeRequest(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID, nil)
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.GetChangeRequest(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects malformed UUID", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/not-a-uuid", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetChangeRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty id", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/", nil))
+		w := httptest.NewRecorder()
+		h.GetChangeRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards id to upstream and returns 200", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityChangeRequestClient{
+			getChangeRequestFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"id":"` + testCRID + `","number":"CHG001","state":"scheduled"}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID, nil))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.GetChangeRequest(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+
+		if capturedID != testCRID {
+			t.Errorf("upstream received id %q, want %q", capturedID, testCRID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["number"] != "CHG001" {
+			t.Errorf("response number = %v, want CHG001", resp["number"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to retrieve change request.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityChangeRequestClient{
+					getChangeRequestFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewChangeRequestHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID, nil))
+				r.SetPathValue("id", testCRID)
+				w := httptest.NewRecorder()
+				h.GetChangeRequest(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchChangeRequests(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})

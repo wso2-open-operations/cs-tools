@@ -1100,6 +1100,56 @@ paths:
         "500":
           description: InternalServerError
 
+  /change-requests/{id}:
+    get:
+      summary: Get a single change request by ID (ServiceNow data source only).
+      operationId: getChangeRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the change request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestDetail'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/search:
     post:
       summary: Search change requests (ServiceNow data source only).
@@ -2625,12 +2675,15 @@ components:
           nullable: true
         impact:
           type: string
+          nullable: true
           description: Impact level (e.g. "high", "medium", "low")
         state:
           type: string
+          nullable: true
           description: Current workflow state (e.g. "scheduled", "closed")
         type:
           type: string
+          nullable: true
           description: Change request type (e.g. "standard", "normal")
         createdOn:
           type: string
@@ -2651,3 +2704,39 @@ components:
           type: integer
         offset:
           type: integer
+
+    ChangeRequestDetail:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestSearchView'
+        - type: object
+          properties:
+            createdBy:
+              type: string
+            justification:
+              type: string
+              nullable: true
+            impactDescription:
+              type: string
+              nullable: true
+            serviceOutage:
+              type: string
+              nullable: true
+            communicationPlan:
+              type: string
+              nullable: true
+            rollbackPlan:
+              type: string
+              nullable: true
+            testPlan:
+              type: string
+              nullable: true
+            hasCustomerApproved:
+              type: boolean
+            hasCustomerReviewed:
+              type: boolean
+            approvedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
+            approvedOn:
+              type: string
+              nullable: true

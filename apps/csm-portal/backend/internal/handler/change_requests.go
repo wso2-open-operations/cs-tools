@@ -30,6 +30,7 @@ import (
 // entityChangeRequestClient abstracts the entity service change-request operations.
 type entityChangeRequestClient interface {
 	SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error)
+	GetChangeRequest(ctx context.Context, id string) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -40,6 +41,30 @@ type ChangeRequestHandler struct {
 // NewChangeRequestHandler creates a ChangeRequestHandler backed by the given entity client.
 func NewChangeRequestHandler(entity entityChangeRequestClient) *ChangeRequestHandler {
 	return &ChangeRequestHandler{entity: entity}
+}
+
+// GetChangeRequest handles GET /change-requests/{id}.
+func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetChangeRequest(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve change request.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SearchChangeRequests handles POST /change-requests/search.

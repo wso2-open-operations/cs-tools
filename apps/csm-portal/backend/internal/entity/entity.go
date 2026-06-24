@@ -119,6 +119,12 @@ func (c *Client) SearchChangeRequests(ctx context.Context, body []byte) ([]byte,
 	return c.do(ctx, http.MethodPost, "/change-requests/search", body)
 }
 
+// GetChangeRequest calls GET /change-requests/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetChangeRequest(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/change-requests/%s", url.PathEscape(id)), nil)
+}
+
 // CreateCaseAttachment calls POST /cases/{id}/attachments on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) CreateCaseAttachment(ctx context.Context, caseID string, body []byte) ([]byte, error) {

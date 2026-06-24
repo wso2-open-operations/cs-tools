@@ -281,6 +281,7 @@ func (m *mockEntityProductClient) SearchProductVersions(ctx context.Context, pro
 
 type mockEntityChangeRequestClient struct {
 	searchChangeRequestsFn func(ctx context.Context, body []byte) ([]byte, error)
+	getChangeRequestFn     func(ctx context.Context, id string) ([]byte, error)
 }
 
 func (m *mockEntityChangeRequestClient) SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error) {
@@ -288,6 +289,13 @@ func (m *mockEntityChangeRequestClient) SearchChangeRequests(ctx context.Context
 		return m.searchChangeRequestsFn(ctx, body)
 	}
 	return []byte(`{"changeRequests":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityChangeRequestClient) GetChangeRequest(ctx context.Context, id string) ([]byte, error) {
+	if m.getChangeRequestFn != nil {
+		return m.getChangeRequestFn(ctx, id)
+	}
+	return []byte(`{}`), nil
 }
 
 // ----- mock entity deployment client -----

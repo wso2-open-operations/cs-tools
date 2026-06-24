@@ -196,6 +196,7 @@ backend/
 
 ### Change Requests
 
+- `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
 
 ### Updates
