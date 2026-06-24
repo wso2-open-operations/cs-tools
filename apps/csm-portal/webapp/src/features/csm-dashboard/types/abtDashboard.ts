@@ -24,6 +24,13 @@ export type CaseState =
   | "waiting_on_wso2"
   | "closed";
 
+/**
+ * Work sub-state of a `work_in_progress` case. `null` / absent when the case is
+ * not in progress. Mirrors the entity-service `CaseWorkState` enum; the backend
+ * gates comment posting on `work_in_progress` + `ongoing`.
+ */
+export type CaseWorkState = "ongoing" | "paused";
+
 export type SlaClockType = "ack" | "first_response" | "resolution";
 
 export type DashboardScope = "my_abt" | "all_customers";

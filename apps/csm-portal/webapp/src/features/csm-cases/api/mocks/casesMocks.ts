@@ -412,6 +412,8 @@ const ALL_EXTRA_CASE_SEEDS: CaseSeed[] = [
     projectName: "API Manager",
     severity: "S3",
     state: "work_in_progress",
+    // Paused: exercises the comment-gate disabled state in mock mode.
+    workState: "paused",
     assignee: "Dilan W.",
     assigneeIsMe: false,
     slaClockType: "resolution",
@@ -455,6 +457,11 @@ function deriveWso2CaseId(seed: CaseSeed): string {
 function hydrate(seed: CaseSeed): CsmCaseRow {
   return {
     ...seed,
+    // Default an in-progress case to `ongoing` so the comment composer is
+    // usable in mock mode; a seed may set `paused` explicitly. Non-in-progress
+    // cases have no work sub-state.
+    workState:
+      seed.workState ?? (seed.state === "work_in_progress" ? "ongoing" : null),
     product: deriveProductName(seed.subject, seed.projectName),
     wso2CaseId: deriveWso2CaseId(seed),
   };

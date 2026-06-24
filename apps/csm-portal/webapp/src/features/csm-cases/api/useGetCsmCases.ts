@@ -226,6 +226,7 @@ export function useGetCsmCases(
           product: c.deployedProduct?.displayName ?? "—",
           severity: severityFromPriority(c.priority),
           state: uiStateFromBe(c.state),
+          workState: c.workState ?? null,
           // No assignee field on the backend yet; surfaced as "Unassigned".
           assignee: "Unassigned",
           assigneeIsMe: false,

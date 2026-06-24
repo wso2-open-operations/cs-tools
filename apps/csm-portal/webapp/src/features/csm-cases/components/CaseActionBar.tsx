@@ -203,7 +203,7 @@ function buildSecondaryItems(): SecondaryItem[] {
   // their backend flows land, so the menu advertises the roadmap without
   // exposing dead actions that would no-op or toast a mock message.
   return [
-    { key: "reassign_engineer", label: "Reassign engineer…", icon: <User size={16} />, disabled: true },
+    { key: "reassign_engineer", label: "Assign / reassign engineer…", icon: <User size={16} /> },
     { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true, disabled: true },
     { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
     { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },

@@ -21,38 +21,43 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { isMockMode, useBackendApi } from "@api/backend/client";
-import type { BeCase, BeCaseUpdatePayload } from "@api/backend/types";
+import type {
+  BeCaseUpdatePayload,
+  BeUpdateCaseResponse,
+} from "@api/backend/types";
 
 const MOCK_LATENCY_MS = 200;
 
 /**
- * Update a case via `PATCH /cases/{id}` — used for state transitions (and
- * priority changes). On success it invalidates this case's detail query and the
- * cross-project list so both reflect the new state.
+ * Update a case via `PATCH /cases/{id}` — state transitions, priority changes,
+ * assignee (`assigneeEmail`), or watch list (`watchList`). The backend requires
+ * **exactly one** of those fields per call, so callers must not combine them.
+ * The response is `BeUpdateCaseResponse` ({ message, case }), but on success we
+ * ignore the body and invalidate this case's detail query and the cross-project
+ * list so both refetch the authoritative state (incl. fresh `nextStates`).
  *
  * In MOCK mode the mutation resolves without persisting (mock detail data is
  * static), so the caller's optimistic feedback is the only visible effect.
  */
 export function usePatchCsmCase(
   caseId: string | undefined,
-): UseMutationResult<BeCase, Error, BeCaseUpdatePayload> {
+): UseMutationResult<BeUpdateCaseResponse, Error, BeCaseUpdatePayload> {
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
-  return useMutation<BeCase, Error, BeCaseUpdatePayload>({
-    mutationFn: async (input): Promise<BeCase> => {
+  return useMutation<BeUpdateCaseResponse, Error, BeCaseUpdatePayload>({
+    mutationFn: async (input): Promise<BeUpdateCaseResponse> => {
       if (!caseId) {
         throw new Error("Cannot update a case without an id.");
       }
       if (isMockMode()) {
         await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return {
-          id: caseId,
-          state: input.state,
-          priority: input.priority,
-        };
+        // The success handler ignores the body and refetches, so the mock only
+        // needs the id. (Echoing input.state/priority would not type-check
+        // against the single-field union and isn't used anyway.)
+        return { message: "Case updated (mock).", case: { id: caseId } };
       }
-      return api.patch<BeCaseUpdatePayload, BeCase>(
+      return api.patch<BeCaseUpdatePayload, BeUpdateCaseResponse>(
         `/cases/${encodeURIComponent(caseId)}`,
         input,
       );

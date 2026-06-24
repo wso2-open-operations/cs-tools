@@ -34,6 +34,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -57,6 +58,13 @@ interface CsmCaseCommentInputProps {
     attachments: CommentAttachmentDraft[],
   ) => Promise<unknown> | void;
   disabled?: boolean;
+  /**
+   * When set, a **customer-visible** reply cannot be sent right now (e.g. the
+   * case isn't in-progress/ongoing) and this string explains why. Only the
+   * public-reply path is blocked: internal work notes and attachment-only sends
+   * are always allowed. `null`/absent = public replies allowed.
+   */
+  publicCommentDisabledReason?: string | null;
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
   autoFocus?: boolean;
 }
@@ -83,13 +91,18 @@ function isEmpty(html: string): boolean {
 export default function CsmCaseCommentInput({
   onSubmit,
   disabled = false,
+  publicCommentDisabledReason = null,
   autoFocus = false,
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
-  const [internal, setInternal] = useState(false);
+  // When customer replies are blocked, the only allowed entry is an internal
+  // work note, so start in work-note mode and (below) lock the toggle there.
+  const [internal, setInternal] = useState<boolean>(
+    () => !!publicCommentDisabledReason,
+  );
   const [maximized, setMaximized] = useState(false);
   // Files attached to this comment; uploaded to the case on send.
   const [attachments, setAttachments] = useState<CommentAttachmentDraft[]>([]);
@@ -138,6 +151,13 @@ export default function CsmCaseCommentInput({
       setError("Add a comment or an attachment.");
       return;
     }
+    // A customer-visible reply with text is gated on case state; work notes and
+    // attachment-only sends are not. Block before posting so the BE guard isn't
+    // hit with a doomed request.
+    if (!internal && publicCommentDisabledReason && !isEmpty(html)) {
+      setError(publicCommentDisabledReason);
+      return;
+    }
     if (overSizeLimit) {
       setError(sizeError);
       return;
@@ -175,11 +195,20 @@ export default function CsmCaseCommentInput({
     html,
     attachments,
     internal,
+    publicCommentDisabledReason,
     onSubmit,
     overSizeLimit,
     sizeError,
     submitting,
   ]);
+
+  // Customer replies are blocked for this case state. The composer is locked to
+  // work-note mode (toggle disabled, forced on) so the engineer can only log an
+  // internal note; work notes are allowed in any state.
+  const publicReplyLocked = !!publicCommentDisabledReason;
+  useEffect(() => {
+    if (publicReplyLocked && !internal) setInternal(true);
+  }, [publicReplyLocked, internal]);
 
   const toggleSourceMode = useCallback(
     (nextSource: boolean) => {
@@ -233,7 +262,7 @@ export default function CsmCaseCommentInput({
                 color="warning"
                 checked={internal}
                 onChange={(e) => setInternal(e.target.checked)}
-                disabled={disabled || submitting}
+                disabled={disabled || submitting || publicReplyLocked}
               />
             }
             label={
@@ -350,13 +379,21 @@ export default function CsmCaseCommentInput({
       >
         <Typography
           variant="caption"
-          color={sizeError || error ? "error" : "text.secondary"}
+          color={
+            sizeError || error
+              ? "error"
+              : publicReplyLocked
+                ? "warning.main"
+                : "text.secondary"
+          }
         >
           {sizeError ??
             error ??
-            (sourceMode
-              ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
-              : "Ctrl/Cmd + Enter to send.")}
+            (publicReplyLocked
+              ? publicCommentDisabledReason
+              : sourceMode
+                ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
+                : "Ctrl/Cmd + Enter to send.")}
         </Typography>
         <Button
           variant="contained"
@@ -367,7 +404,10 @@ export default function CsmCaseCommentInput({
             disabled ||
             submitting ||
             (isEmpty(html) && attachments.length === 0) ||
-            overSizeLimit
+            overSizeLimit ||
+            // Safety net: a public reply with text while replies are locked.
+            // Normally unreachable — the toggle is forced to work-note mode.
+            (!internal && publicReplyLocked && !isEmpty(html))
           }
           onClick={() => {
             void submit();

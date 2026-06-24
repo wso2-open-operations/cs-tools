@@ -71,6 +71,13 @@ export type BeCaseState =
   | "solution_proposed"
   | "closed";
 
+/**
+ * Work sub-state of a `work_in_progress` case (entity `CaseWorkState`). `null`
+ * when the case is not in progress. The backend rejects comment creation unless
+ * the case is `work_in_progress` AND `ongoing`.
+ */
+export type BeCaseWorkState = "ongoing" | "paused";
+
 export type BeCaseSortField = "created_at" | "updated_at" | "closed_at";
 
 export interface BeCase {
@@ -138,6 +145,8 @@ export interface BeCaseView {
   priority?: BeCasePriority;
   issueType?: BeCaseIssueType;
   state?: BeCaseState;
+  /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
+  workState?: BeCaseWorkState | null;
   nextStates?: BeCaseState[];
   createdBy?: BeUserRef;
   /** The CS engineer the case is assigned to; null when unassigned. */
@@ -178,12 +187,45 @@ export interface BeCaseCreateResponse {
 }
 
 /**
- * Request body for `PATCH /cases/{id}`. At least one of `state` / `priority`
- * must be set (mirrors the entity `UpdateCaseRequest`).
+ * Request body for `PATCH /cases/{id}` (mirrors the entity `UpdateCaseRequest`).
+ * **Exactly one** of `state` / `priority` / `assigneeEmail` / `watchList` is
+ * sent per call — the backend rejects zero or more than one. Encoded as a
+ * discriminated union (each variant `?: never`s the others) so the
+ * exactly-one-field contract is enforced at compile time, not just in docs.
+ * `assigneeEmail` and `watchList` are supported **only** for the ServiceNow
+ * data source.
  */
-export interface BeCaseUpdatePayload {
+export type BeCaseUpdatePayload =
+  | { state: BeCaseState; priority?: never; assigneeEmail?: never; watchList?: never }
+  | { state?: never; priority: BeCasePriority; assigneeEmail?: never; watchList?: never }
+  /** Email of the engineer to assign (ServiceNow only). */
+  | { state?: never; priority?: never; assigneeEmail: string; watchList?: never }
+  /** Full replacement watch list as emails (ServiceNow only). */
+  | { state?: never; priority?: never; assigneeEmail?: never; watchList: string[] };
+
+/** A user in the case watch list, as echoed by `PATCH /cases/{id}`. */
+export interface BeWatchListUser {
+  id: string;
+  userName: string;
+  name?: string;
+  email?: string;
+}
+
+/** The mutated case fields echoed by `PATCH /cases/{id}`. */
+export interface BeUpdatedCase {
+  id: string;
+  updatedOn?: string;
+  updatedBy?: string;
   state?: BeCaseState;
   priority?: BeCasePriority;
+  watchList?: BeWatchListUser[];
+  assignedTo?: BeEntityRef | null;
+}
+
+/** `PATCH /cases/{id}` response: a message plus the mutated case fields. */
+export interface BeUpdateCaseResponse {
+  message?: string;
+  case: BeUpdatedCase;
 }
 
 /** Request body for `POST /cases/search` (the flat, cross-project search). */
@@ -226,6 +268,8 @@ export interface BeCaseSearchView {
   priority?: BeCasePriority;
   issueType?: BeCaseIssueType;
   state?: BeCaseState;
+  /** Work sub-state; only meaningful while `state` is `work_in_progress`. */
+  workState?: BeCaseWorkState | null;
   createdOn?: string;
   updatedOn?: string;
   closedAt?: string | null;
