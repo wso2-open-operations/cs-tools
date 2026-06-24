@@ -131,6 +131,10 @@ public type Project record {|
     int outstandingCount;
     # SLA status (e.g., "Needs Attention")
     string slaStatus;
+    # Project start date
+    Date? startDate;
+    # Project end date
+    Date? endDate;
     json...;
 |};
 

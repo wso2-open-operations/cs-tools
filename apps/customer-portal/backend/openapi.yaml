@@ -4844,6 +4844,10 @@ components:
               $ref: '#/components/schemas/Date'
             endDate:
               $ref: '#/components/schemas/Date'
+            dataSource:
+              type: integer
+              description: "Data source filter: 1 = API Call, 2 = File Upload"
+              format: int64
           additionalProperties: false
           description: Filter criteria
       additionalProperties: false

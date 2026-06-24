@@ -945,7 +945,9 @@ public isolated function mapProjectsResponse(entity:ProjectsResponse response) r
             hasKbReferences: project.hasKbReferences,
             activeCasesCount: project.activeCasesCount,
             activeChatsCount: project.activeChatsCount,
-            slaStatus: project.slaStatus
+            slaStatus: project.slaStatus,
+            startDate: project.startDate,
+            endDate: project.endDate
         };
 
     return {projects, totalRecords: response.totalRecords, 'limit: response.'limit, offset: response.offset};
