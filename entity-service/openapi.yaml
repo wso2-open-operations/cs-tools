@@ -1988,12 +1988,15 @@ components:
           nullable: true
         impact:
           type: string
+          nullable: true
           description: Impact label (e.g. "high", "medium", "low").
         state:
           type: string
+          nullable: true
           description: State label (e.g. "review", "closed").
         type:
           type: string
+          nullable: true
           description: Type label (e.g. "standard", "normal").
         createdOn:
           type: string
