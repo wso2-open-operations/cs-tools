@@ -331,13 +331,13 @@ type DeploymentView struct {
 
 // SearchDeploymentsRequest is the input for a deployment search operation.
 // All filter fields are optional. ProjectIDs scopes results to specific projects;
-// DeploymentTypeKeys filters by deployment type; SearchQuery is matched
+// DeploymentTypes filters by deployment type; SearchQuery is matched
 // case-insensitively against name.
 type SearchDeploymentsRequest struct {
-	Pagination         Pagination       `json:"pagination"`
-	SearchQuery        string           `json:"searchQuery"`
-	ProjectIDs         []string         `json:"projectIds"`
-	DeploymentTypeKeys []DeploymentType `json:"deploymentTypeKeys"`
+	Pagination      Pagination       `json:"pagination"`
+	SearchQuery     string           `json:"searchQuery"`
+	ProjectIDs      []string         `json:"projectIds"`
+	DeploymentTypes []DeploymentType `json:"deploymentTypes"`
 }
 
 // SearchDeploymentsResponse is the paginated result of a deployment search.
@@ -574,17 +574,15 @@ type CaseView struct {
 }
 
 // SearchCasesFilters holds all optional filter criteria for a case search.
-// StateKeys, SeverityKeys, IssueTypeKeys, and EngagementTypeKeys use the same
-// integer IDs as the ServiceNow integration layer.
 type SearchCasesFilters struct {
-	TypeKeys           []string         `json:"typeKeys"`
-	SearchQuery        string           `json:"searchQuery"`
-	ProjectIDs         []string         `json:"projectIds"`
-	DeploymentIDs      []string         `json:"deploymentIds"`
-	StateKeys          []CaseState      `json:"stateKeys"`
-	SeverityKeys       []CaseSeverity   `json:"severityKeys"`
-	IssueTypeKeys      []CaseIssueType  `json:"issueTypeKeys"`
-	EngagementTypeKeys []EngagementType `json:"engagementTypeKeys"`
+	Types           []string         `json:"types"`
+	SearchQuery     string           `json:"searchQuery"`
+	ProjectIDs      []string         `json:"projectIds"`
+	DeploymentIDs   []string         `json:"deploymentIds"`
+	States          []CaseState      `json:"states"`
+	Severities      []CaseSeverity   `json:"severities"`
+	IssueTypes      []CaseIssueType  `json:"issueTypes"`
+	EngagementTypes []EngagementType `json:"engagementTypes"`
 	ClosedStartDate    *time.Time `json:"closedStartDate"`
 	ClosedEndDate      *time.Time `json:"closedEndDate"`
 	StartCreatedDate   *time.Time `json:"startCreatedDate"`
@@ -647,9 +645,9 @@ type SearchCasesResponse struct {
 // WatchList and AssigneeEmail are only supported for the ServiceNow data source.
 type UpdateCaseRequest struct {
 	ID            string         `json:"-"`
-	StateKey      *CaseState     `json:"stateKey"`
-	SeverityKey   *CaseSeverity  `json:"severityKey"`
-	WorkStateKey  *CaseWorkState `json:"workStateKey"`
+	State         *CaseState     `json:"state"`
+	Severity      *CaseSeverity  `json:"severity"`
+	WorkState     *CaseWorkState `json:"workState"`
 	WatchList     []string       `json:"watchList"`
 	AssigneeEmail *string        `json:"assigneeEmail"`
 }
@@ -701,14 +699,14 @@ type CreateCaseDetails struct {
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
-	TypeKey           string        `json:"typeKey"`
+	Type              string        `json:"type"`
 	ProjectID         string        `json:"projectId"`
 	DeploymentID      string        `json:"deploymentId"`
 	DeployedProductID string        `json:"deployedProductId"`
 	Subject           string        `json:"subject"`
 	Description       string        `json:"description"`
-	SeverityKey       CaseSeverity  `json:"severityKey"`
-	IssueTypeKey      CaseIssueType `json:"issueTypeKey"`
+	Severity          CaseSeverity  `json:"severity"`
+	IssueType         CaseIssueType `json:"issueType"`
 }
 
 // CommentType classifies the type of a case comment.
@@ -743,7 +741,7 @@ type CaseComment struct {
 type CreateCaseCommentRequest struct {
 	CaseID    string      `json:"-"`
 	CreatedBy string      `json:"-"`
-	TypeKey   CommentType `json:"typeKey"`
+	Type      CommentType `json:"type"`
 	Content   string      `json:"content"`
 }
 
@@ -770,7 +768,7 @@ type SearchCaseCommentsRequest struct {
 
 // CommentFilters holds optional filter criteria for searching case comments.
 type CommentFilters struct {
-	TypeKey *CommentType `json:"typeKey"`
+	Type *CommentType `json:"type"`
 }
 
 // SearchCaseCommentsResponse is the paginated result of a case comment search.
@@ -900,8 +898,8 @@ type ChangeRequestSort struct {
 type SearchChangeRequestsFilters struct {
 	ProjectIDs      []string              `json:"projectIds"`
 	SearchQuery     string                `json:"searchQuery"`
-	StateKeys       []ChangeRequestState  `json:"stateKeys"`
-	ImpactKeys      []ChangeRequestImpact `json:"impactKeys"`
+	States          []ChangeRequestState  `json:"states"`
+	Impacts         []ChangeRequestImpact `json:"impacts"`
 	ClosedStartDate *time.Time            `json:"closedStartDate"`
 	ClosedEndDate   *time.Time            `json:"closedEndDate"`
 }

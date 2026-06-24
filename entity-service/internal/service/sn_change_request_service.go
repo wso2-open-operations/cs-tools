@@ -241,14 +241,14 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 		return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "closedEndDate must not be before closedStartDate"}
 	}
 
-	for _, s := range req.Filters.StateKeys {
+	for _, s := range req.Filters.States {
 		if !validChangeRequestState[s] {
-			return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "stateKeys contains invalid value: " + string(s)}
+			return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "states contains invalid value: " + string(s)}
 		}
 	}
-	for _, i := range req.Filters.ImpactKeys {
+	for _, i := range req.Filters.Impacts {
 		if !validChangeRequestImpact[i] {
-			return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "impactKeys contains invalid value: " + string(i)}
+			return domain.SearchChangeRequestsResponse{}, &apierror.ValidationError{Msg: "impacts contains invalid value: " + string(i)}
 		}
 	}
 	if req.SortBy.Field != "" && !validChangeRequestSortField[req.SortBy.Field] {
@@ -277,8 +277,8 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 		Filters: snChangeRequestFilters{
 			ProjectIDs:      uuidsToSysids(req.Filters.ProjectIDs),
 			SearchQuery:     req.Filters.SearchQuery,
-			StateKeys:       domainCRStatesToSNIDs(req.Filters.StateKeys),
-			ImpactKeys:      domainCRImpactsToSNIDs(req.Filters.ImpactKeys),
+			StateKeys:       domainCRStatesToSNIDs(req.Filters.States),
+			ImpactKeys:      domainCRImpactsToSNIDs(req.Filters.Impacts),
 			ClosedStartDate: formatSNDate(req.Filters.ClosedStartDate),
 			ClosedEndDate:   formatSNDate(req.Filters.ClosedEndDate),
 		},

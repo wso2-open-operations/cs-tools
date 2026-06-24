@@ -314,10 +314,10 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	if req.TypeKey != "support" {
+	if req.Type != "support" {
 		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"support\" for case creation"}
 	}
-	snType := snCaseTypeMap[req.TypeKey]
+	snType := snCaseTypeMap[req.Type]
 
 	payload := snCreateCasePayload{
 		Type:              snType,
@@ -326,8 +326,8 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		DeployedProductID: uuidToSysid(req.DeployedProductID),
 		Title:             req.Subject,
 		Description:       req.Description,
-		SeverityKey:       snSeverityIDMap[req.SeverityKey],
-		IssueTypeKey:      snIssueTypeID[req.IssueTypeKey],
+		SeverityKey:       snSeverityIDMap[req.Severity],
+		IssueTypeKey:      snIssueTypeID[req.IssueType],
 	}
 
 	raw, err := s.client.Post(ctx, "/cases", token, payload)
@@ -455,14 +455,14 @@ type snCreateCommentResponse struct {
 }
 
 func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CreateCaseCommentResponse, error) {
-	if !validCommentType[req.TypeKey] {
-		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "typeKey contains invalid value: " + string(req.TypeKey)}
+	if !validCommentType[req.Type] {
+		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + string(req.Type)}
 	}
 	if req.Content == "" {
 		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
 	}
-	if req.TypeKey == domain.CommentTypeActivity {
-		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "typeKey 'activity' is not supported for ServiceNow"}
+	if req.Type == domain.CommentTypeActivity {
+		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "type 'activity' is not supported for ServiceNow"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -470,7 +470,7 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 		return domain.CreateCaseCommentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	snType := snCommentTypeMap[req.TypeKey]
+	snType := snCommentTypeMap[req.Type]
 
 	payload := snCreateCommentPayload{
 		ReferenceID:   uuidToSysid(req.CaseID),
@@ -554,11 +554,11 @@ func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.Searc
 		ReferenceType: "case",
 		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
-	if req.Filters != nil && req.Filters.TypeKey != nil {
-		snType, ok := snCommentTypeMap[*req.Filters.TypeKey]
+	if req.Filters != nil && req.Filters.Type != nil {
+		snType, ok := snCommentTypeMap[*req.Filters.Type]
 		if !ok {
 			return domain.SearchCaseCommentsResponse{}, &apierror.ValidationError{
-				Msg: "filters.typeKey is not supported for ServiceNow: " + string(*req.Filters.TypeKey),
+				Msg: "filters.type is not supported for ServiceNow: " + string(*req.Filters.Type),
 			}
 		}
 		payload.Filters = &snCommentFilters{Type: snType}
@@ -657,13 +657,13 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 
 	fieldCount := 0
-	if req.StateKey != nil {
+	if req.State != nil {
 		fieldCount++
 	}
-	if req.SeverityKey != nil {
+	if req.Severity != nil {
 		fieldCount++
 	}
-	if req.WorkStateKey != nil {
+	if req.WorkState != nil {
 		fieldCount++
 	}
 	if len(req.WatchList) > 0 {
@@ -673,10 +673,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		fieldCount++
 	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of stateKey, severityKey, workStateKey, watchList, or assigneeEmail must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "at least one of state, severity, workState, watchList, or assigneeEmail must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, severityKey, workStateKey, watchList, or assigneeEmail may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, workState, watchList, or assigneeEmail may be provided per request"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -685,33 +685,33 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 
 	payload := snUpdateCasePayload{}
-	if req.StateKey != nil {
-		if !validCaseState[*req.StateKey] {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "stateKey contains invalid value: " + string(*req.StateKey)}
+	if req.State != nil {
+		if !validCaseState[*req.State] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 		}
-		id, ok := snStateIDMap[*req.StateKey]
+		id, ok := snStateIDMap[*req.State]
 		if !ok {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state " + string(*req.StateKey) + " is not supported by ServiceNow"}
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state " + string(*req.State) + " is not supported by ServiceNow"}
 		}
 		payload.StateKey = &id
 	}
-	if req.SeverityKey != nil {
-		if !validCaseSeverity[*req.SeverityKey] {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(*req.SeverityKey)}
+	if req.Severity != nil {
+		if !validCaseSeverity[*req.Severity] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(*req.Severity)}
 		}
-		id, ok := snSeverityIDMap[*req.SeverityKey]
+		id, ok := snSeverityIDMap[*req.Severity]
 		if !ok {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey " + string(*req.SeverityKey) + " is not supported by ServiceNow"}
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity " + string(*req.Severity) + " is not supported by ServiceNow"}
 		}
 		payload.SeverityKey = &id
 	}
-	if req.WorkStateKey != nil {
-		if !validCaseWorkState[*req.WorkStateKey] {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workStateKey contains invalid value: " + string(*req.WorkStateKey)}
+	if req.WorkState != nil {
+		if !validCaseWorkState[*req.WorkState] {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 		}
-		id, ok := snWorkStateIDMap[*req.WorkStateKey]
+		id, ok := snWorkStateIDMap[*req.WorkState]
 		if !ok {
-			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState " + string(*req.WorkStateKey) + " is not supported by ServiceNow"}
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState " + string(*req.WorkState) + " is not supported by ServiceNow"}
 		}
 		payload.WorkStateKey = &id
 	}
@@ -1016,12 +1016,12 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		snSortBy = &snCaseSort{Field: snField, Order: order}
 	}
 
-	for _, t := range req.Filters.TypeKeys {
+	for _, t := range req.Filters.Types {
 		if _, ok := snCaseTypeMap[t]; !ok {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "typeKeys contains invalid value: " + t}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "types contains invalid value: " + t}
 		}
 	}
-	snCaseTypes := domainTypeKeysToSN(req.Filters.TypeKeys)
+	snCaseTypes := domainTypeKeysToSN(req.Filters.Types)
 	if len(snCaseTypes) == 0 {
 		snCaseTypes = []string{"default_case"}
 	}
@@ -1032,10 +1032,10 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			SearchQuery:        req.Filters.SearchQuery,
 			ProjectIDs:         uuidsToSysids(req.Filters.ProjectIDs),
 			DeploymentIDs:      uuidsToSysids(req.Filters.DeploymentIDs),
-			StateKeys:          domainStatesToSNIDs(req.Filters.StateKeys),
-			SeverityKeys:       domainSeveritiesToSNIDs(req.Filters.SeverityKeys),
-			IssueTypeKeys:      domainIssueTypesToSNIDs(req.Filters.IssueTypeKeys),
-			EngagementTypeKeys: domainEngagementTypesToSNIDs(req.Filters.EngagementTypeKeys),
+			StateKeys:          domainStatesToSNIDs(req.Filters.States),
+			SeverityKeys:       domainSeveritiesToSNIDs(req.Filters.Severities),
+			IssueTypeKeys:      domainIssueTypesToSNIDs(req.Filters.IssueTypes),
+			EngagementTypeKeys: domainEngagementTypesToSNIDs(req.Filters.EngagementTypes),
 			ClosedStartDate:    formatSNDate(req.Filters.ClosedStartDate),
 			ClosedEndDate:      formatSNDate(req.Filters.ClosedEndDate),
 			StartCreatedDate:   formatSNDate(req.Filters.StartCreatedDate),

@@ -83,7 +83,7 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 	var c domain.Case
 	err := r.db.QueryRow(ctx, query,
 		req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
-		req.TypeKey, req.Subject, req.Description, string(req.SeverityKey), string(req.IssueTypeKey),
+		req.Type, req.Subject, req.Description, string(req.Severity), string(req.IssueType),
 	).Scan(
 		&c.ID, &c.Number, &c.InternalID, &c.CreatedBy,
 		&c.ProjectID, &c.DeploymentID, &c.DeployedProductID,
@@ -185,7 +185,7 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 
 	var c domain.CaseComment
 	err := r.db.QueryRow(ctx, query,
-		req.CaseID, string(req.TypeKey), req.Content, req.CreatedBy,
+		req.CaseID, string(req.Type), req.Content, req.CreatedBy,
 	).Scan(&c.ID, &c.CaseID, &c.Type, &c.Content, &c.CreatedBy, &c.CreatedOn)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
@@ -205,8 +205,8 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
 	args := []any{req.CaseID}
 	typeFilter := ""
-	if req.Filters != nil && req.Filters.TypeKey != nil {
-		args = append(args, string(*req.Filters.TypeKey))
+	if req.Filters != nil && req.Filters.Type != nil {
+		args = append(args, string(*req.Filters.Type))
 		typeFilter = fmt.Sprintf(" AND cc.type = $%d::comment_type_enum", len(args))
 	}
 
@@ -272,16 +272,16 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // UpdateCase implements CaseRepository.
 func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, error) {
 	state := ""
-	if req.StateKey != nil {
-		state = string(*req.StateKey)
+	if req.State != nil {
+		state = string(*req.State)
 	}
 	severity := ""
-	if req.SeverityKey != nil {
-		severity = string(*req.SeverityKey)
+	if req.Severity != nil {
+		severity = string(*req.Severity)
 	}
 	workState := ""
-	if req.WorkStateKey != nil {
-		workState = string(*req.WorkStateKey)
+	if req.WorkState != nil {
+		workState = string(*req.WorkState)
 	}
 	const query = `
 		UPDATE cases
@@ -330,9 +330,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 
 	where := "WHERE 1=1"
 
-	if len(req.Filters.TypeKeys) > 0 {
+	if len(req.Filters.Types) > 0 {
 		where += fmt.Sprintf(" AND c.type = ANY($%d::case_type_enum[])", argIdx)
-		filterArgs = append(filterArgs, req.Filters.TypeKeys)
+		filterArgs = append(filterArgs, req.Filters.Types)
 		argIdx++
 	}
 
@@ -348,9 +348,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
-	if len(req.Filters.StateKeys) > 0 {
-		stateStrings := make([]string, len(req.Filters.StateKeys))
-		for i, s := range req.Filters.StateKeys {
+	if len(req.Filters.States) > 0 {
+		stateStrings := make([]string, len(req.Filters.States))
+		for i, s := range req.Filters.States {
 			stateStrings[i] = string(s)
 		}
 		where += fmt.Sprintf(" AND c.state = ANY($%d::case_state_enum[])", argIdx)
@@ -358,9 +358,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
-	if len(req.Filters.SeverityKeys) > 0 {
-		severityStrings := make([]string, len(req.Filters.SeverityKeys))
-		for i, s := range req.Filters.SeverityKeys {
+	if len(req.Filters.Severities) > 0 {
+		severityStrings := make([]string, len(req.Filters.Severities))
+		for i, s := range req.Filters.Severities {
 			severityStrings[i] = string(s)
 		}
 		where += fmt.Sprintf(" AND c.severity = ANY($%d::case_severity_enum[])", argIdx)
@@ -368,9 +368,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
-	if len(req.Filters.IssueTypeKeys) > 0 {
-		issueTypeStrings := make([]string, len(req.Filters.IssueTypeKeys))
-		for i, it := range req.Filters.IssueTypeKeys {
+	if len(req.Filters.IssueTypes) > 0 {
+		issueTypeStrings := make([]string, len(req.Filters.IssueTypes))
+		for i, it := range req.Filters.IssueTypes {
 			issueTypeStrings[i] = string(it)
 		}
 		where += fmt.Sprintf(" AND c.issue_type = ANY($%d::case_issue_type_enum[])", argIdx)
@@ -378,9 +378,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
-	if len(req.Filters.EngagementTypeKeys) > 0 {
-		engTypeStrings := make([]string, len(req.Filters.EngagementTypeKeys))
-		for i, et := range req.Filters.EngagementTypeKeys {
+	if len(req.Filters.EngagementTypes) > 0 {
+		engTypeStrings := make([]string, len(req.Filters.EngagementTypes))
+		for i, et := range req.Filters.EngagementTypes {
 			engTypeStrings[i] = string(et)
 		}
 		where += fmt.Sprintf(" AND c.engagement_type = ANY($%d::engagement_type_enum[])", argIdx)

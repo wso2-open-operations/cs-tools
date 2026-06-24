@@ -100,8 +100,8 @@ var validCaseWorkState = map[domain.CaseWorkState]bool{
 // UUID format of ID fields is not checked here — postgres IDs are UUIDs but
 // ServiceNow IDs are opaque hex strings; callers add format checks as needed.
 func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
-	if req.TypeKey == "" {
-		return &apierror.ValidationError{Msg: "typeKey is required"}
+	if req.Type == "" {
+		return &apierror.ValidationError{Msg: "type is required"}
 	}
 	if req.ProjectID == "" {
 		return &apierror.ValidationError{Msg: "projectId is required"}
@@ -118,11 +118,11 @@ func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
 	if req.Description == "" {
 		return &apierror.ValidationError{Msg: "description is required"}
 	}
-	if !validCaseSeverity[req.SeverityKey] {
-		return &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(req.SeverityKey)}
+	if !validCaseSeverity[req.Severity] {
+		return &apierror.ValidationError{Msg: "severity contains invalid value: " + string(req.Severity)}
 	}
-	if !validCaseIssueType[req.IssueTypeKey] {
-		return &apierror.ValidationError{Msg: "issueTypeKey contains invalid value: " + string(req.IssueTypeKey)}
+	if !validCaseIssueType[req.IssueType] {
+		return &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
 	}
 	return nil
 }
@@ -132,7 +132,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err := validateCreateCaseRequest(req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	if req.TypeKey != "support" {
+	if req.Type != "support" {
 		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"support\" for case creation"}
 	}
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
@@ -195,8 +195,8 @@ func (s *caseService) CreateCaseComment(ctx context.Context, req domain.CreateCa
 	if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
 		return domain.CreateCaseCommentResponse{}, err
 	}
-	if !validCommentType[req.TypeKey] {
-		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "typeKey contains invalid value: " + string(req.TypeKey)}
+	if !validCommentType[req.Type] {
+		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + string(req.Type)}
 	}
 	if req.Content == "" {
 		return domain.CreateCaseCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
@@ -236,8 +236,8 @@ func (s *caseService) SearchCaseComments(ctx context.Context, req domain.SearchC
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCaseCommentsResponse{}, err
 	}
-	if req.Filters != nil && req.Filters.TypeKey != nil && !validCommentType[*req.Filters.TypeKey] {
-		return domain.SearchCaseCommentsResponse{}, &apierror.ValidationError{Msg: "filters.typeKey contains invalid value: " + string(*req.Filters.TypeKey)}
+	if req.Filters != nil && req.Filters.Type != nil && !validCommentType[*req.Filters.Type] {
+		return domain.SearchCaseCommentsResponse{}, &apierror.ValidationError{Msg: "filters.type contains invalid value: " + string(*req.Filters.Type)}
 	}
 	comments, total, err := s.repo.SearchCaseComments(ctx, req)
 	if err != nil {
@@ -261,29 +261,29 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList and assigneeEmail are only supported for the ServiceNow data source"}
 	}
 	fieldCount := 0
-	if req.StateKey != nil {
+	if req.State != nil {
 		fieldCount++
 	}
-	if req.SeverityKey != nil {
+	if req.Severity != nil {
 		fieldCount++
 	}
-	if req.WorkStateKey != nil {
+	if req.WorkState != nil {
 		fieldCount++
 	}
 	if fieldCount == 0 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of stateKey, severityKey, or workStateKey must be provided"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "exactly one of state, severity, or workState must be provided"}
 	}
 	if fieldCount > 1 {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of stateKey, severityKey, or workStateKey may be provided per request"}
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "only one of state, severity, or workState may be provided per request"}
 	}
-	if req.StateKey != nil && !validCaseState[*req.StateKey] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "stateKey contains invalid value: " + string(*req.StateKey)}
+	if req.State != nil && !validCaseState[*req.State] {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 	}
-	if req.SeverityKey != nil && !validCaseSeverity[*req.SeverityKey] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severityKey contains invalid value: " + string(*req.SeverityKey)}
+	if req.Severity != nil && !validCaseSeverity[*req.Severity] {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(*req.Severity)}
 	}
-	if req.WorkStateKey != nil && !validCaseWorkState[*req.WorkStateKey] {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workStateKey contains invalid value: " + string(*req.WorkStateKey)}
+	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 	}
 	c, err := s.repo.UpdateCase(ctx, req)
 	if err != nil {
@@ -319,29 +319,29 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 		return domain.SearchCasesResponse{}, err
 	}
 
-	for _, t := range req.Filters.TypeKeys {
+	for _, t := range req.Filters.Types {
 		if !validCaseType[t] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "typeKeys contains invalid value: " + t}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "types contains invalid value: " + t}
 		}
 	}
-	for _, s := range req.Filters.StateKeys {
+	for _, s := range req.Filters.States {
 		if !validCaseState[s] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "stateKeys contains invalid value: " + string(s)}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "states contains invalid value: " + string(s)}
 		}
 	}
-	for _, s := range req.Filters.SeverityKeys {
+	for _, s := range req.Filters.Severities {
 		if !validCaseSeverity[s] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "severityKeys contains invalid value: " + string(s)}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "severities contains invalid value: " + string(s)}
 		}
 	}
-	for _, it := range req.Filters.IssueTypeKeys {
+	for _, it := range req.Filters.IssueTypes {
 		if !validCaseIssueType[it] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "issueTypeKeys contains invalid value: " + string(it)}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "issueTypes contains invalid value: " + string(it)}
 		}
 	}
-	for _, et := range req.Filters.EngagementTypeKeys {
+	for _, et := range req.Filters.EngagementTypes {
 		if !validEngagementType[et] {
-			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "engagementTypeKeys contains invalid value: " + string(et)}
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "engagementTypes contains invalid value: " + string(et)}
 		}
 	}
 

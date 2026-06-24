@@ -57,11 +57,11 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		argIdx++
 	}
 
-	if len(req.DeploymentTypeKeys) > 0 {
+	if len(req.DeploymentTypes) > 0 {
 		// Convert []DeploymentType to []string — pgx has no codec for named string types.
 		// Cast the parameter to deployment_type_enum[] so the column stays uncast and idx_deployments_type is usable.
-		typeStrings := make([]string, len(req.DeploymentTypeKeys))
-		for i, t := range req.DeploymentTypeKeys {
+		typeStrings := make([]string, len(req.DeploymentTypes))
+		for i, t := range req.DeploymentTypes {
 			typeStrings[i] = string(t)
 		}
 		where += fmt.Sprintf(" AND d.type = ANY($%d::deployment_type_enum[])", argIdx)
