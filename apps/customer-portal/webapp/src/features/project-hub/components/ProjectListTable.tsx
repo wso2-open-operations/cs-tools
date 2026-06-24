@@ -65,7 +65,7 @@ type ProjectListTableProps = {
 
 /**
  * List-view table for partner users with more than 4 projects.
- * Columns: Project Key, Name, Status, Start Date, End Date, Action Required, Outstanding Items.
+ * Columns: Project Key, Name, Status, Start Date, End Date, Action Required Items, Outstanding Items.
  * Clicking a row navigates to the project dashboard.
  */
 type ExportFormat = "csv" | "pdf";
@@ -168,7 +168,7 @@ const ProjectListTable = ({
               <TableCell>Status</TableCell>
               <TableCell>Start Date</TableCell>
               <TableCell>End Date</TableCell>
-              <TableCell align="right">Action Required</TableCell>
+              <TableCell align="right">Action Required Items</TableCell>
               <TableCell align="right">Outstanding Items</TableCell>
             </TableRow>
           </TableHead>

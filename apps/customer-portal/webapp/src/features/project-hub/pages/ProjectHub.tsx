@@ -174,6 +174,12 @@ export default function ProjectHub(): JSX.Element {
     }
   }, [isLoading, showLoader, hideLoader]);
 
+  const isPartner = (userDetails?.roles ?? []).includes(SETTINGS_PARTNER_ROLE);
+  // Use the unfiltered cached total so a search returning fewer results doesn't
+  // switch a partner back to card view.
+  const isPartnerListView =
+    isPartner && cachedTotalProjects > PROJECT_HUB_PARTNER_LIST_VIEW_THRESHOLD;
+
   const isCheckingAllSuspended =
     !isLoading &&
     !isAuthLoading &&
@@ -200,7 +206,8 @@ export default function ProjectHub(): JSX.Element {
     projects.length === 1 &&
     !searchQuery &&
     !allProjectsSuspended &&
-    !isCheckingAllSuspended;
+    !isCheckingAllSuspended &&
+    !isPartnerListView;
 
   useEffect(() => {
     if (isRedirectingToSingleProject) {
@@ -264,10 +271,6 @@ export default function ProjectHub(): JSX.Element {
 
   const headerTitle = resolveProjectHubHeaderTitle(titleTotalRecords);
   const headerSubtitle = resolveProjectHubHeaderSubtitle();
-
-  const isPartner = (userDetails?.roles ?? []).includes(SETTINGS_PARTNER_ROLE);
-  const isPartnerListView =
-    isPartner && totalRecords > PROJECT_HUB_PARTNER_LIST_VIEW_THRESHOLD;
 
   const colsPerRow = isXlUp ? 5 : isLgUp ? 4 : 3;
   // During loading use the cached count so the skeleton mirrors the expected layout.
