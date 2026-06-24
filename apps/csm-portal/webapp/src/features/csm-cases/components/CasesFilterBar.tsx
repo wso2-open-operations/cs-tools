@@ -614,19 +614,29 @@ export default function CasesFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              {/* Options are engineer emails labelled by name; `@me` resolves to
-                  the caller server-side via `assignedToMe`. */}
-              <SearchableMultiSelect
-                id="cases-filter-assignee"
-                label="Assignee"
-                placeholder="Search engineers…"
-                values={filters.assignees}
-                options={assigneeOptions}
-                formatOption={formatAssignee}
-                getOptionSecondary={assigneeSecondary}
-                getOptionSearchText={assigneeSearchText}
-                onChange={(next) => onChange({ ...filters, assignees: next })}
-              />
+              {/* Disabled until the backend `/cases/search` supports an
+                  assigned-engineer filter. The picker is email-backed and ready
+                  to enable (options labelled by name, `@me` sentinel); the hook
+                  does NOT send any assignee field meanwhile, so the search is
+                  never broken. */}
+              <Tooltip title="Assignee filtering is coming soon.">
+                <Box>
+                  <SearchableMultiSelect
+                    id="cases-filter-assignee"
+                    label="Assignee"
+                    placeholder="Search engineers…"
+                    values={filters.assignees}
+                    options={assigneeOptions}
+                    formatOption={formatAssignee}
+                    getOptionSecondary={assigneeSecondary}
+                    getOptionSearchText={assigneeSearchText}
+                    onChange={(next) =>
+                      onChange({ ...filters, assignees: next })
+                    }
+                    disabled
+                  />
+                </Box>
+              </Tooltip>
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               <AsyncProjectMultiSelect

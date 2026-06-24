@@ -273,15 +273,9 @@ export interface BeCaseSearchFilters {
   createdBy?: string[];
   /** When true, the caller's email (from the JWT) is appended to `createdBy`. */
   createdByMe?: boolean;
-  /**
-   * Filter to cases assigned to these engineer emails. Mirrors the
-   * `createdBy`/`createdByMe` pair for the assigned engineer rather than the
-   * reporter. NOTE: pending backend support on `/cases/search` — the FE sends
-   * it so the assignee filter works the moment the entity/BFF add it.
-   */
-  assignedTo?: string[];
-  /** When true, the caller's email (from the JWT) is appended to `assignedTo`. */
-  assignedToMe?: boolean;
+  // NOTE: there is no assigned-engineer filter here yet. The cases-list
+  // assignee control is disabled until the entity/BFF add one (e.g.
+  // `assignedTo`/`assignedToMe`, mirroring `createdBy`/`createdByMe`).
 }
 
 export interface BeCaseSearchPayload {

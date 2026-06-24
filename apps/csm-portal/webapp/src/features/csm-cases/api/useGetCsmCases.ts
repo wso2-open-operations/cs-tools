@@ -37,10 +37,7 @@ import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
-import {
-  ASSIGNEE_ME_TOKEN,
-  type CasesFilters,
-} from "@features/csm-cases/components/CasesFilterBar";
+import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 import type {
   CsmCaseRow,
   CsmCasesListResponse,
@@ -97,11 +94,10 @@ function accountOptionsQueryOptions(api: BackendApi) {
  * go stale. The project lookup shares `useProjectOptions`' key, which the
  * cases page already mounts for its filter options.
  *
- * Search and the severity / state / case-type / project / assignee filters are
- * pushed into the search payload (searchQuery / severities / states /
- * types / projectIds / assignedTo / assignedToMe) and the BE
- * paginates the result (`pagination` → `total` / `limit` / `offset` /
- * `hasMore`).
+ * Search and the severity / state / case-type / project filters are pushed
+ * into the search payload (searchQuery / severities / states / types /
+ * projectIds) and the BE paginates the result (`pagination` → `total` /
+ * `limit` / `offset` / `hasMore`).
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
  * limit (≤ {@link BE_MAX_PAGE_LIMIT}). With no filters the backend sorts by
@@ -123,15 +119,11 @@ export function useGetCsmCases(
 
   const offset = page * pageSize;
   const search = filters.search.trim();
-  // The assignee filter stores engineer emails plus the `@me` sentinel; `@me`
-  // maps to `assignedToMe` (the BE resolves the caller), the rest to
-  // `assignedTo`. Mirrors the createdBy / createdByMe split.
-  const assignedToMe = filters.assignees.includes(ASSIGNEE_ME_TOKEN);
-  const assignedTo = filters.assignees.filter((a) => a !== ASSIGNEE_ME_TOKEN);
 
   return useQuery<CsmCasesListResponse, Error>({
     // Sort the array filters so selection order doesn't fragment the cache
-    // (["S1","S2"] and ["S2","S1"] are the same query).
+    // (["S1","S2"] and ["S2","S1"] are the same query). `assignees` is omitted:
+    // the assignee filter is disabled and not sent, so it never changes results.
     queryKey: [
       ApiQueryKeys.CSM_CASES,
       search,
@@ -139,7 +131,6 @@ export function useGetCsmCases(
       [...filters.states].sort(),
       [...filters.caseTypes].sort(),
       [...filters.projects].sort(),
-      [...filters.assignees].sort(),
       currentUserEmail ?? "",
       page,
       pageSize,
@@ -170,10 +161,8 @@ export function useGetCsmCases(
             ...(filters.projects.length > 0 && {
               projectIds: filters.projects,
             }),
-            // Assignee filter (assigned engineer, by email). Pending BE support
-            // on `/cases/search`; see BeCaseSearchFilters.assignedTo.
-            ...(assignedTo.length > 0 && { assignedTo }),
-            ...(assignedToMe && { assignedToMe: true }),
+            // No assignee filter: `/cases/search` has no assigned-engineer
+            // filter yet, so the (disabled) assignee control sends nothing.
           },
         }),
         queryClient.fetchQuery(projectOptionsQueryOptions(api)).catch((err) => {

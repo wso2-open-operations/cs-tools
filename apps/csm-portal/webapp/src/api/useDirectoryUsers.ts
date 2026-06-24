@@ -61,7 +61,10 @@ export function useDirectoryUsers(): UseQueryResult<DirectoryUser[], Error> {
       const rows: RawDirectoryUser[] = Array.isArray(res)
         ? (res as RawDirectoryUser[])
         : ((res as { users?: RawDirectoryUser[] })?.users ?? []);
-      return rows.map(toDirectoryUser).filter((u) => u.name);
+      // Require both name (the option label) and email (the value the assignee
+      // filter sends as `assignedTo`) — a name-only user would yield an empty,
+      // invalid filter value.
+      return rows.map(toDirectoryUser).filter((u) => u.name && u.email);
     },
     staleTime: 30_000,
   });
