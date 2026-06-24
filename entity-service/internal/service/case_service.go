@@ -44,7 +44,7 @@ var validCaseSortField = map[domain.CaseSortField]bool{
 }
 
 var validCaseType = map[string]bool{
-	"support":                  true,
+	"case":                     true,
 	"service_request":          true,
 	"security_report_analysis": true,
 	"announcement":             true,
@@ -132,8 +132,8 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err := validateCreateCaseRequest(req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	if req.Type != "support" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"support\" for case creation"}
+	if req.Type != "case" {
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"case\" for case creation"}
 	}
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
 		return domain.CreateCaseResponse{}, err

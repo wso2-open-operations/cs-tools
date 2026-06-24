@@ -126,11 +126,33 @@ type snCaseSort struct {
 
 // snCaseTypeMap maps domain case type strings to the ServiceNow caseType values.
 var snCaseTypeMap = map[string]string{
-	"support":                    "default_case",
+	"case":                       "default_case",
 	"service_request":            "service_request",
 	"security_report_analysis":   "security_report_analysis",
 	"announcement":               "announcement",
 	"engagement":                 "engagement",
+}
+
+// snCaseTypeSysidMap maps ServiceNow caseType sysids to domain case type values.
+var snCaseTypeSysidMap = map[string]string{
+	"8d4b87bd1b18f010cb6898aebd4bcb59": "case",
+	"0d5b8fbd1b18f010cb6898aebd4bcba5": "case",
+	"5aeff1201b74c210264c997a234bcb54": "service_request",
+	"ab36479047ccf510a0a29cd3846d43ee": "security_report_analysis",
+	"3b8b43311b58f010cb6898aebd4bcb8f": "announcement",
+	"8f8fc2c41b0bd550d64e64a2604bcb38": "announcement",
+}
+
+// snCaseTypeToDomain converts a SN caseType entity ref to the domain type string.
+// Maps by sysid; defaults to "case" when caseType is null or the sysid is unrecognised.
+func snCaseTypeToDomain(ct *snCaseEntityRef) *string {
+	domainType := "case"
+	if ct != nil {
+		if mapped, ok := snCaseTypeSysidMap[ct.ID]; ok {
+			domainType = mapped
+		}
+	}
+	return &domainType
 }
 
 func domainTypeKeysToSN(typeKeys []string) []string {
@@ -314,8 +336,8 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	if req.Type != "support" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"support\" for case creation"}
+	if req.Type != "case" {
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"case\" for case creation"}
 	}
 	snType := snCaseTypeMap[req.Type]
 
@@ -397,30 +419,58 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	}
 
 	cv := domain.CaseView{
-		ID:          sysidToUUID(c.ID),
-		Number:      c.Number,
-		InternalID:  c.InternalID,
-		Subject:     c.Title,
-		Description: c.Description,
-		Severity:      snSeverityToSeverity(c.Severity),
-		IssueType:   snIssueTypeToEnum(c.IssueType),
-		State:       state,
-		WorkState:   snWorkStateLabelToEnum(c.WorkState),
-		CreatedOn:   createdOn,
-		UpdatedOn:   updatedOn,
+		ID:             sysidToUUID(c.ID),
+		Number:         c.Number,
+		InternalID:     c.InternalID,
+		Subject:        c.Title,
+		Description:    c.Description,
+		Severity:       snSeverityToSeverity(c.Severity),
+		IssueType:      snIssueTypeToEnum(c.IssueType),
+		State:          state,
+		WorkState:      snWorkStateLabelToEnum(c.WorkState),
+		Type:           snCaseTypeToDomain(c.CaseType),
+		EngagementType: snLabelStr(c.EngagementType),
+		CreatedOn:      createdOn,
+		UpdatedOn:      updatedOn,
 		CreatedByDetails: domain.UserRef{
 			Email: c.CreatedBy,
 		},
 		ProjectDetails:    domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
-		DeploymentDetails: domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
-		DeployedProductDetails: domain.DeployedProductRef{
-			ID:          sysidToUUID(c.DeployedProduct.ID),
-			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
-		},
 	}
 
+	if depID := sysidToUUID(c.Deployment.ID); depID != "" {
+		cv.DeploymentDetails = &domain.EntityRef{ID: depID, Name: c.Deployment.Name}
+	}
+	if dpID := sysidToUUID(c.DeployedProduct.ID); dpID != "" {
+		cv.DeployedProductDetails = &domain.DeployedProductRef{
+			ID:          dpID,
+			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
+		}
+	}
 	if c.Product != nil {
-		cv.ProductDetails = domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+		if id := sysidToUUID(c.Product.ID); id != "" {
+			cv.ProductDetails = &domain.EntityRef{ID: id, Name: c.Product.Name}
+		}
+	}
+	if c.Catalog != nil {
+		if id := sysidToUUID(c.Catalog.ID); id != "" {
+			cv.Catalog = &domain.EntityRef{ID: id, Name: c.Catalog.Name}
+		}
+	}
+	if c.CatalogItem != nil {
+		if id := sysidToUUID(c.CatalogItem.ID); id != "" {
+			cv.CatalogItem = &domain.EntityRef{ID: id, Name: c.CatalogItem.Name}
+		}
+	}
+	if c.AssignedTeam != nil {
+		if id := sysidToUUID(c.AssignedTeam.ID); id != "" {
+			cv.AssignedTeam = &domain.EntityRef{ID: id, Name: c.AssignedTeam.Name}
+		}
+	}
+	if c.Conversation != nil {
+		if id := sysidToUUID(c.Conversation.ID); id != "" {
+			cv.Conversation = &domain.EntityRef{ID: id, Name: c.Conversation.Name}
+		}
 	}
 	if c.AssignedEngineer != nil {
 		cv.AssignedEngineer = &domain.AssignedEngineerRef{ID: sysidToUUID(c.AssignedEngineer.ID), Name: c.AssignedEngineer.Name, Email: c.AssignedEngineer.Email}
@@ -638,6 +688,7 @@ type snUpdateCaseResponse struct {
 		UpdatedBy string        `json:"updatedBy"`
 		State     *snCaseState  `json:"state"`
 		Severity  *snCaseLabel  `json:"severity"`
+		WorkState *snCaseLabel  `json:"workState"`
 		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
@@ -755,6 +806,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if snResp.Case.Severity != nil {
 		resp.Case.Severity = snSeverityToSeverity(snResp.Case.Severity)
 	}
+	resp.Case.WorkState = snWorkStateLabelToEnum(snResp.Case.WorkState)
 	if snResp.Case.AssignedTo != nil {
 		resp.Case.AssignedTo = &domain.AssignedEngineerRef{
 			ID:   sysidToUUID(snResp.Case.AssignedTo.ID),
@@ -1072,9 +1124,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		if c.State != nil {
 			stateLabel = c.State.Label
 		}
-		caseType := ""
-		if c.CaseType != nil {
-			caseType = c.CaseType.Name
+		caseTypeDomain := ""
+		if t := snCaseTypeToDomain(c.CaseType); t != nil {
+			caseTypeDomain = *t
 		}
 
 		cv := domain.SearchCaseView{
@@ -1090,22 +1142,34 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			Severity:        severityLabel,
 			EngagementType:  engagementTypeLabel,
 			WorkState:       workStateLabel,
-			CaseType:        caseType,
-			Project:         domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
-			Deployment:      domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
-			DeployedProduct: domain.EntityRef{ID: sysidToUUID(c.DeployedProduct.ID), Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
+			Type:            caseTypeDomain,
+			Project: domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+		}
+		if depID := sysidToUUID(c.Deployment.ID); depID != "" {
+			cv.Deployment = &domain.EntityRef{ID: depID, Name: c.Deployment.Name}
+		}
+		if dpID := sysidToUUID(c.DeployedProduct.ID); dpID != "" {
+			cv.DeployedProduct = &domain.EntityRef{ID: dpID, Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)}
 		}
 		if c.Product != nil {
-			cv.Product = &domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+			if id := sysidToUUID(c.Product.ID); id != "" {
+				cv.Product = &domain.EntityRef{ID: id, Name: c.Product.Name}
+			}
 		}
 		if c.Catalog != nil {
-			cv.Catalog = &domain.EntityRef{ID: sysidToUUID(c.Catalog.ID), Name: c.Catalog.Name}
+			if id := sysidToUUID(c.Catalog.ID); id != "" {
+				cv.Catalog = &domain.EntityRef{ID: id, Name: c.Catalog.Name}
+			}
 		}
 		if c.CatalogItem != nil {
-			cv.CatalogItem = &domain.EntityRef{ID: sysidToUUID(c.CatalogItem.ID), Name: c.CatalogItem.Name}
+			if id := sysidToUUID(c.CatalogItem.ID); id != "" {
+				cv.CatalogItem = &domain.EntityRef{ID: id, Name: c.CatalogItem.Name}
+			}
 		}
 		if c.AssignedTeam != nil {
-			cv.AssignedTeam = &domain.EntityRef{ID: sysidToUUID(c.AssignedTeam.ID), Name: c.AssignedTeam.Name}
+			if id := sysidToUUID(c.AssignedTeam.ID); id != "" {
+				cv.AssignedTeam = &domain.EntityRef{ID: id, Name: c.AssignedTeam.Name}
+			}
 		}
 		if c.Conversation != nil {
 			cv.Conversation = &domain.EntityRef{ID: sysidToUUID(c.Conversation.ID), Name: c.Conversation.Name}

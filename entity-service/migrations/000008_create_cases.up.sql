@@ -4,7 +4,7 @@ CREATE TYPE case_work_state_enum AS ENUM (
 );
 
 CREATE TYPE case_type_enum AS ENUM (
-  'support',
+  'case',
   'service_request',
   'security_report_analysis',
   'announcement',
@@ -57,7 +57,7 @@ CREATE TABLE cases (
   project_id          UUID NOT NULL REFERENCES projects(id),
   deployment_id       UUID NOT NULL REFERENCES deployments(id),
   deployed_product_id UUID NOT NULL REFERENCES deployed_products(id),
-  type                case_type_enum NOT NULL DEFAULT 'support',
+  type                case_type_enum NOT NULL DEFAULT 'case',
   subject             VARCHAR NOT NULL,
   description         TEXT NOT NULL,
   severity            case_severity_enum NULL,
@@ -85,11 +85,11 @@ CREATE TABLE cases (
       (state != 'work_in_progress' AND work_state IS NULL)
     ),
 
-  CONSTRAINT chk_severity_required_for_support
+  CONSTRAINT chk_severity_required_for_case
     CHECK (
-      (type = 'support' AND severity IS NOT NULL)
+      (type = 'case' AND severity IS NOT NULL)
       OR
-      (type != 'support' AND severity IS NULL)
+      (type != 'case' AND severity IS NULL)
     ),
 
   CONSTRAINT chk_engagement_type_only_on_engagement

@@ -113,6 +113,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		rcID, rcNum                         *string
 		accountID, accountName, accountTier string
 		workState                           *string
+		depID, depName                      string
+		dpID, dpDisplayName                 string
+		prodID, prodName                    string
 	)
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
@@ -145,9 +148,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
-		&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
-		&cv.DeployedProductDetails.ID, &cv.DeployedProductDetails.DisplayName,
-		&cv.ProductDetails.ID, &cv.ProductDetails.Name,
+		&depID, &depName,
+		&dpID, &dpDisplayName,
+		&prodID, &prodName,
 		&accountID, &accountName, &accountTier,
 		&aeID, &aeName,
 		&pcID, &pcNum,
@@ -159,6 +162,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
 	}
+	cv.DeploymentDetails = &domain.EntityRef{ID: depID, Name: depName}
+	cv.DeployedProductDetails = &domain.DeployedProductRef{ID: dpID, DisplayName: dpDisplayName}
+	cv.ProductDetails = &domain.EntityRef{ID: prodID, Name: prodName}
 	cv.AccountDetails = &domain.AccountRef{ID: accountID, Name: accountName, Type: accountTier}
 	if workState != nil {
 		ws := domain.CaseWorkState(*workState)
@@ -496,14 +502,16 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			var pcID, pcNumber *string
 			var rcID, rcNumber *string
 			var prodID, prodName string
+			var depID, depName string
+			var dpID, dpName string
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &cv.InternalID,
 				&caseType, &subject, &description, &severity, &issueType, &cv.State,
 				&engagementType, &workState, &createdAt,
 				&cv.CreatedBy,
 				&cv.Project.ID, &cv.Project.Name,
-				&cv.Deployment.ID, &cv.Deployment.Name,
-				&cv.DeployedProduct.ID, &cv.DeployedProduct.Name,
+				&depID, &depName,
+				&dpID, &dpName,
 				&prodID, &prodName,
 				&aeID, &aeName,
 				&pcID, &pcNumber,
@@ -511,7 +519,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			); err != nil {
 				return fmt.Errorf("scan case: %w", err)
 			}
-			cv.CaseType = caseType
+			cv.Deployment = &domain.EntityRef{ID: depID, Name: depName}
+			cv.DeployedProduct = &domain.EntityRef{ID: dpID, Name: dpName}
+			cv.Type = caseType
 			cv.Subject = &subject
 			cv.Description = &description
 			cv.Severity = severity

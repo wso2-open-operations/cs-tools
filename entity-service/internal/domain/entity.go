@@ -503,9 +503,9 @@ type Case struct {
 
 // UserRef is a reference to a user with key display fields.
 type UserRef struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	UserID string `json:"userId"`
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	UserID string `json:"userId,omitempty"`
 	Email  string `json:"email"`
 }
 
@@ -559,14 +559,20 @@ type CaseView struct {
 	IssueType              CaseIssueType        `json:"issueType"`
 	State                  CaseState            `json:"state"`
 	WorkState              *CaseWorkState       `json:"workState"`
+	Type                   *string              `json:"type"`
+	EngagementType         *string              `json:"engagementType"`
 	CreatedOn              time.Time            `json:"createdOn"`
 	UpdatedOn              time.Time            `json:"updatedOn"`
 	ClosedOn               *time.Time           `json:"closedOn"`
 	CreatedByDetails       UserRef              `json:"createdBy"`
 	ProjectDetails         EntityRef            `json:"project"`
-	DeploymentDetails      EntityRef            `json:"deployment"`
-	DeployedProductDetails DeployedProductRef   `json:"deployedProduct"`
-	ProductDetails         EntityRef            `json:"product"`
+	DeploymentDetails      *EntityRef           `json:"deployment"`
+	DeployedProductDetails *DeployedProductRef  `json:"deployedProduct"`
+	ProductDetails         *EntityRef           `json:"product"`
+	Catalog                *EntityRef           `json:"catalog"`
+	CatalogItem            *EntityRef           `json:"catalogItem"`
+	AssignedTeam           *EntityRef           `json:"assignedTeam"`
+	Conversation           *EntityRef           `json:"conversation"`
 	AssignedEngineer       *AssignedEngineerRef `json:"assignedEngineer"`
 	ParentCase             *CaseNumberRef       `json:"parentCase"`
 	RelatedCase            *CaseNumberRef       `json:"relatedCase"`
@@ -620,10 +626,10 @@ type SearchCaseView struct {
 	Product          *EntityRef           `json:"product"`
 	EngagementType   *string              `json:"engagementType"`
 	WorkState        *string              `json:"workState"`
-	CaseType         string               `json:"caseType"`
+	Type             string               `json:"type"`
 	Project          EntityRef            `json:"project"`
-	Deployment       EntityRef            `json:"deployment"`
-	DeployedProduct  EntityRef            `json:"deployedProduct"`
+	Deployment       *EntityRef           `json:"deployment"`
+	DeployedProduct  *EntityRef           `json:"deployedProduct"`
 	AssignedEngineer *AssignedEngineerRef `json:"assignedEngineer"`
 	ParentCase       *EntityRef           `json:"parentCase"`
 	RelatedCase      *EntityRef           `json:"relatedCase"`

@@ -1326,10 +1326,10 @@ components:
       properties:
         type:
           type: string
-          enum: [support]
+          enum: [case]
           description: |
-            Case type. Currently only `support` is accepted for the Postgres data source.
-            For the ServiceNow data source `support` maps to `default_case` in the SN API payload.
+            Case type. Currently only `case` is accepted for the Postgres data source.
+            For the ServiceNow data source `case` maps to `default_case` in the SN API payload.
         projectId:
           type: string
           format: uuid
@@ -1379,10 +1379,10 @@ components:
           type: array
           items:
             type: string
-            enum: [support, service_request, security_report_analysis, announcement, engagement]
+            enum: [case, service_request, security_report_analysis, announcement, engagement]
           description: |
             Filter by case type. For the ServiceNow data source each value is
-            translated to its SN caseType equivalent (support → default_case).
+            translated to its SN caseTypes equivalent (case → default_case).
         searchQuery:
           type: string
           description: Case-insensitive match against subject, number, and internal_id.
@@ -1409,7 +1409,7 @@ components:
           items:
             type: string
             enum: [catastrophic, critical, high, medium, low]
-          description: Filter by severity. Only applicable when types includes support.
+          description: Filter by severity. Only applicable when types includes case.
         issueTypes:
           type: array
           items:
@@ -1619,6 +1619,14 @@ components:
           enum: [ongoing, paused]
           nullable: true
           description: Work sub-state, present only when state is work_in_progress.
+        type:
+          type: string
+          nullable: true
+          description: Case type label. Populated for ServiceNow cases; null for Postgres cases.
+        engagementType:
+          type: string
+          nullable: true
+          description: Engagement type label. Populated for ServiceNow cases; null for Postgres cases.
         createdOn:
           type: string
           format: date-time
@@ -1635,11 +1643,29 @@ components:
         project:
           $ref: '#/components/schemas/EntityRef'
         deployment:
+          nullable: true
           $ref: '#/components/schemas/EntityRef'
+          description: Deployment associated with the case. null for ServiceNow cases with no deployment.
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
         product:
           $ref: '#/components/schemas/EntityRef'
+        catalog:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog entry. Populated for ServiceNow cases; null for Postgres cases.
+        catalogItem:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Service catalog item. Populated for ServiceNow cases; null for Postgres cases.
+        assignedTeam:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Team assigned to the case. Populated for ServiceNow cases; null for Postgres cases.
+        conversation:
+          nullable: true
+          $ref: '#/components/schemas/EntityRef'
+          description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
         assignedEngineer:
           nullable: true
           $ref: '#/components/schemas/AssignedEngineerRef'
@@ -1685,7 +1711,7 @@ components:
         severity:
           type: string
           nullable: true
-          description: Severity enum value (Postgres) or raw SN label (ServiceNow). Null for non-support cases.
+          description: Severity enum value (Postgres) or raw SN label (ServiceNow). Null for non-case types.
         catalog:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
@@ -1703,14 +1729,14 @@ components:
         engagementType:
           type: string
           nullable: true
-          description: Engagement type label. Non-null only when caseType is engagement.
+          description: Engagement type label. Non-null only when type is engagement.
         workState:
           type: string
           nullable: true
           description: Work sub-state label. Non-null only when state is work_in_progress.
-        caseType:
+        type:
           type: string
-          description: Case type value (Postgres) or raw SN caseType name (ServiceNow).
+          description: Case type value (Postgres) or SN caseType label (ServiceNow).
         project:
           $ref: '#/components/schemas/EntityRef'
         deployment:
