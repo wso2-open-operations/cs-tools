@@ -503,9 +503,9 @@ type Case struct {
 
 // UserRef is a reference to a user with key display fields.
 type UserRef struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	UserID string `json:"userId"`
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	UserID string `json:"userId,omitempty"`
 	Email  string `json:"email"`
 }
 
@@ -567,8 +567,8 @@ type CaseView struct {
 	CreatedByDetails       UserRef              `json:"createdBy"`
 	ProjectDetails         EntityRef            `json:"project"`
 	DeploymentDetails      EntityRef            `json:"deployment"`
-	DeployedProductDetails DeployedProductRef   `json:"deployedProduct"`
-	ProductDetails         EntityRef            `json:"product"`
+	DeployedProductDetails *DeployedProductRef  `json:"deployedProduct"`
+	ProductDetails         *EntityRef           `json:"product"`
 	Catalog                *EntityRef           `json:"catalog"`
 	CatalogItem            *EntityRef           `json:"catalogItem"`
 	AssignedTeam           *EntityRef           `json:"assignedTeam"`

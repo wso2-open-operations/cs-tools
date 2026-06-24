@@ -396,39 +396,41 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		return domain.CaseView{}, fmt.Errorf("sn get case %q: %w", c.ID, err)
 	}
 
-	caseType := ""
+	var caseType *string
 	if c.CaseType != nil {
-		caseType = c.CaseType.Name
+		s := c.CaseType.Name
+		caseType = &s
 	}
-	engagementType := snLabelStr(c.EngagementType)
 
 	cv := domain.CaseView{
-		ID:          sysidToUUID(c.ID),
-		Number:      c.Number,
-		InternalID:  c.InternalID,
-		Subject:     c.Title,
-		Description: c.Description,
-		Severity:    snSeverityToSeverity(c.Severity),
-		IssueType:   snIssueTypeToEnum(c.IssueType),
-		State:       state,
-		WorkState:   snWorkStateLabelToEnum(c.WorkState),
-		CaseType:    &caseType,
-		EngagementType: engagementType,
-		CreatedOn:   createdOn,
-		UpdatedOn:   updatedOn,
+		ID:             sysidToUUID(c.ID),
+		Number:         c.Number,
+		InternalID:     c.InternalID,
+		Subject:        c.Title,
+		Description:    c.Description,
+		Severity:       snSeverityToSeverity(c.Severity),
+		IssueType:      snIssueTypeToEnum(c.IssueType),
+		State:          state,
+		WorkState:      snWorkStateLabelToEnum(c.WorkState),
+		CaseType:       caseType,
+		EngagementType: snLabelStr(c.EngagementType),
+		CreatedOn:      createdOn,
+		UpdatedOn:      updatedOn,
 		CreatedByDetails: domain.UserRef{
 			Email: c.CreatedBy,
 		},
 		ProjectDetails:    domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 		DeploymentDetails: domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
-		DeployedProductDetails: domain.DeployedProductRef{
-			ID:          sysidToUUID(c.DeployedProduct.ID),
-			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
-		},
 	}
 
+	if dpID := sysidToUUID(c.DeployedProduct.ID); dpID != "" {
+		cv.DeployedProductDetails = &domain.DeployedProductRef{
+			ID:          dpID,
+			DisplayName: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version),
+		}
+	}
 	if c.Product != nil {
-		cv.ProductDetails = domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
+		cv.ProductDetails = &domain.EntityRef{ID: sysidToUUID(c.Product.ID), Name: c.Product.Name}
 	}
 	if c.Catalog != nil {
 		cv.Catalog = &domain.EntityRef{ID: sysidToUUID(c.Catalog.ID), Name: c.Catalog.Name}

@@ -113,6 +113,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		rcID, rcNum                         *string
 		accountID, accountName, accountTier string
 		workState                           *string
+		dpID, dpDisplayName                 string
+		prodID, prodName                    string
 	)
 	err := r.db.QueryRow(ctx,
 		`SELECT c.id, c.number, c.internal_id,
@@ -146,8 +148,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
 		&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
-		&cv.DeployedProductDetails.ID, &cv.DeployedProductDetails.DisplayName,
-		&cv.ProductDetails.ID, &cv.ProductDetails.Name,
+		&dpID, &dpDisplayName,
+		&prodID, &prodName,
 		&accountID, &accountName, &accountTier,
 		&aeID, &aeName,
 		&pcID, &pcNum,
@@ -159,6 +161,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
 	}
+	cv.DeployedProductDetails = &domain.DeployedProductRef{ID: dpID, DisplayName: dpDisplayName}
+	cv.ProductDetails = &domain.EntityRef{ID: prodID, Name: prodName}
 	cv.AccountDetails = &domain.AccountRef{ID: accountID, Name: accountName, Type: accountTier}
 	if workState != nil {
 		ws := domain.CaseWorkState(*workState)
