@@ -108,11 +108,14 @@ export function classifyProductLabel(label: string): {
  * Returns the ordered metric keys relevant for a given product label.
  * UNKNOWN products fall back to showing all common metric keys.
  *
- * @param label - Product display label.
+ * @param label - Product display label used for type detection.
+ * @param version - Explicit product version string (e.g. "7.0.0") as the primary
+ *   source for major version selection. Falls back to parsing the label when omitted.
  * @returns Ordered list of metric keys to display.
  */
-export function getProductMetricKeys(label: string): string[] {
-  const { type, majorVersion } = classifyProductLabel(label);
+export function getProductMetricKeys(label: string, version?: string): string[] {
+  const { type, majorVersion: labelMajorVersion } = classifyProductLabel(label);
+  const majorVersion = version != null ? parseMajorVersion(version) : labelMajorVersion;
   switch (type) {
     case WsoProductType.APIM:
       return majorVersion >= 7
