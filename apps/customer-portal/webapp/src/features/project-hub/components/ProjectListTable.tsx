@@ -16,7 +16,11 @@
 
 import {
   Box,
+  Button,
   Chip,
+  CircularProgress,
+  Menu,
+  MenuItem,
   Paper,
   Table,
   TableBody,
@@ -27,9 +31,15 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import { type JSX, useState, useMemo } from "react";
+import { ChevronDown, Download } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, useState, useMemo, useRef, useCallback, type MouseEvent } from "react";
 import { useNavigate } from "react-router";
 import type { ProjectListItem } from "@features/project-hub/types/projects";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  downloadProjectListCsv,
+  downloadProjectListPdf,
+} from "@features/project-hub/utils/projectsExport";
 
 const DATE_LOCALE = "en-US";
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
@@ -55,16 +65,53 @@ type ProjectListTableProps = {
 
 /**
  * List-view table for partner users with more than 4 projects.
- * Columns: Project Key, Name, Status, Start Date, End Date, Action Required, Outstanding Items.
+ * Columns: Project Key, Name, Status, Start Date, End Date, Action Required Items, Outstanding Items.
  * Clicking a row navigates to the project dashboard.
  */
+type ExportFormat = "csv" | "pdf";
+
 const ProjectListTable = ({
   projects,
   isFetchingNextPage,
 }: ProjectListTableProps): JSX.Element => {
   const navigate = useNavigate();
+  const { showError } = useErrorBanner();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
+  const isExportingRef = useRef(false);
+  const [exportAnchorEl, setExportAnchorEl] = useState<HTMLElement | null>(null);
+
+  const handleExportOpen = (e: MouseEvent<HTMLElement>) => {
+    if (!isExportingRef.current) setExportAnchorEl(e.currentTarget);
+  };
+  const handleExportClose = () => setExportAnchorEl(null);
+
+  const handleExport = useCallback(
+    (format: ExportFormat) => {
+      if (isExportingRef.current) return;
+      handleExportClose();
+      if (projects.length === 0) {
+        showError("No projects to export.");
+        return;
+      }
+      isExportingRef.current = true;
+      setExportingFormat(format);
+      try {
+        if (format === "csv") {
+          downloadProjectListCsv(projects);
+        } else {
+          downloadProjectListPdf(projects);
+        }
+      } catch {
+        showError("Failed to export projects.");
+      } finally {
+        isExportingRef.current = false;
+        setExportingFormat(null);
+      }
+    },
+    [projects, showError],
+  );
 
   const maxPage = Math.max(0, Math.floor((projects.length - 1) / rowsPerPage));
   if (page > maxPage) setPage(maxPage);
@@ -81,8 +128,41 @@ const ProjectListTable = ({
     setPage(0);
   };
 
+  const isExporting = exportingFormat !== null;
+
   return (
     <Box sx={{ width: "100%", mt: 1 }}>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
+        <Button
+          type="button"
+          variant="outlined"
+          size="small"
+          onClick={handleExportOpen}
+          disabled={isExporting || projects.length === 0}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(exportAnchorEl)}
+          aria-controls="project-list-export-menu"
+          startIcon={
+            isExporting ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : (
+              <Download size={16} />
+            )
+          }
+          endIcon={<ChevronDown size={16} />}
+        >
+          {isExporting ? "Exporting..." : "Export"}
+        </Button>
+        <Menu
+          id="project-list-export-menu"
+          anchorEl={exportAnchorEl}
+          open={Boolean(exportAnchorEl)}
+          onClose={handleExportClose}
+        >
+          <MenuItem onClick={() => handleExport("csv")}>Export to CSV</MenuItem>
+          <MenuItem onClick={() => handleExport("pdf")}>Export to PDF</MenuItem>
+        </Menu>
+      </Box>
       <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
         <Table sx={{ minWidth: 800 }}>
           <TableHead>
@@ -92,8 +172,8 @@ const ProjectListTable = ({
               <TableCell>Status</TableCell>
               <TableCell>Start Date</TableCell>
               <TableCell>End Date</TableCell>
-              <TableCell align="right">Action Required</TableCell>
-              <TableCell align="right">Outstanding Items</TableCell>
+              <TableCell>Action Required Items</TableCell>
+              <TableCell>Outstanding Items</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -150,12 +230,12 @@ const ProjectListTable = ({
                         {formatDate(project.endDate)}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell>
                       <Typography variant="body2">
                         {project.actionRequiredCount ?? 0}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell>
                       <Typography variant="body2">
                         {project.outstandingCount ?? 0}
                       </Typography>
