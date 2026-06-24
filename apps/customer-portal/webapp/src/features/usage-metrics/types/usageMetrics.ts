@@ -133,6 +133,7 @@ export type DeploymentExpandedViewProps = {
   deploymentId: string;
   typeId: string;
   dateRange: UsageDateRangeIso;
+  expanded: boolean;
 };
 
 export type EnvironmentBreakdownRow = {

@@ -234,6 +234,7 @@ function DeploymentExpandedView({
   deploymentId,
   typeId,
   dateRange,
+  expanded,
 }: DeploymentExpandedViewProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(typeId);
 
@@ -251,12 +252,15 @@ function DeploymentExpandedView({
     isError: instancesError,
   } = usePostDeploymentInstancesSearch(deploymentId);
 
-  // Fetch usages for this deployment — gives us transactions per deployedProduct
+  // Fetch usages only when expanded — avoids firing for every collapsed row.
   const {
     data: usagesData,
     isLoading: usagesLoading,
     isError: usagesError,
-  } = usePostDeploymentInstancesUsagesSearch(deploymentId, metricsPayload);
+  } = usePostDeploymentInstancesUsagesSearch(
+    expanded ? deploymentId : undefined,
+    metricsPayload,
+  );
 
   const isLoading = instancesLoading || usagesLoading;
   const isError = instancesError || usagesError;
@@ -505,6 +509,7 @@ function EnvironmentBreakdownAccordion({
           deploymentId={row.deploymentId}
           typeId={row.kind}
           dateRange={dateRange}
+          expanded={expanded}
         />
       </AccordionDetails>
     </Accordion>
@@ -541,8 +546,7 @@ function deriveMetricSummaries(
     const values = sortedDates.map((d) => stats[d][key] ?? 0);
     const nonZero = values.filter((v) => v > 0);
     if (nonZero.length === 0) continue;
-    const lastNonZero = [...values].reverse().find((v) => v > 0) ?? 0;
-    const curr = lastNonZero;
+    const curr = values[values.length - 1] ?? 0;
     const min = Math.min(...nonZero);
     const max = Math.max(...nonZero);
     const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
@@ -626,7 +630,7 @@ export default function UsageOverviewPanel({
     metricsError ||
     statsError;
 
-  const isStatCardsLoading = metricsLoading || statsLoading;
+  const isStatCardsLoading = metricsLoading || statsLoading || usagesLoading;
 
   // ── Data source stats ──────────────────────────────────────────────────────
   const dataSourceStatsPayload = useMemo(

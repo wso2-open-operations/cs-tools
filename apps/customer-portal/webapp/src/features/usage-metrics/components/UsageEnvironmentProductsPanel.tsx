@@ -354,7 +354,7 @@ function InstanceAccordionRow({
             <MetricPill
               icon={<Cpu size={16} color={colors.grey?.[400]} />}
               label={USAGE_METRICS_INSTANCE_CORE_COUNT}
-              value={`${instance.coreSummary.curr} / ${instance.coreSummary.avg} / ${instance.coreSummary.min} / ${instance.coreSummary.max}`}
+              value={`Curr ${instance.coreSummary.curr} / Avg ${instance.coreSummary.avg} / Min ${instance.coreSummary.min} / Max ${instance.coreSummary.max}`}
             />
           </Box>
         </Box>
@@ -514,7 +514,8 @@ function ProductAccordionRow({
               flex: 1,
               minWidth: 0,
               display: "flex",
-              justifyContent: "space-between",
+              flexWrap: "wrap",
+              justifyContent: { xs: "flex-start", sm: "space-between" },
               alignItems: "flex-start",
               gap: 2,
             }}
