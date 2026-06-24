@@ -113,6 +113,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		rcID, rcNum                         *string
 		accountID, accountName, accountTier string
 		workState                           *string
+		depID, depName                      string
 		dpID, dpDisplayName                 string
 		prodID, prodName                    string
 	)
@@ -147,7 +148,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 		&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn,
 		&cv.CreatedByDetails.ID, &cv.CreatedByDetails.Name, &cv.CreatedByDetails.UserID, &cv.CreatedByDetails.Email,
 		&cv.ProjectDetails.ID, &cv.ProjectDetails.Name,
-		&cv.DeploymentDetails.ID, &cv.DeploymentDetails.Name,
+		&depID, &depName,
 		&dpID, &dpDisplayName,
 		&prodID, &prodName,
 		&accountID, &accountName, &accountTier,
@@ -161,6 +162,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string) (domain.CaseView,
 	if err != nil {
 		return domain.CaseView{}, fmt.Errorf("get case by id: %w", err)
 	}
+	cv.DeploymentDetails = &domain.EntityRef{ID: depID, Name: depName}
 	cv.DeployedProductDetails = &domain.DeployedProductRef{ID: dpID, DisplayName: dpDisplayName}
 	cv.ProductDetails = &domain.EntityRef{ID: prodID, Name: prodName}
 	cv.AccountDetails = &domain.AccountRef{ID: accountID, Name: accountName, Type: accountTier}

@@ -566,7 +566,7 @@ type CaseView struct {
 	ClosedOn               *time.Time           `json:"closedOn"`
 	CreatedByDetails       UserRef              `json:"createdBy"`
 	ProjectDetails         EntityRef            `json:"project"`
-	DeploymentDetails      EntityRef            `json:"deployment"`
+	DeploymentDetails      *EntityRef           `json:"deployment"`
 	DeployedProductDetails *DeployedProductRef  `json:"deployedProduct"`
 	ProductDetails         *EntityRef           `json:"product"`
 	Catalog                *EntityRef           `json:"catalog"`

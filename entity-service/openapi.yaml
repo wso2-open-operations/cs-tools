@@ -1643,7 +1643,9 @@ components:
         project:
           $ref: '#/components/schemas/EntityRef'
         deployment:
+          nullable: true
           $ref: '#/components/schemas/EntityRef'
+          description: Deployment associated with the case. null for ServiceNow cases with no deployment.
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
         product:
