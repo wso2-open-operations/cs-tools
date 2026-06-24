@@ -133,6 +133,28 @@ var snCaseTypeMap = map[string]string{
 	"engagement":                 "engagement",
 }
 
+// snCaseTypeSysidMap maps ServiceNow caseType sysids to domain case type values.
+var snCaseTypeSysidMap = map[string]string{
+	"8d4b87bd1b18f010cb6898aebd4bcb59": "case",
+	"0d5b8fbd1b18f010cb6898aebd4bcba5": "case",
+	"5aeff1201b74c210264c997a234bcb54": "service_request",
+	"ab36479047ccf510a0a29cd3846d43ee": "security_report_analysis",
+	"3b8b43311b58f010cb6898aebd4bcb8f": "announcement",
+	"8f8fc2c41b0bd550d64e64a2604bcb38": "announcement",
+}
+
+// snCaseTypeToDomain converts a SN caseType entity ref to the domain type string.
+// Maps by sysid; defaults to "case" when caseType is null or the sysid is unrecognised.
+func snCaseTypeToDomain(ct *snCaseEntityRef) *string {
+	domainType := "case"
+	if ct != nil {
+		if mapped, ok := snCaseTypeSysidMap[ct.ID]; ok {
+			domainType = mapped
+		}
+	}
+	return &domainType
+}
+
 func domainTypeKeysToSN(typeKeys []string) []string {
 	result := make([]string, 0, len(typeKeys))
 	for _, t := range typeKeys {
@@ -396,12 +418,6 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		return domain.CaseView{}, fmt.Errorf("sn get case %q: %w", c.ID, err)
 	}
 
-	var caseType *string
-	if c.CaseType != nil {
-		s := c.CaseType.Name
-		caseType = &s
-	}
-
 	cv := domain.CaseView{
 		ID:             sysidToUUID(c.ID),
 		Number:         c.Number,
@@ -412,7 +428,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		IssueType:      snIssueTypeToEnum(c.IssueType),
 		State:          state,
 		WorkState:      snWorkStateLabelToEnum(c.WorkState),
-		Type:           caseType,
+		Type:           snCaseTypeToDomain(c.CaseType),
 		EngagementType: snLabelStr(c.EngagementType),
 		CreatedOn:      createdOn,
 		UpdatedOn:      updatedOn,
@@ -1094,9 +1110,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		if c.State != nil {
 			stateLabel = c.State.Label
 		}
-		caseType := ""
-		if c.CaseType != nil {
-			caseType = c.CaseType.Name
+		caseTypeDomain := ""
+		if t := snCaseTypeToDomain(c.CaseType); t != nil {
+			caseTypeDomain = *t
 		}
 
 		cv := domain.SearchCaseView{
@@ -1112,7 +1128,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			Severity:        severityLabel,
 			EngagementType:  engagementTypeLabel,
 			WorkState:       workStateLabel,
-			Type:            caseType,
+			Type:            caseTypeDomain,
 			Project:         domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 			Deployment:      domain.EntityRef{ID: sysidToUUID(c.Deployment.ID), Name: c.Deployment.Name},
 			DeployedProduct: domain.EntityRef{ID: sysidToUUID(c.DeployedProduct.ID), Name: strings.TrimSpace(c.DeployedProduct.Name + " " + c.DeployedProduct.Version)},
