@@ -676,6 +676,7 @@ type snUpdateCaseResponse struct {
 		UpdatedBy string        `json:"updatedBy"`
 		State     *snCaseState  `json:"state"`
 		Severity  *snCaseLabel  `json:"severity"`
+		WorkState *snCaseLabel  `json:"workState"`
 		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
@@ -793,6 +794,7 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if snResp.Case.Severity != nil {
 		resp.Case.Severity = snSeverityToSeverity(snResp.Case.Severity)
 	}
+	resp.Case.WorkState = snWorkStateLabelToEnum(snResp.Case.WorkState)
 	if snResp.Case.AssignedTo != nil {
 		resp.Case.AssignedTo = &domain.AssignedEngineerRef{
 			ID:   sysidToUUID(snResp.Case.AssignedTo.ID),
