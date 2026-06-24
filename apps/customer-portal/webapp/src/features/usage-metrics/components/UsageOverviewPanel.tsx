@@ -397,7 +397,7 @@ function EnvironmentBreakdownAccordion({
     ]);
     const totalTx = usages.reduce((sum, u) => sum + sumUsageEntryTransactions(u), 0);
     return {
-      productCount: depUsagesData ? productIds.size : row.productCount,
+      productCount: productIds.size,
       instanceCount: instances.length,
       totalCores: instances.reduce((sum, i) => sum + (i.metadata?.coreCount ?? 0), 0),
       transactionsLabel: formatUsageMetricCount(totalTx),
@@ -464,9 +464,7 @@ function EnvironmentBreakdownAccordion({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {productCount} product{productCount !== 1 ? "s" : ""}
-                <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>
-                  |
-                </Box>
+                <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>|</Box>
                 {instanceCount} instance{instanceCount !== 1 ? "s" : ""}
               </Typography>
             </Box>
@@ -682,8 +680,8 @@ export default function UsageOverviewPanel({
 
   // ── Environment breakdown rows ─────────────────────────────────────────────
   const environmentBreakdown = useMemo((): EnvironmentBreakdownRow[] => {
-    if (!deploymentsData) return [];
-    const instances = instancesData?.instances ?? [];
+    if (!deploymentsData || !instancesData) return [];
+    const instances = instancesData.instances ?? [];
 
     return deploymentsData.map((dep) => {
       const depInstances = instances.filter((i) => i.deployment?.id === dep.id);
