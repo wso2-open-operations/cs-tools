@@ -41,18 +41,12 @@ import type { JSX } from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
   USAGE_LINE_CHART_MARGIN,
-  USAGE_METRICS_CHART_LINE_CORES_SHORT,
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
-  USAGE_METRICS_INSTANCE_CHART_TX_TITLE,
   USAGE_METRICS_INSTANCE_CORE_COUNT,
   USAGE_METRICS_INSTANCE_JAVA,
-  USAGE_METRICS_INSTANCE_TOTAL_TX,
   USAGE_METRICS_INSTANCE_U2,
   USAGE_METRICS_NO_INSTANCE_DATA,
   USAGE_METRICS_NO_PRODUCTS_IN_DEPLOYMENT,
-  USAGE_METRICS_PRODUCT_PANEL_TOTAL_TRANSACTIONS,
-  USAGE_METRICS_PRODUCT_TREND_CORE_SECTION,
-  USAGE_METRICS_PRODUCT_TREND_TX_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCE_METRICS,
   USAGE_METRICS_PRODUCT_CORE_METRICS,
@@ -100,6 +94,10 @@ function ProductExpandedView({
     );
   }
 
+  const chartGridSize = product.chartTrends.length === 1 ? 12
+    : product.chartTrends.length === 3 ? 4
+    : 6;
+
   return (
     <>
       <Grid
@@ -107,62 +105,36 @@ function ProductExpandedView({
         spacing={2}
         sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}
       >
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card sx={{ p: 2, borderRadius: 0 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-              {USAGE_METRICS_PRODUCT_TREND_TX_SECTION}
-            </Typography>
-            <UsageChartSurface minHeight={200}>
-              <LineChart
-                data={product.transactionTrend}
-                xAxisDataKey="name"
-                height={200}
-                width="100%"
-                margin={USAGE_LINE_CHART_MARGIN}
-                accessibilityLayer={false}
-                legend={{ show: false }}
-                grid={{ show: true, strokeDasharray: "3 3" }}
-                lines={[
-                  {
-                    dataKey: "value",
-                    name: USAGE_METRICS_INSTANCE_CHART_TX_TITLE,
-                    stroke: colors.blue?.[500] ?? "#3B82F6",
-                    strokeWidth: 2.5,
-                    dot: false,
-                  },
-                ]}
-              />
-            </UsageChartSurface>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card sx={{ p: 2, borderRadius: 0 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-              {USAGE_METRICS_PRODUCT_TREND_CORE_SECTION}
-            </Typography>
-            <UsageChartSurface minHeight={200}>
-              <LineChart
-                data={product.coreUsageTrend}
-                xAxisDataKey="name"
-                height={200}
-                width="100%"
-                margin={USAGE_LINE_CHART_MARGIN}
-                accessibilityLayer={false}
-                legend={{ show: false }}
-                grid={{ show: true, strokeDasharray: "3 3" }}
-                lines={[
-                  {
-                    dataKey: "current",
-                    name: USAGE_METRICS_CHART_LINE_CORES_SHORT,
-                    stroke: colors.orange?.[500] ?? "#F97316",
-                    strokeWidth: 2.5,
-                    dot: false,
-                  },
-                ]}
-              />
-            </UsageChartSurface>
-          </Card>
-        </Grid>
+        {product.chartTrends.map((trend) => (
+          <Grid key={trend.title} size={{ xs: 12, lg: chartGridSize }}>
+            <Card sx={{ p: 2, borderRadius: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
+                {trend.title}
+              </Typography>
+              <UsageChartSurface minHeight={200}>
+                <LineChart
+                  data={trend.data}
+                  xAxisDataKey="name"
+                  height={200}
+                  width="100%"
+                  margin={USAGE_LINE_CHART_MARGIN}
+                  accessibilityLayer={false}
+                  legend={{ show: false }}
+                  grid={{ show: true, strokeDasharray: "3 3" }}
+                  lines={[
+                    {
+                      dataKey: "value",
+                      name: trend.title,
+                      stroke: trend.stroke,
+                      strokeWidth: 2.5,
+                      dot: false,
+                    },
+                  ]}
+                />
+              </UsageChartSurface>
+            </Card>
+          </Grid>
+        ))}
       </Grid>
 
       <Box sx={{ mt: 2 }}>
@@ -346,11 +318,14 @@ function InstanceAccordionRow({
               label={USAGE_METRICS_INSTANCE_U2}
               value={instance.u2Level}
             />
-            <MetricPill
-              icon={<Activity size={16} color={colors.grey?.[400]} />}
-              label={USAGE_METRICS_INSTANCE_TOTAL_TX}
-              value={instance.transactionsLabel}
-            />
+            {instance.summaryStats.map((stat) => (
+              <MetricPill
+                key={stat.label}
+                icon={<Activity size={16} color={colors.grey?.[400]} />}
+                label={stat.label}
+                value={stat.value}
+              />
+            ))}
             <MetricPill
               icon={<Cpu size={16} color={colors.grey?.[400]} />}
               label={USAGE_METRICS_INSTANCE_CORE_COUNT}
@@ -371,12 +346,19 @@ function InstanceAccordionRow({
         }}
       >
         <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <InstanceMiniTrendCard block={instance.charts.transactions} />
-          </Grid>
-          <Grid size={{ xs: 12, lg: 6 }}>
-            <InstanceMiniTrendCard block={instance.charts.cores} />
-          </Grid>
+          {instance.charts.map((chart) => (
+            <Grid
+              key={chart.title}
+              size={{
+                xs: 12,
+                lg: instance.charts.length === 1 ? 12
+                  : instance.charts.length === 3 ? 4
+                  : 6,
+              }}
+            >
+              <InstanceMiniTrendCard block={chart} />
+            </Grid>
+          ))}
         </Grid>
       </AccordionDetails>
     </Accordion>
@@ -520,22 +502,16 @@ function ProductAccordionRow({
               gap: 2,
             }}
           >
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                {USAGE_METRICS_PRODUCT_PANEL_TOTAL_TRANSACTIONS}
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                {product.transactionsLabel}
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                {product.thirdMetricLabel}
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 700 }}>
-                {product.thirdMetricValue}
-              </Typography>
-            </Box>
+            {product.summaryStats.map((stat) => (
+              <Box key={stat.label}>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                  {stat.label}
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                  {stat.value}
+                </Typography>
+              </Box>
+            ))}
             <CurrMinMaxBlock
               label={USAGE_METRICS_PRODUCT_INSTANCE_METRICS}
               summary={product.instanceSummary}
