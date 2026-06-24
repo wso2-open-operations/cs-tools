@@ -132,6 +132,19 @@ export function setLastSelectedProjectId(projectId: string): void {
 }
 
 /**
+ * Removes the last selected project from localStorage (both keys).
+ * Call when the user returns to the project selection page.
+ */
+export function clearLastSelectedProject(): void {
+  try {
+    localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
+    localStorage.removeItem(LAST_SELECTED_PROJECT_ID_KEY);
+  } catch {
+    return;
+  }
+}
+
+/**
  * Reads whether Novera chat is enabled from localStorage.
  *
  * @returns {boolean} True when enabled, false otherwise.

@@ -168,6 +168,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
 
   // Path Logic Constants
   const isProjectHub = location.pathname === "/" || location.pathname === "";
+  const isPartnerPage = location.pathname.startsWith("/partner/");
 
   const isCaseDetailsPage =
     /\/(?:projects\/[^/]+|[^/]+)\/support\/cases\/[^/]+$/.test(
@@ -237,7 +238,7 @@ export default function AppLayout({ children }: AppLayoutProps): JSX.Element {
             />
           }
           sidebar={
-            !isProjectHub && !hasPortalAccessError && !isErrorPageDisplayed ? (
+            !isProjectHub && !isPartnerPage && !hasPortalAccessError && !isErrorPageDisplayed ? (
               <SideBar
                 collapsed={
                   isSidebarOverlay ? false : shellState.sidebarCollapsed

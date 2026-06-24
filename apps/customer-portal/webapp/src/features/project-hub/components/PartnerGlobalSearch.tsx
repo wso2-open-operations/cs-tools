@@ -1,0 +1,785 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import {
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  IconButton,
+  InputAdornment,
+  Divider,
+  Menu,
+  MenuItem,
+  Paper,
+  Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { ChevronDown, Download, FileText, FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type MouseEvent, useCallback, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { useGetGlobalCasesPage } from "@api/useGetGlobalCasesPage";
+import useInfiniteProjects from "@api/useGetProjects";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
+import {
+  downloadProjectListCsv,
+  downloadProjectListPdf,
+  fetchAllProjectsForExport,
+} from "@features/project-hub/utils/projectsExport";
+import { mapSeverityToDisplay } from "@features/support/utils/support";
+
+type ExportFormat = "csv" | "pdf";
+
+const GLOBAL_SEARCH_PAGE_SIZE = 10;
+const SKELETON_ROW_COUNT = 5;
+const DROPDOWN_RESULT_LIMIT = 5;
+const DATE_LOCALE = "en-US";
+const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+};
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "--";
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? "--" : d.toLocaleDateString(DATE_LOCALE, DATE_FORMAT_OPTIONS);
+}
+
+function getSeverityChipColor(
+  label?: string,
+): "default" | "error" | "info" | "secondary" | "success" | "warning" {
+  const display = mapSeverityToDisplay(label);
+  const token = display.replace(/\s*\(.*$/, "").toUpperCase();
+  switch (token) {
+    case "S0":
+      return "error";
+    case "S1":
+      return "warning";
+    case "S2":
+      return "info";
+    case "S3":
+      return "secondary";
+    case "S4":
+      return "success";
+    default:
+      return "default";
+  }
+}
+
+function highlightMatch(text: string, query: string): JSX.Element {
+  if (!query.trim()) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase().trim();
+  const idx = lowerText.indexOf(lowerQuery);
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <strong>{text.slice(idx, idx + lowerQuery.length)}</strong>
+      {text.slice(idx + lowerQuery.length)}
+    </>
+  );
+}
+
+function SkeletonRows({ cols }: { cols: number }): JSX.Element {
+  return (
+    <>
+      {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+        <TableRow key={`sk-${i}`}>
+          {Array.from({ length: cols }).map((_, j) => (
+            <TableCell key={j}>
+              <Skeleton variant="text" width="80%" />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Salesforce-style global search for partner users.
+ * Shows the first 10 projects and first 10 cases in separate table sections,
+ * each with a "View More" placeholder button.
+ */
+export default function PartnerGlobalSearch(): JSX.Element {
+  const navigate = useNavigate();
+  const authFetch = useAuthApiClient();
+  const { showError } = useErrorBanner();
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, PROJECT_HUB_SEARCH_DEBOUNCE_MS);
+
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
+  const isExportingRef = useRef(false);
+  const [exportAnchorEl, setExportAnchorEl] = useState<HTMLElement | null>(null);
+
+  const handleExportOpen = (e: MouseEvent<HTMLElement>) => {
+    if (!isExportingRef.current) setExportAnchorEl(e.currentTarget);
+  };
+  const handleExportClose = () => setExportAnchorEl(null);
+
+  const handleExport = useCallback(
+    async (format: ExportFormat) => {
+      if (isExportingRef.current) return;
+      handleExportClose();
+      isExportingRef.current = true;
+      setExportingFormat(format);
+      try {
+        const allProjects = await fetchAllProjectsForExport(authFetch);
+        if (allProjects.length === 0) {
+          showError("No projects to export.");
+          return;
+        }
+        if (format === "csv") {
+          downloadProjectListCsv(allProjects);
+        } else {
+          downloadProjectListPdf(allProjects);
+        }
+      } catch {
+        showError("Failed to export projects.");
+      } finally {
+        isExportingRef.current = false;
+        setExportingFormat(null);
+      }
+    },
+    [authFetch, showError],
+  );
+
+  const isExporting = exportingFormat !== null;
+
+  // Table queries — always unfiltered; do not react to the search input
+  const {
+    data: projectsData,
+    isLoading: isLoadingProjects,
+    isError: isErrorProjects,
+  } = useInfiniteProjects({ pageSize: GLOBAL_SEARCH_PAGE_SIZE });
+
+  const {
+    data: casesData,
+    isLoading: isLoadingCases,
+    isError: isErrorCases,
+  } = useGetGlobalCasesPage({}, 0, GLOBAL_SEARCH_PAGE_SIZE);
+
+  // Dropdown queries — filtered by the live search query
+  const {
+    data: dropdownProjectsData,
+    isLoading: isLoadingDropdownProjects,
+  } = useInfiniteProjects({
+    pageSize: DROPDOWN_RESULT_LIMIT,
+    searchQuery: debouncedSearchQuery || undefined,
+  });
+
+  const {
+    data: dropdownCasesData,
+    isLoading: isLoadingDropdownCases,
+  } = useGetGlobalCasesPage(
+    { filters: debouncedSearchQuery ? { searchQuery: debouncedSearchQuery } : undefined },
+    0,
+    DROPDOWN_RESULT_LIMIT,
+  );
+
+  const projects = useMemo(
+    () => (projectsData?.pages[0]?.projects ?? []).slice(0, GLOBAL_SEARCH_PAGE_SIZE),
+    [projectsData],
+  );
+  const projectsTotal = projectsData?.pages[0]?.totalRecords ?? 0;
+  const cases = casesData?.cases ?? [];
+  const casesTotal = casesData?.totalRecords ?? 0;
+
+  const projectsMoreCount = Math.max(0, projectsTotal - projects.length);
+  const casesMoreCount = Math.max(0, casesTotal - cases.length);
+
+  const isDebouncing = searchQuery.trim() !== debouncedSearchQuery.trim();
+  const dropdownProjects = isDebouncing || isLoadingDropdownProjects
+    ? []
+    : (dropdownProjectsData?.pages[0]?.projects ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
+  const dropdownCases = isDebouncing || isLoadingDropdownCases
+    ? []
+    : (dropdownCasesData?.cases ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flex: 1,
+        flexDirection: "column",
+        minHeight: 0,
+        overflow: "hidden",
+        width: "100%",
+      }}
+    >
+      {/* Page header + search bar */}
+      <Box
+        sx={{
+          alignItems: "center",
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0,
+          pb: 2,
+          pt: 2.5,
+          px: 2,
+          textAlign: "center",
+        }}
+      >
+        <Box sx={{ maxWidth: 560, position: "relative", width: "100%" }}>
+          <TextField
+            fullWidth
+            inputProps={{ autoComplete: "off" }}
+            InputProps={{
+              endAdornment: searchQuery ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear search"
+                    edge="end"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setDropdownOpen(false);
+                    }}
+                    size="small"
+                  >
+                    <X size={16} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+              startAdornment: <Search size={20} style={{ marginRight: 8 }} />,
+            }}
+            onBlur={() => setDropdownOpen(false)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setDropdownOpen(Boolean(e.target.value.trim()));
+            }}
+            onFocus={() => {
+              if (searchQuery.trim()) setDropdownOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setDropdownOpen(false);
+            }}
+            placeholder="Search projects and cases..."
+            size="small"
+            sx={{
+              "& input:-webkit-autofill, & input:-webkit-autofill:focus, & input:-webkit-autofill:hover":
+                {
+                  WebkitBoxShadow: "0 0 0 100px transparent inset",
+                  WebkitTextFillColor: "inherit",
+                  transition: "background-color 5000s ease-in-out 0s",
+                },
+            }}
+            value={searchQuery}
+          />
+          {dropdownOpen && (
+            <Paper
+              elevation={4}
+              onMouseDown={(e) => e.preventDefault()}
+              sx={{
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1,
+                left: 0,
+                maxHeight: 400,
+                mt: 0.5,
+                overflowY: "auto",
+                position: "absolute",
+                right: 0,
+                textAlign: "left",
+                top: "100%",
+                zIndex: 1300,
+              }}
+            >
+              {/* Projects section */}
+              {(isDebouncing || isLoadingProjects || dropdownProjects.length > 0) && (
+                <>
+                  {isDebouncing || isLoadingProjects ? (
+                    [1, 2, 3].map((i) => (
+                      <Box
+                        key={i}
+                        sx={{
+                          alignItems: "center",
+                          display: "flex",
+                          gap: 1.5,
+                          px: 2,
+                          py: 1,
+                        }}
+                      >
+                        <Skeleton height={36} variant="circular" width={36} />
+                        <Box sx={{ flex: 1 }}>
+                          <Skeleton variant="text" width="70%" />
+                          <Skeleton variant="text" width="30%" />
+                        </Box>
+                      </Box>
+                    ))
+                  ) : (
+                    dropdownProjects.map((project) => (
+                      <Box
+                        key={project.id}
+                        onClick={() => {
+                          setDropdownOpen(false);
+                          navigate(`/projects/${project.id}/dashboard`);
+                        }}
+                        sx={{
+                          alignItems: "center",
+                          cursor: "pointer",
+                          display: "flex",
+                          gap: 1.5,
+                          px: 2,
+                          py: 1.25,
+                          "&:hover": { bgcolor: "action.hover" },
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            alignItems: "center",
+                            bgcolor: "primary.main",
+                            borderRadius: "50%",
+                            color: "primary.contrastText",
+                            display: "flex",
+                            flexShrink: 0,
+                            height: 36,
+                            justifyContent: "center",
+                            width: 36,
+                          }}
+                        >
+                          <FolderOpen size={16} />
+                        </Box>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography noWrap variant="body2">
+                            {highlightMatch(
+                              project.key
+                                ? `${project.key} · ${project.name}`
+                                : project.name,
+                              debouncedSearchQuery,
+                            )}
+                          </Typography>
+                          <Typography color="text.secondary" variant="caption">
+                            Project
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))
+                  )}
+                </>
+              )}
+
+              {/* Divider between sections — only when both have results */}
+              {!isDebouncing &&
+                !isLoadingProjects &&
+                !isLoadingCases &&
+                dropdownProjects.length > 0 &&
+                dropdownCases.length > 0 && <Divider />}
+
+              {/* Cases section */}
+              {(isDebouncing || isLoadingCases || dropdownCases.length > 0) && (
+                <>
+                  {isDebouncing || isLoadingCases ? (
+                    [1, 2, 3].map((i) => (
+                      <Box
+                        key={i}
+                        sx={{
+                          alignItems: "center",
+                          display: "flex",
+                          gap: 1.5,
+                          px: 2,
+                          py: 1,
+                        }}
+                      >
+                        <Skeleton height={36} variant="circular" width={36} />
+                        <Box sx={{ flex: 1 }}>
+                          <Skeleton variant="text" width="70%" />
+                          <Skeleton variant="text" width="30%" />
+                        </Box>
+                      </Box>
+                    ))
+                  ) : (
+                    dropdownCases.map((c) => (
+                      <Box
+                        key={c.id}
+                        onClick={() => {
+                          setDropdownOpen(false);
+                          navigate(
+                            `/projects/${c.project?.id}/support/cases/${c.id}`,
+                          );
+                        }}
+                        sx={{
+                          alignItems: "center",
+                          cursor: "pointer",
+                          display: "flex",
+                          gap: 1.5,
+                          px: 2,
+                          py: 1.25,
+                          "&:hover": { bgcolor: "action.hover" },
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            alignItems: "center",
+                            bgcolor: "warning.main",
+                            borderRadius: "50%",
+                            color: "warning.contrastText",
+                            display: "flex",
+                            flexShrink: 0,
+                            height: 36,
+                            justifyContent: "center",
+                            width: 36,
+                          }}
+                        >
+                          <FileText size={16} />
+                        </Box>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography noWrap variant="body2">
+                            {highlightMatch(
+                              c.number
+                                ? `${c.number} · ${c.title ?? ""}`
+                                : (c.title ?? ""),
+                              debouncedSearchQuery,
+                            )}
+                          </Typography>
+                          <Typography color="text.secondary" variant="caption">
+                            Case
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))
+                  )}
+                </>
+              )}
+
+              {/* No results */}
+              {!isDebouncing &&
+                !isLoadingProjects &&
+                !isLoadingCases &&
+                dropdownProjects.length === 0 &&
+                dropdownCases.length === 0 && (
+                  <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
+                    <Typography color="text.secondary" variant="body2">
+                      No results found.
+                    </Typography>
+                  </Box>
+                )}
+            </Paper>
+          )}
+        </Box>
+      </Box>
+
+      {/* Scrollable content: projects + cases sections */}
+      <Box
+        sx={{
+          display: "flex",
+          flex: "1 1 auto",
+          flexDirection: "column",
+          gap: 3,
+          overflowX: "hidden",
+          overflowY: "auto",
+          pb: 4,
+          px: 2,
+        }}
+      >
+        {/* Projects section */}
+        <Box>
+          <Box sx={{ alignItems: "center", display: "flex", mb: 1.5 }}>
+            <Box sx={{ alignItems: "center", display: "flex", flex: 1, gap: 1 }}>
+              <FolderOpen size={20} />
+              <Typography variant="h6">
+                Projects
+                {!isLoadingProjects && (
+                  <Typography
+                    color="text.secondary"
+                    component="span"
+                    variant="h6"
+                  >
+                    {" "}
+                    ({projectsTotal})
+                  </Typography>
+                )}
+              </Typography>
+            </Box>
+            <Button
+              aria-controls="partner-export-menu"
+              aria-expanded={Boolean(exportAnchorEl)}
+              aria-haspopup="menu"
+              disabled={isExporting || (!isLoadingProjects && projectsTotal === 0)}
+              endIcon={<ChevronDown size={16} />}
+              onClick={handleExportOpen}
+              size="small"
+              startIcon={
+                isExporting ? (
+                  <CircularProgress color="inherit" size={16} />
+                ) : (
+                  <Download size={16} />
+                )
+              }
+              type="button"
+              variant="outlined"
+            >
+              {isExporting ? "Exporting..." : "Export"}
+            </Button>
+            <Menu
+              anchorEl={exportAnchorEl}
+              id="partner-export-menu"
+              onClose={handleExportClose}
+              open={Boolean(exportAnchorEl)}
+            >
+              <MenuItem onClick={() => void handleExport("csv")}>Export to CSV</MenuItem>
+              <MenuItem onClick={() => void handleExport("pdf")}>Export to PDF</MenuItem>
+            </Menu>
+          </Box>
+
+          <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 680 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Project Key</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Start Date</TableCell>
+                  <TableCell>End Date</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {isLoadingProjects ? (
+                  <SkeletonRows cols={5} />
+                ) : isErrorProjects ? (
+                  <TableRow>
+                    <TableCell align="center" colSpan={5}>
+                      <Typography color="text.secondary" variant="body2">
+                        Failed to load projects.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : projects.length === 0 ? (
+                  <TableRow>
+                    <TableCell align="center" colSpan={5}>
+                      <Typography color="text.secondary" variant="body2">
+                        No projects found.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  projects.map((project) => {
+                    const isSuspended =
+                      project.closureState?.toLowerCase() === "suspended";
+                    return (
+                      <TableRow
+                        hover
+                        key={project.id}
+                        onClick={() => navigate(`/projects/${project.id}/dashboard`)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            navigate(`/projects/${project.id}/dashboard`);
+                          }
+                        }}
+                        sx={{ cursor: "pointer" }}
+                        tabIndex={0}
+                      >
+                        <TableCell>
+                          <Typography fontWeight="medium" variant="body2">
+                            {project.key}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{project.name}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            color={isSuspended ? "warning" : "success"}
+                            label={project.closureState ?? "Active"}
+                            size="small"
+                            sx={{ fontWeight: 500 }}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography color="text.secondary" variant="body2">
+                            {formatDate(project.startDate)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography color="text.secondary" variant="body2">
+                            {formatDate(project.endDate)}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+            <Button
+              onClick={() => {
+                const params = debouncedSearchQuery
+                  ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
+                  : "";
+                navigate(`/partner/projects${params}`);
+              }}
+              size="small"
+              variant="text"
+            >
+              View More
+              {projectsMoreCount > 0 && ` (${projectsMoreCount} more)`}
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Cases section */}
+        <Box>
+          <Box sx={{ alignItems: "center", display: "flex", gap: 1, mb: 1.5 }}>
+            <FileText size={20} />
+            <Typography variant="h6">
+              Cases
+              {!isLoadingCases && (
+                <Typography
+                  color="text.secondary"
+                  component="span"
+                  variant="h6"
+                >
+                  {" "}
+                  ({casesTotal})
+                </Typography>
+              )}
+            </Typography>
+          </Box>
+
+          <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
+            <Table sx={{ minWidth: 720 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Case #</TableCell>
+                  <TableCell>Title</TableCell>
+                  <TableCell>Severity</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Project</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {isLoadingCases ? (
+                  <SkeletonRows cols={5} />
+                ) : isErrorCases ? (
+                  <TableRow>
+                    <TableCell align="center" colSpan={5}>
+                      <Typography color="text.secondary" variant="body2">
+                        Failed to load cases.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : cases.length === 0 ? (
+                  <TableRow>
+                    <TableCell align="center" colSpan={5}>
+                      <Typography color="text.secondary" variant="body2">
+                        No cases found.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  cases.map((c) => {
+                    const severityLabel = c.severity?.label;
+                    const severityDisplay = mapSeverityToDisplay(severityLabel);
+                    const severityColor = getSeverityChipColor(severityLabel);
+                    return (
+                      <TableRow
+                        hover
+                        key={c.id}
+                        onClick={() =>
+                          navigate(
+                            `/projects/${c.project?.id}/support/cases/${c.id}`,
+                          )
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            navigate(
+                              `/projects/${c.project?.id}/support/cases/${c.id}`,
+                            );
+                          }
+                        }}
+                        sx={{ cursor: "pointer" }}
+                        tabIndex={0}
+                      >
+                        <TableCell>
+                          <Typography fontWeight="medium" variant="body2">
+                            {c.number}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{c.title}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          {severityLabel ? (
+                            <Chip
+                              color={severityColor}
+                              label={severityDisplay}
+                              size="small"
+                              sx={{ fontWeight: 500 }}
+                              variant="outlined"
+                            />
+                          ) : (
+                            <Typography color="text.secondary" variant="body2">
+                              --
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {c.status?.label ?? "--"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography color="text.secondary" variant="body2">
+                            {c.project?.label ?? "--"}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+            <Button
+              onClick={() => {
+                const params = debouncedSearchQuery
+                  ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
+                  : "";
+                navigate(`/partner/cases${params}`);
+              }}
+              size="small"
+              variant="text"
+            >
+              View More
+              {casesMoreCount > 0 && ` (${casesMoreCount} more)`}
+            </Button>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
