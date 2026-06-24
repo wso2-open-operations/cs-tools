@@ -337,7 +337,7 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	}
 
 	if req.Type != "case" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "typeKey must be \"case\" for case creation"}
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"case\" for case creation"}
 	}
 	snType := snCaseTypeMap[req.Type]
 
