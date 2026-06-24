@@ -15,13 +15,12 @@
 // under the License.
 
 import { useCallback } from "react";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
-import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
 
 /** A case the current user is actively working (in-progress + ongoing). */
 export interface MyOngoingCase {
@@ -55,21 +54,6 @@ export function useFindMyOngoingCases(): (
 
   return useCallback(
     async (excludeCaseId: string): Promise<MyOngoingCase[]> => {
-      if (isMockMode()) {
-        return getMockCsmCases("all_customers")
-          .filter(
-            (c) =>
-              c.id !== excludeCaseId &&
-              c.assigneeIsMe &&
-              c.state === "work_in_progress" &&
-              c.workState === "ongoing",
-          )
-          .map((c) => ({
-            id: c.id,
-            label: c.wso2CaseId || c.caseNumber || c.subject,
-          }));
-      }
-
       // Without our email we can't tell which cases are ours; skip the prompt.
       if (!myEmail) return [];
 

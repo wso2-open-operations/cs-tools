@@ -16,26 +16,18 @@
 
 import type {
   CaseState,
-  DashboardScope,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
-import type {
-  CasesFilters,
-  SlaFilter,
-} from "@features/csm-cases/components/CasesFilterBar";
+import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 
 export const DEFAULT_CASES_FILTERS: CasesFilters = {
-  scope: "my_abt",
   search: "",
   severities: [],
   states: [],
-  sla: "any",
   assignees: [],
   projects: [],
-  products: [],
 };
 
-const VALID_SCOPES: DashboardScope[] = ["my_abt", "all_customers"];
 const VALID_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
 const VALID_STATES: CaseState[] = [
   "open",
@@ -45,7 +37,6 @@ const VALID_STATES: CaseState[] = [
   "waiting_on_wso2",
   "closed",
 ];
-const VALID_SLA: SlaFilter[] = ["any", "at_risk", "breached"];
 
 function parseCsv<T extends string>(raw: string | null, allowed: T[]): T[] {
   if (!raw) return [];
@@ -68,26 +59,15 @@ function parseFreeFormCsv(raw: string | null, maxEntryLen = 120): string[] {
     .filter((s) => s.length > 0 && s.length <= maxEntryLen);
 }
 
-function parseEnum<T extends string>(
-  raw: string | null,
-  allowed: T[],
-  fallback: T,
-): T {
-  return raw && (allowed as string[]).includes(raw) ? (raw as T) : fallback;
-}
-
 export function readCasesFiltersFromUrl(
   params: URLSearchParams,
 ): CasesFilters {
   return {
-    scope: parseEnum(params.get("scope"), VALID_SCOPES, "my_abt"),
     search: params.get("q") ?? "",
     severities: parseCsv(params.get("severities"), VALID_SEVERITIES),
     states: parseCsv(params.get("states"), VALID_STATES),
-    sla: parseEnum(params.get("sla"), VALID_SLA, "any"),
     assignees: parseFreeFormCsv(params.get("assignees")),
     projects: parseFreeFormCsv(params.get("projects")),
-    products: parseFreeFormCsv(params.get("products")),
   };
 }
 
@@ -97,14 +77,11 @@ export function readCasesFiltersFromUrl(
  */
 export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   const out = new URLSearchParams();
-  if (f.scope !== "my_abt") out.set("scope", f.scope);
   if (f.search) out.set("q", f.search);
   if (f.severities.length) out.set("severities", f.severities.join(","));
   if (f.states.length) out.set("states", f.states.join(","));
-  if (f.sla !== "any") out.set("sla", f.sla);
   if (f.assignees.length) out.set("assignees", f.assignees.join(","));
   if (f.projects.length) out.set("projects", f.projects.join(","));
-  if (f.products.length) out.set("products", f.products.join(","));
   return out;
 }
 
@@ -119,10 +96,8 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.search.trim()) n += 1;
   if (f.severities.length) n += 1;
   if (f.states.length) n += 1;
-  if (f.sla !== "any") n += 1;
   if (f.assignees.length) n += 1;
   if (f.projects.length) n += 1;
-  if (f.products.length) n += 1;
   return n;
 }
 

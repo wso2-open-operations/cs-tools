@@ -719,7 +719,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         </Button>
         <Typography variant="h5">Case not found</Typography>
         <Typography variant="body2" color="text.secondary">
-          No case with id <code>{caseId}</code> in the current mock dataset.
+          No case found with id <code>{caseId}</code>.
         </Typography>
       </Box>
     );

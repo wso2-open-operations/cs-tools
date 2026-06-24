@@ -22,7 +22,6 @@ import AppErrorBoundary from "@components/error/AppErrorBoundary";
 import { AsgardeoProvider } from "@asgardeo/react";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
-import { MockModeProvider } from "@context/mock-mode/MockModeContext";
 import { ThemePreferenceProvider } from "@context/theme/ThemePreferenceContext";
 import { authConfig } from "@config/authConfig";
 
@@ -90,9 +89,7 @@ export default function AppWithConfig(): JSX.Element {
           <ThemePreferenceProvider>
             <QueryClientProvider client={queryClient}>
               <AppErrorBoundary>
-                <MockModeProvider>
-                  <App />
-                </MockModeProvider>
+                <App />
               </AppErrorBoundary>
               {ReactQueryDevtools && (
                 <Suspense fallback={null}>

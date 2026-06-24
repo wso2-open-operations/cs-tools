@@ -16,13 +16,12 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
-import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
 import type {
   CaseState,
   Severity,
@@ -68,7 +67,7 @@ function emptyMatrix(): CaseCountsMatrix {
  * cell's priority + state and asks for `limit: 1`, then reads the `total`
  * attribute off the response (the case rows themselves are discarded). Counts
  * are therefore *exact* — no sampling, no truncation. Row/column/grand totals
- * are summed from the cells. MOCK mode tallies the seeded cases client-side.
+ * are summed from the cells.
  *
  * Trade-off: this is `MATRIX_SEVERITIES.length * MATRIX_STATES.length` requests
  * (fired in parallel) per refresh. They are cheap indexed counts; the proper
@@ -85,17 +84,6 @@ export function useCaseCountsMatrix(): UseQueryResult<CaseCountsMatrix, Error> {
     queryKey: [ApiQueryKeys.CSM_CASE_COUNTS],
     queryFn: async (): Promise<CaseCountsMatrix> => {
       const matrix = emptyMatrix();
-
-      if (isMockMode()) {
-        for (const c of getMockCsmCases("all_customers")) {
-          if (matrix.counts[c.severity]?.[c.state] === undefined) continue;
-          matrix.counts[c.severity][c.state] += 1;
-          matrix.severityTotals[c.severity] += 1;
-          matrix.stateTotals[c.state] += 1;
-          matrix.total += 1;
-        }
-        return matrix;
-      }
 
       const cells = MATRIX_SEVERITIES.flatMap((severity) =>
         MATRIX_STATES.map((state) => ({ severity, state })),

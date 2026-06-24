@@ -22,7 +22,7 @@ import {
 import { useLogger } from "@hooks/useLogger";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { isMockMode, useBackendApi, type BackendApi } from "@api/backend/client";
+import { useBackendApi, type BackendApi } from "@api/backend/client";
 import {
   beStateFromUi,
   priorityFromSeverity,
@@ -37,18 +37,12 @@ import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
-import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
-import {
-  applyCasesFilters,
-  sortBySlaUrgency,
-} from "@features/csm-cases/utils/casesClientFilter";
 import type {
   CsmCaseRow,
   CsmCasesListResponse,
 } from "@features/csm-cases/types/csmCases";
 
-const MOCK_LATENCY_MS = 200;
 /** Page size for the account name lookup (customer column). */
 const LOOKUP_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
 // Cap the account scan the same way useProjectOptions caps the project scan.
@@ -89,7 +83,7 @@ function accountOptionsQueryOptions(api: BackendApi) {
 /**
  * Cross-project CSM cases list.
  *
- * LIVE mode does a single `POST /cases/search` (the flat, cross-project search)
+ * Does a single `POST /cases/search` (the flat, cross-project search)
  * and maps each rich `CaseSearchView` — which embeds project / deployment /
  * deployed-product — to the UI `CsmCaseRow`. The account (customer) name is the
  * only field not embedded, so it's resolved via `projects/search`
@@ -103,9 +97,7 @@ function accountOptionsQueryOptions(api: BackendApi) {
  * Search and the severity / state / project filters are pushed into the search
  * payload (searchQuery / severityKeys / stateKeys / projectIds) and the BE
  * paginates the result (`pagination` → `total` / `limit` / `offset` /
- * `hasMore`). The remaining filters (assignee, SLA, product) have no BE support
- * and are disabled in LIVE; they only do anything in MOCK mode, where the whole
- * seeded dataset is filtered, sorted and sliced client-side here.
+ * `hasMore`).
  *
  * `page` is zero-based (matching MUI `TablePagination`); `pageSize` is the row
  * limit (≤ {@link BE_MAX_PAGE_LIMIT}). With no filters the backend sorts by
@@ -133,40 +125,16 @@ export function useGetCsmCases(
     // (["S1","S2"] and ["S2","S1"] are the same query).
     queryKey: [
       ApiQueryKeys.CSM_CASES,
-      filters.scope,
       search,
       [...filters.severities].sort(),
       [...filters.states].sort(),
       [...filters.projects].sort(),
-      // MOCK-only filters still affect the sliced result in mock mode.
-      filters.sla,
       [...filters.assignees].sort(),
-      [...filters.products].sort(),
       currentUserEmail ?? "",
       page,
       pageSize,
     ],
     queryFn: async (): Promise<CsmCasesListResponse> => {
-      if (isMockMode()) {
-        logger.debug(
-          `[useGetCsmCases] Returning mock cases for scope=${filters.scope}`,
-        );
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        const all = getMockCsmCases(filters.scope);
-        const matched = applyCasesFilters(all, filters)
-          .slice()
-          .sort(sortBySlaUrgency);
-        const pageRows = matched.slice(offset, offset + pageSize);
-        return {
-          scope: filters.scope,
-          cases: pageRows,
-          total: matched.length,
-          limit: pageSize,
-          offset,
-          hasMore: offset + pageRows.length < matched.length,
-        };
-      }
-
       // One cross-project case search, plus project/account lookups for the
       // customer column (cases embed the project, but not its account). The
       // lookups go through `fetchQuery` with their own stable keys, so they
@@ -254,7 +222,6 @@ export function useGetCsmCases(
       });
 
       return {
-        scope: filters.scope,
         cases,
         total: casesResponse.total ?? cases.length,
         limit: casesResponse.limit ?? pageSize,

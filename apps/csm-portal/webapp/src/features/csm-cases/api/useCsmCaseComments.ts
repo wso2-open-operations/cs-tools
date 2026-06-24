@@ -21,9 +21,8 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import type {
   BeCaseComment,
   BeCaseCommentCreatePayload,
@@ -34,13 +33,7 @@ import {
   commentTypeFromInternal,
   uiCommentFromBe,
 } from "@api/backend/mappers";
-import {
-  getMockCsmCaseComments,
-  postMockCsmCaseComment,
-} from "@features/csm-cases/api/mocks/commentsMocks";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
-
-const MOCK_LATENCY_MS = 150;
 
 /** Page size used by the comments list. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const COMMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
@@ -54,21 +47,12 @@ const COMMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
 export function useGetCsmCaseComments(
   caseId: string | undefined,
 ): UseQueryResult<CsmCaseComment[], Error> {
-  const logger = useLogger();
   const api = useBackendApi();
 
   return useQuery<CsmCaseComment[], Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, caseId ?? ""],
     queryFn: async (): Promise<CsmCaseComment[]> => {
       if (!caseId) return [];
-
-      if (isMockMode()) {
-        logger.debug(
-          `[useGetCsmCaseComments] Returning mock comments for ${caseId}`,
-        );
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCaseComments(caseId);
-      }
 
       const payload: BeCaseCommentSearchPayload = {
         pagination: { offset: 0, limit: COMMENTS_PAGE_LIMIT },
@@ -104,26 +88,11 @@ export function usePostCsmCaseComment(): UseMutationResult<
   Error,
   PostCsmCaseCommentInput
 > {
-  const logger = useLogger();
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
   return useMutation<CsmCaseComment, Error, PostCsmCaseCommentInput>({
     mutationFn: async (input): Promise<CsmCaseComment> => {
-      if (isMockMode()) {
-        logger.debug(
-          `[usePostCsmCaseComment] Posting mock comment for ${input.caseId}`,
-        );
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return postMockCsmCaseComment({
-          caseId: input.caseId,
-          bodyHtml: input.bodyHtml,
-          authorName: input.authorName,
-          authorRole: "wso2_engineer",
-          internal: input.internal ?? false,
-        });
-      }
-
       const payload: BeCaseCommentCreatePayload = {
         type: commentTypeFromInternal(input.internal ?? false),
         // BE stores rich-text HTML; send the editor output as-is.

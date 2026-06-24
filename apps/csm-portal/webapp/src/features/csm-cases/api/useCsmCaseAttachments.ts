@@ -22,9 +22,8 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import type {
   BeAttachmentCreatePayload,
   BeAttachmentCreateResponse,
@@ -32,13 +31,7 @@ import type {
   BeAttachmentSearchResponse,
 } from "@api/backend/types";
 import { uiAttachmentFromBe } from "@api/backend/mappers";
-import {
-  getMockCsmCaseAttachments,
-  postMockCsmCaseAttachment,
-} from "@features/csm-cases/api/mocks/casesMocks";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
-
-const MOCK_LATENCY_MS = 150;
 
 /**
  * Page size used by the attachments list. A single wide page is enough for the
@@ -87,21 +80,12 @@ function saveBlob(blob: Blob, filename: string): void {
 export function useGetCsmCaseAttachments(
   caseId: string | undefined,
 ): UseQueryResult<CaseAttachment[], Error> {
-  const logger = useLogger();
   const api = useBackendApi();
 
   return useQuery<CaseAttachment[], Error>({
     queryKey: [ApiQueryKeys.CSM_CASE_ATTACHMENTS, caseId ?? ""],
     queryFn: async (): Promise<CaseAttachment[]> => {
       if (!caseId) return [];
-
-      if (isMockMode()) {
-        logger.debug(
-          `[useGetCsmCaseAttachments] Returning mock attachments for ${caseId}`,
-        );
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCaseAttachments(caseId);
-      }
 
       const payload: BeAttachmentSearchPayload = {
         pagination: { offset: 0, limit: ATTACHMENTS_PAGE_LIMIT },
@@ -141,7 +125,6 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
   Error,
   PostCsmCaseAttachmentInput
 > {
-  const logger = useLogger();
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
@@ -153,20 +136,6 @@ export function usePostCsmCaseAttachment(): UseMutationResult<
             MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)
           } MB.`,
         );
-      }
-
-      if (isMockMode()) {
-        logger.debug(
-          `[usePostCsmCaseAttachment] Posting mock attachment for ${input.caseId}`,
-        );
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return postMockCsmCaseAttachment({
-          caseId: input.caseId,
-          filename: input.name?.trim() || input.file.name,
-          size: input.file.size,
-          contentType: input.file.type || "application/octet-stream",
-          uploadedBy: input.uploadedBy,
-        });
       }
 
       const dataUri = await readFileAsDataUrl(input.file);
@@ -200,23 +169,10 @@ export function useDownloadCsmCaseAttachment(): (
   caseId: string,
   attachment: CaseAttachment,
 ) => Promise<void> {
-  const logger = useLogger();
   const api = useBackendApi();
 
   return useCallback(
     async (caseId: string, attachment: CaseAttachment): Promise<void> => {
-      if (isMockMode()) {
-        logger.debug(
-          `[useDownloadCsmCaseAttachment] Mock download of ${attachment.filename}`,
-        );
-        const placeholder = new Blob(
-          [`Mock content for ${attachment.filename}`],
-          { type: "text/plain" },
-        );
-        saveBlob(placeholder, attachment.filename);
-        return;
-      }
-
       const blob = await api.getBlob(
         `/cases/${encodeURIComponent(caseId)}/attachments/${encodeURIComponent(
           attachment.id,
@@ -224,6 +180,6 @@ export function useDownloadCsmCaseAttachment(): (
       );
       saveBlob(blob, attachment.filename);
     },
-    [api, logger],
+    [api],
   );
 }

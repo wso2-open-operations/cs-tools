@@ -20,23 +20,18 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import type {
   BeCaseCreatePayload,
   BeCaseCreateResponse,
   BeCreatedCase,
 } from "@api/backend/types";
 
-const MOCK_LATENCY_MS = 200;
-
 /**
  * Create a case via `POST /cases`. The backend wraps the result in a
  * `{ message, case }` envelope, so this unwraps and returns the created case
  * (its `id` drives the post-create redirect). The mutation also invalidates
  * project-scoped case searches so list views refresh.
- *
- * In MOCK mode the mutation resolves with a fabricated case using the input
- * payload; nothing is persisted server-side.
  */
 export function usePostCsmCase(): UseMutationResult<
   BeCreatedCase,
@@ -48,17 +43,6 @@ export function usePostCsmCase(): UseMutationResult<
 
   return useMutation<BeCreatedCase, Error, BeCaseCreatePayload>({
     mutationFn: async (input): Promise<BeCreatedCase> => {
-      if (isMockMode()) {
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        const now = new Date().toISOString();
-        return {
-          id: `mock-${Math.random().toString(36).slice(2, 10)}`,
-          number: `CS-MOCK-${Math.floor(Math.random() * 9000) + 1000}`,
-          createdBy: "mock@wso2.com",
-          createdOn: now,
-          state: "Open",
-        };
-      }
       const res = await api.post<BeCaseCreatePayload, BeCaseCreateResponse>(
         "/cases",
         input,

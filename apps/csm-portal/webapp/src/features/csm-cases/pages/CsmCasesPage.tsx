@@ -106,7 +106,7 @@ export default function CsmCasesPage(): JSX.Element {
     if (!isError) hasShownErrorRef.current = false;
   }, [isError, error, showError]);
 
-  // The backend (or the mock hook) already filtered, sorted and paged the rows;
+  // The backend already filtered, sorted and paged the rows;
   // render exactly what came back for the current page.
   const cases = data?.cases ?? [];
 
@@ -132,14 +132,6 @@ export default function CsmCasesPage(): JSX.Element {
       if (c.projectId) byId.set(c.projectId, c.projectName || c.projectId);
     });
     return Array.from(byId, ([id, name]) => ({ id, name }));
-  }, [data?.cases]);
-
-  const availableProducts = useMemo(() => {
-    const set = new Set<string>();
-    (data?.cases ?? []).forEach((c) => {
-      if (c.product) set.add(c.product);
-    });
-    return Array.from(set).sort();
   }, [data?.cases]);
 
   const total = data?.total ?? 0;
@@ -216,14 +208,11 @@ export default function CsmCasesPage(): JSX.Element {
       <CasesFilterBar
         filters={filters}
         onChange={setFilters}
-        onReset={() =>
-          setFilters({ ...DEFAULT_CASES_FILTERS, scope: filters.scope })
-        }
+        onReset={() => setFilters(DEFAULT_CASES_FILTERS)}
         isFiltersOpen={isFiltersOpen}
         onFiltersToggle={() => setIsFiltersOpen((v) => !v)}
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
-        availableProducts={availableProducts}
       />
 
       <CasesList cases={cases} isLoading={isLoading} />

@@ -16,13 +16,12 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type {
   BeCaseSearchPayload,
   BeCaseSearchResponse,
 } from "@api/backend/types";
-import { getMockCsmCases } from "@features/csm-cases/api/mocks/casesMocks";
 import {
   MATRIX_SEVERITIES,
   MATRIX_STATES,
@@ -60,8 +59,7 @@ export interface CaseComposition {
  * The backend has no aggregation endpoint, so — like the severity×state matrix
  * — this fans out count-only searches (`limit: 1`, read `total`): one per
  * severity (filtered by priority AND the active states) and one per active
- * state (filtered by state), plus one for the closed total. MOCK mode tallies
- * the seeded cases.
+ * state (filtered by state), plus one for the closed total.
  *
  * Severity and state each partition the same active population, so both totals
  * are equal and reconcile with the matrix's grand total.
@@ -78,74 +76,61 @@ export function useCaseComposition(): UseQueryResult<CaseComposition, Error> {
       COMPOSITION_STATES.forEach((s) => (byState[s] = 0));
       let closedTotal = 0;
 
-      if (isMockMode()) {
-        for (const c of getMockCsmCases("all_customers")) {
-          // Closed cases are tallied on their own and kept out of the pies so
-          // the active counts reconcile with the matrix above.
-          if (c.state === "closed") {
-            closedTotal += 1;
-            continue;
-          }
-          if (bySeverity[c.severity] !== undefined) bySeverity[c.severity] += 1;
-          if (byState[c.state] !== undefined) byState[c.state] += 1;
-        }
-      } else {
-        const countTotal = (payload: BeCaseSearchPayload): Promise<number> =>
-          api
-            .post<BeCaseSearchPayload, BeCaseSearchResponse>(
-              "/cases/search",
-              payload,
-            )
-            .then((r) => r.total ?? 0);
+      const countTotal = (payload: BeCaseSearchPayload): Promise<number> =>
+        api
+          .post<BeCaseSearchPayload, BeCaseSearchResponse>(
+            "/cases/search",
+            payload,
+          )
+          .then((r) => r.total ?? 0);
 
-        // The active states, expressed once for the severity counts so each is
-        // scoped to active cases (priority AND active-state), not the whole
-        // population.
-        const activeStateKeys = COMPOSITION_STATES.map(beStateFromUi);
-        // The state/closed counts don't filter by severity. The backend,
-        // however, counts only catastrophic cases when `severityKeys` is absent
-        // (an empty priority filter is not treated as "all"), which made the
-        // state pie show the S0 row only and disagree with the matrix totals.
-        // Pass every priority explicitly so these counts span all severities.
-        // BE follow-up: treat an absent/empty severityKeys as "all priorities".
-        const allPriorityKeys = MATRIX_SEVERITIES.map(priorityFromSeverity);
+      // The active states, expressed once for the severity counts so each is
+      // scoped to active cases (priority AND active-state), not the whole
+      // population.
+      const activeStateKeys = COMPOSITION_STATES.map(beStateFromUi);
+      // The state/closed counts don't filter by severity. The backend,
+      // however, counts only catastrophic cases when `severityKeys` is absent
+      // (an empty priority filter is not treated as "all"), which made the
+      // state pie show the S0 row only and disagree with the matrix totals.
+      // Pass every priority explicitly so these counts span all severities.
+      // BE follow-up: treat an absent/empty severityKeys as "all priorities".
+      const allPriorityKeys = MATRIX_SEVERITIES.map(priorityFromSeverity);
 
-        // All severity + state counts (plus the closed total) fire in one wave.
-        const [severityCounts, stateCounts, closedCount] = await Promise.all([
-          Promise.all(
-            MATRIX_SEVERITIES.map((sev) =>
-              countTotal({
-                pagination: { offset: 0, limit: 1 },
-                filters: {
-                  severityKeys: [priorityFromSeverity(sev)],
-                  stateKeys: activeStateKeys,
-                },
-              }).then((n) => ({ key: sev, n })),
-            ),
+      // All severity + state counts (plus the closed total) fire in one wave.
+      const [severityCounts, stateCounts, closedCount] = await Promise.all([
+        Promise.all(
+          MATRIX_SEVERITIES.map((sev) =>
+            countTotal({
+              pagination: { offset: 0, limit: 1 },
+              filters: {
+                severityKeys: [priorityFromSeverity(sev)],
+                stateKeys: activeStateKeys,
+              },
+            }).then((n) => ({ key: sev, n })),
           ),
-          Promise.all(
-            COMPOSITION_STATES.map((st) =>
-              countTotal({
-                pagination: { offset: 0, limit: 1 },
-                filters: {
-                  stateKeys: [beStateFromUi(st)],
-                  severityKeys: allPriorityKeys,
-                },
-              }).then((n) => ({ key: st, n })),
-            ),
+        ),
+        Promise.all(
+          COMPOSITION_STATES.map((st) =>
+            countTotal({
+              pagination: { offset: 0, limit: 1 },
+              filters: {
+                stateKeys: [beStateFromUi(st)],
+                severityKeys: allPriorityKeys,
+              },
+            }).then((n) => ({ key: st, n })),
           ),
-          countTotal({
-            pagination: { offset: 0, limit: 1 },
-            filters: {
-              stateKeys: [beStateFromUi("closed")],
-              severityKeys: allPriorityKeys,
-            },
-          }),
-        ]);
-        severityCounts.forEach(({ key, n }) => (bySeverity[key] = n));
-        stateCounts.forEach(({ key, n }) => (byState[key] = n));
-        closedTotal = closedCount;
-      }
+        ),
+        countTotal({
+          pagination: { offset: 0, limit: 1 },
+          filters: {
+            stateKeys: [beStateFromUi("closed")],
+            severityKeys: allPriorityKeys,
+          },
+        }),
+      ]);
+      severityCounts.forEach(({ key, n }) => (bySeverity[key] = n));
+      stateCounts.forEach(({ key, n }) => (byState[key] = n));
+      closedTotal = closedCount;
 
       const severityTotal = MATRIX_SEVERITIES.reduce(
         (a, s) => a + bySeverity[s],

@@ -17,7 +17,6 @@
 import type {
   CaseState,
   CaseWorkState,
-  DashboardScope,
   Severity,
   SlaClockType,
 } from "@features/csm-dashboard/types/abtDashboard";
@@ -74,7 +73,6 @@ export interface CsmCaseRow {
 }
 
 export interface CsmCasesListResponse {
-  scope: DashboardScope;
   cases: CsmCaseRow[];
   /** Total rows matching the query across all pages (BE `total`). */
   total: number;

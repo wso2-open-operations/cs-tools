@@ -19,14 +19,6 @@ import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import type { BeErrorPayload } from "@api/backend/types";
 import { CORRELATION_ID_HEADER } from "@utils/correlationId";
 
-/**
- * `true` when the mock toggle is on. Hooks should branch on this and call
- * the backend client only in LIVE mode.
- */
-export function isMockMode(): boolean {
-  return !!window.config?.CSM_PORTAL_USE_MOCKS;
-}
-
 export function backendBaseUrl(): string {
   const baseUrl = window.config?.CSM_PORTAL_BACKEND_BASE_URL;
   if (!baseUrl) {

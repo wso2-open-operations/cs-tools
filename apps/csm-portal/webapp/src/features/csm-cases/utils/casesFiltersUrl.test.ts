@@ -32,29 +32,24 @@ describe("readCasesFiltersFromUrl", () => {
 
   it("parses a fully-populated query string", () => {
     const params = new URLSearchParams(
-      "scope=all_customers&q=timeout&severities=S0,S2&states=open,closed&sla=at_risk&assignees=alice,bob&projects=apim&products=mi",
+      "q=timeout&severities=S0,S2&states=open,closed&assignees=alice,bob&projects=apim",
     );
     expect(readCasesFiltersFromUrl(params)).toEqual({
-      scope: "all_customers",
       search: "timeout",
       severities: ["S0", "S2"],
       states: ["open", "closed"],
-      sla: "at_risk",
       assignees: ["alice", "bob"],
       projects: ["apim"],
-      products: ["mi"],
     });
   });
 
   it("drops values outside the allowed enums", () => {
     const params = new URLSearchParams(
-      "scope=bogus&severities=S0,S9,wat&states=open,nonsense&sla=invalid",
+      "severities=S0,S9,wat&states=open,nonsense",
     );
     const f = readCasesFiltersFromUrl(params);
-    expect(f.scope).toBe("my_abt"); // fallback
     expect(f.severities).toEqual(["S0"]);
     expect(f.states).toEqual(["open"]);
-    expect(f.sla).toBe("any"); // fallback
   });
 
   it("strips empties and over-long free-form entries", () => {
@@ -72,14 +67,11 @@ describe("writeCasesFiltersToUrl", () => {
 
   it("round-trips a non-default filter set", () => {
     const filters: CasesFilters = {
-      scope: "all_customers",
       search: "disk full",
       severities: ["S1"],
       states: ["work_in_progress"],
-      sla: "breached",
       assignees: ["carol"],
       projects: ["streaming"],
-      products: ["si"],
     };
     const round = readCasesFiltersFromUrl(writeCasesFiltersToUrl(filters));
     expect(round).toEqual(filters);
@@ -92,8 +84,6 @@ describe("casesHref", () => {
   });
 
   it("builds a query string from a partial override", () => {
-    expect(casesHref({ scope: "all_customers" })).toBe(
-      "/cases?scope=all_customers",
-    );
+    expect(casesHref({ severities: ["S1"] })).toBe("/cases?severities=S1");
   });
 });

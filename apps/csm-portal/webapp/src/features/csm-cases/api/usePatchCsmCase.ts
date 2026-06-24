@@ -21,13 +21,11 @@ import {
 } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import type {
   BeCaseUpdatePayload,
   BeUpdateCaseResponse,
 } from "@api/backend/types";
-
-const MOCK_LATENCY_MS = 200;
 
 /**
  * Update a case via `PATCH /cases/{id}` — state transitions, priority changes,
@@ -37,9 +35,6 @@ const MOCK_LATENCY_MS = 200;
  * The response is `BeUpdateCaseResponse` ({ message, case }), but on success we
  * ignore the body and invalidate this case's detail query and the cross-project
  * list so both refetch the authoritative state (incl. fresh `nextStates`).
- *
- * In MOCK mode the mutation resolves without persisting (mock detail data is
- * static), so the caller's optimistic feedback is the only visible effect.
  */
 export function usePatchCsmCase(
   caseId: string | undefined,
@@ -51,13 +46,6 @@ export function usePatchCsmCase(
     mutationFn: async (input): Promise<BeUpdateCaseResponse> => {
       if (!caseId) {
         throw new Error("Cannot update a case without an id.");
-      }
-      if (isMockMode()) {
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        // The success handler ignores the body and refetches, so the mock only
-        // needs the id. (Echoing input.state/priority would not type-check
-        // against the single-field union and isn't used anyway.)
-        return { message: "Case updated (mock).", case: { id: caseId } };
       }
       return api.patch<BeCaseUpdatePayload, BeUpdateCaseResponse>(
         `/cases/${encodeURIComponent(caseId)}`,
@@ -90,14 +78,10 @@ export function usePatchCsmCaseById(): (
   return useCallback(
     async (caseId: string, input: BeCaseUpdatePayload): Promise<void> => {
       if (!caseId) throw new Error("Cannot update a case without an id.");
-      if (isMockMode()) {
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-      } else {
-        await api.patch<BeCaseUpdatePayload, BeUpdateCaseResponse>(
-          `/cases/${encodeURIComponent(caseId)}`,
-          input,
-        );
-      }
+      await api.patch<BeCaseUpdatePayload, BeUpdateCaseResponse>(
+        `/cases/${encodeURIComponent(caseId)}`,
+        input,
+      );
       queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CSM_CASE_DETAIL, caseId],
       });

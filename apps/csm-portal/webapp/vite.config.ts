@@ -98,7 +98,7 @@ const viteConfig = defineConfig({
   },
   envPrefix: ["CSM_PORTAL_"],
   server: {
-    port: 3000,
+    port: 3001,
     strictPort: true,
   },
 });
@@ -159,10 +159,6 @@ window.config.CSM_PORTAL_BACKEND_BASE_URL = window.location.origin + "/local-api
 // loops on sign-in. Same same-origin rationale as the backend URL above.
 window.config.CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL = window.location.origin;
 window.config.CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL = window.location.origin;
-window.config.CSM_PORTAL_USE_MOCKS = false;
-// Pin the runtime mock toggle off so a stale localStorage flag cannot
-// silently re-enable mock data in front of the real local backend.
-try { localStorage.setItem("csm.useMocks", "0"); } catch (e) { /* ignore */ }
 `;
 
 function localGatewayConfigPlugin(): Plugin {

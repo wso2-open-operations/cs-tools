@@ -15,16 +15,12 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useLogger } from "@hooks/useLogger";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
 import type { BeCaseView } from "@api/backend/types";
-import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
-
-const MOCK_LATENCY_MS = 150;
 
 /**
  * Build a CsmCaseDetail from the rich `BeCaseView`. The view embeds the
@@ -112,13 +108,11 @@ function detailFromBeCase(
  * Look up a single CSM case by id. Returns `null` (not an error) when the
  * id is unknown so the page can render a not-found state for that case.
  *
- * Calls `GET /cases/{id}` in LIVE mode and falls back to the seeded mock
- * detail when the mock toggle is on.
+ * Calls `GET /cases/{id}`.
  */
 export function useGetCsmCaseDetail(
   caseId: string | undefined,
 ): UseQueryResult<CsmCaseDetail | null, Error> {
-  const logger = useLogger();
   const api = useBackendApi();
   // Signed-in user's email, used to resolve `assigneeIsMe` against the case's
   // assigned-engineer email. In the query key so a late-arriving claim recomputes.
@@ -128,12 +122,6 @@ export function useGetCsmCaseDetail(
     queryKey: [ApiQueryKeys.CSM_CASE_DETAIL, caseId ?? "", currentUserEmail ?? ""],
     queryFn: async (): Promise<CsmCaseDetail | null> => {
       if (!caseId) return null;
-
-      if (isMockMode()) {
-        logger.debug(`[useGetCsmCaseDetail] Returning mock case ${caseId}`);
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return getMockCsmCaseDetailById(caseId) ?? null;
-      }
 
       const beCase = await api.get<BeCaseView>(
         `/cases/${encodeURIComponent(caseId)}`,

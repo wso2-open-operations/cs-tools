@@ -15,9 +15,8 @@
 // under the License.
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { isMockMode, useBackendApi } from "@api/backend/client";
+import { useBackendApi } from "@api/backend/client";
 
 /**
  * Minimal user-directory entry: just what UI affordances like the cases
@@ -28,19 +27,6 @@ export interface DirectoryUser {
   name: string;
   email: string;
 }
-
-const MOCK_LATENCY_MS = 150;
-
-// A small mock directory so the assignee picker is populated in mock mode
-// without coupling to the csm-admin mock data set.
-const MOCK_DIRECTORY: DirectoryUser[] = [
-  { name: "Sajith Ekanayaka", email: "sajithe@wso2.com" },
-  { name: "Renee Park", email: "renee.park@example.com" },
-  { name: "Marcus Webb", email: "marcus.webb@example.com" },
-  { name: "Lena Fischer", email: "lena.fischer@example.com" },
-  { name: "Arjun Nair", email: "arjun.nair@example.com" },
-  { name: "Priya Sharma", email: "priya.sharma@example.com" },
-];
 
 /** Raw user shape the backend may return; mapped defensively to DirectoryUser. */
 interface RawDirectoryUser {
@@ -58,22 +44,16 @@ function toDirectoryUser(u: RawDirectoryUser): DirectoryUser {
 }
 
 /**
- * Shared user-directory lookup. Backed by `POST /users/search` in live mode
- * (the canonical backend route — there is no `GET /users`), and a small mock
- * set under the mock toggle. Returns a lightweight {@link DirectoryUser} list.
+ * Shared user-directory lookup. Backed by `POST /users/search`
+ * (the canonical backend route — there is no `GET /users`). Returns a
+ * lightweight {@link DirectoryUser} list.
  */
 export function useDirectoryUsers(): UseQueryResult<DirectoryUser[], Error> {
-  const logger = useLogger();
   const api = useBackendApi();
 
   return useQuery<DirectoryUser[], Error>({
     queryKey: [ApiQueryKeys.CSM_ADMIN_USERS, "directory"],
     queryFn: async (): Promise<DirectoryUser[]> => {
-      if (isMockMode()) {
-        logger.debug("[useDirectoryUsers] returning mock directory");
-        await new Promise((r) => setTimeout(r, MOCK_LATENCY_MS));
-        return MOCK_DIRECTORY;
-      }
       const res = await api.post<Record<string, never>, unknown>(
         "/users/search",
         {},

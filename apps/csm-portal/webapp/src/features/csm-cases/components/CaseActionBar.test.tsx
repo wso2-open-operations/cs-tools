@@ -18,21 +18,65 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
-import { getMockCsmCaseDetailById } from "@features/csm-cases/api/mocks/casesMocks";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import type { CaseState } from "@features/csm-dashboard/types/abtDashboard";
 
+/** A complete, minimal case-detail fixture; tests override state/nextStates. */
+const BASE_CASE: CsmCaseDetail = {
+  id: "case-1001",
+  caseNumber: "CS-1001",
+  wso2CaseId: "ACMESUB-1001",
+  subject: "Identity Server token issuance latency spike",
+  customer: "Acme Financial",
+  accountId: "acc-001",
+  projectId: "prj-acme-iam-prod",
+  projectName: "IAM Production",
+  product: "WSO2 Identity Server",
+  severity: "S1",
+  state: "work_in_progress",
+  workState: "ongoing",
+  assignee: "Jane Doe",
+  assigneeIsMe: true,
+  slaClockType: "first_response",
+  minutesToBreach: 120,
+  hasSla: false,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T01:00:00.000Z",
+  description: "Token issuance latency has spiked.",
+  assignmentGroup: "grp.cre_team",
+  customerContext: {
+    accountName: "Acme Financial",
+    tier: "enterprise",
+    region: "us-east-1",
+    primaryContact: "Jane Doe",
+    primaryContactEmail: "jane.doe@example.com",
+    accountManager: "John Roe",
+    openCases: 1,
+  },
+  productContext: {
+    product: "WSO2 Identity Server",
+    version: "7.1.0",
+    deployment: "IAM Production",
+    environment: "prod",
+  },
+  slaClocks: [],
+  watchers: [],
+  linkedItems: [],
+  tags: [],
+  timeLogs: [],
+  audit: [],
+  attachments: [],
+  isWatching: false,
+};
+
 /**
- * Build a case-detail fixture in a given state with an explicit `nextStates`,
- * reusing the seeded mock so every other required field is realistic.
+ * Build a case-detail fixture in a given state with an explicit `nextStates`.
  */
 function caseInState(
   state: CaseState,
   nextStates: CaseState[] | undefined,
 ): CsmCaseDetail {
-  const base = getMockCsmCaseDetailById("case-1001");
-  if (!base) throw new Error("mock case-1001 missing");
-  return { ...base, state, nextStates };
+  return { ...BASE_CASE, state, nextStates };
 }
 
 describe("CaseActionBar — nextStates-driven buttons", () => {

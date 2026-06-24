@@ -56,7 +56,6 @@ import {
 import { useMemo, useState, type JSX } from "react";
 import type {
   CaseState,
-  DashboardScope,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 import { STATE_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
@@ -71,10 +70,7 @@ import {
   SUGGESTED_FILTER_VIEWS,
   useSavedFilterViews,
 } from "@features/csm-cases/utils/savedFilterViews";
-import { isMockMode } from "@api/backend/client";
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
-
-export type SlaFilter = "any" | "breached" | "at_risk";
 
 /** Sentinel used inside `assignees` to mean "the current user". */
 export const ASSIGNEE_ME_TOKEN = "@me";
@@ -83,21 +79,18 @@ export const ASSIGNEE_UNASSIGNED = "Unassigned";
 
 /**
  * Filter state for the CSM cases list. `severities` / `states` are multi-select
- * arrays driven by fixed enums. `assignees` / `projects` / `products` are
- * free-form multi-selects driven by an Autocomplete with type-to-filter:
- * options are derived from the data currently in scope. The `assignees` list
- * accepts the sentinel `@me` (resolves against `assigneeIsMe`) and the literal
+ * arrays driven by fixed enums. `assignees` / `projects` are free-form
+ * multi-selects driven by an Autocomplete with type-to-filter: options are
+ * derived from the data currently in scope. The `assignees` list accepts the
+ * sentinel `@me` (resolves against `assigneeIsMe`) and the literal
  * "Unassigned"; any other entries are matched against `case.assignee` by name.
  */
 export interface CasesFilters {
-  scope: DashboardScope;
   search: string;
   severities: Severity[];
   states: CaseState[];
-  sla: SlaFilter;
   assignees: string[];
   projects: string[];
-  products: string[];
 }
 
 /**
@@ -120,8 +113,6 @@ interface CasesFilterBarProps {
   availableAssigneeUsers: AssigneeUser[];
   /** Projects for the (id-based) project filter — value is the id, label the name. */
   availableProjects: { id: string; name: string }[];
-  /** Product names seen in the current data. */
-  availableProducts: string[];
 }
 
 const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -133,13 +124,6 @@ const PRIMARY_STATES: CaseState[] = [
   "waiting_on_wso2",
   "closed",
 ];
-const SLA_OPTIONS: { value: SlaFilter; label: string }[] = [
-  { value: "any", label: "Any SLA" },
-  { value: "at_risk", label: "At risk" },
-  { value: "breached", label: "Breached" },
-];
-
-
 /** Pretty-print an assignee value (handle the @me sentinel). */
 function assigneeLabel(value: string): string {
   return value === ASSIGNEE_ME_TOKEN ? "Me" : value;
@@ -214,43 +198,6 @@ function MultiSelectField<T extends string>({
             </MenuItem>
           ))
         )}
-      </Select>
-    </FormControl>
-  );
-}
-
-interface SingleSelectFieldProps<T extends string> {
-  id: string;
-  label: string;
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (next: T) => void;
-  disabled?: boolean;
-}
-
-function SingleSelectField<T extends string>({
-  id,
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: SingleSelectFieldProps<T>): JSX.Element {
-  return (
-    <FormControl fullWidth size="small" disabled={disabled}>
-      <InputLabel id={`${id}-label`}>{label}</InputLabel>
-      <Select
-        labelId={`${id}-label`}
-        id={id}
-        value={value as unknown as string}
-        label={label}
-        onChange={(e) => onChange(e.target.value as T)}
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt.value} value={opt.value}>
-            {opt.label}
-          </MenuItem>
-        ))}
       </Select>
     </FormControl>
   );
@@ -365,7 +312,6 @@ export default function CasesFilterBar({
   onFiltersToggle,
   availableAssigneeUsers,
   availableProjects,
-  availableProducts,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -402,19 +348,6 @@ export default function CasesFilterBar({
     setSaveDialogOpen(false);
     setSavedAnchor(null);
   };
-
-  // Scope (ABT), assignee, and SLA have no backend support yet (no assignee or
-  // SLA fields), so disable them against the live backend — they only do
-  // anything against seeded mock data.
-  const beUnsupported = !isMockMode();
-  const beUnsupportedReason =
-    "Not available against the live backend yet (no assignee / SLA data).";
-  // Product filtering would need the backend to filter by deployed-product
-  // instance ids (the case carries an instance id, not the product name), and
-  // there is no directory to map product name → instance ids. So it is
-  // disabled in LIVE and only refines the seeded mock data.
-  const productFilterUnsupportedReason =
-    "Filtering by product isn't supported by the live backend yet.";
 
   const severityOptions = useMemo(
     () => ALL_SEVERITIES.map((s) => ({ value: s, label: s })),
@@ -467,34 +400,8 @@ export default function CasesFilterBar({
 
   return (
     <Paper sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
-      {/* Scope + search + filters toggle. Scope buttons are CSM-specific
-          (My ABT vs All customers) and live alongside search at the top. */}
+      {/* Search + saved views + filters toggle. */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-        <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
-          <Box sx={{ display: "flex", gap: 0.75 }}>
-            <Button
-              size="small"
-              variant={filters.scope === "my_abt" ? "contained" : "outlined"}
-              color="primary"
-              disabled={beUnsupported}
-              onClick={() => onChange({ ...filters, scope: "my_abt" })}
-            >
-              My ABT
-            </Button>
-            <Button
-              size="small"
-              variant={
-                filters.scope === "all_customers" ? "contained" : "outlined"
-              }
-              color="primary"
-              disabled={beUnsupported}
-              onClick={() => onChange({ ...filters, scope: "all_customers" })}
-            >
-              All customers
-            </Button>
-          </Box>
-        </Tooltip>
-
         <Box sx={{ position: "relative", flex: 1, minWidth: 240 }}>
           <TextField
             fullWidth
@@ -665,7 +572,7 @@ export default function CasesFilterBar({
       </Dialog>
 
       {/* Collapsible filter grid. Severity / state stay as fixed multi-selects;
-          assignee / project / product are type-to-search Autocompletes. */}
+          assignee / project are type-to-search Autocompletes. */}
       {isFiltersOpen && (
         <>
           <Divider />
@@ -689,24 +596,10 @@ export default function CasesFilterBar({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
-                <Box>
-                  <SingleSelectField
-                    id="cases-filter-sla"
-                    label="SLA"
-                    value={filters.sla}
-                    options={SLA_OPTIONS}
-                    onChange={(next) => onChange({ ...filters, sla: next })}
-                    disabled={beUnsupported}
-                  />
-                </Box>
-              </Tooltip>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               {/* Static option list for now. Once the backend supports assignee
                   search/filtering, switch this to a type-ahead like
                   AsyncProjectMultiSelect rather than loading every user. */}
-              <Tooltip title={beUnsupported ? beUnsupportedReason : ""}>
+              <Tooltip title="Assignee filtering is coming soon.">
                 <Box>
                   <SearchableMultiSelect
                     id="cases-filter-assignee"
@@ -720,7 +613,7 @@ export default function CasesFilterBar({
                     onChange={(next) =>
                       onChange({ ...filters, assignees: next })
                     }
-                    disabled={beUnsupported}
+                    disabled
                   />
                 </Box>
               </Tooltip>
@@ -731,25 +624,6 @@ export default function CasesFilterBar({
                 onChange={(next) => onChange({ ...filters, projects: next })}
                 nameSeed={projectNameSeed}
               />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <Tooltip
-                title={beUnsupported ? productFilterUnsupportedReason : ""}
-              >
-                <Box>
-                  <SearchableMultiSelect
-                    id="cases-filter-product"
-                    label="Product"
-                    placeholder="Type a product…"
-                    values={filters.products}
-                    options={availableProducts}
-                    onChange={(next) =>
-                      onChange({ ...filters, products: next })
-                    }
-                    disabled={beUnsupported}
-                  />
-                </Box>
-              </Tooltip>
             </Grid>
           </Grid>
           {activeCount > 0 && (
