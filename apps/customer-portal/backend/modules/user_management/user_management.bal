@@ -177,7 +177,7 @@ isolated function toContact(UserManagementContact contact) returns Contact {
         firstName: contact.firstName,
         lastName: contact.lastName,
         isCsAdmin: hasRole(contact["role"], ADMIN_ROLE),
-        isLead: hasRole(membership["role"], LEAD),
+        isLead: hasRole(contact["role"], LEAD),
         isCsIntegrationUser: contact.isCsIntegrationUser,
         isPortalUser: hasRole(contact["role"], PORTAL_USER_ROLE),
         isSecurityContact: hasRole(contact["role"], SECURITY_CONTACT_ROLE),
