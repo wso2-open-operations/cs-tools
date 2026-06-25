@@ -231,7 +231,7 @@ export default function CaseEscalationHistoryPanel({ caseId, caseCreatedOn }: Pr
         </Box>
       ) : (
         <Box>
-          {records.map((record, idx) => (
+          {records.map((record) => (
             <EscalationTimelineItem
               key={record.id}
               record={record}
