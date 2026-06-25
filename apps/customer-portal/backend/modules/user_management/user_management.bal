@@ -21,6 +21,7 @@ public type CONFLICT_ERROR distinct error;
 const ADMIN_ROLE = "Admin";
 const PORTAL_USER_ROLE = "Portal user";
 const SECURITY_CONTACT_ROLE = "Security Contact";
+const LEAD = "Lead";
 
 # Get project contacts for the given project ID.
 #
@@ -176,6 +177,7 @@ isolated function toContact(UserManagementContact contact) returns Contact {
         firstName: contact.firstName,
         lastName: contact.lastName,
         isCsAdmin: hasRole(contact["role"], ADMIN_ROLE),
+        isLead: hasRole(membership["role"], LEAD),
         isCsIntegrationUser: contact.isCsIntegrationUser,
         isPortalUser: hasRole(contact["role"], PORTAL_USER_ROLE),
         isSecurityContact: hasRole(contact["role"], SECURITY_CONTACT_ROLE),
