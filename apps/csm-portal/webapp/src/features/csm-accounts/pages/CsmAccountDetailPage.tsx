@@ -93,7 +93,7 @@ export default function CsmAccountDetailPage(): JSX.Element {
   if (isError) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <BackButton onClick={() => navigate("/accounts")} />
+        <BackButton onClick={() => navigate("/customers/accounts")} />
         <Typography variant="body1" color="error">
           Could not load account {id}.
         </Typography>
@@ -104,7 +104,7 @@ export default function CsmAccountDetailPage(): JSX.Element {
   if (!data) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <BackButton onClick={() => navigate("/accounts")} />
+        <BackButton onClick={() => navigate("/customers/accounts")} />
         <Typography variant="h5">Account not found</Typography>
         <Typography variant="body2" color="text.secondary">
           No account with id <code>{id}</code>.
@@ -117,7 +117,7 @@ export default function CsmAccountDetailPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-      <BackButton onClick={() => navigate("/accounts")} />
+      <BackButton onClick={() => navigate("/customers/accounts")} />
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>

@@ -22,28 +22,29 @@ import {
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
-  BeCaseCreatePayload,
+  BeCaseCreateBody,
   BeCaseCreateResponse,
   BeCreatedCase,
 } from "@api/backend/types";
 
 /**
- * Create a case via `POST /cases`. The backend wraps the result in a
- * `{ message, case }` envelope, so this unwraps and returns the created case
+ * Create a case via `POST /cases`. Accepts any supported create body (standard
+ * support `case` or catalog `service_request`). The backend wraps the result in
+ * a `{ message, case }` envelope, so this unwraps and returns the created case
  * (its `id` drives the post-create redirect). The mutation also invalidates
  * project-scoped case searches so list views refresh.
  */
 export function usePostCsmCase(): UseMutationResult<
   BeCreatedCase,
   Error,
-  BeCaseCreatePayload
+  BeCaseCreateBody
 > {
   const api = useBackendApi();
   const queryClient = useQueryClient();
 
-  return useMutation<BeCreatedCase, Error, BeCaseCreatePayload>({
+  return useMutation<BeCreatedCase, Error, BeCaseCreateBody>({
     mutationFn: async (input): Promise<BeCreatedCase> => {
-      const res = await api.post<BeCaseCreatePayload, BeCaseCreateResponse>(
+      const res = await api.post<BeCaseCreateBody, BeCaseCreateResponse>(
         "/cases",
         input,
       );

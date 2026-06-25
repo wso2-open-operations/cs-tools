@@ -93,6 +93,7 @@ import {
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
+import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
   CaseAttachment,
   CaseLifecycleAction,
@@ -831,6 +832,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
               distinct from the free-form tags by a divider, so the current
               state doesn't get lost among the tag chips. */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            {c.caseType && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={CASE_TYPE_LABEL[c.caseType]}
+                sx={{ fontWeight: 600 }}
+              />
+            )}
             <SeverityChip severity={c.severity} withLabel />
             <StateChip state={c.state} />
             {c.state === "work_in_progress" && c.workState && (

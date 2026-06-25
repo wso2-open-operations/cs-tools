@@ -194,7 +194,7 @@ export interface BeCaseView {
 }
 
 export interface BeCaseCreatePayload {
-  /** Case type. The portal only creates `case` (standard support) cases. */
+  /** Standard support case. */
   type: "case";
   projectId: string;
   deploymentId: string;
@@ -203,7 +203,68 @@ export interface BeCaseCreatePayload {
   description: string;
   severity: BeCaseSeverity;
   issueType: BeCaseIssueType;
+  /** Optional supporting files (raw base64), like the customer portal. */
+  attachments?: BeCaseAttachmentPayload[];
 }
+
+/** A single answered catalog-item variable in a service-request create. */
+export interface BeCaseVariable {
+  /** Variable (question) id, as returned by the catalog-item variables endpoint. */
+  id: string;
+  /** The engineer's answer for this variable. */
+  value: string;
+}
+
+/**
+ * Catalog-based service request (`type: "service_request"`). ServiceNow-only:
+ * the catalog/catalog-item come from `POST /catalogs/search` (filtered by the
+ * deployed product) and the variables from the catalog-item variables endpoint.
+ */
+export interface BeServiceRequestCreatePayload {
+  type: "service_request";
+  projectId: string;
+  deploymentId: string;
+  deployedProductId: string;
+  catalogId: string;
+  catalogItemId: string;
+  variables: BeCaseVariable[];
+}
+
+/**
+ * An inline attachment in a security-report create. Note `file` is **raw**
+ * base64 (the file's bytes), NOT a `data:` URI — the SRA create path passes it
+ * straight through. (The separate post-case attachment endpoint, by contrast,
+ * requires a data URI.)
+ */
+export interface BeCaseAttachmentPayload {
+  /** File name including extension. */
+  name: string;
+  /** Base64-encoded file content (raw base64, no `data:` prefix). */
+  file: string;
+}
+
+/**
+ * Security report analysis (`type: "security_report_analysis"`). ServiceNow-only;
+ * requires a subject, description, and at least one attachment.
+ */
+export interface BeSecurityReportCreatePayload {
+  type: "security_report_analysis";
+  projectId: string;
+  deploymentId: string;
+  deployedProductId: string;
+  subject: string;
+  description: string;
+  attachments: BeCaseAttachmentPayload[];
+}
+
+/**
+ * Any body accepted by `POST /cases`: a standard support case, a catalog
+ * service request, or a security report analysis.
+ */
+export type BeCaseCreateBody =
+  | BeCaseCreatePayload
+  | BeServiceRequestCreatePayload
+  | BeSecurityReportCreatePayload;
 
 /** The case summary embedded in the `POST /cases` success envelope. */
 export interface BeCreatedCase {
@@ -219,6 +280,55 @@ export interface BeCreatedCase {
 export interface BeCaseCreateResponse {
   message?: string;
   case: BeCreatedCase;
+}
+
+// ---------------------------------------------------------------------------
+// Service catalogs (ServiceNow only) — drive service-request creation
+// ---------------------------------------------------------------------------
+
+/** A catalog item (request form) within a catalog. */
+export interface BeCatalogItemRef {
+  id: string;
+  name?: string;
+}
+
+/** A service catalog and the catalog items it offers. */
+export interface BeCatalogRef {
+  id: string;
+  name?: string;
+  catalogItems?: BeCatalogItemRef[];
+}
+
+/** Request body for `POST /catalogs/search`. */
+export interface BeSearchCatalogsPayload {
+  /** Deployed product to scope catalogs to (required). */
+  deployedProductId: string;
+  pagination?: { offset?: number; limit?: number };
+}
+
+/** `POST /catalogs/search` response. */
+export interface BeSearchCatalogsResponse {
+  catalogs?: BeCatalogRef[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * A catalog-item variable (form field). The contract carries the question
+ * text, display order, and a free-form `type` hint, but no choice/option list
+ * or mandatory flag — so the portal renders every variable as a text field.
+ */
+export interface BeCatalogItemVariable {
+  id: string;
+  questionText?: string;
+  order?: number;
+  type?: string;
+}
+
+/** `GET /catalogs/{catalogId}/items/{catalogItemId}/variables` response. */
+export interface BeGetCatalogItemVariablesResponse {
+  variables?: BeCatalogItemVariable[];
 }
 
 /**

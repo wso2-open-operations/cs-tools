@@ -118,6 +118,10 @@ interface CasesFilterBarProps {
   availableAssigneeUsers: AssigneeUser[];
   /** Projects for the (id-based) project filter — value is the id, label the name. */
   availableProjects: { id: string; name: string }[];
+  /** Hide the case-type control when the surrounding view locks the type. */
+  hideTypeFilter?: boolean;
+  /** Hide the project control when the surrounding view is project-scoped. */
+  hideProjectFilter?: boolean;
 }
 
 const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -313,6 +317,8 @@ export default function CasesFilterBar({
   onFiltersToggle,
   availableAssigneeUsers,
   availableProjects,
+  hideTypeFilter = false,
+  hideProjectFilter = false,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -604,15 +610,17 @@ export default function CasesFilterBar({
                 onChange={(next) => onChange({ ...filters, states: next })}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <MultiSelectField
-                id="cases-filter-type"
-                label="Case type"
-                values={filters.caseTypes}
-                options={caseTypeOptions}
-                onChange={(next) => onChange({ ...filters, caseTypes: next })}
-              />
-            </Grid>
+            {!hideTypeFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-type"
+                  label="Case type"
+                  values={filters.caseTypes}
+                  options={caseTypeOptions}
+                  onChange={(next) => onChange({ ...filters, caseTypes: next })}
+                />
+              </Grid>
+            )}
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               {/* Disabled until the backend `/cases/search` supports an
                   assigned-engineer filter. The picker is email-backed and ready
@@ -638,13 +646,15 @@ export default function CasesFilterBar({
                 </Box>
               </Tooltip>
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              <AsyncProjectMultiSelect
-                values={filters.projects}
-                onChange={(next) => onChange({ ...filters, projects: next })}
-                nameSeed={projectNameSeed}
-              />
-            </Grid>
+            {!hideProjectFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <AsyncProjectMultiSelect
+                  values={filters.projects}
+                  onChange={(next) => onChange({ ...filters, projects: next })}
+                  nameSeed={projectNameSeed}
+                />
+              </Grid>
+            )}
           </Grid>
           {activeCount > 0 && (
             <Box sx={{ display: "flex", justifyContent: "flex-end" }}>

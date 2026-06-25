@@ -83,12 +83,9 @@ export default function CsmProjectsPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Box>
-        <Typography variant="h5">Projects</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Search across project name, project key, and subscription type.
-        </Typography>
-      </Box>
+      <Typography variant="body2" color="text.secondary">
+        Search across project name, project key, and subscription type.
+      </Typography>
 
       <TextField
         size="small"
@@ -139,7 +136,7 @@ export default function CsmProjectsPage(): JSX.Element {
                     <TableCell>
                       <Typography
                         component={RouterLink}
-                        to={`/projects/${p.id}`}
+                        to={`/customers/projects/${p.id}`}
                         variant="body2"
                         sx={(t) => ({
                           textDecoration: "none",

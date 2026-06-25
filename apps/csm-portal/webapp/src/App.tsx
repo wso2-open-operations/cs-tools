@@ -15,7 +15,7 @@
 // under the License.
 
 import { type JSX, lazy } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useParams } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import {
   POST_LOGIN_REDIRECT_KEY,
@@ -62,6 +62,9 @@ const CsmAdminLayout = lazy(
 const CsmUsersPage = lazy(
   () => import("@features/csm-users/pages/CsmUsersPage"),
 );
+const CsmCustomersLayout = lazy(
+  () => import("@features/csm-customers/pages/CsmCustomersLayout"),
+);
 const CsmAccountsPage = lazy(
   () => import("@features/csm-accounts/pages/CsmAccountsPage"),
 );
@@ -77,6 +80,12 @@ const CsmProjectDetailPage = lazy(
 const CsmUpdatesPage = lazy(
   () => import("@features/updates/pages/CsmUpdatesPage"),
 );
+const CsmSecurityCenterPage = lazy(
+  () => import("@features/csm-security-center/pages/CsmSecurityCenterPage"),
+);
+const CreateSecurityReportPage = lazy(
+  () => import("@features/csm-security-center/pages/CreateSecurityReportPage"),
+);
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -87,6 +96,16 @@ const CsmUpdatesPage = lazy(
 function RootLanding(): JSX.Element | null {
   const pending = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY);
   return pending ? null : <Navigate to="/dashboard" replace />;
+}
+
+/**
+ * Redirects a legacy detail path (`/accounts/:id`, `/projects/:id`) to its new
+ * home under `/customers`, preserving the id. Exists only so old pinned/deep
+ * links survive the Accounts+Projects → Customers menu merge.
+ */
+function LegacyDetailRedirect({ to }: { to: string }): JSX.Element {
+  const { id } = useParams();
+  return <Navigate to={id ? `${to}/${id}` : to} replace />;
 }
 
 export default function App(): JSX.Element {
@@ -125,11 +144,43 @@ export default function App(): JSX.Element {
               <Route element={<AuthGuard />}>
                 <Route path="/" element={<RootLanding />} />
 
-                {/* BFF-backed pages (entity-service search + by-id endpoints) */}
-                <Route path="accounts" element={<CsmAccountsPage />} />
-                <Route path="accounts/:id" element={<CsmAccountDetailPage />} />
-                <Route path="projects" element={<CsmProjectsPage />} />
-                <Route path="projects/:id" element={<CsmProjectDetailPage />} />
+                {/* Customers — Accounts + Projects under one tabbed section.
+                    BFF-backed pages (entity-service search + by-id endpoints).
+                    Detail pages render full-width (outside the tab layout). */}
+                <Route path="customers" element={<CsmCustomersLayout />}>
+                  <Route
+                    index
+                    element={<Navigate to="/customers/accounts" replace />}
+                  />
+                  <Route path="accounts" element={<CsmAccountsPage />} />
+                  <Route path="projects" element={<CsmProjectsPage />} />
+                </Route>
+                <Route
+                  path="customers/accounts/:id"
+                  element={<CsmAccountDetailPage />}
+                />
+                <Route
+                  path="customers/projects/:id"
+                  element={<CsmProjectDetailPage />}
+                />
+
+                {/* Legacy paths kept alive so pinned/deep links don't 404. */}
+                <Route
+                  path="accounts"
+                  element={<Navigate to="/customers/accounts" replace />}
+                />
+                <Route
+                  path="accounts/:id"
+                  element={<LegacyDetailRedirect to="/customers/accounts" />}
+                />
+                <Route
+                  path="projects"
+                  element={<Navigate to="/customers/projects" replace />}
+                />
+                <Route
+                  path="projects/:id"
+                  element={<LegacyDetailRedirect to="/customers/projects" />}
+                />
 
                 {/* Administration — Users tab is real, others are WIP */}
                 <Route path="admin" element={<CsmAdminLayout />}>
@@ -190,15 +241,10 @@ export default function App(): JSX.Element {
                   }
                 />
                 <Route path="updates" element={<CsmUpdatesPage />} />
+                <Route path="security-center" element={<CsmSecurityCenterPage />} />
                 <Route
-                  path="security-center"
-                  element={
-                    <CsmComingSoonPage
-                      title="Security center"
-                      description="Vulnerability posture across customer deployments."
-                      blockedOn="csm-portal/backend security endpoint"
-                    />
-                  }
+                  path="security-center/reports/new"
+                  element={<CreateSecurityReportPage />}
                 />
                 <Route
                   path="time-cards"

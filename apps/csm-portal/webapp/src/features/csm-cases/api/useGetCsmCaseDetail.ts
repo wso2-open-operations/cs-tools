@@ -54,6 +54,7 @@ function detailFromBeCase(
     caseNumber: c.number,
     wso2CaseId: c.internalId,
     subject: c.subject ?? "(no subject)",
+    caseType: c.type ?? undefined,
     customer,
     accountId: account?.id ?? "",
     projectId: c.project?.id ?? "",

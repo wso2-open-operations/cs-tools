@@ -16,11 +16,10 @@
 
 import {
   Briefcase,
-  Building,
+  Building2,
   ChartColumn,
   Clock,
   Cog,
-  FolderOpen,
   Headset,
   RefreshCw,
   Settings,
@@ -43,14 +42,13 @@ export interface CsmNavItem {
  */
 export const CSM_NAV_ITEMS: CsmNavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: ChartColumn },
-  { id: "cases", label: "Cases", path: "/cases", icon: Headset },
+  { id: "support", label: "Support", path: "/cases", icon: Headset },
   { id: "operations", label: "Operations", path: "/operations", icon: Cog },
   { id: "engagements", label: "Engagements", path: "/engagements", icon: Briefcase },
+  { id: "security-center", label: "Security Center", path: "/security-center", icon: Shield },
   { id: "updates", label: "Updates", path: "/updates", icon: RefreshCw },
-  { id: "security-center", label: "Security center", path: "/security-center", icon: Shield },
   { id: "time-cards", label: "Time cards", path: "/time-cards", icon: Clock },
-  { id: "accounts", label: "Accounts", path: "/accounts", icon: Building },
-  { id: "projects", label: "Projects", path: "/projects", icon: FolderOpen },
+  { id: "customers", label: "Customers", path: "/customers", icon: Building2 },
   { id: "admin", label: "Settings", path: "/admin", icon: Settings },
 ];
 

@@ -14,19 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX } from "react";
 import { useNavigate } from "react-router";
+import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import IssuesListUnavailable from "@features/csm-operations/components/IssuesListUnavailable";
 
 type OperationsTabId = "service_requests" | "change_requests" | "incidents";
 
 /**
  * Operations landing — the home for the managed-cloud operational entities,
- * split into Service Requests / Change Requests / Incidents tabs. Only the
- * Service Request create entry point is live; the list views and the
- * CR/Incident tabs are awaiting their backend endpoints, so they render
- * "coming soon" placeholders. Replaces the previous blanket coming-soon page.
+ * split into Service Requests / Change Requests / Incidents tabs. Service
+ * requests are case-typed, so they list through the shared issues view; CR and
+ * Incidents have no backend search endpoint yet and render an unavailable
+ * placeholder.
  */
 export default function OperationsPage(): JSX.Element {
   const navigate = useNavigate();
@@ -53,9 +55,11 @@ export default function OperationsPage(): JSX.Element {
       </Box>
 
       {activeTab === "service_requests" && (
-        <TabPanel
-          description="Catalog-driven requests raised on behalf of a customer (e.g. configuration, access, infrastructure changes)."
-          action={
+        <CsmIssuesView
+          entityNoun="service requests"
+          lockedFilters={{ caseTypes: ["service_request"] }}
+          hideTypeFilter
+          actions={
             <Button
               variant="contained"
               color="primary"
@@ -66,71 +70,22 @@ export default function OperationsPage(): JSX.Element {
               Create service request
             </Button>
           }
-        >
-          <Typography variant="body2" color="text.secondary">
-            The service request list will appear here once the backend search
-            endpoint is available.
-          </Typography>
-        </TabPanel>
+        />
       )}
 
       {activeTab === "change_requests" && (
-        <TabPanel
+        <IssuesListUnavailable
+          title="Change requests"
           description="Controlled changes, linked to service requests, with peer / CAB approval."
-          comingSoon
         />
       )}
 
       {activeTab === "incidents" && (
-        <TabPanel
+        <IssuesListUnavailable
+          title="Incidents"
           description="SaaS incidents raised by CRE or automation; may link to a case."
-          comingSoon
         />
       )}
-    </Box>
-  );
-}
-
-interface TabPanelProps {
-  description: string;
-  action?: ReactNode;
-  comingSoon?: boolean;
-  children?: ReactNode;
-}
-
-function TabPanel({
-  description,
-  action,
-  comingSoon,
-  children,
-}: TabPanelProps): JSX.Element {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 1.5,
-          flexWrap: "wrap",
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            {description}
-          </Typography>
-          {comingSoon && (
-            <Chip
-              size="small"
-              label="Coming soon"
-              color="warning"
-              variant="outlined"
-            />
-          )}
-        </Box>
-        {action}
-      </Box>
-      {children}
     </Box>
   );
 }

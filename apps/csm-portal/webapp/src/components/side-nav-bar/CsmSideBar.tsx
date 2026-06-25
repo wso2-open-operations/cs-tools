@@ -31,8 +31,8 @@ interface CsmSideBarProps {
 }
 
 function pickActiveId(pathname: string): string {
-  if (pathname === "/" || pathname === "") return "accounts";
-  return navItemForPath(pathname)?.id ?? "accounts";
+  if (pathname === "/" || pathname === "") return "dashboard";
+  return navItemForPath(pathname)?.id ?? "dashboard";
 }
 
 export default function CsmSideBar({

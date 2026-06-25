@@ -33,12 +33,17 @@ import { useNavigate, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
+import AttachmentsField from "@components/attachments/AttachmentsField";
+import { type EncodedAttachment } from "@components/attachments/encodeAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
+import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import type { BeCaseIssueType } from "@api/backend/types";
@@ -89,10 +94,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const [issueType, setIssueType] = useState<BeCaseIssueType | "">("");
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
+  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
+  const postAttachment = usePostCsmCaseAttachment();
+  const uploadedBy = useEngineerDisplayName();
+  // Spans the whole submit (create + post-create attachment uploads).
+  const [submitting, setSubmitting] = useState(false);
 
   // Resolve the locked project's display name so the read-only field shows the
   // name (not the raw id). Only fetched when the form is project-scoped.
@@ -119,6 +129,9 @@ export default function CsmCaseCreatePage(): JSX.Element {
     [description],
   );
   const descriptionOverLimit = descriptionBytes > MAX_DESCRIPTION_CONTENT_BYTES;
+  // Attachments are uploaded after the case is created (separate requests), so
+  // they don't count against the create-body budget — only the per-file cap in
+  // AttachmentsField applies.
   const descriptionError = descriptionOverLimit
     ? `The case description is too large (${formatBytes(
         descriptionBytes,
@@ -137,7 +150,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
       !descriptionOverLimit &&
-      !postCase.isPending,
+      !submitting,
     [
       projectId,
       deploymentId,
@@ -147,7 +160,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       subject,
       description,
       descriptionOverLimit,
-      postCase.isPending,
+      submitting,
     ],
   );
 
@@ -162,10 +175,11 @@ export default function CsmCaseCreatePage(): JSX.Element {
     setDeployedProductId("");
   };
 
-  const handleSubmit = (): void => {
+  const handleSubmit = async (): Promise<void> => {
     if (!canSubmit || !severity || !issueType || descriptionOverLimit) return;
-    postCase.mutate(
-      {
+    setSubmitting(true);
+    try {
+      const created = await postCase.mutateAsync({
         type: "case",
         projectId,
         deploymentId,
@@ -174,13 +188,25 @@ export default function CsmCaseCreatePage(): JSX.Element {
         description,
         severity: priorityFromSeverity(severity),
         issueType: issueType,
-      },
-      {
-        onSuccess: (created) => navigate(`/cases/${created.id}`),
-        onError: (err) =>
-          showError("Could not create the case. Please try again.", err),
-      },
-    );
+      });
+      // The create endpoint doesn't attach files for standard cases, so upload
+      // them to the new case afterwards. A partial failure still lands the case.
+      const failed = await uploadAttachmentsToCase(
+        postAttachment.mutateAsync,
+        created.id,
+        attachments,
+        uploadedBy,
+      );
+      if (failed > 0) {
+        showError(
+          `The case was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the case page.`,
+        );
+      }
+      navigate(`/cases/${created.id}`);
+    } catch (err) {
+      setSubmitting(false);
+      showError("Could not create the case. Please try again.", err);
+    }
   };
 
   return (
@@ -362,7 +388,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 minHeight={180}
                 maxHeight={420}
                 toolbarVariant="full"
-                disabled={postCase.isPending}
+                disabled={submitting}
               />
             </Box>
             {descriptionError && (
@@ -375,6 +401,22 @@ export default function CsmCaseCreatePage(): JSX.Element {
               </Typography>
             )}
           </Grid>
+
+          <Grid size={{ xs: 12 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mb: 0.5 }}
+            >
+              Attachments
+            </Typography>
+            <AttachmentsField
+              attachments={attachments}
+              onChange={setAttachments}
+              onError={showError}
+              maxEncodedBytes={Number.MAX_SAFE_INTEGER}
+            />
+          </Grid>
         </Grid>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
@@ -383,10 +425,10 @@ export default function CsmCaseCreatePage(): JSX.Element {
           </Button>
           <Button
             variant="contained"
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={!canSubmit}
           >
-            {postCase.isPending ? "Creating…" : "Create case"}
+            {submitting ? "Creating…" : "Create case"}
           </Button>
         </Box>
       </Card>

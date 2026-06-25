@@ -209,7 +209,7 @@ export default function CaseMetaBand({
           </Cell>
           <Cell label="Account">
             {c.accountId ? (
-              <LinkText to={`/accounts/${c.accountId}`}>
+              <LinkText to={`/customers/accounts/${c.accountId}`}>
                 {c.customer}
               </LinkText>
             ) : (
@@ -220,7 +220,7 @@ export default function CaseMetaBand({
           </Cell>
           <Cell label="Project">
             {c.projectId ? (
-              <LinkText to={`/projects/${c.projectId}`}>
+              <LinkText to={`/customers/projects/${c.projectId}`}>
                 {c.projectName}
               </LinkText>
             ) : (

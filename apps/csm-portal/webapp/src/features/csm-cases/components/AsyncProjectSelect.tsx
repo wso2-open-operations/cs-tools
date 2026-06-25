@@ -16,8 +16,9 @@
 
 import { Autocomplete, TextField } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
+import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
-import { useProjectSearch } from "@features/csm-cases/api/useProjectSearch";
+import { useInfiniteProjectSearch } from "@features/csm-cases/api/useProjectSearch";
 
 interface ProjectOption {
   id: string;
@@ -35,10 +36,11 @@ interface AsyncProjectSelectProps {
 }
 
 /**
- * Single-project picker that searches the backend as the user types instead of
- * loading the whole project catalogue up front (see {@link useProjectSearch}).
- * The name of the picked project is remembered so the field keeps its label
- * even after the search term — and its results — move on.
+ * Single-project picker. Mirrors the cases filter's project control
+ * ({@link useInfiniteProjectSearch}): on open it loads the first page of
+ * projects (no typing needed) and pages through the rest on scroll, narrowing
+ * as the user types. The name of the picked project is remembered so the field
+ * keeps its label even after the search term — and its results — move on.
  */
 export default function AsyncProjectSelect({
   id = "case-project",
@@ -48,16 +50,35 @@ export default function AsyncProjectSelect({
   required,
   disabled,
 }: AsyncProjectSelectProps): JSX.Element {
-  // Tracked separately from the displayed input value (which MUI manages and
-  // shows the selected project's name) so the type-ahead query keeps working.
+  // Search term tracked separately from the displayed input value (which MUI
+  // manages and shows the selected project's name) so the type-ahead works.
   const [searchTerm, setSearchTerm] = useState("");
+  const [open, setOpen] = useState(false);
   const debounced = useDebouncedValue(searchTerm, 300);
   const query = debounced.trim();
 
-  const { data, isFetching, isError } = useProjectSearch(
-    query,
-    query.length > 0,
-  );
+  // Enabled while the dropdown is open, so it loads the first page of projects
+  // on open and re-pages as the user types.
+  const {
+    projects,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    isError,
+    fetchNextPage,
+  } = useInfiniteProjectSearch(query, open);
+
+  // Lazy-load the next page when the listbox is scrolled near its end.
+  const handleListboxScroll = (event: React.UIEvent<HTMLElement>): void => {
+    const el = event.currentTarget;
+    if (
+      hasNextPage &&
+      !isFetchingNextPage &&
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    ) {
+      fetchNextPage();
+    }
+  };
 
   // Captured at selection time so the field stays labelled once the search
   // results change to a different term.
@@ -66,20 +87,20 @@ export default function AsyncProjectSelect({
   const selectedOption = useMemo<ProjectOption | null>(() => {
     if (!value) return null;
     if (picked && picked.id === value) return picked;
-    const match = (data ?? []).find((p) => p.id === value);
+    const match = projects.find((p) => p.id === value);
     if (match) return { id: match.id, name: match.name || match.id };
     return { id: value, name: value };
-  }, [value, picked, data]);
+  }, [value, picked, projects]);
 
   // Pool = the current selection (so it can render) + the search results,
   // de-duplicated by id.
   const options = useMemo<ProjectOption[]>(() => {
-    const results = (data ?? []).map((p) => ({ id: p.id, name: p.name || p.id }));
+    const results = projects.map((p) => ({ id: p.id, name: p.name || p.id }));
     if (selectedOption && !results.some((o) => o.id === selectedOption.id)) {
       return [selectedOption, ...results];
     }
     return results;
-  }, [data, selectedOption]);
+  }, [projects, selectedOption]);
 
   return (
     <Autocomplete<ProjectOption>
@@ -88,12 +109,21 @@ export default function AsyncProjectSelect({
       id={id}
       options={options}
       value={selectedOption}
+      open={open}
+      onOpen={() => {
+        // Start each open from the default first page rather than a stale term.
+        setSearchTerm("");
+        setOpen(true);
+      }}
+      onClose={() => setOpen(false)}
       disabled={disabled}
-      loading={isFetching}
+      // Spinner only while the first page loads; later pages append on scroll.
+      loading={isFetching && projects.length === 0}
       // The backend already filtered by the typed term; don't re-filter locally.
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.name}
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
+      slotProps={{ listbox: { onScroll: handleListboxScroll } }}
       onChange={(_event, next) => {
         setPicked(next);
         onChange(next ? next.id : "");
@@ -103,29 +133,22 @@ export default function AsyncProjectSelect({
         else if (reason === "clear") setSearchTerm("");
       }}
       noOptionsText={
-        query.length === 0
-          ? "Type to search projects…"
-          : isError
-            ? "Could not load projects"
-            : isFetching
-              ? "Searching…"
-              : "No projects found"
+        isError
+          ? "Couldn't load projects. Try again."
+          : isFetching
+            ? "Loading projects…"
+            : "No projects found"
       }
-      renderInput={(params) => {
-        const failed = query.length > 0 && isError;
-        return (
-          <TextField
-            {...params}
-            label={label}
-            required={required}
-            placeholder={value ? undefined : "Type a project…"}
-            error={failed}
-            helperText={
-              failed ? "Project search failed. Type to retry." : undefined
-            }
-          />
-        );
-      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          required={required}
+          placeholder={value ? undefined : "Search projects…"}
+          error={isError && open}
+          helperText={isError && open ? "Project search failed." : undefined}
+        />
+      )}
     />
   );
 }

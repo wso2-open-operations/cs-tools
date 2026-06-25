@@ -20,12 +20,17 @@ import {
   Card,
   Chip,
   Skeleton,
+  Tab,
+  Tabs,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
+import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+
+type ProjectTabId = "overview" | "issues";
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -114,6 +119,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data, isLoading, isError } = useGetProject(id);
+  const [activeTab, setActiveTab] = useState<ProjectTabId>("overview");
 
   if (isLoading) {
     return (
@@ -127,7 +133,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
   if (isError) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <BackButton onClick={() => navigate("/projects")} />
+        <BackButton onClick={() => navigate("/customers/projects")} />
         <Typography variant="body1" color="error">
           Could not load project {id}.
         </Typography>
@@ -138,7 +144,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
   if (!data) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <BackButton onClick={() => navigate("/projects")} />
+        <BackButton onClick={() => navigate("/customers/projects")} />
         <Typography variant="h5">Project not found</Typography>
         <Typography variant="body2" color="text.secondary">
           No project with id <code>{id}</code>.
@@ -151,7 +157,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-      <BackButton onClick={() => navigate("/projects")} />
+      <BackButton onClick={() => navigate("/customers/projects")} />
 
       <Box
         sx={{
@@ -187,57 +193,74 @@ export default function CsmProjectDetailPage(): JSX.Element {
         </Button>
       </Box>
 
-      <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Typography variant="subtitle2">Overview</Typography>
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: {
-              xs: "1fr",
-              sm: "repeat(2, minmax(0, 1fr))",
-              md: "repeat(3, minmax(0, 1fr))",
-            },
-          }}
-        >
-          <MetaCell label="Project key">
-            <Mono>{p.key}</Mono>
-          </MetaCell>
-          <MetaCell label="Subscription">
-            <Typography variant="body2">{formatSubscriptionType(p.subscriptionType)}</Typography>
-          </MetaCell>
-          <MetaCell label="Account">
-            {p.account?.id ? (
-              <LinkText to={`/accounts/${p.account.id}`}>
-                {p.account.name || p.account.id}
-              </LinkText>
-            ) : (
-              <Typography variant="body2">—</Typography>
-            )}
-          </MetaCell>
-          <MetaCell label="Account tier">
-            <Typography variant="body2">{p.account?.tier || "—"}</Typography>
-          </MetaCell>
-          <MetaCell label="Start date">
-            <Typography variant="body2">{formatDate(p.startDate)}</Typography>
-          </MetaCell>
-          <MetaCell label="End date">
-            <Typography variant="body2">{formatDate(p.endDate)}</Typography>
-          </MetaCell>
-          <MetaCell label="Salesforce ID">
-            <Mono>{p.sfId || "—"}</Mono>
-          </MetaCell>
-          <MetaCell label="Created">
-            <Typography variant="body2">{formatDate(p.createdOn)}</Typography>
-          </MetaCell>
-          <MetaCell label="Last updated">
-            <Typography variant="body2">{formatDate(p.updatedOn)}</Typography>
-          </MetaCell>
-          <MetaCell label="Project ID">
-            <Mono>{p.id}</Mono>
-          </MetaCell>
-        </Box>
-      </Card>
+      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
+          <Tab value="overview" label="Overview" />
+          <Tab value="issues" label="Issues" />
+        </Tabs>
+      </Box>
+
+      {activeTab === "overview" && (
+        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+          <Typography variant="subtitle2">Overview</Typography>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: {
+                xs: "1fr",
+                sm: "repeat(2, minmax(0, 1fr))",
+                md: "repeat(3, minmax(0, 1fr))",
+              },
+            }}
+          >
+            <MetaCell label="Project key">
+              <Mono>{p.key}</Mono>
+            </MetaCell>
+            <MetaCell label="Subscription">
+              <Typography variant="body2">{formatSubscriptionType(p.subscriptionType)}</Typography>
+            </MetaCell>
+            <MetaCell label="Account">
+              {p.account?.id ? (
+                <LinkText to={`/customers/accounts/${p.account.id}`}>
+                  {p.account.name || p.account.id}
+                </LinkText>
+              ) : (
+                <Typography variant="body2">—</Typography>
+              )}
+            </MetaCell>
+            <MetaCell label="Account tier">
+              <Typography variant="body2">{p.account?.tier || "—"}</Typography>
+            </MetaCell>
+            <MetaCell label="Start date">
+              <Typography variant="body2">{formatDate(p.startDate)}</Typography>
+            </MetaCell>
+            <MetaCell label="End date">
+              <Typography variant="body2">{formatDate(p.endDate)}</Typography>
+            </MetaCell>
+            <MetaCell label="Salesforce ID">
+              <Mono>{p.sfId || "—"}</Mono>
+            </MetaCell>
+            <MetaCell label="Created">
+              <Typography variant="body2">{formatDate(p.createdOn)}</Typography>
+            </MetaCell>
+            <MetaCell label="Last updated">
+              <Typography variant="body2">{formatDate(p.updatedOn)}</Typography>
+            </MetaCell>
+            <MetaCell label="Project ID">
+              <Mono>{p.id}</Mono>
+            </MetaCell>
+          </Box>
+        </Card>
+      )}
+
+      {activeTab === "issues" && (
+        <CsmIssuesView
+          entityNoun="issues"
+          lockedFilters={{ projects: [p.id] }}
+          hideProjectFilter
+        />
+      )}
     </Box>
   );
 }

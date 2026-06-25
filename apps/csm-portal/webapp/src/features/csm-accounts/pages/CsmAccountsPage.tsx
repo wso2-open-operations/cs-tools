@@ -79,12 +79,9 @@ export default function CsmAccountsPage(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Box>
-        <Typography variant="h5">Accounts</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Search across account name and Salesforce ID (case-insensitive).
-        </Typography>
-      </Box>
+      <Typography variant="body2" color="text.secondary">
+        Search across account name and Salesforce ID (case-insensitive).
+      </Typography>
 
       <TextField
         size="small"
@@ -136,7 +133,7 @@ export default function CsmAccountsPage(): JSX.Element {
                     <TableCell>
                       <Typography
                         component={RouterLink}
-                        to={`/accounts/${a.id}`}
+                        to={`/customers/accounts/${a.id}`}
                         variant="body2"
                         sx={(t) => ({
                           textDecoration: "none",
