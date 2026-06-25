@@ -6534,9 +6534,7 @@ components:
       - case
       - createdBy
       - createdOn
-      - currentLevel
       - id
-      - previousLevel
       type: object
       properties:
         id:
@@ -6544,9 +6542,15 @@ components:
         case:
           $ref: '#/components/schemas/ReferenceItem'
         currentLevel:
-          $ref: '#/components/schemas/ReferenceItem'
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Current escalation level
         previousLevel:
-          $ref: '#/components/schemas/ReferenceItem'
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Previous escalation level
         createdBy:
           type: string
           description: User who created the escalation
@@ -6571,10 +6575,8 @@ components:
       - case
       - createdBy
       - createdOn
-      - currentLevel
       - id
       - notificationSentTo
-      - previousLevel
       - updatedOn
       type: object
       properties:
@@ -6583,9 +6585,15 @@ components:
         case:
           $ref: '#/components/schemas/ReferenceItem'
         currentLevel:
-          $ref: '#/components/schemas/ReferenceItem'
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Current escalation level
         previousLevel:
-          $ref: '#/components/schemas/ReferenceItem'
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Previous escalation level
         createdBy:
           type: string
           description: User who created the escalation

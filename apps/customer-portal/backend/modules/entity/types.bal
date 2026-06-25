@@ -2422,9 +2422,9 @@ public type CreatedEscalation record {|
     # Associated case information
     ReferenceTableItem case;
     # Current escalation level
-    ChoiceListItem currentLevel;
+    ChoiceListItem? currentLevel;
     # Previous escalation level
-    ChoiceListItem previousLevel;
+    ChoiceListItem? previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time
@@ -2448,9 +2448,9 @@ public type Escalation record {|
     # Associated case information
     ReferenceTableItem case;
     # Current escalation level
-    ChoiceListItem currentLevel;
+    ChoiceListItem? currentLevel;
     # Previous escalation level
-    ChoiceListItem previousLevel;
+    ChoiceListItem? previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time

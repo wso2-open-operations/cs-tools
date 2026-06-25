@@ -1191,13 +1191,15 @@ public isolated function mapCreatedEscalation(entity:EscalationCreateResponse re
     returns types:EscalationCreateResponse {
 
     entity:CreatedEscalation escalation = response.escalation;
+    entity:ChoiceListItem? currentLevel = escalation.currentLevel;
+    entity:ChoiceListItem? previousLevel = escalation.previousLevel;
     return {
         message: response.message,
         escalation: {
             id: escalation.id,
             'case: {id: escalation.case.id, label: escalation.case.name},
-            currentLevel: {id: escalation.currentLevel.id.toString(), label: escalation.currentLevel.label},
-            previousLevel: {id: escalation.previousLevel.id.toString(), label: escalation.previousLevel.label},
+            currentLevel: currentLevel != () ? {id: currentLevel.id.toString(), label: currentLevel.label} : (),
+            previousLevel: previousLevel != () ? {id: previousLevel.id.toString(), label: previousLevel.label} : (),
             createdBy: escalation.createdBy,
             createdOn: escalation.createdOn
         }
@@ -1213,13 +1215,13 @@ public isolated function mapEscalationsResponse(entity:EscalationsResponse respo
 
     types:Escalation[] escalations = from entity:Escalation escalation in response.escalations
         let entity:ReferenceTableItem escalationCase = escalation.case
-        let entity:ChoiceListItem currentLevel = escalation.currentLevel
-        let entity:ChoiceListItem previousLevel = escalation.previousLevel
+        let entity:ChoiceListItem? currentLevel = escalation.currentLevel
+        let entity:ChoiceListItem? previousLevel = escalation.previousLevel
         select {
             id: escalation.id,
             'case: {id: escalationCase.id, label: escalationCase.name},
-            currentLevel: {id: currentLevel.id.toString(), label: currentLevel.label},
-            previousLevel: {id: previousLevel.id.toString(), label: previousLevel.label},
+            currentLevel: currentLevel != () ? {id: currentLevel.id.toString(), label: currentLevel.label} : (),
+            previousLevel: previousLevel != () ? {id: previousLevel.id.toString(), label: previousLevel.label} : (),
             createdBy: escalation.createdBy,
             createdOn: escalation.createdOn,
             updatedOn: escalation.updatedOn,

@@ -1191,9 +1191,9 @@ public type CreatedEscalation record {|
     # Associated case information
     ReferenceItem case;
     # Current escalation level
-    ReferenceItem currentLevel;
+    ReferenceItem? currentLevel;
     # Previous escalation level
-    ReferenceItem previousLevel;
+    ReferenceItem? previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time
@@ -1223,9 +1223,9 @@ public type Escalation record {|
     # Associated case information
     ReferenceItem case;
     # Current escalation level
-    ReferenceItem currentLevel;
+    ReferenceItem? currentLevel;
     # Previous escalation level
-    ReferenceItem previousLevel;
+    ReferenceItem? previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time
