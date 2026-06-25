@@ -102,6 +102,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		changeRequestHandler = handler.NewChangeRequestHandler(service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient))
 	}
 
+	var catalogHandler *handler.CatalogHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		catalogHandler = handler.NewCatalogHandler(service.NewServiceNowCatalogService(serviceNowIntegrationServiceClient))
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
@@ -127,6 +132,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	if changeRequestHandler != nil {
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
+	}
+
+	if catalogHandler != nil {
+		mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
+		mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)
 	}
 
 	return middleware.CorrelationID(

@@ -304,14 +304,31 @@ var snIssueTypeID = map[domain.CaseIssueType]int{
 }
 
 type snCreateCasePayload struct {
-	Type              string `json:"type"`
-	ProjectID         string `json:"projectId"`
-	DeploymentID      string `json:"deploymentId"`
-	DeployedProductID string `json:"deployedProductId"`
-	Title             string `json:"title"`
-	Description       string `json:"description"`
-	SeverityKey       int    `json:"severityKey"`
-	IssueTypeKey      int    `json:"issueTypeKey"`
+	Type              string              `json:"type"`
+	ProjectID         string              `json:"projectId"`
+	DeploymentID      string              `json:"deploymentId"`
+	DeployedProductID string              `json:"deployedProductId"`
+	Title             string              `json:"title,omitempty"`
+	Description       string              `json:"description,omitempty"`
+	SeverityKey       int                 `json:"severityKey,omitempty"`
+	IssueTypeKey      int                 `json:"issueTypeKey,omitempty"`
+	CatalogID         string              `json:"catalogId,omitempty"`
+	CatalogItemID     string              `json:"catalogItemId,omitempty"`
+	Variables         []snCaseVariable    `json:"variables,omitempty"`
+	RelatedCaseID     string              `json:"relatedCaseId,omitempty"`
+	ConversationID    string              `json:"conversationId,omitempty"`
+	WatchList         []string            `json:"watchList,omitempty"`
+	Attachments       []snCaseAttachment  `json:"attachments,omitempty"`
+}
+
+type snCaseVariable struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+type snCaseAttachment struct {
+	Name string `json:"name"`
+	File string `json:"file"`
 }
 
 type snCreateCaseResponse struct {
@@ -336,20 +353,79 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 		return domain.CreateCaseResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	if req.Type != "case" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"case\" for case creation"}
+	snType, ok := snCaseTypeMap[req.Type]
+	if !ok {
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type contains invalid value: " + req.Type}
 	}
-	snType := snCaseTypeMap[req.Type]
+
+	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+	if err := validateUUIDs("deploymentId", []string{req.DeploymentID}); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+	if err := validateUUIDs("deployedProductId", []string{req.DeployedProductID}); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
 
 	payload := snCreateCasePayload{
 		Type:              snType,
 		ProjectID:         uuidToSysid(req.ProjectID),
 		DeploymentID:      uuidToSysid(req.DeploymentID),
 		DeployedProductID: uuidToSysid(req.DeployedProductID),
-		Title:             req.Subject,
-		Description:       req.Description,
-		SeverityKey:       snSeverityIDMap[req.Severity],
-		IssueTypeKey:      snIssueTypeID[req.IssueType],
+	}
+
+	switch req.Type {
+	case "case":
+		payload.Title = req.Subject
+		payload.Description = req.Description
+		payload.SeverityKey = snSeverityIDMap[req.Severity]
+		payload.IssueTypeKey = snIssueTypeID[req.IssueType]
+	case "service_request":
+		if err := validateUUIDs("catalogId", []string{req.CatalogID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		if err := validateUUIDs("catalogItemId", []string{req.CatalogItemID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		payload.CatalogID = uuidToSysid(req.CatalogID)
+		payload.CatalogItemID = uuidToSysid(req.CatalogItemID)
+		if len(req.Variables) > 0 {
+			vars := make([]snCaseVariable, 0, len(req.Variables))
+			for i, v := range req.Variables {
+				if err := validateUUIDs(fmt.Sprintf("variables[%d].id", i), []string{v.ID}); err != nil {
+					return domain.CreateCaseResponse{}, err
+				}
+				vars = append(vars, snCaseVariable{ID: uuidToSysid(v.ID), Value: v.Value})
+			}
+			payload.Variables = vars
+		}
+	case "security_report_analysis":
+		payload.Title = req.Subject
+		payload.Description = req.Description
+		if len(req.Attachments) > 0 {
+			atts := make([]snCaseAttachment, 0, len(req.Attachments))
+			for _, a := range req.Attachments {
+				atts = append(atts, snCaseAttachment{Name: a.Name, File: a.File})
+			}
+			payload.Attachments = atts
+		}
+	}
+
+	if len(req.WatchList) > 0 {
+		payload.WatchList = req.WatchList
+	}
+	if req.RelatedCaseID != "" {
+		if err := validateUUIDs("relatedCaseId", []string{req.RelatedCaseID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		payload.RelatedCaseID = uuidToSysid(req.RelatedCaseID)
+	}
+	if req.ConversationID != "" {
+		if err := validateUUIDs("conversationId", []string{req.ConversationID}); err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
+		payload.ConversationID = uuidToSysid(req.ConversationID)
 	}
 
 	raw, err := s.client.Post(ctx, "/cases", token, payload)

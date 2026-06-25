@@ -123,6 +123,17 @@ type CaseService interface {
 	GetCaseAttachmentContent(ctx context.Context, caseID, attachmentID string) (content []byte, contentType string, err error)
 }
 
+// CatalogService defines the operations available on service catalogs.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CatalogService interface {
+	// SearchCatalogs returns catalogs available for the given deployed product.
+	// DeployedProductID is required. A ValidationError is returned for missing input.
+	SearchCatalogs(ctx context.Context, req domain.SearchCatalogsRequest) (domain.SearchCatalogsResponse, error)
+	// GetCatalogItemVariables returns the variables (form fields) for a specific catalog item.
+	// A NotFoundError is returned if the catalog or item does not exist.
+	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) (domain.GetCatalogItemVariablesResponse, error)
+}
+
 // ChangeRequestService defines the operations available on the change_requests entity.
 type ChangeRequestService interface {
 	// SearchChangeRequests returns a paginated list of change requests filtered by optional

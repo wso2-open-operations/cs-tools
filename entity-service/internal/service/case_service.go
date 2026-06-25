@@ -19,6 +19,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -47,8 +48,6 @@ var validCaseType = map[string]bool{
 	"case":                     true,
 	"service_request":          true,
 	"security_report_analysis": true,
-	"announcement":             true,
-	"engagement":               true,
 }
 
 var validEngagementType = map[domain.EngagementType]bool{
@@ -103,6 +102,9 @@ func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
 	if req.Type == "" {
 		return &apierror.ValidationError{Msg: "type is required"}
 	}
+	if !validCaseType[req.Type] {
+		return &apierror.ValidationError{Msg: "type contains invalid value: " + req.Type}
+	}
 	if req.ProjectID == "" {
 		return &apierror.ValidationError{Msg: "projectId is required"}
 	}
@@ -112,18 +114,51 @@ func validateCreateCaseRequest(req domain.CreateCaseRequest) error {
 	if req.DeployedProductID == "" {
 		return &apierror.ValidationError{Msg: "deployedProductId is required"}
 	}
-	if req.Subject == "" {
-		return &apierror.ValidationError{Msg: "subject is required"}
+
+	switch req.Type {
+	case "case":
+		if req.Subject == "" {
+			return &apierror.ValidationError{Msg: "subject is required"}
+		}
+		if req.Description == "" {
+			return &apierror.ValidationError{Msg: "description is required"}
+		}
+		if !validCaseSeverity[req.Severity] {
+			return &apierror.ValidationError{Msg: "severity contains invalid value: " + string(req.Severity)}
+		}
+		if !validCaseIssueType[req.IssueType] {
+			return &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
+		}
+	case "service_request":
+		if req.CatalogID == "" {
+			return &apierror.ValidationError{Msg: "catalogId is required for service_request"}
+		}
+		if req.CatalogItemID == "" {
+			return &apierror.ValidationError{Msg: "catalogItemId is required for service_request"}
+		}
+		if len(req.Variables) == 0 {
+			return &apierror.ValidationError{Msg: "variables are required for service_request"}
+		}
+	case "security_report_analysis":
+		if req.Subject == "" {
+			return &apierror.ValidationError{Msg: "subject is required for security_report_analysis"}
+		}
+		if req.Description == "" {
+			return &apierror.ValidationError{Msg: "description is required for security_report_analysis"}
+		}
+		if len(req.Attachments) == 0 {
+			return &apierror.ValidationError{Msg: "at least one attachment is required for security_report_analysis"}
+		}
+		for i, a := range req.Attachments {
+			if a.Name == "" {
+				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].name is required", i)}
+			}
+			if a.File == "" {
+				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].file is required", i)}
+			}
+		}
 	}
-	if req.Description == "" {
-		return &apierror.ValidationError{Msg: "description is required"}
-	}
-	if !validCaseSeverity[req.Severity] {
-		return &apierror.ValidationError{Msg: "severity contains invalid value: " + string(req.Severity)}
-	}
-	if !validCaseIssueType[req.IssueType] {
-		return &apierror.ValidationError{Msg: "issueType contains invalid value: " + string(req.IssueType)}
-	}
+
 	return nil
 }
 
@@ -133,7 +168,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	if req.Type != "case" {
-		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "type must be \"case\" for case creation"}
+		return domain.CreateCaseResponse{}, &apierror.ValidationError{Msg: "only type \"case\" is supported for the Postgres data source"}
 	}
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
 		return domain.CreateCaseResponse{}, err

@@ -25,6 +25,15 @@ Each upstream service has its own client package under `internal/`:
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern.
 
+## Running locally
+
+```bash
+# from apps/csm-portal/backend
+go run ./cmd/server/main.go
+```
+
+The server auto-loads `.env` from the working directory at startup (silently ignored if absent). No need to `source .env` manually.
+
 ## Commands
 
 ```bash
@@ -51,7 +60,7 @@ Follow these steps in order:
 - **Auth**: always check `middleware.UserInfoFromContext(r.Context()) == nil` first → 401
 - **Body size**: cap with `http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)` (1 MiB) before reading
 - **Path params**: guard against empty string after `r.PathValue("id")`; if the param is a UUID, also validate format using the package-level `uuidRe` compiled regex and return 400 on mismatch — fail fast before calling the upstream
-- **Field naming**: case create/patch use bare names without `Key`/`Keys` suffix — `state`, `severity`, `workState` (PATCH), `type`, `severity`, `issueType` (POST); search filters use `states`, `severities`, `types`, `issueTypes`, `engagementTypes`; deployment search uses `deploymentTypes`; case comments use `type` (not `typeKey`); case create requires `type: "case"` (only accepted value currently)
+- **Field naming**: case create/patch use bare names without `Key`/`Keys` suffix — `state`, `severity`, `workState` (PATCH), `type`, `severity`, `issueType` (POST); search filters use `states`, `severities`, `types`, `issueTypes`, `engagementTypes`; deployment search uses `deploymentTypes`; case comments use `type` (not `typeKey`); case create accepts `type: "case"`, `"service_request"`, or `"security_report_analysis"` (ServiceNow only for the latter two)
 - **Upstream errors**: always use `mapUpstreamError(w, err, "<fallback message>")` — never write custom status mappings inline
 - **Response**: return raw `[]byte` with `writeJSON` for simple passthroughs; unmarshal into typed structs only when the response shape needs to change
 

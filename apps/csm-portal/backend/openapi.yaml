@@ -1198,6 +1198,109 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /catalogs/search:
+    post:
+      summary: Search service catalogs by deployed product (ServiceNow data source only).
+      operationId: searchCatalogs
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCatalogsPayload'
+      responses:
+        "200":
+          description: Catalogs available for the given deployed product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCatalogsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /catalogs/{catalogId}/items/{catalogItemId}/variables:
+    get:
+      summary: Get variables (form fields) for a catalog item (ServiceNow data source only).
+      operationId: getCatalogItemVariables
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: catalogId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Catalog UUID.
+        - name: catalogItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Catalog item UUID.
+      responses:
+        "200":
+          description: Variables for the catalog item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCatalogItemVariablesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Catalog or catalog item not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1315,15 +1418,15 @@ components:
         - projectId
         - deploymentId
         - deployedProductId
-        - subject
-        - description
-        - severity
-        - issueType
       properties:
         type:
           type: string
-          enum: [case]
-          description: Case type. Currently only `case` is accepted.
+          enum: [case, service_request, security_report_analysis]
+          description: |
+            Case type.
+            - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
+            - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
+            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -1335,18 +1438,49 @@ components:
           description: UUID of the deployed product this case relates to
         subject:
           type: string
-          description: Short summary of the issue
+          description: Required for `case` and `security_report_analysis` types.
         description:
           type: string
-          description: Full description of the issue
+          description: Required for `case` and `security_report_analysis` types.
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: Severity level of the case
+          description: Required for `case` type.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
-          description: Nature of the issue
+          description: Required for `case` type.
+        catalogId:
+          type: string
+          format: uuid
+          description: Required for `service_request` type. UUID of the catalog.
+        catalogItemId:
+          type: string
+          format: uuid
+          description: Required for `service_request` type. UUID of the catalog item.
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseVariable'
+          description: Required for `service_request` type.
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseAttachmentPayload'
+          description: Required for `security_report_analysis` type (at least one entry).
+        relatedCaseId:
+          type: string
+          format: uuid
+          description: Optional UUID of a related case.
+        conversationId:
+          type: string
+          format: uuid
+          description: Optional UUID of a related conversation.
+        watchList:
+          type: array
+          items:
+            type: string
+          description: Optional list of user IDs to notify.
 
     CaseSearchFilters:
       type: object
@@ -2779,3 +2913,106 @@ components:
             approvedOn:
               type: string
               nullable: true
+
+    CaseVariable:
+      type: object
+      required: [id, value]
+      properties:
+        id:
+          type: string
+          description: Variable (question) ID.
+        value:
+          type: string
+          description: Answer/value for the variable.
+
+    CaseAttachmentPayload:
+      type: object
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          description: File name including extension.
+        file:
+          type: string
+          description: Base64-encoded file content.
+
+    CatalogItemRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    CatalogRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        catalogItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItemRef'
+
+    SearchCatalogsPayload:
+      type: object
+      required: [deployedProductId]
+      properties:
+        deployedProductId:
+          type: string
+          format: uuid
+          description: UUID of the deployed product to filter catalogs by.
+        pagination:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
+
+    SearchCatalogsResponse:
+      type: object
+      properties:
+        catalogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogRef'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CatalogItemVariable:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Variable (question) ID.
+        questionText:
+          type: string
+          description: Display text for the variable/question.
+        order:
+          type: integer
+          description: Display order.
+        type:
+          type: string
+          description: Variable type (e.g. text, select).
+
+    GetCatalogItemVariablesResponse:
+      type: object
+      properties:
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogItemVariable'

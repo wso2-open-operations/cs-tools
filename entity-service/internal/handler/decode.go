@@ -20,9 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
@@ -35,14 +37,39 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		apierror.WriteJSON(w, http.StatusBadRequest, "invalid request body")
+		apierror.WriteJSON(w, http.StatusBadRequest, decodeErrMsg(err))
 		return false
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "invalid request body")
+		apierror.WriteJSON(w, http.StatusBadRequest, "request body must contain a single JSON object")
 		return false
 	}
 	return true
+}
+
+// decodeErrMsg converts a JSON decode error into a human-readable message that
+// is safe to return to the caller. Infrastructure details (e.g. raw Go type
+// names) are replaced with user-friendly descriptions.
+func decodeErrMsg(err error) string {
+	var maxBytes *http.MaxBytesError
+	if errors.As(err, &maxBytes) {
+		return "request body too large"
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return fmt.Sprintf("request body contains malformed JSON at position %d: %s", syntaxErr.Offset, syntaxErr.Error())
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return fmt.Sprintf("invalid value for field %q: expected %s", typeErr.Field, typeErr.Type)
+	}
+	// DisallowUnknownFields produces "json: unknown field "<name>"".
+	msg := err.Error()
+	if strings.HasPrefix(msg, "json: unknown field ") {
+		field := strings.TrimPrefix(msg, "json: unknown field ")
+		return fmt.Sprintf("unknown field %s in request body", field)
+	}
+	return "invalid request body"
 }
 
 // writeServiceError maps a service-layer error to the appropriate HTTP response.

@@ -6,8 +6,10 @@ Go backend service for the CSM Portal application.
 
 ```bash
 # from apps/csm-portal/backend
-set -a && source .env && set +a && go run ./cmd/server
+go run ./cmd/server/main.go
 ```
+
+The server automatically loads `.env` from the working directory on startup (silently ignored if absent).
 
 Backend starts at `http://localhost:8080`.
 
@@ -143,6 +145,7 @@ backend/
 │   └── handler/
 │       ├── cases.go            # HTTP handlers for case endpoints
 │       ├── state.go            # Case state machine (nextStates, isValidStateTransition)
+│       ├── catalogs.go         # HTTP handlers for catalog endpoints (ServiceNow only)
 │       ├── change_requests.go  # HTTP handlers for change-request endpoints
 │       ├── accounts.go         # HTTP handlers for account endpoints
 │       ├── deployments.go      # HTTP handlers for deployment endpoints
@@ -158,7 +161,7 @@ backend/
 
 ### Cases
 
-- `POST /cases` — Create a case (requires `type: "case"`)
+- `POST /cases` — Create a case (`type`: `case`; `service_request` and `security_report_analysis` are ServiceNow data source only)
 - `GET /cases/{id}` — Get case by ID
 - `PATCH /cases/{id}` — Update a case (state, severity, workState, watchList, or assigneeEmail)
 - `POST /cases/search` — Search cases
@@ -199,6 +202,11 @@ backend/
 - `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
 
+### Catalogs
+
+- `POST /catalogs/search` — Search service catalogs by deployed product (ServiceNow only)
+- `GET /catalogs/{catalogId}/items/{catalogItemId}/variables` — Get catalog item variables (ServiceNow only)
+
 ### Updates
 
 - `GET /updates/product-update-levels` — Get product update levels
@@ -208,7 +216,7 @@ backend/
 
 ```bash
 # from apps/csm-portal/backend
-set -a && source .env && set +a && go run ./cmd/server
+go run ./cmd/server/main.go
 ```
 
 When `AUTH_TOKEN_VALIDATOR_ENABLED=false` (default for local), pass any valid JWT as the `x-jwt-assertion` header. In production, the Choreo gateway validates the Bearer token and injects this header automatically.

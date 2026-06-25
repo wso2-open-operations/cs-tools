@@ -700,19 +700,44 @@ type CreateCaseDetails struct {
 	State      string    `json:"state"`
 }
 
+// Variable is a key-value pair used in service request case creation.
+type Variable struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+// CaseAttachment is a file attachment for security report analysis case creation.
+// File must be a base64 data URI (e.g. data:application/pdf;base64,...).
+type CaseAttachment struct {
+	Name string `json:"name"`
+	File string `json:"file"`
+}
+
 // CreateCaseRequest is the input for creating a new case.
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
+// For type "service_request": catalogId, catalogItemId, and variables are required.
+// For type "security_report_analysis": subject, description, and at least one attachment are required.
 type CreateCaseRequest struct {
-	CreatedBy         string        `json:"-"`
-	Type              string        `json:"type"`
-	ProjectID         string        `json:"projectId"`
-	DeploymentID      string        `json:"deploymentId"`
-	DeployedProductID string        `json:"deployedProductId"`
-	Subject           string        `json:"subject"`
-	Description       string        `json:"description"`
-	Severity          CaseSeverity  `json:"severity"`
-	IssueType         CaseIssueType `json:"issueType"`
+	CreatedBy         string           `json:"-"`
+	Type              string           `json:"type"`
+	ProjectID         string           `json:"projectId"`
+	DeploymentID      string           `json:"deploymentId"`
+	DeployedProductID string           `json:"deployedProductId"`
+	Subject           string           `json:"subject"`
+	Description       string           `json:"description"`
+	Severity          CaseSeverity     `json:"severity"`
+	IssueType         CaseIssueType    `json:"issueType"`
+	// For service_request type
+	CatalogID         string           `json:"catalogId"`
+	CatalogItemID     string           `json:"catalogItemId"`
+	Variables         []Variable       `json:"variables"`
+	// Optional fields
+	RelatedCaseID     string           `json:"relatedCaseId"`
+	ConversationID    string           `json:"conversationId"`
+	WatchList         []string         `json:"watchList"`
+	// For security_report_analysis type
+	Attachments       []CaseAttachment `json:"attachments"`
 }
 
 // CommentType classifies the type of a case comment.
@@ -946,6 +971,48 @@ type SearchChangeRequestsResponse struct {
 	Total          int                       `json:"total"`
 	Offset         int                       `json:"offset"`
 	Limit          int                       `json:"limit"`
+}
+
+// CatalogItem is a reference to a catalog item within a catalog.
+type CatalogItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Catalog represents a service catalog containing one or more catalog items.
+type Catalog struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	CatalogItems []CatalogItem `json:"catalogItems"`
+}
+
+// SearchCatalogsRequest is the input for POST /catalogs/search.
+// DeployedProductID scopes the search to catalogs available for that deployed product.
+type SearchCatalogsRequest struct {
+	DeployedProductID string     `json:"deployedProductId"`
+	Pagination        Pagination `json:"pagination"`
+}
+
+// SearchCatalogsResponse is the paginated result of a catalog search.
+type SearchCatalogsResponse struct {
+	Catalogs []Catalog `json:"catalogs"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+}
+
+// CatalogItemVariable describes a single variable (form field) on a catalog item.
+type CatalogItemVariable struct {
+	ID           string `json:"id"`
+	QuestionText string `json:"questionText"`
+	Order        int    `json:"order"`
+	Type         string `json:"type"`
+}
+
+// GetCatalogItemVariablesResponse is the response for
+// GET /catalogs/{catalogId}/items/{catalogItemId}/variables.
+type GetCatalogItemVariablesResponse struct {
+	Variables []CatalogItemVariable `json:"variables"`
 }
 
 // ChangeRequest is the full change request detail returned by GET /change-requests/{id}.

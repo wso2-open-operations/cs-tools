@@ -142,3 +142,15 @@ func (c *Client) SearchCaseAttachments(ctx context.Context, caseID string, body 
 func (c *Client) GetCaseAttachmentContent(ctx context.Context, caseID, attachmentID string) ([]byte, string, error) {
 	return c.doBinary(ctx, fmt.Sprintf("/cases/%s/attachments/%s/content", url.PathEscape(caseID), url.PathEscape(attachmentID)))
 }
+
+// SearchCatalogs calls POST /catalogs/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchCatalogs(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/catalogs/search", body)
+}
+
+// GetCatalogItemVariables calls GET /catalogs/{catalogId}/items/{catalogItemId}/variables
+// on the entity service. Response is returned as raw JSON.
+func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/catalogs/%s/items/%s/variables", url.PathEscape(catalogID), url.PathEscape(catalogItemID)), nil)
+}

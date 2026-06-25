@@ -266,6 +266,22 @@ func (c *Client) Post(ctx context.Context, path string, userIDToken string, payl
 	return c.do(req, path)
 }
 
+// extractDownstreamMessage attempts to parse a "message" field from the JSON
+// error body returned by the downstream service. Falls back to defaultMsg if
+// the body is empty, not JSON, or has no "message" field.
+func extractDownstreamMessage(body []byte, defaultMsg string) string {
+	if len(body) == 0 {
+		return defaultMsg
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil && payload.Message != "" {
+		return payload.Message
+	}
+	return defaultMsg
+}
+
 func (c *Client) do(req *http.Request, path string) (json.RawMessage, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -285,13 +301,13 @@ func (c *Client) do(req *http.Request, path string) (json.RawMessage, error) {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return json.RawMessage(raw), nil
 	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &apierror.ValidationError{Msg: "downstream service rejected the request"}
+		return nil, &apierror.ValidationError{Msg: extractDownstreamMessage(raw, "downstream service rejected the request")}
 	case resp.StatusCode == http.StatusUnauthorized:
-		return nil, &apierror.UnauthorizedError{Msg: "invalid or missing x-user-id-token"}
+		return nil, &apierror.UnauthorizedError{Msg: extractDownstreamMessage(raw, "invalid or missing x-user-id-token")}
 	case resp.StatusCode == http.StatusForbidden:
-		return nil, &apierror.ForbiddenError{Msg: "not authorized to access this resource"}
+		return nil, &apierror.ForbiddenError{Msg: extractDownstreamMessage(raw, "not authorized to access this resource")}
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, &apierror.NotFoundError{Msg: "resource not found in downstream service"}
+		return nil, &apierror.NotFoundError{Msg: extractDownstreamMessage(raw, "resource not found in downstream service")}
 	case resp.StatusCode == http.StatusServiceUnavailable:
 		return nil, &apierror.ServiceUnavailableError{Msg: "downstream service unavailable"}
 	default:
