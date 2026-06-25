@@ -4299,6 +4299,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
+          nullable: true
         isCsIntegrationUser:
           type: boolean
           description: Whether the contact is an Integration user or not
