@@ -95,7 +95,7 @@ export default function CaseDetailsActionRow({
   isLoading = false,
   escalationLevelId,
   onEscalateSuccess,
-  isCurrentUserLead = false,
+  isCurrentUserLead,
 }: CaseDetailsActionRowProps): JSX.Element {
   void assignedEngineer;
   void engineerInitials;
@@ -122,7 +122,7 @@ export default function CaseDetailsActionRow({
     statusLabel !== "Closed" &&
     resolvedEscalationLevelId !== ESCALATION_MAX_LEVEL_ID &&
     !!escalationLevelInfo &&
-    (!needsLead || isCurrentUserLead);
+    (!needsLead || isCurrentUserLead === true);
 
   const availableActions = getAvailableCaseActions(statusLabel).filter(
     (label) => {

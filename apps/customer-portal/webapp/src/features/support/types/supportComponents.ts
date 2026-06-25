@@ -448,7 +448,7 @@ export type CaseDetailsActionRowProps = {
   restrictToCloseOnly?: boolean;
   escalationLevelId?: string | null;
   onEscalateSuccess?: () => void;
-  isCurrentUserLead?: boolean;
+  isCurrentUserLead?: boolean | undefined;
 };
 
 export type EscalateCaseModalProps = {

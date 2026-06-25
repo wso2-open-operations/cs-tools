@@ -196,13 +196,18 @@ export default function CaseDetailsContent({
   const escalationLevelId = String(data?.escalationLevel?.id ?? "0");
 
   // Determine if the logged-in user is a Lead (required for EL3+ escalations).
-  const { data: userDetails } = useGetUserDetails();
+  // Keep undefined while userDetails is still loading to avoid a false-negative
+  // that would cause the Escalate button to flicker into view for Lead users.
+  const { data: userDetails, isLoading: isUserDetailsLoading } = useGetUserDetails();
   const { data: projectContacts } = useGetProjectContacts(
     hideEscalationTab ? "" : resolvedProjectId,
   );
-  const isCurrentUserLead = !!projectContacts?.find(
-    (c) => c.email.toLowerCase() === (userDetails?.email ?? "").toLowerCase(),
-  )?.isLead;
+  const isCurrentUserLead: boolean | undefined =
+    !isUserDetailsLoading && !!userDetails?.email
+      ? !!projectContacts?.find(
+          (c) => c.email.toLowerCase() === userDetails.email!.toLowerCase(),
+        )?.isLead
+      : undefined;
 
   const visibleTabs = useMemo(
     () => [
