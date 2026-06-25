@@ -643,3 +643,25 @@ public isolated function searchInstanceMetricsStats(string idToken, InstanceMetr
 public isolated function downloadAttachment(string idToken, IdString attachmentId) returns http:Response|error {
     return csEntityClient->/attachments/[attachmentId]/content.get(generateHeaders(idToken));
 }
+
+# Create an escalation for a case.
+#
+# + idToken - ID token for authorization
+# + payload - Escalation creation payload containing the case ID and reason
+# + return - Escalation creation response or error
+public isolated function createEscalation(string idToken, EscalationCreatePayload payload)
+    returns EscalationCreateResponse|error {
+
+    return csEntityClient->/escalations.post(payload, generateHeaders(idToken));
+}
+
+# Search escalations by criteria.
+#
+# + idToken - ID token for authorization
+# + payload - Escalation search payload containing filters, sort, and pagination
+# + return - Escalations response containing matching escalations or error
+public isolated function searchEscalations(string idToken, EscalationSearchPayload payload)
+    returns EscalationsResponse|error {
+
+    return csEntityClient->/escalations/search.post(payload, generateHeaders(idToken));
+}

@@ -6183,6 +6183,125 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         }
         return response;
     }
+
+    # Create an escalation for a specific case.
+    #
+    # + caseId - ID of the case
+    # + payload - Escalation creation payload
+    # + return - Created escalation details or error response
+    resource function post cases/[entity:IdString caseId]/escalations(
+            http:RequestContext ctx, types:EscalationCreatePayload payload)
+        returns http:Created|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:EscalationCreateResponse|error response = entity:createEscalation(userInfo.idToken,
+                {
+                    caseId: caseId,
+                    reason: payload.reason
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to create an escalation for case: ${caseId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_CASE_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for creating an escalation."
+                    }
+                };
+            }
+
+            string customError = "Failed to create escalation.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Created>{body: mapCreatedEscalation(response)};
+    }
+
+    # Search escalations for a specific case.
+    #
+    # + caseId - ID of the case
+    # + payload - Escalation search payload
+    # + return - List of escalations or error response
+    resource function post cases/[entity:IdString caseId]/escalations/search(
+            http:RequestContext ctx, types:EscalationSearchPayload payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:EscalationsResponse|error response = entity:searchEscalations(userInfo.idToken,
+                {
+                    filters: {caseIds: [caseId]},
+                    sortBy: payload.sortBy,
+                    pagination: payload.pagination
+                });
+        if response is error {
+            if getStatusCode(response) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_FORBIDDEN {
+                log:printWarn(string `User: ${userInfo.userId} is forbidden to search escalations for case: ${caseId}`);
+                return <http:Forbidden>{
+                    body: {
+                        message: ERR_MSG_CASE_ACCESS_FORBIDDEN
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for searching escalations."
+                    }
+                };
+            }
+
+            string customError = "Failed to search escalations.";
+            log:printError(customError, response);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: mapEscalationsResponse(response)};
+    }
 }
 
 # WebSocket service to proxy messages between the browser and the upstream Python AI chat agent for real-time communication in chat sessions.

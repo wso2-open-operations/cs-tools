@@ -2406,3 +2406,85 @@ public type InstanceMetricStatsResponse record {|
     string endDate;
     json...;
 |};
+
+# Payload for creating an escalation.
+public type EscalationCreatePayload record {|
+    # Case ID
+    IdString caseId;
+    # Reason for the escalation
+    string reason;
+|};
+
+# Created escalation details.
+public type CreatedEscalation record {|
+    # ID
+    IdString id;
+    # Associated case information
+    ReferenceTableItem case;
+    # Current escalation level
+    ChoiceListItem currentLevel;
+    # Previous escalation level
+    ChoiceListItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    json...;
+|};
+
+# Response from creating an escalation.
+public type EscalationCreateResponse record {|
+    # Success message
+    string message;
+    # Created escalation details
+    CreatedEscalation escalation;
+    json...;
+|};
+
+# Escalation data.
+public type Escalation record {|
+    # ID
+    IdString id;
+    # Associated case information
+    ReferenceTableItem case;
+    # Current escalation level
+    ChoiceListItem currentLevel;
+    # Previous escalation level
+    ChoiceListItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Reason for the escalation
+    string? reason;
+    # List of users notified about the escalation
+    string[] notificationSentTo;
+    json...;
+|};
+
+# Payload for searching escalations.
+public type EscalationSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Case IDs to filter
+        IdString[] caseIds?;
+    |} filters?;
+    # Sort configuration
+    SortBy sortBy?;
+    # Pagination details
+    Pagination pagination?;
+|};
+
+# Escalations search response.
+public type EscalationsResponse record {|
+    # List of escalations
+    Escalation[] escalations;
+    # Total records count
+    int totalRecords;
+    *Pagination;
+    # Warnings
+    string[] warnings;
+    json...;
+|};

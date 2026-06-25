@@ -1178,6 +1178,77 @@ public type CallRequestCreatePayload record {|
     int durationInMinutes;
 |};
 
+# Request payload for creating an escalation.
+public type EscalationCreatePayload record {|
+    # Reason for the escalation
+    string reason;
+|};
+
+# Created escalation details.
+public type CreatedEscalation record {|
+    # ID
+    entity:IdString id;
+    # Associated case information
+    ReferenceItem case;
+    # Current escalation level
+    ReferenceItem currentLevel;
+    # Previous escalation level
+    ReferenceItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+|};
+
+# Response from creating an escalation.
+public type EscalationCreateResponse record {|
+    # Success message
+    string message;
+    # Created escalation details
+    CreatedEscalation escalation;
+|};
+
+# Request payload for searching escalations.
+public type EscalationSearchPayload record {|
+    # Sort configuration
+    entity:SortBy sortBy?;
+    # Pagination details
+    entity:Pagination pagination?;
+|};
+
+# Escalation data.
+public type Escalation record {|
+    # ID
+    entity:IdString id;
+    # Associated case information
+    ReferenceItem case;
+    # Current escalation level
+    ReferenceItem currentLevel;
+    # Previous escalation level
+    ReferenceItem previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Reason for the escalation
+    string? reason;
+    # List of users notified about the escalation
+    string[] notificationSentTo;
+|};
+
+# Escalations search response.
+public type EscalationsResponse record {|
+    # List of escalations
+    Escalation[] escalations;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
+    # Warnings
+    string[] warnings;
+|};
+
 # Product version data.
 public type ProductVersion record {|
     # ID
