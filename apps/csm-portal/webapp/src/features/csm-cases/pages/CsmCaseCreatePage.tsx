@@ -34,7 +34,10 @@ import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import { type EncodedAttachment } from "@components/attachments/encodeAttachment";
+import {
+  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
+  type EncodedAttachment,
+} from "@components/attachments/encodeAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
@@ -414,7 +417,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
-              maxEncodedBytes={Number.MAX_SAFE_INTEGER}
+              maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
             />
           </Grid>
         </Grid>

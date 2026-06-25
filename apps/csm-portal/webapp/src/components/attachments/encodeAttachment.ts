@@ -30,6 +30,14 @@ export interface EncodedAttachment {
   raw: File;
 }
 
+/**
+ * Aggregate-size ceiling for attachments uploaded after case creation (standard
+ * cases / service requests). Each upload is a separate request capped per-file
+ * at 10 MB, so this is a sanity bound on how much the browser base64-encodes and
+ * holds in memory at once — not a single-request body limit.
+ */
+export const POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES = 100 * 1024 * 1024;
+
 /** Combined base64 size of all attachments (≈ bytes, base64 is ASCII). */
 export function totalEncodedBytes(attachments: EncodedAttachment[]): number {
   return attachments.reduce((sum, a) => sum + a.file.length, 0);

@@ -44,10 +44,9 @@ import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedPr
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 
 // POST /cases caps the whole body at 10 MiB (BE maxCaseBodyBytes). Attachments
-// dominate that, so cap the combined base64 size with headroom for the subject,
-// description, and JSON envelope.
+// dominate that, but the subject + (rich-text, unbounded) description share the
+// same body, so the attachment budget is whatever those leave under the cap.
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENTS_ENCODED_BYTES = MAX_BODY_BYTES - 64 * 1024;
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
 function isEmptyHtml(html: string): boolean {
@@ -77,7 +76,15 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
 
-  const overLimit = totalEncodedBytes(attachments) > MAX_ATTACHMENTS_ENCODED_BYTES;
+  // The create body carries subject + description (HTML) + base64 attachments;
+  // give attachments only the room the text leaves so the whole body stays under
+  // the backend's maxCaseBodyBytes once serialized.
+  const nonAttachmentBytes = useMemo(
+    () => new TextEncoder().encode(subject + description).length,
+    [subject, description],
+  );
+  const attachmentsBudget = Math.max(0, MAX_BODY_BYTES - nonAttachmentBytes - 4 * 1024);
+  const overLimit = totalEncodedBytes(attachments) > attachmentsBudget;
 
   // Auto-generate the report title as "{Deployment} - {Product} - {date}" when
   // the product is chosen (both names are loaded by then), matching the customer
@@ -302,7 +309,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
-              maxEncodedBytes={MAX_ATTACHMENTS_ENCODED_BYTES}
+              maxEncodedBytes={attachmentsBudget}
               required
             />
           </Grid>

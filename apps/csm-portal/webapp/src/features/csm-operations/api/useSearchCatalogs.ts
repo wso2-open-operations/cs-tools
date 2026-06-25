@@ -41,7 +41,12 @@ export function useSearchCatalogs(
     queryKey: [ApiQueryKeys.CATALOGS_SEARCH, deployedProductId ?? ""],
     queryFn: async (): Promise<BeCatalogRef[]> => {
       const all: BeCatalogRef[] = [];
-      for (let offset = 0; ; offset += PAGE_LIMIT) {
+      // Advance the offset by the ACTUAL page size, not the requested limit:
+      // the backend may clamp `limit` below PAGE_LIMIT, and incrementing by the
+      // requested value would both skip records and stop early. Terminate on an
+      // empty page or once the reported total is reached.
+      let offset = 0;
+      for (;;) {
         const res = await api.post<
           BeSearchCatalogsPayload,
           BeSearchCatalogsResponse
@@ -49,9 +54,11 @@ export function useSearchCatalogs(
           deployedProductId: deployedProductId as string,
           pagination: { offset, limit: PAGE_LIMIT },
         });
-        const page = res.catalogs ?? [];
+        const page = res?.catalogs ?? [];
         all.push(...page);
-        if (page.length < PAGE_LIMIT) break;
+        offset += page.length;
+        const total = res?.total ?? all.length;
+        if (page.length === 0 || all.length >= total) break;
       }
       return all;
     },

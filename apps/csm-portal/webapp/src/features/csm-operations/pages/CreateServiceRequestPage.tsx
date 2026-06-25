@@ -33,7 +33,10 @@ import { useMemo, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import { type EncodedAttachment } from "@components/attachments/encodeAttachment";
+import {
+  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
+  type EncodedAttachment,
+} from "@components/attachments/encodeAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
@@ -410,7 +413,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 attachments={attachments}
                 onChange={setAttachments}
                 onError={showError}
-                maxEncodedBytes={Number.MAX_SAFE_INTEGER}
+                maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
               />
             </Grid>
           )}

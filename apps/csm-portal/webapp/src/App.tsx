@@ -15,7 +15,7 @@
 // under the License.
 
 import { type JSX, lazy } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router";
 import AuthGuard from "@layouts/AuthGuard";
 import {
   POST_LOGIN_REDIRECT_KEY,
@@ -105,7 +105,11 @@ function RootLanding(): JSX.Element | null {
  */
 function LegacyDetailRedirect({ to }: { to: string }): JSX.Element {
   const { id } = useParams();
-  return <Navigate to={id ? `${to}/${id}` : to} replace />;
+  // Preserve any query/hash so legacy deep links (e.g. /accounts/:id?tab=…#…)
+  // keep their context through the compatibility redirect.
+  const { search, hash } = useLocation();
+  const target = id ? `${to}/${id}` : to;
+  return <Navigate to={`${target}${search}${hash}`} replace />;
 }
 
 export default function App(): JSX.Element {

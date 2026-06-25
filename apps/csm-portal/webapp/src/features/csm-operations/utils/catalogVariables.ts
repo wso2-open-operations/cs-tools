@@ -34,11 +34,12 @@ export const VARIABLE_TYPE_RADIO = "Radio Buttons";
 
 /** Boolean-ish field that renders a Yes/No dropdown (no choice list in the API). */
 export function isChoiceField(variable: BeCatalogItemVariable): boolean {
-  const t = (variable.type ?? "").trim();
+  // Case-insensitive, matching the documented contract and the other classifiers.
+  const t = (variable.type ?? "").trim().toLowerCase();
   return (
-    t === VARIABLE_TYPE_SELECT ||
-    t === VARIABLE_TYPE_RADIO ||
-    t === VARIABLE_TYPE_CHECKBOX
+    t === VARIABLE_TYPE_SELECT.toLowerCase() ||
+    t === VARIABLE_TYPE_RADIO.toLowerCase() ||
+    t === VARIABLE_TYPE_CHECKBOX.toLowerCase()
   );
 }
 
