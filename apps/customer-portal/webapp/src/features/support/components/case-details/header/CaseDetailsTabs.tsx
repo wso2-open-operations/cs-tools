@@ -121,7 +121,7 @@ export default function CaseDetailsTabs({
               tabLabel = `Escalation (${escalationCount})`;
             }
             if (isEscalated) {
-              tabIcon = <Icon size={14} color={theme.palette.warning.main} />;
+              tabIcon = <Box component="span" sx={{ color: theme.palette.warning.main, display: "flex" }}><Icon size={14} /></Box>;
             }
           }
 
