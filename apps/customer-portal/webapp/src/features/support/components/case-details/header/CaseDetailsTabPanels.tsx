@@ -24,6 +24,7 @@ import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAt
 import CaseDetailsDetailsPanel from "@case-details-details/CaseDetailsDetailsPanel";
 import CallsPanel from "@case-details-calls/CallsPanel";
 import CaseKnowledgeBaseRecommendations from "@features/support/components/knowledge-base/CaseKnowledgeBaseRecommendations";
+import CaseEscalationHistoryPanel from "../escalation/CaseEscalationHistoryPanel";
 
 /**
  * Renders the active tab panel for case details (Activity, Details, Attachments, Calls,
@@ -195,6 +196,13 @@ export default function CaseDetailsTabPanels({
         </Stack>
       );
     }
+    case 6:
+      return (
+        <CaseEscalationHistoryPanel
+          caseId={caseId}
+          caseCreatedOn={data?.createdOn}
+        />
+      );
     default:
       return null;
   }

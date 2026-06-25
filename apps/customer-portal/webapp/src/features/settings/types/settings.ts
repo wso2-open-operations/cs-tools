@@ -45,6 +45,7 @@ export enum RegistryTokenDisplayStatus {
 export enum SettingsRoleInfoId {
   ADMIN = "admin",
   PORTAL_USER = "portal_user",
+  LEAD = "lead",
   SYSTEM_USER = "system_user",
   SECURITY_USER = "security_user",
 }

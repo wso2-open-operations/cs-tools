@@ -56,6 +56,8 @@ export type CaseDetailsHeaderProps = {
   showSeverityChip?: boolean;
   showStatusChip?: boolean;
   variant?: CaseDetailsHeaderVariant;
+  isEscalated?: boolean;
+  escalationLevelLabel?: string | null;
 };
 
 export type OutstandingCasesListProps = {
@@ -405,6 +407,9 @@ export type CaseDetailsTabsProps = {
   knowledgeBaseCount?: number;
   knowledgeBaseCountLoading?: boolean;
   hideRelatedChangeRequestsTab?: boolean;
+  hideEscalationTab?: boolean;
+  escalationCount?: number;
+  isEscalated?: boolean;
 };
 
 export type CaseDetailsTabPanelsProps = {
@@ -441,6 +446,19 @@ export type CaseDetailsActionRowProps = {
   isLoading?: boolean;
   hideAssignedEngineer?: boolean;
   restrictToCloseOnly?: boolean;
+  escalationLevelId?: string | null;
+  onEscalateSuccess?: () => void;
+  isCurrentUserLead?: boolean | undefined;
+};
+
+export type EscalateCaseModalProps = {
+  open: boolean;
+  caseId: string;
+  escalationLevelId: string;
+  escalationLevelLabel: string;
+  onClose: () => void;
+  onSuccess?: () => void;
+  onError?: (message: string) => void;
 };
 
 export type CasesOverviewStatCardProps = {

@@ -328,7 +328,24 @@ export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
   { label: "Calls (0)", Icon: Phone },
   { label: "Knowledge Base (0)", Icon: BookOpen },
   { label: "Related Change Requests", Icon: GitBranch },
+  { label: "Escalation", Icon: TriangleAlert },
 ];
+
+export const ESCALATION_MAX_LEVEL_ID = "5";
+
+// Escalation levels that require the user to have isLead: true (EL3→EL4 and EL4→EL5).
+export const ESCALATION_LEAD_REQUIRED_FROM_LEVEL = new Set(["3", "4"]);
+
+export const ESCALATION_NEXT_LEVEL: Record<
+  string,
+  { nextId: string; nextLabel: string; notifiedLabel: string }
+> = {
+  "0": { nextId: "1", nextLabel: "EL1", notifiedLabel: "Team Lead" },
+  "1": { nextId: "2", nextLabel: "EL2", notifiedLabel: "Technology Unit Head" },
+  "2": { nextId: "3", nextLabel: "EL3", notifiedLabel: "CRE Head" },
+  "3": { nextId: "4", nextLabel: "EL4", notifiedLabel: "CCO / CRO" },
+  "4": { nextId: "5", nextLabel: "EL5", notifiedLabel: "CEO" },
+};
 
 // Case status actions shown in the case details action row. Close button last.
 export const CASE_STATUS_ACTIONS: CaseStatusAction[] = [

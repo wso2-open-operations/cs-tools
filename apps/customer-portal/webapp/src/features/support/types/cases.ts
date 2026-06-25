@@ -202,6 +202,65 @@ export type CaseVariable = {
   value: string;
 };
 
+// Item type for an escalation level.
+export type EscalationLevel = {
+  id: number | string;
+  label: string;
+};
+
+// Item type for a user notified about an escalation.
+export type EscalationNotifiedUser = {
+  id: string;
+  userName: string;
+  name?: string | null;
+  email?: string | null;
+};
+
+// Item type for a single escalation record.
+export type EscalationRecord = {
+  id: string;
+  case: { id: string; name: string };
+  currentLevel: EscalationLevel | null;
+  previousLevel: EscalationLevel | null;
+  createdBy: string;
+  createdOn: string;
+  updatedOn?: string;
+  reason: string;
+  notificationSentTo?: EscalationNotifiedUser[] | null;
+};
+
+// Request type for creating an escalation.
+export type CreateEscalationRequest = {
+  reason: string;
+};
+
+// Response type for creating an escalation.
+export type CreateEscalationResponse = {
+  message: string;
+  escalation: EscalationRecord;
+};
+
+// Request type for searching escalations.
+// Note: filters.caseIds is injected by cs-tools backend; frontend sends only sortBy/pagination.
+export type EscalationSearchRequest = {
+  sortBy?: {
+    field: "createdOn" | "updatedOn";
+    order: "asc" | "desc";
+  };
+  pagination?: {
+    limit: number;
+    offset: number;
+  };
+};
+
+// Response type for escalation search.
+export type EscalationSearchResponse = {
+  escalations: EscalationRecord[];
+  totalRecords: number;
+  offset: number;
+  limit: number;
+};
+
 // Response type for detailed case information.
 export type CaseDetails = AuditMetadata & {
   id: string;
@@ -240,6 +299,8 @@ export type CaseDetails = AuditMetadata & {
   findingsResolved: number | null;
   findingsTotal: number | null;
   watchList?: Array<{ id?: string; userName?: string; name?: string; email?: string }> | null;
+  escalationLevel?: EscalationLevel | null;
+  isEscalated?: boolean | null;
 };
 
 // Item type for a single case comment.

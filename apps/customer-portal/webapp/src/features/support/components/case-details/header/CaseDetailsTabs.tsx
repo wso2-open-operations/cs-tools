@@ -16,7 +16,7 @@
 
 import type { CaseDetailsTabsProps } from "@features/support/types/supportComponents";
 import { CASE_DETAILS_TABS } from "@features/support/constants/supportConstants";
-import { Box, Button, Skeleton, Tab, Tabs } from "@wso2/oxygen-ui";
+import { Box, Button, Skeleton, Tab, Tabs, useTheme } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode } from "react";
 
@@ -38,7 +38,11 @@ export default function CaseDetailsTabs({
   knowledgeBaseCount,
   knowledgeBaseCountLoading = false,
   hideRelatedChangeRequestsTab = true,
+  hideEscalationTab = true,
+  escalationCount,
+  isEscalated = false,
 }: CaseDetailsTabsProps): JSX.Element {
+  const theme = useTheme();
   const tabs = CASE_DETAILS_TABS.filter((t) => {
     if (hideCallsTab && t.label.startsWith("Calls")) {
       return false;
@@ -47,6 +51,9 @@ export default function CaseDetailsTabs({
       return false;
     }
     if (hideRelatedChangeRequestsTab && t.label === "Related Change Requests") {
+      return false;
+    }
+    if (hideEscalationTab && t.label === "Escalation") {
       return false;
     }
     return true;
@@ -84,8 +91,11 @@ export default function CaseDetailsTabs({
           const isAttachmentsTab = label.startsWith("Attachments");
           const isCallsTab = label.startsWith("Calls");
           const isKnowledgeBaseTab = label.startsWith("Knowledge Base");
+          const isEscalationTab = label === "Escalation";
 
           let tabLabel: ReactNode = label;
+          let tabIcon: ReactNode = <Icon size={14} />;
+
           if (isAttachmentsTab && attachmentCount !== undefined) {
             tabLabel = `Attachments (${attachmentCount})`;
           } else if (isCallsTab && callCount !== undefined) {
@@ -106,12 +116,19 @@ export default function CaseDetailsTabs({
             } else if (knowledgeBaseCount !== undefined) {
               tabLabel = `Knowledge Base (${knowledgeBaseCount})`;
             }
+          } else if (isEscalationTab) {
+            if (escalationCount !== undefined) {
+              tabLabel = `Escalation (${escalationCount})`;
+            }
+            if (isEscalated) {
+              tabIcon = <Icon size={14} color={theme.palette.warning.main} />;
+            }
           }
 
           return (
             <Tab
               key={label}
-              icon={<Icon size={14} />}
+              icon={tabIcon}
               iconPosition="start"
               label={tabLabel}
             />
