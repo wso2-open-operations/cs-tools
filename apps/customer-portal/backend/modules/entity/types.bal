@@ -401,6 +401,10 @@ public type Case record {|
     ReferenceTableItem? product;
     # Engagement type information
     ChoiceListItem engagementType?;
+    # Current escalation level of the case
+    ChoiceListItem? escalationLevel;
+    # Indicates whether the case is escalated
+    boolean? isEscalated;
     json...;
 |};
 
@@ -2422,13 +2426,26 @@ public type CreatedEscalation record {|
     # Associated case information
     ReferenceTableItem case;
     # Current escalation level
-    ChoiceListItem? currentLevel;
+    ChoiceListItem currentLevel;
     # Previous escalation level
-    ChoiceListItem? previousLevel;
+    ChoiceListItem previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time
     string createdOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # System ID of the user
+        IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
     json...;
 |};
 
@@ -2448,9 +2465,9 @@ public type Escalation record {|
     # Associated case information
     ReferenceTableItem case;
     # Current escalation level
-    ChoiceListItem? currentLevel;
+    ChoiceListItem currentLevel;
     # Previous escalation level
-    ChoiceListItem? previousLevel;
+    ChoiceListItem previousLevel;
     # User who created the escalation
     string createdBy;
     # Created date and time
@@ -2458,9 +2475,9 @@ public type Escalation record {|
     # Updated date and time
     string updatedOn;
     # Reason for the escalation
-    string? reason;
-    # List of users notified about the escalation
-    string[] notificationSentTo;
+    string reason;
+    # Name of the role/person notified
+    string? notificationSentTo;
     json...;
 |};
 
@@ -2470,9 +2487,16 @@ public type EscalationSearchPayload record {|
     record {|
         # Case IDs to filter
         IdString[] caseIds?;
+        # Current escalation level IDs to filter by
+        int[] currentLevels?;
     |} filters?;
     # Sort configuration
-    SortBy sortBy?;
+    record {|
+        # Field to sort by
+        EscalationSortField 'field;
+        # Sort order
+        SortOrder 'order;
+    |} sortBy?;
     # Pagination details
     Pagination pagination?;
 |};
@@ -2484,7 +2508,5 @@ public type EscalationsResponse record {|
     # Total records count
     int totalRecords;
     *Pagination;
-    # Warnings
-    string[] warnings;
     json...;
 |};

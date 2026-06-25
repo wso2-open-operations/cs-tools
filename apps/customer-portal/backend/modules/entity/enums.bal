@@ -53,6 +53,12 @@ public enum ConversationSortField {
     CONVERSATION_UPDATED_ON = "updatedOn"
 }
 
+# Valid escalation sort field values.
+public enum EscalationSortField {
+    ESCALATION_CREATED_ON = "createdOn",
+    ESCALATION_UPDATED_ON = "updatedOn"
+}
+
 # Case type enum
 public enum CaseType {
     DEFAULT_CASE = "default_case",

@@ -132,6 +132,10 @@ public type Case record {|
     ReferenceItem? product;
     # Engagement type information
     ReferenceItem engagementType?;
+    # Current escalation level of the case
+    ReferenceItem? escalationLevel;
+    # Indicates whether the case is escalated
+    boolean? isEscalated;
 |};
 
 # Case information.
@@ -1198,6 +1202,19 @@ public type CreatedEscalation record {|
     string createdBy;
     # Created date and time
     string createdOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # ID of the user
+        entity:IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
 |};
 
 # Response from creating an escalation.
@@ -1211,7 +1228,12 @@ public type EscalationCreateResponse record {|
 # Request payload for searching escalations.
 public type EscalationSearchPayload record {|
     # Sort configuration
-    entity:SortBy sortBy?;
+    record {|
+        # Field to sort by
+        entity:EscalationSortField 'field;
+        # Sort order
+        entity:SortOrder 'order;
+    |} sortBy?;
     # Pagination details
     entity:Pagination pagination?;
 |};
@@ -1233,9 +1255,9 @@ public type Escalation record {|
     # Updated date and time
     string updatedOn;
     # Reason for the escalation
-    string? reason;
-    # List of users notified about the escalation
-    string[] notificationSentTo;
+    string reason;
+    # Name of the role/person notified
+    string? notificationSentTo;
 |};
 
 # Escalations search response.
@@ -1245,8 +1267,6 @@ public type EscalationsResponse record {|
     # Total records count
     int totalRecords;
     *entity:Pagination;
-    # Warnings
-    string[] warnings;
 |};
 
 # Product version data.

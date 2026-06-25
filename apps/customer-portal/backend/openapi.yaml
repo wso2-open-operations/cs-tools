@@ -6520,11 +6520,26 @@ components:
           description: Reason for the escalation
       additionalProperties: false
       description: Request payload for creating an escalation.
+    EscalationSortField:
+      type: string
+      description: Valid escalation sort field values.
+      enum:
+      - createdOn
+      - updatedOn
     EscalationSearchPayload:
       type: object
       properties:
         sortBy:
-          $ref: '#/components/schemas/SortBy'
+          type: object
+          required:
+          - field
+          - order
+          properties:
+            field:
+              $ref: '#/components/schemas/EscalationSortField'
+            order:
+              $ref: '#/components/schemas/SortOrder'
+          description: Sort configuration
         pagination:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
@@ -6534,7 +6549,10 @@ components:
       - case
       - createdBy
       - createdOn
+      - currentLevel
       - id
+      - previousLevel
+      - reason
       type: object
       properties:
         id:
@@ -6557,6 +6575,29 @@ components:
         createdOn:
           type: string
           description: Created date and time
+        reason:
+          type: string
+          description: Reason for the escalation
+        notificationSentTo:
+          type: array
+          nullable: true
+          description: Users notified about the escalation
+          items:
+            type: object
+            required:
+            - id
+            - userName
+            properties:
+              id:
+                $ref: '#/components/schemas/IdString'
+              userName:
+                type: string
+              name:
+                type: string
+                nullable: true
+              email:
+                type: string
+                nullable: true
       description: Created escalation details.
     EscalationCreateResponse:
       required:
@@ -6575,8 +6616,10 @@ components:
       - case
       - createdBy
       - createdOn
+      - currentLevel
       - id
-      - notificationSentTo
+      - previousLevel
+      - reason
       - updatedOn
       type: object
       properties:
@@ -6606,12 +6649,10 @@ components:
         reason:
           type: string
           description: Reason for the escalation
-          nullable: true
         notificationSentTo:
-          type: array
-          description: List of users notified about the escalation
-          items:
-            type: string
+          type: string
+          nullable: true
+          description: Name of the role/person notified
       description: Escalation data.
     EscalationsResponse:
       required:
@@ -6619,7 +6660,6 @@ components:
       - limit
       - offset
       - totalRecords
-      - warnings
       type: object
       properties:
         escalations:
@@ -6641,9 +6681,4 @@ components:
           type: integer
           description: Limit for pagination
           format: int64
-        warnings:
-          type: array
-          description: Warnings
-          items:
-            type: string
       description: Escalations search response.

@@ -93,6 +93,7 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
         let entity:ReferenceTableItem? catalogItem = case?.catalogItem
         let entity:ReferenceTableItem? assignedTeam = case.assignedTeam
         let entity:ReferenceTableItem? product = case.product
+        let entity:ChoiceListItem? escalationLevel = case.escalationLevel
         select {
             id: case.id,
             internalId: case.internalId,
@@ -117,7 +118,9 @@ public isolated function searchCases(string idToken, string projectId, types:Cas
             catalog: catalog != () ? {id: catalog.id, label: catalog.name} : (),
             catalogItem: catalogItem != () ? {id: catalogItem.id, label: catalogItem.name} : (),
             assignedTeam: assignedTeam != () ? {id: assignedTeam.id, label: assignedTeam.name} : (),
-            product: product != () ? {id: product.id, label: product.name} : ()
+            product: product != () ? {id: product.id, label: product.name} : (),
+            escalationLevel: escalationLevel != () ? {id: escalationLevel.id.toString(), label: escalationLevel.label} : (),
+            isEscalated: case.isEscalated
         };
 
     return {
@@ -642,6 +645,7 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
     entity:ReferenceTableItem? product = response.product;
     entity:ChoiceListItem? engagementType = response.engagementType;
     entity:WatchList[]? watchList = response.watchList;
+    entity:ChoiceListItem? escalationLevel = response.escalationLevel;
 
     return {
         id: response.id,
@@ -708,7 +712,9 @@ public isolated function mapCaseResponse(entity:CaseResponse response) returns t
         engagementEndDate: response?.engagementEndDate,
         variables,
         watchList: watchList != () ? from entity:WatchList user in watchList
-            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : ()
+            select {id: user.id, userName: user.userName, name: user.name, email: user.email} : (),
+        escalationLevel: escalationLevel != () ? {id: escalationLevel.id.toString(), label: escalationLevel.label} : (),
+        isEscalated: response.isEscalated
     };
 }
 
@@ -1191,17 +1197,17 @@ public isolated function mapCreatedEscalation(entity:EscalationCreateResponse re
     returns types:EscalationCreateResponse {
 
     entity:CreatedEscalation escalation = response.escalation;
-    entity:ChoiceListItem? currentLevel = escalation.currentLevel;
-    entity:ChoiceListItem? previousLevel = escalation.previousLevel;
     return {
         message: response.message,
         escalation: {
             id: escalation.id,
             'case: {id: escalation.case.id, label: escalation.case.name},
-            currentLevel: currentLevel != () ? {id: currentLevel.id.toString(), label: currentLevel.label} : (),
-            previousLevel: previousLevel != () ? {id: previousLevel.id.toString(), label: previousLevel.label} : (),
+            currentLevel: {id: escalation.currentLevel.id.toString(), label: escalation.currentLevel.label},
+            previousLevel: {id: escalation.previousLevel.id.toString(), label: escalation.previousLevel.label},
             createdBy: escalation.createdBy,
-            createdOn: escalation.createdOn
+            createdOn: escalation.createdOn,
+            reason: escalation.reason,
+            notificationSentTo: escalation.notificationSentTo
         }
     };
 }
@@ -1215,13 +1221,13 @@ public isolated function mapEscalationsResponse(entity:EscalationsResponse respo
 
     types:Escalation[] escalations = from entity:Escalation escalation in response.escalations
         let entity:ReferenceTableItem escalationCase = escalation.case
-        let entity:ChoiceListItem? currentLevel = escalation.currentLevel
-        let entity:ChoiceListItem? previousLevel = escalation.previousLevel
+        let entity:ChoiceListItem currentLevel = escalation.currentLevel
+        let entity:ChoiceListItem previousLevel = escalation.previousLevel
         select {
             id: escalation.id,
             'case: {id: escalationCase.id, label: escalationCase.name},
-            currentLevel: currentLevel != () ? {id: currentLevel.id.toString(), label: currentLevel.label} : (),
-            previousLevel: previousLevel != () ? {id: previousLevel.id.toString(), label: previousLevel.label} : (),
+            currentLevel: {id: currentLevel.id.toString(), label: currentLevel.label},
+            previousLevel: {id: previousLevel.id.toString(), label: previousLevel.label},
             createdBy: escalation.createdBy,
             createdOn: escalation.createdOn,
             updatedOn: escalation.updatedOn,
@@ -1233,8 +1239,7 @@ public isolated function mapEscalationsResponse(entity:EscalationsResponse respo
         escalations,
         totalRecords: response.totalRecords,
         'limit: response.'limit,
-        offset: response.offset,
-        warnings: response.warnings
+        offset: response.offset
     };
 }
 
