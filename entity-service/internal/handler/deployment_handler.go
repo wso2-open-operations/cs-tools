@@ -35,6 +35,23 @@ func NewDeploymentHandler(svc service.DeploymentService) *DeploymentHandler {
 	return &DeploymentHandler{svc: svc}
 }
 
+// PatchDeployment handles PATCH /deployments/{id}.
+// Accepts name, typeKey, description (detail fields) or active=false (deactivation), but not both groups.
+func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateDeploymentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	resp, err := h.svc.UpdateDeployment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchDeployments handles POST /deployments/search.
 func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchDeploymentsRequest

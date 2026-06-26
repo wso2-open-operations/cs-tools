@@ -110,6 +110,7 @@ func main() {
 	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
+	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
 	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)

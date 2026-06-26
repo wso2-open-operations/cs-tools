@@ -20,6 +20,7 @@ package service
 import (
 	"context"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -31,6 +32,11 @@ type deploymentService struct {
 // NewDeploymentService constructs a DeploymentService backed by the given repository.
 func NewDeploymentService(repo repository.DeploymentRepository) DeploymentService {
 	return &deploymentService{repo: repo}
+}
+
+// UpdateDeployment implements DeploymentService. Not supported for the PostgreSQL data source.
+func (s *deploymentService) UpdateDeployment(_ context.Context, _ domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error) {
+	return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "UpdateDeployment is not supported for the PostgreSQL data source"}
 }
 
 // SearchDeployments implements DeploymentService.
