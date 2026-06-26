@@ -18,7 +18,7 @@ import type {
   CaseState,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
-import type { BeCaseType } from "@api/backend/types";
+import type { BeCaseType, BeEngagementType } from "@api/backend/types";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 import { ALL_CASE_TYPES } from "@features/csm-cases/utils/caseType";
 
@@ -29,6 +29,7 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   caseTypes: [],
   assignees: [],
   projects: [],
+  engagementTypes: [],
 };
 
 const VALID_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -41,6 +42,13 @@ const VALID_STATES: CaseState[] = [
   "closed",
 ];
 const VALID_CASE_TYPES: BeCaseType[] = ALL_CASE_TYPES;
+const VALID_ENGAGEMENT_TYPES: BeEngagementType[] = [
+  "migration",
+  "consultancy",
+  "new_feature_improvement",
+  "follow_up",
+  "onboarding",
+];
 
 function parseCsv<T extends string>(raw: string | null, allowed: T[]): T[] {
   if (!raw) return [];
@@ -73,6 +81,7 @@ export function readCasesFiltersFromUrl(
     caseTypes: parseCsv(params.get("types"), VALID_CASE_TYPES),
     assignees: parseFreeFormCsv(params.get("assignees")),
     projects: parseFreeFormCsv(params.get("projects")),
+    engagementTypes: parseCsv(params.get("engagementTypes"), VALID_ENGAGEMENT_TYPES),
   };
 }
 
@@ -88,6 +97,7 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.caseTypes.length) out.set("types", f.caseTypes.join(","));
   if (f.assignees.length) out.set("assignees", f.assignees.join(","));
   if (f.projects.length) out.set("projects", f.projects.join(","));
+  if (f.engagementTypes.length) out.set("engagementTypes", f.engagementTypes.join(","));
   return out;
 }
 
@@ -105,6 +115,7 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.caseTypes.length) n += 1;
   if (f.assignees.length) n += 1;
   if (f.projects.length) n += 1;
+  if (f.engagementTypes.length) n += 1;
   return n;
 }
 

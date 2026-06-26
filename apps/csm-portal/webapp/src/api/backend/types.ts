@@ -377,6 +377,13 @@ export interface BeUpdateCaseResponse {
   case: BeUpdatedCase;
 }
 
+export type BeEngagementType =
+  | "migration"
+  | "consultancy"
+  | "new_feature_improvement"
+  | "follow_up"
+  | "onboarding";
+
 /** Request body for `POST /cases/search` (the flat, cross-project search). */
 /** Filter block for `POST /cases/search`; all fields are optional. */
 export interface BeCaseSearchFilters {
@@ -389,6 +396,8 @@ export interface BeCaseSearchFilters {
   states?: BeCaseState[];
   severities?: BeCaseSeverity[];
   issueTypes?: BeCaseIssueType[];
+  /** Filter by engagement type; only applies when `types` includes `"engagement"`. */
+  engagementTypes?: BeEngagementType[];
   /** Filter to cases created by these emails. */
   createdBy?: string[];
   /** When true, the caller's email (from the JWT) is appended to `createdBy`. */

@@ -86,6 +86,9 @@ const CsmSecurityCenterPage = lazy(
 const CreateSecurityReportPage = lazy(
   () => import("@features/csm-security-center/pages/CreateSecurityReportPage"),
 );
+const CsmEngagementsPage = lazy(
+  () => import("@features/csm-engagements/pages/CsmEngagementsPage"),
+);
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -233,17 +236,8 @@ export default function App(): JSX.Element {
                   element={<CreateServiceRequestPage />}
                 />
 
-                {/* WIP placeholders for top-level features awaiting BFF support */}
-                <Route
-                  path="engagements"
-                  element={
-                    <CsmComingSoonPage
-                      title="Engagements"
-                      description="Professional services engagements (migration, implementation, onboarding, training) across customers."
-                      blockedOn="csm-portal/backend engagements endpoint"
-                    />
-                  }
-                />
+                <Route path="engagements" element={<CsmEngagementsPage />} />
+                <Route path="engagements/:caseId" element={<CsmCaseDetailPage />} />
                 <Route path="updates" element={<CsmUpdatesPage />} />
                 <Route path="security-center" element={<CsmSecurityCenterPage />} />
                 <Route

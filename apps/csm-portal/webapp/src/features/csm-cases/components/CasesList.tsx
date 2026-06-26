@@ -25,6 +25,8 @@ import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 interface CasesListProps {
   cases: CsmCaseRow[];
   isLoading: boolean;
+  /** Base path for detail links. Defaults to "/cases". */
+  detailBasePath?: string;
 }
 
 // Every column is left-aligned for a consistent scan line down the table.
@@ -45,6 +47,7 @@ const GRID =
 export default function CasesList({
   cases,
   isLoading,
+  detailBasePath = "/cases",
 }: CasesListProps): JSX.Element {
   const theme = useTheme();
 
@@ -125,7 +128,7 @@ export default function CasesList({
             <Box
               key={c.id}
               component={RouterLink}
-              to={`/cases/${c.id}`}
+              to={`${detailBasePath}/${c.id}`}
               sx={{
                 gridColumn: "1 / -1",
                 display: "grid",

@@ -53,6 +53,7 @@ const FILTER_PARAM_KEYS = [
   "types",
   "assignees",
   "projects",
+  "engagementTypes",
 ] as const;
 
 interface CsmIssuesViewProps {
@@ -69,6 +70,10 @@ interface CsmIssuesViewProps {
   hideTypeFilter?: boolean;
   /** Hide the project filter control (use when the view is project-scoped). */
   hideProjectFilter?: boolean;
+  /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
+  showEngagementTypeFilter?: boolean;
+  /** Base path for row detail links. Defaults to "/cases". */
+  detailBasePath?: string;
 }
 
 /**
@@ -85,6 +90,8 @@ export default function CsmIssuesView({
   lockedFilters,
   hideTypeFilter,
   hideProjectFilter,
+  showEngagementTypeFilter,
+  detailBasePath,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<CasesFilters>(
@@ -227,9 +234,10 @@ export default function CsmIssuesView({
         availableProjects={availableProjects}
         hideTypeFilter={hideTypeFilter}
         hideProjectFilter={hideProjectFilter}
+        showEngagementTypeFilter={showEngagementTypeFilter}
       />
 
-      <CasesList cases={cases} isLoading={isLoading} />
+      <CasesList cases={cases} isLoading={isLoading} detailBasePath={detailBasePath} />
 
       <TablePagination
         component="div"

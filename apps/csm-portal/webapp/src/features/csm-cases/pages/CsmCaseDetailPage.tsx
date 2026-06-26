@@ -241,6 +241,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const isEngagementRoute = location.pathname.startsWith("/engagements/");
+  const backPath = isEngagementRoute ? "/engagements" : "/cases";
+  const backLabel = isEngagementRoute ? "Back to engagements" : "Back to cases";
+  const detailPath = isEngagementRoute ? `/engagements/${caseId}` : `/cases/${caseId}`;
   const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
@@ -366,7 +370,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         ? `${caseIdLabel(data)} · ${data.subject}`
         : data.subject,
       subtitle: `${data.customer} · ${data.projectName}`,
-      href: `/cases/${data.id}`,
+      href: detailPath,
     });
   }, [data, recordView]);
 
@@ -548,7 +552,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       if (action.secondary === "copy_link") {
         if (data && navigator.clipboard) {
           navigator.clipboard
-            .writeText(`${window.location.origin}/cases/${data.id}`)
+            .writeText(`${window.location.origin}${detailPath}`)
             .then(() =>
               setFeedback({
                 message: SECONDARY_TOAST.copy_link,
@@ -694,10 +698,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate("/cases")}
+          onClick={() => navigate(backPath)}
           sx={{ alignSelf: "flex-start" }}
         >
-          Back to cases
+          {backLabel}
         </Button>
         <Typography variant="body1" color="error">
           Could not load case {caseId}.
@@ -713,10 +717,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate("/cases")}
+          onClick={() => navigate(backPath)}
           sx={{ alignSelf: "flex-start" }}
         >
-          Back to cases
+          {backLabel}
         </Button>
         <Typography variant="h5">Case not found</Typography>
         <Typography variant="body2" color="text.secondary">
@@ -771,10 +775,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
         variant="text"
         size="small"
         startIcon={<ArrowLeft size={16} />}
-        onClick={() => navigate("/cases")}
+        onClick={() => navigate(backPath)}
         sx={{ alignSelf: "flex-start" }}
       >
-        Back to cases
+        {backLabel}
       </Button>
 
       <Box

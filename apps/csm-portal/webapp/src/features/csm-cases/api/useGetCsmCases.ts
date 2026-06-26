@@ -131,6 +131,7 @@ export function useGetCsmCases(
       [...filters.states].sort(),
       [...filters.caseTypes].sort(),
       [...filters.projects].sort(),
+      [...filters.engagementTypes].sort(),
       currentUserEmail ?? "",
       page,
       pageSize,
@@ -156,6 +157,9 @@ export function useGetCsmCases(
             }),
             ...(filters.caseTypes.length > 0 && {
               types: filters.caseTypes,
+            }),
+            ...(filters.engagementTypes.length > 0 && {
+              engagementTypes: filters.engagementTypes,
             }),
             // `filters.projects` holds project IDs (the filter is id-based).
             ...(filters.projects.length > 0 && {

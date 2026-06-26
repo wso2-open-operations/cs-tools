@@ -70,7 +70,7 @@ import {
   SUGGESTED_FILTER_VIEWS,
   useSavedFilterViews,
 } from "@features/csm-cases/utils/savedFilterViews";
-import type { BeCaseType } from "@api/backend/types";
+import type { BeCaseType, BeEngagementType } from "@api/backend/types";
 import {
   ALL_CASE_TYPES,
   CASE_TYPE_LABEL,
@@ -97,6 +97,8 @@ export interface CasesFilters {
   /** Engineer emails (+ the `@me` sentinel) to filter by assigned engineer. */
   assignees: string[];
   projects: string[];
+  /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
+  engagementTypes: BeEngagementType[];
 }
 
 /**
@@ -122,7 +124,25 @@ interface CasesFilterBarProps {
   hideTypeFilter?: boolean;
   /** Hide the project control when the surrounding view is project-scoped. */
   hideProjectFilter?: boolean;
+  /** Show the engagement-type multi-select (only relevant when type is locked to engagement). */
+  showEngagementTypeFilter?: boolean;
 }
+
+const ALL_ENGAGEMENT_TYPES: BeEngagementType[] = [
+  "migration",
+  "consultancy",
+  "new_feature_improvement",
+  "follow_up",
+  "onboarding",
+];
+
+const ENGAGEMENT_TYPE_LABEL: Record<BeEngagementType, string> = {
+  migration: "Migration",
+  consultancy: "Consultancy",
+  new_feature_improvement: "New feature / improvement",
+  follow_up: "Follow-up",
+  onboarding: "Onboarding",
+};
 
 const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
 const PRIMARY_STATES: CaseState[] = [
@@ -319,6 +339,7 @@ export default function CasesFilterBar({
   availableProjects,
   hideTypeFilter = false,
   hideProjectFilter = false,
+  showEngagementTypeFilter = false,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -366,6 +387,10 @@ export default function CasesFilterBar({
   );
   const caseTypeOptions = useMemo(
     () => ALL_CASE_TYPES.map((t) => ({ value: t, label: CASE_TYPE_LABEL[t] })),
+    [],
+  );
+  const engagementTypeOptions = useMemo(
+    () => ALL_ENGAGEMENT_TYPES.map((t) => ({ value: t, label: ENGAGEMENT_TYPE_LABEL[t] })),
     [],
   );
 
@@ -610,6 +635,17 @@ export default function CasesFilterBar({
                 onChange={(next) => onChange({ ...filters, states: next })}
               />
             </Grid>
+            {showEngagementTypeFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-engagement-type"
+                  label="Engagement type"
+                  values={filters.engagementTypes}
+                  options={engagementTypeOptions}
+                  onChange={(next) => onChange({ ...filters, engagementTypes: next })}
+                />
+              </Grid>
+            )}
             {!hideTypeFilter && (
               <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
                 <MultiSelectField
