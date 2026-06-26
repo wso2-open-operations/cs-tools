@@ -1314,7 +1314,7 @@ components:
 
     CreateDeploymentRequest:
       type: object
-      required: [projectId, name, typeKey, description]
+      required: [projectId, name, type, description]
       properties:
         projectId:
           type: string
@@ -1323,9 +1323,10 @@ components:
         name:
           type: string
           description: Display name of the deployment.
-        typeKey:
-          type: integer
-          description: ServiceNow deployment type integer key.
+        type:
+          type: string
+          enum: [primary_production, staging, qa, stress, uat, development]
+          description: Deployment environment type.
         description:
           type: string
           description: Description of the deployment.
@@ -1352,15 +1353,16 @@ components:
 
     UpdateDeploymentRequest:
       oneOf:
-        - description: Update deployment detail fields. At least one of name, typeKey, or description must be provided.
+        - description: Update deployment detail fields. At least one of name, type, or description must be provided.
           type: object
           minProperties: 1
           properties:
             name:
               type: string
-            typeKey:
-              type: integer
-              description: ServiceNow deployment type integer key.
+            type:
+              type: string
+              enum: [primary_production, staging, qa, stress, uat, development]
+              description: Deployment environment type.
             description:
               type: string
               nullable: true

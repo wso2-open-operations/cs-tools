@@ -26,7 +26,7 @@ import (
 )
 
 func TestPostDeployment(t *testing.T) {
-	const validBody = `{"projectId":"11111111-1111-1111-1111-111111111111","name":"Prod","typeKey":1,"description":"Main prod deployment"}`
+	const validBody = `{"projectId":"11111111-1111-1111-1111-111111111111","name":"Prod","type":"primary_production","description":"Main prod deployment"}`
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})

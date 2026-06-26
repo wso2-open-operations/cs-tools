@@ -927,7 +927,7 @@ paths:
             type: string
             format: uuid
       requestBody:
-        description: Deployment update payload. Provide either detail fields (name, typeKey, description) or active=false, but not both.
+        description: Deployment update payload. Provide either detail fields (name, type, description) or active=false, but not both.
         required: true
         content:
           application/json:
@@ -2299,7 +2299,7 @@ components:
 
     DeploymentCreatePayload:
       type: object
-      required: [projectId, name, typeKey, description]
+      required: [projectId, name, type, description]
       properties:
         projectId:
           type: string
@@ -2308,9 +2308,10 @@ components:
         name:
           type: string
           description: Display name of the deployment.
-        typeKey:
-          type: integer
-          description: ServiceNow deployment type integer key.
+        type:
+          type: string
+          enum: [primary_production, staging, qa, stress, uat, development]
+          description: Deployment environment type.
         description:
           type: string
           description: Description of the deployment.
@@ -2334,15 +2335,16 @@ components:
 
     DeploymentUpdatePayload:
       oneOf:
-        - description: Update deployment detail fields. At least one of name, typeKey, or description must be provided.
+        - description: Update deployment detail fields. At least one of name, type, or description must be provided.
           type: object
           minProperties: 1
           properties:
             name:
               type: string
-            typeKey:
-              type: integer
-              description: ServiceNow deployment type integer key.
+            type:
+              type: string
+              enum: [primary_production, staging, qa, stress, uat, development]
+              description: Deployment environment type.
             description:
               type: string
               nullable: true

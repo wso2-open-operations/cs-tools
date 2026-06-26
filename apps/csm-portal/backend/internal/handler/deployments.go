@@ -100,7 +100,7 @@ func (h *DeploymentHandler) PostDeployment(w http.ResponseWriter, r *http.Reques
 }
 
 // PatchDeployment handles PATCH /deployments/{id}.
-// Accepts name, typeKey, description (detail fields) or active=false (deactivation) and forwards to the entity service.
+// Accepts name, type, description (detail fields) or active=false (deactivation) and forwards to the entity service.
 func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {

@@ -170,8 +170,11 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 	if req.Name == "" {
 		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "name is required"}
 	}
-	if req.TypeKey == nil {
-		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "typeKey is required"}
+	if req.Type == nil {
+		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "type is required"}
+	}
+	if _, ok := validDeploymentTypes[*req.Type]; !ok {
+		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
 	}
 	if req.Description == "" {
 		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "description is required"}
@@ -185,7 +188,7 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 	payload := snCreateDeploymentPayload{
 		ProjectID:   uuidToSysid(req.ProjectID),
 		Name:        req.Name,
-		TypeKey:     *req.TypeKey,
+		TypeKey:     deploymentTypeToKey[*req.Type],
 		Description: req.Description,
 	}
 
@@ -239,12 +242,17 @@ func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.U
 		return domain.UpdateDeploymentResponse{}, err
 	}
 
-	hasDetailFields := req.Name != nil || req.TypeKey != nil || req.Description != nil
+	hasDetailFields := req.Name != nil || req.Type != nil || req.Description != nil
 	if !hasDetailFields && req.Active == nil {
-		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "at least one of name, typeKey, description, or active must be provided"}
+		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "at least one of name, type, description, or active must be provided"}
 	}
 	if hasDetailFields && req.Active != nil {
 		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active must not be provided when updating deployment details"}
+	}
+	if req.Type != nil {
+		if _, ok := validDeploymentTypes[*req.Type]; !ok {
+			return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
 	}
 	if req.Active != nil && *req.Active {
 		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active can only be set to false"}
@@ -256,9 +264,12 @@ func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.U
 	}
 
 	payload := snUpdateDeploymentPayload{
-		Name:    req.Name,
-		TypeKey: req.TypeKey,
-		Active:  req.Active,
+		Name:   req.Name,
+		Active: req.Active,
+	}
+	if req.Type != nil {
+		k := deploymentTypeToKey[*req.Type]
+		payload.TypeKey = &k
 	}
 	if req.Description != nil {
 		if *req.Description == nil {
@@ -305,6 +316,16 @@ var validDeploymentTypes = map[domain.DeploymentType]struct{}{
 	domain.DeploymentTypeStress:            {},
 	domain.DeploymentTypeUAT:               {},
 	domain.DeploymentTypeDevelopment:       {},
+}
+
+// deploymentTypeToKey maps the domain DeploymentType string to the ServiceNow integer choice-list key.
+var deploymentTypeToKey = map[domain.DeploymentType]int{
+	domain.DeploymentTypeDevelopment:       1,
+	domain.DeploymentTypeQA:                2,
+	domain.DeploymentTypeStaging:           3,
+	domain.DeploymentTypeStress:            4,
+	domain.DeploymentTypeUAT:               5,
+	domain.DeploymentTypePrimaryProduction: 6,
 }
 
 // snDeployTypeLabelToEnum converts a SN deployment type label (e.g. "Primary Production")
