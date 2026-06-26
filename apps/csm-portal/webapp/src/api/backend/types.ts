@@ -682,18 +682,24 @@ export interface BeDeployment {
 /**
  * Detail-field update for `PATCH /deployments/{id}`. At least one field must be
  * present (BE rejects an empty body). `description: null` clears the value.
- * `typeKey` (the ServiceNow deployment-type integer) is intentionally omitted:
- * no endpoint exposes the type→key mapping, so type changes are deferred until
- * the BE either accepts the string `type` enum or exposes a types lookup.
+ * `active` is forbidden on this variant — use `BeDeploymentDeactivatePayload`.
+ *
+ * Per PR #957: the BE now accepts the string `type` enum directly, so
+ * `typeKey` (the old integer) is gone.
  */
-export interface BeDeploymentDetailUpdatePayload {
+export type BeDeploymentDetailUpdatePayload = {
   name?: string;
+  type?: BeDeploymentType;
   description?: string | null;
-}
+  active?: never;
+} & ({ name: string } | { type: BeDeploymentType } | { description: string | null });
 
 /** Deactivation for `PATCH /deployments/{id}`: `active` must be `false`, alone. */
 export interface BeDeploymentDeactivatePayload {
   active: false;
+  name?: never;
+  type?: never;
+  description?: never;
 }
 
 export type BeDeploymentUpdatePayload =
@@ -706,6 +712,30 @@ export interface BeDeploymentUpdateResponse {
     id: string;
     updatedOn: string;
     updatedBy: string;
+  };
+}
+
+/**
+ * Request body for `POST /deployments`. All four fields are required per the
+ * BE contract (PR #957: `type` is the string enum, `typeKey` integer is gone).
+ */
+export interface BeDeploymentCreatePayload {
+  projectId: string;
+  name: string;
+  type: BeDeploymentType;
+  description: string;
+}
+
+export interface BeDeploymentCreateResponse {
+  message: string;
+  deployment: {
+    id: string;
+    projectId: string;
+    name: string;
+    type: BeDeploymentType;
+    description: string;
+    createdOn: string;
+    createdBy: string;
   };
 }
 

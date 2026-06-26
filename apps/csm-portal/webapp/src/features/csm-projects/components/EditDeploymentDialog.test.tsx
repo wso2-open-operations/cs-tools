@@ -75,8 +75,28 @@ describe("EditDeploymentDialog", () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it("does not offer type editing", () => {
+  it("renders a type selector with all 6 deployment types", () => {
     renderDialog();
-    expect(screen.getByText(/type changes aren't available yet/i)).toBeInTheDocument();
+    // The Select renders its current value in a combobox.
+    const typeSelect = screen.getByRole("combobox", { name: /type/i });
+    expect(typeSelect).toBeInTheDocument();
+  });
+
+  it("enables Save and sends type when the type is changed", () => {
+    const { onSave } = renderDialog();
+    // Open the Select dropdown and pick "Staging".
+    const typeSelect = screen.getByRole("combobox", { name: /type/i });
+    fireEvent.mouseDown(typeSelect);
+    const stagingOption = screen.getByRole("option", { name: /staging/i });
+    fireEvent.click(stagingOption);
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ type: "staging" });
+  });
+
+  it("does not render 'Type changes aren't available yet'", () => {
+    renderDialog();
+    expect(
+      screen.queryByText(/type changes aren't available yet/i),
+    ).not.toBeInTheDocument();
   });
 });

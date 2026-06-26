@@ -22,26 +22,24 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
   TextField,
 } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
-import type {
-  BeDeployment,
-  BeDeploymentDetailUpdatePayload,
-  BeDeploymentType,
-} from "@api/backend/types";
+import { useState, type JSX } from "react";
+import type { BeDeploymentCreatePayload, BeDeploymentType } from "@api/backend/types";
 import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
 
-interface EditDeploymentDialogProps {
-  deployment: BeDeployment;
-  /** True while the PATCH is in flight; disables the actions. */
+interface CreateDeploymentDialogProps {
+  /** The project this deployment belongs to (pre-populated, read-only). */
+  projectId: string;
+  /** True while the POST is in flight; disables the actions. */
   isSaving: boolean;
   onClose: () => void;
-  /** Persist the changed detail fields via `PATCH /deployments/{id}`. */
-  onSave: (payload: BeDeploymentDetailUpdatePayload) => void;
+  /** Submit the create payload via `POST /deployments`. */
+  onCreate: (payload: BeDeploymentCreatePayload) => void;
 }
 
 const NAME_MAX = 200;
@@ -57,51 +55,44 @@ const DEPLOYMENT_TYPES: BeDeploymentType[] = [
 ];
 
 /**
- * Edit a deployment's name, type, and description (`PATCH /deployments/{id}`
- * detail fields). Type is now a string enum per the BE contract introduced in
- * PR #957 — `typeKey` integer is gone. Mount only while open.
+ * Create a new deployment under the current project. All four fields are
+ * required per `POST /deployments`. The project is locked to the page context;
+ * `type` is the string enum introduced by PR #957 (no `typeKey` integer).
+ * Mount only while open.
  */
-export default function EditDeploymentDialog({
-  deployment,
+export default function CreateDeploymentDialog({
+  projectId,
   isSaving,
   onClose,
-  onSave,
-}: EditDeploymentDialogProps): JSX.Element {
-  const [name, setName] = useState(deployment.name ?? "");
-  const [type, setType] = useState<BeDeploymentType | "">(deployment.type ?? "");
-  const [description, setDescription] = useState(deployment.description ?? "");
+  onCreate,
+}: CreateDeploymentDialogProps): JSX.Element {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<BeDeploymentType | "">("");
+  const [description, setDescription] = useState("");
 
   const trimmedName = name.trim();
   const trimmedDescription = description.trim();
-  const originalName = (deployment.name ?? "").trim();
-  const originalType = deployment.type ?? "";
-  const originalDescription = (deployment.description ?? "").trim();
-
-  const nameChanged = trimmedName !== originalName;
-  const typeChanged = type !== originalType;
-  const descriptionChanged = trimmedDescription !== originalDescription;
   const nameError = trimmedName.length === 0;
+  const typeError = type === "";
+  const descriptionError = trimmedDescription.length === 0;
 
-  // Send only the fields the user actually changed. The backend requires at
-  // least one field, so Save stays disabled until something differs.
-  const payload = useMemo<BeDeploymentDetailUpdatePayload>(() => {
-    const next: Record<string, unknown> = {};
-    if (nameChanged) next.name = trimmedName;
-    if (typeChanged && type) next.type = type;
-    // An emptied description clears the value (null), matching the BE's
-    // nullable detail field.
-    if (descriptionChanged) {
-      next.description = trimmedDescription.length > 0 ? trimmedDescription : null;
-    }
-    return next as BeDeploymentDetailUpdatePayload;
-  }, [nameChanged, typeChanged, descriptionChanged, trimmedName, type, trimmedDescription]);
-
+  // All four fields required by the BE contract.
   const canSave =
-    !isSaving && !nameError && (nameChanged || typeChanged || descriptionChanged);
+    !isSaving && !nameError && !typeError && !descriptionError;
+
+  const handleCreate = (): void => {
+    if (!canSave || !type) return;
+    onCreate({
+      projectId,
+      name: trimmedName,
+      type,
+      description: trimmedDescription,
+    });
+  };
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit deployment</DialogTitle>
+      <DialogTitle>Create deployment</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           <TextField
@@ -112,15 +103,15 @@ export default function EditDeploymentDialog({
             fullWidth
             required
             autoFocus
-            error={nameError}
-            helperText={nameError ? "Name is required." : " "}
+            error={name.length > 0 && nameError}
+            helperText={name.length > 0 && nameError ? "Name is required." : " "}
             slotProps={{ htmlInput: { maxLength: NAME_MAX } }}
           />
 
-          <FormControl size="small" fullWidth required>
-            <InputLabel id="edit-deployment-type-label">Type</InputLabel>
+          <FormControl size="small" fullWidth required error={type === "" && description.length > 0}>
+            <InputLabel id="create-deployment-type-label">Type</InputLabel>
             <Select
-              labelId="edit-deployment-type-label"
+              labelId="create-deployment-type-label"
               label="Type"
               value={type}
               onChange={(e) => setType(e.target.value as BeDeploymentType)}
@@ -131,6 +122,9 @@ export default function EditDeploymentDialog({
                 </MenuItem>
               ))}
             </Select>
+            {type === "" && description.length > 0 && (
+              <FormHelperText>Type is required.</FormHelperText>
+            )}
           </FormControl>
 
           <TextField
@@ -139,8 +133,15 @@ export default function EditDeploymentDialog({
             onChange={(e) => setDescription(e.target.value)}
             size="small"
             fullWidth
+            required
             multiline
             minRows={3}
+            error={description.length > 0 && descriptionError}
+            helperText={
+              description.length > 0 && descriptionError
+                ? "Description is required."
+                : " "
+            }
             slotProps={{ htmlInput: { maxLength: DESCRIPTION_MAX } }}
           />
         </Box>
@@ -149,8 +150,12 @@ export default function EditDeploymentDialog({
         <Button onClick={onClose} disabled={isSaving}>
           Cancel
         </Button>
-        <Button variant="contained" disabled={!canSave} onClick={() => onSave(payload)}>
-          Save changes
+        <Button
+          variant="contained"
+          disabled={!canSave}
+          onClick={handleCreate}
+        >
+          Create
         </Button>
       </DialogActions>
     </Dialog>

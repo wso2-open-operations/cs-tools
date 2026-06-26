@@ -22,6 +22,7 @@ import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
+import type { BeDeploymentType } from "@api/backend/types";
 
 interface CaseMetaBandProps {
   detail: CsmCaseDetail;
@@ -302,7 +303,9 @@ export default function CaseMetaBand({
           deployment={{
             id: product.deploymentId,
             name: product.deployment,
-            type: product.deploymentCategory,
+            // DeploymentCategory and BeDeploymentType share the same string
+            // literal values. Cast so the dialog receives the right type.
+            type: product.deploymentCategory as BeDeploymentType | undefined,
           }}
           onClose={() => setShowDeployment(false)}
         />

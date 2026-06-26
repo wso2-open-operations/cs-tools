@@ -38,10 +38,11 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Ban, Eye, MoreVertical, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { Ban, Eye, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useUpdateDeployment } from "@features/csm-projects/api/useUpdateDeployment";
+import { useCreateDeployment } from "@features/csm-projects/api/useCreateDeployment";
 import {
   deploymentTypeLabel,
   formatDeploymentDate,
@@ -49,9 +50,11 @@ import {
 import type {
   BeDeployment,
   BeDeploymentDetailUpdatePayload,
+  BeDeploymentCreatePayload,
 } from "@api/backend/types";
 import EditDeploymentDialog from "@features/csm-projects/components/EditDeploymentDialog";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
+import CreateDeploymentDialog from "@features/csm-projects/components/CreateDeploymentDialog";
 
 /** Columns rendered per deployment row (5 data + actions). */
 const COLUMN_COUNT = 6;
@@ -67,14 +70,13 @@ interface Feedback {
 
 /**
  * Lists a project's deployments (`POST /deployments/search`) and lets engineers
- * edit a deployment's name/description or deactivate it (`PATCH
- * /deployments/{id}`). Creating deployments and changing a deployment's type are
- * not offered yet: both need the ServiceNow type→key integer, which no endpoint
- * exposes.
+ * create, edit, or deactivate deployments. Type is editable via a select
+ * (string enum per PR #957; `typeKey` integer is gone).
  */
 export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.Element {
   const { data, isLoading, isError, error, isFetching } = useSearchDeployments(projectId);
   const updateDeployment = useUpdateDeployment(projectId);
+  const createDeployment = useCreateDeployment(projectId);
 
   // Row-action menu anchored to the deployment whose "⋮" was clicked.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -82,6 +84,7 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
   const [editing, setEditing] = useState<BeDeployment | null>(null);
   const [deactivating, setDeactivating] = useState<BeDeployment | null>(null);
   const [viewing, setViewing] = useState<BeDeployment | null>(null);
+  const [creating, setCreating] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const deployments = data ?? [];
@@ -105,11 +108,15 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           setEditing(null);
           setFeedback({ message: `Updated ${name}.`, severity: "success" });
         },
-        onError: (err) =>
+        onError: (err) => {
+          // Close the dialog first so the page-level alert is not hidden
+          // behind the modal backdrop.
+          setEditing(null);
           setFeedback({
             message: `Could not update ${name}: ${err.message}`,
             severity: "error",
-          }),
+          });
+        },
       },
     );
   };
@@ -125,13 +132,33 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           setDeactivating(null);
           setFeedback({ message: `Deactivated ${name}.`, severity: "success" });
         },
-        onError: (err) =>
+        onError: (err) => {
+          // Close the dialog first so the page-level alert is not hidden
+          // behind the modal backdrop.
+          setDeactivating(null);
           setFeedback({
             message: `Could not deactivate ${name}: ${err.message}`,
             severity: "error",
-          }),
+          });
+        },
       },
     );
+  };
+
+  const handleCreate = (payload: BeDeploymentCreatePayload): void => {
+    createDeployment.mutate(payload, {
+      onSuccess: () => {
+        setCreating(false);
+        setFeedback({ message: "Deployment created.", severity: "success" });
+      },
+      onError: (err) => {
+        setCreating(false);
+        setFeedback({
+          message: `Could not create deployment: ${err.message}`,
+          severity: "error",
+        });
+      },
+    });
   };
 
   return (
@@ -148,6 +175,17 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           {error instanceof Error ? error.message : "unknown error"}
         </Alert>
       )}
+
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="contained"
+          size="small"
+          startIcon={<Plus size={16} />}
+          onClick={() => setCreating(true)}
+        >
+          Create deployment
+        </Button>
+      </Box>
 
       <Paper variant="outlined">
         <TableContainer>
@@ -266,6 +304,15 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           isSaving={updateDeployment.isPending}
           onClose={() => setEditing(null)}
           onSave={handleSaveEdit}
+        />
+      )}
+
+      {creating && (
+        <CreateDeploymentDialog
+          projectId={projectId}
+          isSaving={createDeployment.isPending}
+          onClose={() => setCreating(false)}
+          onCreate={handleCreate}
         />
       )}
 
