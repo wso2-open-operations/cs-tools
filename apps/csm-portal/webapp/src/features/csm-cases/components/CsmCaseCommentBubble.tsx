@@ -15,11 +15,11 @@
 // under the License.
 
 import { alpha, Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
-import DOMPurify from "dompurify";
 import type { JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import { pickAccessibleText } from "@utils/contrastText";
+import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { initialsOf } from "@utils/userClaims";
 import type {
   CsmCaseComment,
@@ -45,37 +45,11 @@ const ROLE_COLOR: Record<
   system: "warning",
 };
 
-const PURIFY_CONFIG = {
-  ALLOWED_TAGS: [
-    "p",
-    "br",
-    "strong",
-    "b",
-    "em",
-    "i",
-    "u",
-    "s",
-    "code",
-    "pre",
-    "ul",
-    "ol",
-    "li",
-    "a",
-    "blockquote",
-    "h1",
-    "h2",
-    "h3",
-    "img",
-    "span",
-  ],
-  ALLOWED_ATTR: ["href", "target", "rel", "src", "alt"],
-};
-
 export default function CsmCaseCommentBubble({
   comment,
 }: CsmCaseCommentBubbleProps): JSX.Element {
   const theme = useTheme();
-  const safeHtml = DOMPurify.sanitize(comment.bodyHtml, PURIFY_CONFIG);
+  const safeHtml = sanitizeRichTextHtml(comment.bodyHtml);
   const isSystem = comment.authorRole === "system";
 
   if (isSystem) {
