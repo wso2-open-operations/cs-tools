@@ -249,6 +249,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /deployments/{id}:
+    patch:
+      summary: Update a deployment's name, type, description, or deactivate it.
+      operationId: patchDeployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeploymentRequest'
+      responses:
+        "200":
+          description: Deployment updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDeploymentResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized (missing x-user-id-token header).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Deployment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /deployments/search:
     post:
       summary: Search deployments by name, project IDs, or deployment type.
@@ -1226,6 +1275,50 @@ components:
         updatedOn:
           type: string
           format: date-time
+
+    UpdateDeploymentRequest:
+      oneOf:
+        - description: Update deployment detail fields. At least one of name, typeKey, or description must be provided.
+          type: object
+          minProperties: 1
+          properties:
+            name:
+              type: string
+            typeKey:
+              type: integer
+              description: ServiceNow deployment type integer key.
+            description:
+              type: string
+              nullable: true
+        - description: Deactivate the deployment. active must be false; no other fields may be present.
+          type: object
+          required: [active]
+          properties:
+            active:
+              type: boolean
+              enum: [false]
+
+    UpdateDeploymentResponse:
+      type: object
+      required: [message, deployment]
+      properties:
+        message:
+          type: string
+        deployment:
+          $ref: '#/components/schemas/UpdatedDeployment'
+
+    UpdatedDeployment:
+      type: object
+      required: [id, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
 
     SearchDeploymentsResponse:
       type: object

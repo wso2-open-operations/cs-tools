@@ -48,6 +48,7 @@ func injectDeploymentID(body []byte, deploymentID string) ([]byte, error) {
 type entityDeploymentClient interface {
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
+	PatchDeployment(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
 }
 
 // DeploymentHandler handles HTTP requests for deployment operations, delegating to the
@@ -59,6 +60,48 @@ type DeploymentHandler struct {
 // NewDeploymentHandler creates a DeploymentHandler backed by the given entity client.
 func NewDeploymentHandler(entity entityDeploymentClient) *DeploymentHandler {
 	return &DeploymentHandler{entity: entity}
+}
+
+// PatchDeployment handles PATCH /deployments/{id}.
+// Accepts name, typeKey, description (detail fields) or active=false (deactivation) and forwards to the entity service.
+func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	deploymentID := r.PathValue("id")
+	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchDeployment(r.Context(), deploymentID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PatchDeployment failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		mapUpstreamError(w, err, "Failed to update deployment.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SearchDeployments handles POST /deployments/search.

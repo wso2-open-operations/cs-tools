@@ -102,6 +102,106 @@ func TestSearchDeployments(t *testing.T) {
 	})
 }
 
+func TestPatchDeployment(t *testing.T) {
+	const validID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/deployments/"+validID, strings.NewReader(`{"name":"prod"}`))
+		r.SetPathValue("id", validID)
+		w := httptest.NewRecorder()
+		h.PatchDeployment(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID deployment id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/not-a-uuid", strings.NewReader(`{"name":"prod"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.PatchDeployment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", validID)
+		w := httptest.NewRecorder()
+		h.PatchDeployment(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", validID)
+		w := httptest.NewRecorder()
+		h.PatchDeployment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body and deployment id to upstream and returns 200", func(t *testing.T) {
+		const reqPayload = `{"name":"new-name"}`
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityDeploymentClient{
+			patchDeploymentFn: func(_ context.Context, deploymentID string, body []byte) ([]byte, error) {
+				capturedID = deploymentID
+				capturedBody = body
+				return []byte(`{"message":"Deployment updated successfully","deployment":{"id":"` + validID + `","updatedOn":"2026-06-26T00:00:00Z","updatedBy":"user@wso2.com"}}`), nil
+			},
+		}
+		h := NewDeploymentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validID, strings.NewReader(reqPayload)))
+		r.SetPathValue("id", validID)
+		w := httptest.NewRecorder()
+		h.PatchDeployment(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != validID {
+			t.Errorf("upstream received id %q, want %q", capturedID, validID)
+		}
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Deployment updated successfully" {
+			t.Errorf("message = %v, want %q", resp["message"], "Deployment updated successfully")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update deployment.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityDeploymentClient{
+					patchDeploymentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewDeploymentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validID, strings.NewReader(`{"name":"x"}`)))
+				r.SetPathValue("id", validID)
+				w := httptest.NewRecorder()
+				h.PatchDeployment(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchDeployedProducts(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})

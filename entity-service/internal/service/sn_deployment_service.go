@@ -145,6 +145,89 @@ func (s *snDeploymentService) SearchDeployments(ctx context.Context, req domain.
 	}, nil
 }
 
+// snUpdateDeploymentPayload is the Choreo PATCH /deployments/{id} request body.
+// Description is json.RawMessage so an explicit null ("description":null) can be
+// distinguished from an omitted field — omitempty drops nil RawMessage entirely.
+type snUpdateDeploymentPayload struct {
+	Name        *string         `json:"name,omitempty"`
+	TypeKey     *int            `json:"typeKey,omitempty"`
+	Description json.RawMessage `json:"description,omitempty"`
+	Active      *bool           `json:"active,omitempty"`
+}
+
+type snUpdateDeploymentResponse struct {
+	Message    string `json:"message"`
+	Deployment struct {
+		ID        string `json:"id"`
+		UpdatedOn string `json:"updatedOn"`
+		UpdatedBy string `json:"updatedBy"`
+	} `json:"deployment"`
+}
+
+// UpdateDeployment implements DeploymentService for the ServiceNow data source.
+func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error) {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return domain.UpdateDeploymentResponse{}, err
+	}
+
+	hasDetailFields := req.Name != nil || req.TypeKey != nil || req.Description != nil
+	if !hasDetailFields && req.Active == nil {
+		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "at least one of name, typeKey, description, or active must be provided"}
+	}
+	if hasDetailFields && req.Active != nil {
+		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active must not be provided when updating deployment details"}
+	}
+	if req.Active != nil && *req.Active {
+		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active can only be set to false"}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.UpdateDeploymentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snUpdateDeploymentPayload{
+		Name:    req.Name,
+		TypeKey: req.TypeKey,
+		Active:  req.Active,
+	}
+	if req.Description != nil {
+		if *req.Description == nil {
+			payload.Description = json.RawMessage("null")
+		} else {
+			b, err := json.Marshal(**req.Description)
+			if err != nil {
+				return domain.UpdateDeploymentResponse{}, fmt.Errorf("sn update deployment: marshal description: %w", err)
+			}
+			payload.Description = b
+		}
+	}
+
+	raw, err := s.client.Patch(ctx, "/deployments/"+uuidToSysid(req.ID), token, payload)
+	if err != nil {
+		return domain.UpdateDeploymentResponse{}, err
+	}
+
+	var snResp snUpdateDeploymentResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.UpdateDeploymentResponse{}, fmt.Errorf("sn update deployment: parse response: %w", err)
+	}
+
+	updatedOn, err := time.Parse(snCreatedOnLayout, snResp.Deployment.UpdatedOn)
+	if err != nil {
+		return domain.UpdateDeploymentResponse{}, fmt.Errorf("sn update deployment: parse updatedOn %q: %w", snResp.Deployment.UpdatedOn, err)
+	}
+
+	return domain.UpdateDeploymentResponse{
+		Message: snResp.Message,
+		Deployment: domain.UpdatedDeployment{
+			ID:        sysidToUUID(snResp.Deployment.ID),
+			UpdatedOn: updatedOn,
+			UpdatedBy: snResp.Deployment.UpdatedBy,
+		},
+	}, nil
+}
+
 // validDeploymentTypes is the set of known DeploymentType enum values.
 var validDeploymentTypes = map[domain.DeploymentType]struct{}{
 	domain.DeploymentTypePrimaryProduction: {},
