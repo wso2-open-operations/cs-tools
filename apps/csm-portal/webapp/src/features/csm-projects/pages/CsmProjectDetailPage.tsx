@@ -29,8 +29,9 @@ import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
 
-type ProjectTabId = "overview" | "issues";
+type ProjectTabId = "overview" | "issues" | "deployments";
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -197,6 +198,7 @@ export default function CsmProjectDetailPage(): JSX.Element {
         <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as ProjectTabId)}>
           <Tab value="overview" label="Overview" />
           <Tab value="issues" label="Issues" />
+          <Tab value="deployments" label="Deployments" />
         </Tabs>
       </Box>
 
@@ -261,6 +263,8 @@ export default function CsmProjectDetailPage(): JSX.Element {
           hideProjectFilter
         />
       )}
+
+      {activeTab === "deployments" && <DeploymentsTab projectId={p.id} />}
     </Box>
   );
 }

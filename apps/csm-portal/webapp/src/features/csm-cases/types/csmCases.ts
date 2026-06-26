@@ -217,6 +217,8 @@ export interface CaseProductContext {
   updateLevel?: string;
   /** Customer-provided deployment name (set by the customer in the project). */
   deployment: string;
+  /** Deployment UUID, when the case is linked to one — drives the detail link. */
+  deploymentId?: string;
   /** Fixed-list classification of the deployment (e.g. Primary Production). */
   deploymentCategory?: DeploymentCategory;
   environment: "dev" | "qa" | "staging" | "prod";

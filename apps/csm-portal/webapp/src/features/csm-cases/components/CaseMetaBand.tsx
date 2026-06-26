@@ -16,11 +16,12 @@
 
 import { Box, Card, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
-import type { JSX, ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
+import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
 
 interface CaseMetaBandProps {
   detail: CsmCaseDetail;
@@ -104,6 +105,48 @@ function LinkText({
   );
 }
 
+// Same link styling as LinkText, but a real <button> for in-page actions
+// (opening a dialog) rather than navigation — so it's keyboard-operable and
+// announced as a button, not a link.
+function LinkButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <Typography
+      component="button"
+      type="button"
+      onClick={onClick}
+      variant="body2"
+      noWrap
+      sx={(t) => ({
+        display: "block",
+        cursor: "pointer",
+        textAlign: "left",
+        padding: 0,
+        border: "none",
+        background: "none",
+        font: "inherit",
+        textDecoration: "none",
+        color: t.palette.primary.dark,
+        ...t.applyStyles("dark", { color: t.palette.primary.main }),
+        "&:hover": { textDecoration: "underline" },
+        "&:focus-visible": {
+          outline: "2px solid",
+          outlineColor: "primary.main",
+          outlineOffset: 2,
+          borderRadius: 0.5,
+        },
+      })}
+    >
+      {children}
+    </Typography>
+  );
+}
+
 /**
  * Always-visible facts band shown directly under the case header. Engineers
  * see assignee, project type, deployment/product, who created the case, and
@@ -117,6 +160,7 @@ export default function CaseMetaBand({
 }: CaseMetaBandProps): JSX.Element {
   const product = c.productContext;
   const tier = c.customerContext.tier;
+  const [showDeployment, setShowDeployment] = useState(false);
   // Project type is encoded as the second " - "-delimited segment of the
   // project name (e.g. "Acme - Managed Cloud" → "Managed Cloud"). Temporary
   // until the backend exposes it as a first-class field.
@@ -235,9 +279,15 @@ export default function CaseMetaBand({
             </Typography>
           </Cell>
           <Cell label="Deployment">
-            <Typography variant="body2" noWrap>
-              {product.deployment ?? "—"}
-            </Typography>
+            {product.deploymentId ? (
+              <LinkButton onClick={() => setShowDeployment(true)}>
+                {product.deployment}
+              </LinkButton>
+            ) : (
+              <Typography variant="body2" noWrap>
+                {product.deployment ?? "—"}
+              </Typography>
+            )}
           </Cell>
           <Cell label="Product">
             <Typography variant="body2" noWrap>
@@ -245,6 +295,17 @@ export default function CaseMetaBand({
             </Typography>
           </Cell>
         </Box>
+      )}
+
+      {showDeployment && product.deploymentId && (
+        <DeploymentDetailsDialog
+          deployment={{
+            id: product.deploymentId,
+            name: product.deployment,
+            type: product.deploymentCategory,
+          }}
+          onClose={() => setShowDeployment(false)}
+        />
       )}
     </Card>
   );

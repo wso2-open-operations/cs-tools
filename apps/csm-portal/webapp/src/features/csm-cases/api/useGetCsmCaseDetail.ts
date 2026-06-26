@@ -48,7 +48,10 @@ function detailFromBeCase(
     !!assigneeEmail &&
     !!currentUserEmail &&
     assigneeEmail.toLowerCase() === currentUserEmail.toLowerCase();
-  const product = c.deployedProduct?.displayName ?? "—";
+  // Prefer the deployed-product label (carries the version); fall back to the
+  // plain product name, which the CaseView populates even when no specific
+  // deployed product is linked. `||` so an empty displayName also falls through.
+  const product = c.deployedProduct?.displayName || c.product?.name || "—";
   return {
     id: c.id,
     caseNumber: c.number,
@@ -92,6 +95,7 @@ function detailFromBeCase(
       product,
       version: "—",
       deployment: c.deployment?.name ?? "—",
+      deploymentId: c.deployment?.id,
       environment: "prod",
     },
     slaClocks: [],
