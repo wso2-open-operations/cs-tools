@@ -39,6 +39,7 @@ describe("readCasesFiltersFromUrl", () => {
       severities: ["S0", "S2"],
       states: ["open", "closed"],
       caseTypes: ["case", "engagement"],
+      engagementTypes: [],
       assignees: ["alice@example.com", "@me"],
       projects: ["apim"],
     });

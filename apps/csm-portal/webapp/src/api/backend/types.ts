@@ -764,3 +764,81 @@ export interface BeDeployedProductSearchPayload {
 export interface BeDeployedProductSearchResponse extends BeSearchResponseBase {
   deployedProducts: BeDeployedProduct[];
 }
+
+// ---------------------------------------------------------------------------
+// Change requests (managed-cloud; ServiceNow data source only)
+// ---------------------------------------------------------------------------
+
+export type BeChangeRequestState =
+  | "customer_approval"
+  | "scheduled"
+  | "implement"
+  | "review"
+  | "customer_review"
+  | "rollback"
+  | "closed"
+  | "canceled";
+
+export type BeChangeRequestImpact = "high" | "medium" | "low";
+
+/** List-item / shared shape for a change request (`POST /change-requests/search`). */
+export interface BeChangeRequestSearchView {
+  id: string;
+  number?: string;
+  subject?: string | null;
+  description?: string | null;
+  project?: BeEntityRef;
+  case?: BeEntityRef | null;
+  deployment?: BeEntityRef | null;
+  deployedProduct?: BeEntityRef | null;
+  product?: BeEntityRef | null;
+  assignedEngineer?: BeEntityRef | null;
+  assignedTeam?: BeEntityRef | null;
+  plannedStartOn?: string | null;
+  plannedEndOn?: string | null;
+  duration?: string | null;
+  impact?: string | null;
+  state?: string | null;
+  type?: string | null;
+  createdOn?: string;
+  updatedOn?: string;
+}
+
+/** `GET /change-requests/{id}` — the search view plus the heavy plan fields. */
+export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
+  createdBy?: string;
+  justification?: string | null;
+  impactDescription?: string | null;
+  serviceOutage?: string | null;
+  communicationPlan?: string | null;
+  rollbackPlan?: string | null;
+  testPlan?: string | null;
+  hasCustomerApproved?: boolean;
+  hasCustomerReviewed?: boolean;
+  approvedBy?: BeEntityRef | null;
+  approvedOn?: string | null;
+}
+
+export interface BeChangeRequestSearchPayload {
+  filters?: {
+    projectIds?: string[];
+    searchQuery?: string;
+    states?: BeChangeRequestState[];
+    impacts?: BeChangeRequestImpact[];
+    closedStartDate?: string;
+    closedEndDate?: string;
+  };
+  sortBy?: {
+    field?: "createdOn" | "updatedOn";
+    order?: "asc" | "desc";
+  };
+  pagination?: BePagination;
+}
+
+/** Note: the CR search response carries no `hasMore` (unlike the other searches). */
+export interface BeChangeRequestSearchResponse {
+  changeRequests: BeChangeRequestSearchView[];
+  total: number;
+  limit: number;
+  offset: number;
+}

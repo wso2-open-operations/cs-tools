@@ -28,6 +28,12 @@ export default function CsmCasesPage(): JSX.Element {
     <CsmIssuesView
       title="Cases"
       entityNoun="cases"
+      // Cases list is support cases only. The other issue types have dedicated
+      // homes — service requests under Operations, engagements under
+      // Engagements, security reports under Security Center — so they're locked
+      // out here (and the type filter is hidden since it's fixed to `case`).
+      lockedFilters={{ caseTypes: ["case"] }}
+      hideTypeFilter
       actions={
         <Button
           variant="contained"

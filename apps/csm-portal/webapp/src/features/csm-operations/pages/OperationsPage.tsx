@@ -16,23 +16,40 @@
 
 import { Box, Button, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { type JSX } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
 import IssuesListUnavailable from "@features/csm-operations/components/IssuesListUnavailable";
+import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 
 type OperationsTabId = "service_requests" | "change_requests" | "incidents";
+
+const TAB_IDS: readonly OperationsTabId[] = [
+  "service_requests",
+  "change_requests",
+  "incidents",
+];
 
 /**
  * Operations landing — the home for the managed-cloud operational entities,
  * split into Service Requests / Change Requests / Incidents tabs. Service
- * requests are case-typed, so they list through the shared issues view; CR and
- * Incidents have no backend search endpoint yet and render an unavailable
- * placeholder.
+ * requests are case-typed, so they list through the shared issues view; change
+ * requests have their own search endpoint and listing; Incidents has no backend
+ * yet and renders an unavailable placeholder.
  */
 export default function OperationsPage(): JSX.Element {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<OperationsTabId>("service_requests");
+  // Active tab lives in the URL (`?tab=`) so the change-request detail page can
+  // link back to the right tab, and the tab survives a refresh / share.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") as OperationsTabId | null;
+  const activeTab: OperationsTabId =
+    tabParam && TAB_IDS.includes(tabParam) ? tabParam : "service_requests";
+  const setActiveTab = (next: OperationsTabId): void =>
+    setSearchParams((prev) => {
+      prev.set("tab", next);
+      return prev;
+    });
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -73,12 +90,7 @@ export default function OperationsPage(): JSX.Element {
         />
       )}
 
-      {activeTab === "change_requests" && (
-        <IssuesListUnavailable
-          title="Change requests"
-          description="Controlled changes, linked to service requests, with peer / CAB approval."
-        />
-      )}
+      {activeTab === "change_requests" && <ChangeRequestsTab />}
 
       {activeTab === "incidents" && (
         <IssuesListUnavailable

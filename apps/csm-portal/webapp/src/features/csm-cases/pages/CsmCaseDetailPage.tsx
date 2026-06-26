@@ -573,7 +573,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         sticky: false,
       });
     },
-    [data, showError, patchCase, findMyOngoingCases],
+    [data, showError, patchCase, findMyOngoingCases, detailPath],
   );
 
   // Confirm pausing the engineer's other ongoing case(s) and making this case
