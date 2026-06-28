@@ -300,7 +300,7 @@ func (h *DeploymentHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.
 		return
 	}
 
-	deploymentID := r.PathValue("id")
+	deploymentID := r.PathValue("deploymentId")
 	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return

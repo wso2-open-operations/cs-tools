@@ -498,7 +498,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
 		r := httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`{"cores":4}`))
-		r.SetPathValue("id", validDeploymentID)
+		r.SetPathValue("deploymentId", validDeploymentID)
 		r.SetPathValue("productId", validProductID)
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)
@@ -522,7 +522,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 	t.Run("rejects non-UUID product id", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/not-a-uuid", strings.NewReader(`{"cores":4}`)))
-		r.SetPathValue("id", validDeploymentID)
+		r.SetPathValue("deploymentId", validDeploymentID)
 		r.SetPathValue("productId", "not-a-uuid")
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)
@@ -534,7 +534,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
-		r.SetPathValue("id", validDeploymentID)
+		r.SetPathValue("deploymentId", validDeploymentID)
 		r.SetPathValue("productId", validProductID)
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)
@@ -546,7 +546,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`not-json`)))
-		r.SetPathValue("id", validDeploymentID)
+		r.SetPathValue("deploymentId", validDeploymentID)
 		r.SetPathValue("productId", validProductID)
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)
@@ -568,7 +568,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 		}
 		h := NewDeploymentHandler(client)
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(reqPayload)))
-		r.SetPathValue("id", validDeploymentID)
+		r.SetPathValue("deploymentId", validDeploymentID)
 		r.SetPathValue("productId", validProductID)
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)
@@ -605,7 +605,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 				}
 				h := NewDeploymentHandler(client)
 				r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`{"cores":4}`)))
-				r.SetPathValue("id", validDeploymentID)
+				r.SetPathValue("deploymentId", validDeploymentID)
 				r.SetPathValue("productId", validProductID)
 				w := httptest.NewRecorder()
 				h.PatchDeployedProduct(w, r)

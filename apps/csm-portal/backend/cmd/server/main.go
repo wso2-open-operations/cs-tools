@@ -114,7 +114,7 @@ func main() {
 	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
 	mux.HandleFunc("POST /deployments/{id}/products", deploymentHandler.PostDeployedProduct)
 	mux.HandleFunc("POST /deployments/{id}/products/search", deploymentHandler.SearchDeployedProducts)
-	mux.HandleFunc("PATCH /deployments/{id}/products/{productId}", deploymentHandler.PatchDeployedProduct)
+	mux.HandleFunc("PATCH /deployments/{deploymentId}/products/{productId}", deploymentHandler.PatchDeployedProduct)
 	mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 	mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
