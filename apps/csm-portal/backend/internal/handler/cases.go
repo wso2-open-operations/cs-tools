@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -52,6 +53,9 @@ type entityCaseClient interface {
 	CreateCaseAttachment(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCaseAttachments(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	GetCaseAttachmentContent(ctx context.Context, caseID, attachmentID string) ([]byte, string, error)
+	CreateCallRequest(ctx context.Context, body []byte) ([]byte, error)
+	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
+	PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -512,6 +516,175 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
 		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// injectCaseIDField merges caseId into a JSON request body as {"caseId": "<id>"}.
+func injectCaseIDField(body []byte, caseID string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("request body must be a JSON object")
+	}
+	idJSON, err := json.Marshal(caseID)
+	if err != nil {
+		return nil, err
+	}
+	m["caseId"] = idJSON
+	return json.Marshal(m)
+}
+
+// CreateCallRequest handles POST /cases/{id}/call-requests.
+// Injects the case ID from the URL path into the body as caseId before forwarding
+// to the entity service.
+func (h *CaseHandler) CreateCallRequest(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectCaseIDField(body, caseID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.CreateCallRequest(r.Context(), entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateCallRequest failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to create call request.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// SearchCallRequests handles POST /cases/{id}/call-requests/search.
+// Injects the case ID from the URL path into the body as caseId before forwarding
+// to the entity service.
+func (h *CaseHandler) SearchCallRequests(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectCaseIDField(body, caseID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchCallRequests(r.Context(), entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchCallRequests failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to search call requests.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// PatchCallRequest handles PATCH /cases/{id}/call-requests/{callRequestId}.
+// Forwards the body unchanged to the entity service's PATCH /call-requests/{callRequestId}.
+func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("caseId")
+	if caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	callRequestID := r.PathValue("callRequestId")
+	if callRequestID == "" || !uuidRe.MatchString(callRequestID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectCaseIDField(body, caseID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchCallRequest(r.Context(), callRequestID, entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PatchCallRequest failed", "userID", user.UserID, "caseID", caseID, "callRequestID", callRequestID, "err", err)
+		mapUpstreamError(w, err, "Failed to update call request.")
 		return
 	}
 

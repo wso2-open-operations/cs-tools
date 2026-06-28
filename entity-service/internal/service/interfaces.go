@@ -93,6 +93,13 @@ type DeployedProductService interface {
 	// optional deployment IDs. A ValidationError is returned for invalid input; any other
 	// error indicates an infrastructure failure.
 	SearchDeployedProducts(ctx context.Context, req domain.SearchDeployedProductsRequest) (domain.SearchDeployedProductsResponse, error)
+	// CreateDeployedProduct creates a new deployed product in ServiceNow.
+	// Supported by the ServiceNow data source only.
+	CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error)
+	// UpdateDeployedProduct updates a deployed product's cores, tps, description, or deactivates it.
+	// Either detail fields or Active=false must be provided, but not both.
+	// Supported by the ServiceNow data source only.
+	UpdateDeployedProduct(ctx context.Context, req domain.UpdateDeployedProductRequest) (domain.UpdateDeployedProductResponse, error)
 }
 
 // CaseService defines the operations available on the cases entity.
@@ -139,6 +146,20 @@ type CatalogService interface {
 	// GetCatalogItemVariables returns the variables (form fields) for a specific catalog item.
 	// A NotFoundError is returned if the catalog or item does not exist.
 	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) (domain.GetCatalogItemVariablesResponse, error)
+}
+
+// CallRequestService defines the operations available on the call_requests entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CallRequestService interface {
+	// CreateCallRequest creates a new call request for the given case.
+	// A ValidationError is returned for invalid input.
+	CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error)
+	// SearchCallRequests returns a paginated list of call requests for the given case.
+	// A ValidationError is returned for invalid input.
+	SearchCallRequests(ctx context.Context, req domain.SearchCallRequestsRequest) (domain.SearchCallRequestsResponse, error)
+	// UpdateCallRequest updates the state or other fields of a call request.
+	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
+	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
 }
 
 // ChangeRequestService defines the operations available on the change_requests entity.

@@ -21,27 +21,44 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// DeployedProductHandler handles HTTP requests for the deployed-product resource.
-type DeployedProductHandler struct {
-	svc service.DeployedProductService
+// CallRequestHandler handles HTTP requests for the call-request resource.
+type CallRequestHandler struct {
+	svc service.CallRequestService
 }
 
-// NewDeployedProductHandler constructs a DeployedProductHandler with the given service.
-func NewDeployedProductHandler(svc service.DeployedProductService) *DeployedProductHandler {
-	return &DeployedProductHandler{svc: svc}
+// NewCallRequestHandler constructs a CallRequestHandler with the given service.
+func NewCallRequestHandler(svc service.CallRequestService) *CallRequestHandler {
+	return &CallRequestHandler{svc: svc}
 }
 
-// SearchDeployedProducts handles POST /deployed-products/search.
-func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r *http.Request) {
-	var req domain.SearchDeployedProductsRequest
+// CreateCallRequest handles POST /call-requests.
+func (h *CallRequestHandler) CreateCallRequest(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateCallRequestRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.SearchDeployedProducts(r.Context(), req)
+	resp, err := h.svc.CreateCallRequest(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SearchCallRequests handles POST /call-requests/search.
+func (h *CallRequestHandler) SearchCallRequests(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchCallRequestsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchCallRequests(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -50,34 +67,25 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// CreateDeployedProduct handles POST /deployed-products.
-func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r *http.Request) {
-	var req domain.CreateDeployedProductRequest
-	if !decodeRequest(w, r, &req) {
+// PatchCallRequest handles PATCH /call-requests/{id}.
+func (h *CallRequestHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apierror.WriteJSON(w, http.StatusBadRequest, "call request ID is required")
 		return
 	}
-	result, err := h.svc.CreateDeployedProduct(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(result)
-}
 
-// PatchDeployedProduct handles PATCH /deployed-products/{id}.
-func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.Request) {
-	var req domain.UpdateDeployedProductRequest
+	var req domain.UpdateCallRequestRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	req.ID = r.PathValue("id")
-	result, err := h.svc.UpdateDeployedProduct(r.Context(), req)
+	req.ID = id
+
+	resp, err := h.svc.UpdateCallRequest(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -1032,6 +1032,133 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /deployments/{id}/products:
+    post:
+      summary: Create a deployed product under a specific deployment.
+      operationId: postDeploymentProduct
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the deployment
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Deployed product creation payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductCreatePayload'
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductCreateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /deployments/{deploymentId}/products/{productId}:
+    patch:
+      summary: Update a deployed product's cores, tps, description, or deactivate it.
+      operationId: patchDeploymentProduct
+      parameters:
+        - name: deploymentId
+          in: path
+          description: UUID of the deployment
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: productId
+          in: path
+          description: UUID of the deployed product
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: Deployed product update payload
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductUpdatePayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductUpdateResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /deployments/{id}/products/search:
     post:
       summary: Search deployed products for a specific deployment.
@@ -1211,6 +1338,169 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+
+  /cases/{id}/call-requests:
+    post:
+      summary: Create a call request for a case (ServiceNow data source only).
+      operationId: createCallRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCallRequestPayload'
+      responses:
+        "201":
+          description: Call request created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCallRequestResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{id}/call-requests/search:
+    post:
+      summary: Search call requests for a case (ServiceNow data source only).
+      operationId: searchCallRequests
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCallRequestsPayload'
+      responses:
+        "200":
+          description: Call requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCallRequestsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /cases/{caseId}/call-requests/{callRequestId}:
+    patch:
+      summary: Update a call request (ServiceNow data source only). Alias with caseId param name.
+      operationId: patchCallRequest
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Case UUID.
+        - name: callRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Call request UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCallRequestPayload'
+      responses:
+        "200":
+          description: Call request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCallRequestResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /change-requests/{id}:
     patch:
@@ -2844,6 +3134,91 @@ components:
           type: string
           format: date-time
 
+    DeployedProductCreatePayload:
+      type: object
+      required: [projectId, productId, versionId]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: UUID of the project this deployed product belongs to.
+        productId:
+          type: string
+          format: uuid
+          description: UUID of the product being deployed.
+        versionId:
+          type: string
+          format: uuid
+          description: UUID of the product version being deployed.
+        cores:
+          type: integer
+          description: Number of cores allocated for the product.
+        tps:
+          type: number
+          description: Transactions per second allocated for the product.
+        description:
+          type: string
+          description: Description of the deployed product.
+
+    DeployedProductCreateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        deployedProduct:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            createdOn:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+
+    DeployedProductUpdatePayload:
+      oneOf:
+        - description: Update detail fields. At least one of cores, tps, or description must be provided.
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          properties:
+            cores:
+              type: integer
+              nullable: true
+            tps:
+              type: number
+              nullable: true
+            description:
+              type: string
+              nullable: true
+        - description: Deactivate the deployed product. active must be false; no other fields may be present.
+          type: object
+          required: [active]
+          additionalProperties: false
+          properties:
+            active:
+              type: boolean
+              enum: [false]
+
+    DeployedProductUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        deployedProduct:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+              format: date-time
+            updatedBy:
+              type: string
+
     Pagination:
       type: object
       properties:
@@ -3445,3 +3820,181 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogItemVariable'
+
+    CallRequestState:
+      type: object
+      description: Choice-list state item. id may be an integer or a string.
+      properties:
+        id:
+          description: State key (int or string).
+        label:
+          type: string
+
+    CallRequestCaseRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        number:
+          type: string
+
+    CreateCallRequestPayload:
+      type: object
+      required: [reason, utcTimes, durationInMinutes]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Reason for the call request.
+        utcTimes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: Preferred UTC times for the call.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Duration of the call in minutes.
+
+    CreateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+            state:
+              $ref: '#/components/schemas/CallRequestState'
+
+    SearchCallRequestsPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            states:
+              type: array
+              items:
+                type: string
+                enum:
+                  - pending_on_customer
+                  - pending_on_wso2
+                  - scheduled
+                  - customer_rejected
+                  - wso2_rejected
+                  - canceled
+                  - notes_pending
+                  - concluded
+              description: Filter by one or more states.
+        pagination:
+          allOf:
+            - $ref: '#/components/schemas/Pagination'
+            - properties:
+                limit:
+                  default: 20
+                  maximum: 100
+
+    CallRequestView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        case:
+          $ref: '#/components/schemas/CallRequestCaseRef'
+        reason:
+          type: string
+        preferredTimes:
+          type: array
+          items:
+            type: string
+        durationMin:
+          type: integer
+        scheduleTime:
+          type: string
+        meetingLink:
+          type: string
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+        state:
+          $ref: '#/components/schemas/CallRequestState'
+        cancellationReason:
+          type: string
+
+    SearchCallRequestsResponse:
+      type: object
+      properties:
+        callRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallRequestView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    UpdateCallRequestPayload:
+      type: object
+      required: [state]
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+            - pending_on_customer
+            - pending_on_wso2
+            - scheduled
+            - customer_rejected
+            - wso2_rejected
+            - canceled
+            - notes_pending
+            - concluded
+          description: New state for the call request.
+        cancellationReason:
+          type: string
+          description: Reason for cancellation (required when cancelling).
+        utcTimes:
+          type: array
+          items:
+            type: string
+          description: Updated preferred UTC times.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Updated duration in minutes.
+
+    UpdateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+            updatedBy:
+              type: string
