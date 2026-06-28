@@ -885,7 +885,7 @@ paths:
       summary: Search product vulnerabilities (ServiceNow data source only).
       operationId: searchProductVulnerabilities
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -899,6 +899,12 @@ paths:
                 $ref: '#/components/schemas/SearchProductVulnerabilitiesResponse'
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
           content:
             application/json:
               schema:
@@ -932,6 +938,12 @@ paths:
                 $ref: '#/components/schemas/ProductVulnerabilityView'
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
           content:
             application/json:
               schema:

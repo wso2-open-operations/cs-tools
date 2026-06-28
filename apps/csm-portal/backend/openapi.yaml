@@ -1391,6 +1391,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
           content:
@@ -3332,7 +3338,17 @@ components:
         filters:
           $ref: '#/components/schemas/SearchProductVulnerabilitiesFilters'
         pagination:
-          $ref: '#/components/schemas/Pagination'
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              default: 0
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 20
 
     ProductVulnerabilityView:
       type: object

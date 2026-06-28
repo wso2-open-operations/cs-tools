@@ -212,7 +212,7 @@ backend/
 
 ### Product Vulnerabilities
 
-- `POST /products/vulnerabilities/search` — Search product vulnerabilities with optional `priority`, `searchQuery`, `productName`, `productVersion` filters (ServiceNow data source only)
+- `POST /products/vulnerabilities/search` — Search product vulnerabilities; requires `pagination`, optional `filters` (`priority`, `searchQuery`, `productName`, `productVersion`) (ServiceNow data source only)
 - `GET /products/vulnerabilities/{id}` — Get product vulnerability by ID (ServiceNow data source only)
 
 ### Updates
