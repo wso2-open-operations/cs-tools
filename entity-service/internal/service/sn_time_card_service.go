@@ -75,7 +75,6 @@ type snTimeCard struct {
 }
 
 type snTimeCardLabel struct {
-	ID    int    `json:"id"`
 	Label string `json:"label"`
 }
 
