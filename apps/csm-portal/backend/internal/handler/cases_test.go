@@ -999,28 +999,16 @@ func TestCreateCaseAttachment(t *testing.T) {
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments", strings.NewReader(validPayload))
-		r.SetPathValue("id", testCaseID)
+		r := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(validPayload))
 		w := httptest.NewRecorder()
 		h.CreateCaseAttachment(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
 		assertErrorMessage(t, w, ErrMsgUnauthorized)
 	})
 
-	t.Run("rejects invalid case UUID", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/attachments", strings.NewReader(validPayload)))
-		r.SetPathValue("id", "not-a-uuid")
-		w := httptest.NewRecorder()
-		h.CreateCaseAttachment(w, r)
-		assertStatus(t, w, http.StatusBadRequest)
-		assertErrorMessage(t, w, ErrMsgInvalidUUID)
-	})
-
 	t.Run("rejects body exceeding 15 MiB", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments", strings.NewReader(strings.Repeat("x", maxAttachmentBodyBytes+1))))
-		r.SetPathValue("id", testCaseID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(strings.Repeat("x", maxAttachmentBodyBytes+1))))
 		w := httptest.NewRecorder()
 		h.CreateCaseAttachment(w, r)
 		assertStatus(t, w, http.StatusRequestEntityTooLarge)
@@ -1029,8 +1017,7 @@ func TestCreateCaseAttachment(t *testing.T) {
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments", strings.NewReader(`not-json`)))
-		r.SetPathValue("id", testCaseID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(`not-json`)))
 		w := httptest.NewRecorder()
 		h.CreateCaseAttachment(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -1041,16 +1028,12 @@ func TestCreateCaseAttachment(t *testing.T) {
 		t.Parallel()
 		want := `{"message":"uploaded","attachment":{"id":"` + testCaseID + `"}}`
 		client := &mockEntityCaseClient{
-			createCaseAttachmentFn: func(_ context.Context, caseID string, _ []byte) ([]byte, error) {
-				if caseID != testCaseID {
-					t.Errorf("caseID = %q, want %q", caseID, testCaseID)
-				}
+			createCaseAttachmentFn: func(_ context.Context, _ []byte) ([]byte, error) {
 				return []byte(want), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments", strings.NewReader(validPayload)))
-		r.SetPathValue("id", testCaseID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(validPayload)))
 		w := httptest.NewRecorder()
 		h.CreateCaseAttachment(w, r)
 		assertStatus(t, w, http.StatusCreated)
@@ -1062,13 +1045,12 @@ func TestCreateCaseAttachment(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					createCaseAttachmentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					createCaseAttachmentFn: func(_ context.Context, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments", strings.NewReader(validPayload)))
-				r.SetPathValue("id", testCaseID)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(validPayload)))
 				w := httptest.NewRecorder()
 				h.CreateCaseAttachment(w, r)
 				assertStatus(t, w, tc.wantCode)
@@ -1089,30 +1071,18 @@ func TestSearchCaseAttachments(t *testing.T) {
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments/search", strings.NewReader(validPayload))
-		r.SetPathValue("id", testCaseID)
+		r := httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(validPayload))
 		w := httptest.NewRecorder()
 		h.SearchCaseAttachments(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
 		assertErrorMessage(t, w, ErrMsgUnauthorized)
 	})
 
-	t.Run("rejects invalid case UUID", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/attachments/search", strings.NewReader(validPayload)))
-		r.SetPathValue("id", "not-a-uuid")
-		w := httptest.NewRecorder()
-		h.SearchCaseAttachments(w, r)
-		assertStatus(t, w, http.StatusBadRequest)
-		assertErrorMessage(t, w, ErrMsgInvalidUUID)
-	})
-
 	t.Run("returns 200 on success", func(t *testing.T) {
 		t.Parallel()
 		client := &mockEntityCaseClient{}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments/search", strings.NewReader(validPayload)))
-		r.SetPathValue("id", testCaseID)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(validPayload)))
 		w := httptest.NewRecorder()
 		h.SearchCaseAttachments(w, r)
 		assertStatus(t, w, http.StatusOK)
@@ -1124,13 +1094,12 @@ func TestSearchCaseAttachments(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					searchCaseAttachmentsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					searchCaseAttachmentsFn: func(_ context.Context, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/attachments/search", strings.NewReader(validPayload)))
-				r.SetPathValue("id", testCaseID)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(validPayload)))
 				w := httptest.NewRecorder()
 				h.SearchCaseAttachments(w, r)
 				assertStatus(t, w, tc.wantCode)
@@ -1151,31 +1120,18 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/"+testAttachmentID+"/content", nil)
-		r.SetPathValue("case_id", testCaseID)
-		r.SetPathValue("attachment_id", testAttachmentID)
+		r := httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID+"/content", nil)
+		r.SetPathValue("attachmentId", testAttachmentID)
 		w := httptest.NewRecorder()
 		h.GetCaseAttachmentContent(w, r)
 		assertStatus(t, w, http.StatusUnauthorized)
 		assertErrorMessage(t, w, ErrMsgUnauthorized)
 	})
 
-	t.Run("rejects invalid case UUID", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/not-a-uuid/attachments/"+testAttachmentID+"/content", nil))
-		r.SetPathValue("case_id", "not-a-uuid")
-		r.SetPathValue("attachment_id", testAttachmentID)
-		w := httptest.NewRecorder()
-		h.GetCaseAttachmentContent(w, r)
-		assertStatus(t, w, http.StatusBadRequest)
-		assertErrorMessage(t, w, ErrMsgInvalidUUID)
-	})
-
 	t.Run("rejects invalid attachment UUID", func(t *testing.T) {
 		h := NewCaseHandler(&mockEntityCaseClient{})
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/not-a-uuid/content", nil))
-		r.SetPathValue("case_id", testCaseID)
-		r.SetPathValue("attachment_id", "not-a-uuid")
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/not-a-uuid/content", nil))
+		r.SetPathValue("attachmentId", "not-a-uuid")
 		w := httptest.NewRecorder()
 		h.GetCaseAttachmentContent(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -1185,17 +1141,16 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 	t.Run("streams binary content with upstream Content-Type", func(t *testing.T) {
 		t.Parallel()
 		client := &mockEntityCaseClient{
-			getCaseAttachmentContentFn: func(_ context.Context, caseID, attachmentID string) ([]byte, string, error) {
-				if caseID != testCaseID || attachmentID != testAttachmentID {
-					t.Errorf("ids = (%q,%q), want (%q,%q)", caseID, attachmentID, testCaseID, testAttachmentID)
+			getCaseAttachmentContentFn: func(_ context.Context, attachmentID string) ([]byte, string, error) {
+				if attachmentID != testAttachmentID {
+					t.Errorf("attachmentID = %q, want %q", attachmentID, testAttachmentID)
 				}
 				return []byte("PNG_BYTES"), "image/png", nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/"+testAttachmentID+"/content", nil))
-		r.SetPathValue("case_id", testCaseID)
-		r.SetPathValue("attachment_id", testAttachmentID)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID+"/content", nil))
+		r.SetPathValue("attachmentId", testAttachmentID)
 		w := httptest.NewRecorder()
 		h.GetCaseAttachmentContent(w, r)
 		assertStatus(t, w, http.StatusOK)
@@ -1211,14 +1166,13 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 	t.Run("coerces unsafe Content-Type to octet-stream", func(t *testing.T) {
 		t.Parallel()
 		client := &mockEntityCaseClient{
-			getCaseAttachmentContentFn: func(_ context.Context, _, _ string) ([]byte, string, error) {
+			getCaseAttachmentContentFn: func(_ context.Context, _ string) ([]byte, string, error) {
 				return []byte("<script>alert(1)</script>"), "text/html; charset=utf-8", nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/"+testAttachmentID+"/content", nil))
-		r.SetPathValue("case_id", testCaseID)
-		r.SetPathValue("attachment_id", testAttachmentID)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID+"/content", nil))
+		r.SetPathValue("attachmentId", testAttachmentID)
 		w := httptest.NewRecorder()
 		h.GetCaseAttachmentContent(w, r)
 		assertStatus(t, w, http.StatusOK)
@@ -1230,14 +1184,13 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					getCaseAttachmentContentFn: func(_ context.Context, _, _ string) ([]byte, string, error) {
+					getCaseAttachmentContentFn: func(_ context.Context, _ string) ([]byte, string, error) {
 						return nil, "", tc.err
 					},
 				}
 				h := NewCaseHandler(client)
-				r := withUser(httptest.NewRequest(http.MethodGet, "/cases/"+testCaseID+"/attachments/"+testAttachmentID+"/content", nil))
-				r.SetPathValue("case_id", testCaseID)
-				r.SetPathValue("attachment_id", testAttachmentID)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID+"/content", nil))
+				r.SetPathValue("attachmentId", testAttachmentID)
 				w := httptest.NewRecorder()
 				h.GetCaseAttachmentContent(w, r)
 				assertStatus(t, w, tc.wantCode)
