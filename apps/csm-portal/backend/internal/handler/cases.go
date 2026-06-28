@@ -675,7 +675,13 @@ func (h *CaseHandler) PatchCallRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.entity.PatchCallRequest(r.Context(), callRequestID, body)
+	entityBody, err := injectCaseIDField(body, caseID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchCallRequest(r.Context(), callRequestID, entityBody)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchCallRequest failed", "userID", user.UserID, "caseID", caseID, "callRequestID", callRequestID, "err", err)
 		mapUpstreamError(w, err, "Failed to update call request.")

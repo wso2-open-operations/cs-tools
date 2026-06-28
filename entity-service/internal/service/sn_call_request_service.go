@@ -147,6 +147,9 @@ func (s *snCallRequestService) CreateCallRequest(ctx context.Context, req domain
 	if req.CaseID == "" {
 		return domain.CreateCallRequestResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
 	}
+	if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
+		return domain.CreateCallRequestResponse{}, err
+	}
 	if req.Reason == "" {
 		return domain.CreateCallRequestResponse{}, &apierror.ValidationError{Msg: "reason is required"}
 	}
@@ -196,13 +199,23 @@ func (s *snCallRequestService) SearchCallRequests(ctx context.Context, req domai
 	if req.CaseID == "" {
 		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "caseId is required"}
 	}
+	if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
+		return domain.SearchCallRequestsResponse{}, err
+	}
 
 	payload := snCallRequestSearchPayload{
 		CaseID:     uuidToSysid(req.CaseID),
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
-	if req.Filters != nil {
-		payload.Filters = &snCallRequestSearchFilters{StateKeys: req.Filters.StateKeys}
+	if req.Filters != nil && len(req.Filters.States) > 0 {
+		keys := make([]int, 0, len(req.Filters.States))
+		for _, s := range req.Filters.States {
+			if _, ok := validCallRequestStates[s]; !ok {
+				return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid state %q", s)}
+			}
+			keys = append(keys, callRequestStateToKey[s])
+		}
+		payload.Filters = &snCallRequestSearchFilters{StateKeys: keys}
 	}
 
 	raw, err := s.client.Post(ctx, "/call-requests/search", token, payload)
@@ -260,6 +273,23 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 	if _, ok := validCallRequestStates[req.State]; !ok {
 		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid state %q", req.State)}
 	}
+	if req.DurationMinutes != nil && *req.DurationMinutes <= 0 {
+		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "durationInMinutes must be positive"}
+	}
+	if req.UTCTimes != nil && len(req.UTCTimes) == 0 {
+		return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "utcTimes must not be empty when provided"}
+	}
+
+	sysid := uuidToSysid(req.ID)
+
+	if req.CaseID != "" {
+		if err := validateUUIDs("caseId", []string{req.CaseID}); err != nil {
+			return domain.UpdateCallRequestResponse{}, err
+		}
+		if err := s.verifyCallRequestBelongsToCase(ctx, token, uuidToSysid(req.CaseID), sysid); err != nil {
+			return domain.UpdateCallRequestResponse{}, err
+		}
+	}
 
 	payload := snCallRequestUpdatePayload{
 		StateKey:           callRequestStateToKey[req.State],
@@ -267,8 +297,6 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 		UTCTimes:           req.UTCTimes,
 		DurationMinutes:    req.DurationMinutes,
 	}
-
-	sysid := uuidToSysid(req.ID)
 	raw, err := s.client.Patch(ctx, fmt.Sprintf("/call-requests/%s", sysid), token, payload)
 	if err != nil {
 		return domain.UpdateCallRequestResponse{}, err
@@ -285,4 +313,35 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 	resp.CallRequest.UpdatedOn = snResp.CallRequest.UpdatedOn
 	resp.CallRequest.UpdatedBy = snResp.CallRequest.UpdatedBy
 	return resp, nil
+}
+
+// verifyCallRequestBelongsToCase pages through all call requests for caseSysid
+// and returns nil if callRequestSysid is found, or NotFoundError if exhausted.
+func (s *snCallRequestService) verifyCallRequestBelongsToCase(ctx context.Context, token, caseSysid, callRequestSysid string) error {
+	const pageSize = 50
+	offset := 0
+	for {
+		payload := snCallRequestSearchPayload{
+			CaseID:     caseSysid,
+			Pagination: snProjectPagination{Limit: pageSize, Offset: offset},
+		}
+		raw, err := s.client.Post(ctx, "/call-requests/search", token, payload)
+		if err != nil {
+			return err
+		}
+		var resp snCallRequestsResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return fmt.Errorf("sn call requests: verify ownership: parse response: %w", err)
+		}
+		for _, cr := range resp.CallRequests {
+			if cr.ID == callRequestSysid {
+				return nil
+			}
+		}
+		if offset+len(resp.CallRequests) >= resp.TotalRecords {
+			break
+		}
+		offset += pageSize
+	}
+	return &apierror.NotFoundError{Msg: "call request not found for this case"}
 }

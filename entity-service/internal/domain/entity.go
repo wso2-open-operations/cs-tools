@@ -1134,7 +1134,7 @@ type CreateCallRequestResponse struct {
 
 // SearchCallRequestsFilters holds optional filter criteria for call request searches.
 type SearchCallRequestsFilters struct {
-	StateKeys []int `json:"stateKeys,omitempty"`
+	States []CallRequestStateType `json:"states,omitempty"`
 }
 
 // SearchCallRequestsRequest is the input for POST /call-requests/search.
@@ -1170,8 +1170,11 @@ type SearchCallRequestsResponse struct {
 
 // UpdateCallRequestRequest is the input for PATCH /call-requests/{id}.
 // ID is injected from the URL path parameter and excluded from JSON decoding.
+// CaseID is optional; when provided the SN service verifies the call request
+// belongs to that case before applying the update (IDOR guard).
 type UpdateCallRequestRequest struct {
 	ID                 string               `json:"-"`
+	CaseID             string               `json:"caseId,omitempty"`
 	State              CallRequestStateType `json:"state"`
 	CancellationReason *string              `json:"cancellationReason,omitempty"`
 	UTCTimes           []string             `json:"utcTimes,omitempty"`

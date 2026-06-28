@@ -2669,11 +2669,20 @@ components:
           type: object
           additionalProperties: false
           properties:
-            stateKeys:
+            states:
               type: array
               items:
-                type: integer
-              description: Filter by one or more state keys.
+                type: string
+                enum:
+                  - pending_on_customer
+                  - pending_on_wso2
+                  - scheduled
+                  - customer_rejected
+                  - wso2_rejected
+                  - canceled
+                  - notes_pending
+                  - concluded
+              description: Filter by one or more states.
         pagination:
           $ref: '#/components/schemas/Pagination'
 
