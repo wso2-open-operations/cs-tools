@@ -42,7 +42,7 @@ type snDeployedProduct struct {
 	Product    snDeployedProductRef      `json:"product"`
 	Version    *snDeployedProductVersion `json:"version"`
 	Cores      *int                      `json:"cores"`
-	TPS        *int                      `json:"tps"`
+	TPS        *float64                  `json:"tps"` // Ballerina decimal? serialises as 100.0
 	Category   *string                   `json:"category"`
 	CreatedOn  string                    `json:"createdOn"`
 	UpdatedOn  string                    `json:"updatedOn"`
@@ -345,7 +345,7 @@ func (s *snDeployedProductService) SearchDeployedProducts(ctx context.Context, r
 			cores = &s
 		}
 		if dp.TPS != nil {
-			s := fmt.Sprintf("%d", *dp.TPS)
+			s := fmt.Sprintf("%g", *dp.TPS)
 			tps = &s
 		}
 
