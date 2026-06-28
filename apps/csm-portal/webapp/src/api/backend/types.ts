@@ -1117,3 +1117,58 @@ export interface BeChangeRequestSearchResponse {
   limit: number;
   offset: number;
 }
+
+// ---------------------------------------------------------------------------
+// Product vulnerabilities (managed-cloud; ServiceNow data source only)
+// ---------------------------------------------------------------------------
+
+/** Priority enum for product vulnerabilities. */
+export type BeVulnerabilityPriority =
+  | "info"
+  | "low"
+  | "medium"
+  | "high"
+  | "critical"
+  | "unknown";
+
+/**
+ * Single product vulnerability as returned by both the search list and the
+ * `GET /products/vulnerabilities/{id}` detail endpoint.
+ */
+export interface BeProductVulnerabilityView {
+  id: string;
+  cveId?: string;
+  vulnerabilityId?: string;
+  /** Priority label from the upstream (e.g. "High", "Critical"). */
+  priority?: string;
+  productName?: string | null;
+  productVersion?: string | null;
+  componentName?: string;
+  version?: string;
+  type?: string;
+  componentType?: string | null;
+  updateLevel?: string | null;
+  useCase?: string | null;
+  justification?: string | null;
+  resolution?: string | null;
+}
+
+export interface BeSearchProductVulnerabilitiesFilters {
+  searchQuery?: string;
+  priority?: BeVulnerabilityPriority;
+  productName?: string;
+  productVersion?: string;
+}
+
+export interface BeSearchProductVulnerabilitiesPayload {
+  filters?: BeSearchProductVulnerabilitiesFilters;
+  pagination?: BePagination;
+}
+
+/** Note: the vulnerabilities search response carries no `hasMore`. */
+export interface BeSearchProductVulnerabilitiesResponse {
+  productVulnerabilities: BeProductVulnerabilityView[];
+  total: number;
+  limit: number;
+  offset: number;
+}

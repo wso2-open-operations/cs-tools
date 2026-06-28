@@ -14,25 +14,36 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Chip, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX, type ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { type JSX } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
+import ProductVulnerabilitiesTab from "@features/csm-security-center/components/ProductVulnerabilitiesTab";
 
 type SecurityCenterTabId = "security_reports" | "vulnerabilities";
 
+const TAB_IDS: SecurityCenterTabId[] = ["security_reports", "vulnerabilities"];
+
 /**
  * Security Center landing — the home for the customer-security entities, split
- * into Security Reports (SRA) / Vulnerabilities tabs. Only the security-report
- * create entry point is live; the report list and the Vulnerabilities tab are
- * awaiting their backend endpoints, so they render "coming soon" placeholders.
- * Replaces the previous blanket coming-soon page.
+ * into Security Reports (SRA) / Vulnerabilities tabs. The active tab lives in
+ * the URL (`?tab=`) so the vulnerability detail page can link back to the right
+ * tab, and the selection survives a refresh or share.
  */
 export default function CsmSecurityCenterPage(): JSX.Element {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] =
-    useState<SecurityCenterTabId>("security_reports");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") as SecurityCenterTabId | null;
+  const activeTab: SecurityCenterTabId =
+    tabParam && TAB_IDS.includes(tabParam) ? tabParam : "security_reports";
+
+  const handleTabChange = (_: unknown, next: SecurityCenterTabId): void => {
+    setSearchParams((prev) => {
+      prev.set("tab", next);
+      return prev;
+    });
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -46,7 +57,7 @@ export default function CsmSecurityCenterPage(): JSX.Element {
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
           value={activeTab}
-          onChange={(_, v) => setActiveTab(v as SecurityCenterTabId)}
+          onChange={handleTabChange}
         >
           <Tab value="security_reports" label="Security reports" />
           <Tab value="vulnerabilities" label="Vulnerabilities" />
@@ -72,56 +83,7 @@ export default function CsmSecurityCenterPage(): JSX.Element {
         />
       )}
 
-      {activeTab === "vulnerabilities" && (
-        <TabPanel
-          description="Vulnerability posture across customer deployments, with response-time tracking."
-          comingSoon
-        />
-      )}
-    </Box>
-  );
-}
-
-interface TabPanelProps {
-  description: string;
-  action?: ReactNode;
-  comingSoon?: boolean;
-  children?: ReactNode;
-}
-
-function TabPanel({
-  description,
-  action,
-  comingSoon,
-  children,
-}: TabPanelProps): JSX.Element {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 1.5,
-          flexWrap: "wrap",
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            {description}
-          </Typography>
-          {comingSoon && (
-            <Chip
-              size="small"
-              label="Coming soon"
-              color="warning"
-              variant="outlined"
-            />
-          )}
-        </Box>
-        {action}
-      </Box>
-      {children}
+      {activeTab === "vulnerabilities" && <ProductVulnerabilitiesTab />}
     </Box>
   );
 }
