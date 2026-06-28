@@ -183,7 +183,7 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 		}
 	}
 
-	hasDetailFields := req.Cores != nil || req.TPS != nil || req.Description != nil
+	hasDetailFields := req.Cores != nil || req.TPS != nil || len(req.Description) > 0
 	if !hasDetailFields && req.Active == nil {
 		return domain.UpdateDeployedProductResponse{}, &apierror.ValidationError{Msg: "at least one of cores, tps, or description must be provided, or active must be set to false"}
 	}
@@ -241,16 +241,8 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 		TPS:    req.TPS,
 		Active: req.Active,
 	}
-	if req.Description != nil {
-		if *req.Description == nil {
-			payload.Description = json.RawMessage("null")
-		} else {
-			b, err := json.Marshal(**req.Description)
-			if err != nil {
-				return domain.UpdateDeployedProductResponse{}, fmt.Errorf("sn update deployed product: marshal description: %w", err)
-			}
-			payload.Description = b
-		}
+	if len(req.Description) > 0 {
+		payload.Description = req.Description
 	}
 
 	raw, err := s.client.Patch(ctx, "/deployed-products/"+uuidToSysid(req.ID), token, payload)

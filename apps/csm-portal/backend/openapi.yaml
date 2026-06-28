@@ -2780,6 +2780,7 @@ components:
         - description: Update detail fields. At least one of cores, tps, or description must be provided.
           type: object
           minProperties: 1
+          additionalProperties: false
           properties:
             cores:
               type: integer
@@ -2793,6 +2794,7 @@ components:
         - description: Deactivate the deployed product. active must be false; no other fields may be present.
           type: object
           required: [active]
+          additionalProperties: false
           properties:
             active:
               type: boolean

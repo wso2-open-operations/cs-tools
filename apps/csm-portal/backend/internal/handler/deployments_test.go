@@ -510,7 +510,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 	t.Run("rejects non-UUID deployment id", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/not-a-uuid/products/"+validProductID, strings.NewReader(`{"cores":4}`)))
-		r.SetPathValue("id", "not-a-uuid")
+		r.SetPathValue("deploymentId", "not-a-uuid")
 		r.SetPathValue("productId", validProductID)
 		w := httptest.NewRecorder()
 		h.PatchDeployedProduct(w, r)

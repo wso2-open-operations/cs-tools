@@ -51,7 +51,7 @@ func injectDeploymentIDField(body []byte, deploymentID string) ([]byte, error) {
 		return nil, err
 	}
 	if m == nil {
-		m = make(map[string]json.RawMessage)
+		return nil, errors.New("request body must be a JSON object")
 	}
 	id, err := json.Marshal(deploymentID)
 	if err != nil {
