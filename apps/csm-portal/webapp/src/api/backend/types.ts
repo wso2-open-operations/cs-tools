@@ -834,6 +834,115 @@ export interface BeDeployedProductSearchResponse extends BeSearchResponseBase {
 }
 
 // ---------------------------------------------------------------------------
+// Call requests
+// ---------------------------------------------------------------------------
+
+/**
+ * State of a call request. `id` may be an integer or string (per the OpenAPI
+ * spec -- treat it as opaque and use `label` for display). `label` is the
+ * human-readable state name.
+ */
+export interface BeCallRequestState {
+  id: number | string;
+  label?: string;
+}
+
+/**
+ * The 8 state keys that `SearchCallRequestsPayload.filters.states` and
+ * `UpdateCallRequestPayload.state` accept as plain string enums.
+ */
+export type BeCallRequestStateKey =
+  | "pending_on_customer"
+  | "pending_on_wso2"
+  | "scheduled"
+  | "customer_rejected"
+  | "wso2_rejected"
+  | "canceled"
+  | "notes_pending"
+  | "concluded";
+
+/** A call request list/detail item returned by `POST /cases/{id}/call-requests/search`. */
+export interface BeCallRequestView {
+  id: string;
+  number?: string;
+  case?: {
+    id: string;
+    name?: string;
+    number?: string;
+  };
+  reason?: string;
+  preferredTimes?: string[];
+  durationMin?: number;
+  scheduleTime?: string;
+  meetingLink?: string;
+  createdOn?: string;
+  updatedOn?: string;
+  state?: BeCallRequestState;
+  cancellationReason?: string;
+}
+
+/** `POST /cases/{id}/call-requests` request body. */
+export interface BeCreateCallRequestPayload {
+  reason: string;
+  /** One or more preferred UTC datetimes (ISO strings). */
+  utcTimes: string[];
+  /** Duration of the call in minutes (min 1). */
+  durationInMinutes: number;
+}
+
+/** `POST /cases/{id}/call-requests` response. */
+export interface BeCreateCallRequestResponse {
+  message?: string;
+  callRequest?: {
+    id: string;
+    createdOn?: string;
+    createdBy?: string;
+    state?: BeCallRequestState;
+  };
+}
+
+/** `POST /cases/{id}/call-requests/search` request body. */
+export interface BeSearchCallRequestsPayload {
+  filters?: {
+    states?: BeCallRequestStateKey[];
+  };
+  pagination?: {
+    offset?: number;
+    /** Default 20, max 100. */
+    limit?: number;
+  };
+}
+
+/** `POST /cases/{id}/call-requests/search` response. */
+export interface BeSearchCallRequestsResponse {
+  callRequests: BeCallRequestView[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/** `PATCH /cases/{caseId}/call-requests/{callRequestId}` request body. */
+export interface BeUpdateCallRequestPayload {
+  state: BeCallRequestStateKey;
+  /** Required when `state` is `"canceled"`. */
+  cancellationReason?: string;
+  /** Updated preferred UTC datetimes. */
+  utcTimes?: string[];
+  /** Updated duration in minutes (min 1). */
+  durationInMinutes?: number;
+}
+
+/** `PATCH /cases/{caseId}/call-requests/{callRequestId}` response. */
+export interface BeUpdateCallRequestResponse {
+  message?: string;
+  callRequest?: {
+    id: string;
+    updatedOn?: string;
+    updatedBy?: string;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Change requests (managed-cloud; ServiceNow data source only)
 // ---------------------------------------------------------------------------
 
