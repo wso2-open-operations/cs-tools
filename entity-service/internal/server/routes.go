@@ -142,7 +142,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /cases/{id}/attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /cases/{id}/attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{case_id}/attachments/{attachment_id}/content", caseHandler.GetCaseAttachmentContent)
-	mux.HandleFunc("DELETE /cases/{id}/attachments/{attachment_id}", caseHandler.DeleteCaseAttachment)
+	mux.HandleFunc("DELETE /cases/{id}/attachments/{attachmentId}", caseHandler.DeleteCaseAttachment)
 
 	if callRequestHandler != nil {
 		mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
