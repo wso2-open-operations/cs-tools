@@ -80,6 +80,8 @@ export interface BackendApi {
   post<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
   patch<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse>;
   postEmpty<TResponse>(path: string): Promise<TResponse>;
+  /** Authenticated DELETE. Returns the parsed JSON body (`null` on 204). */
+  del<TResponse>(path: string): Promise<TResponse | null>;
   /**
    * Authenticated binary GET. Used for endpoints that stream raw file content
    * (e.g. attachment download) rather than JSON. Unlike {@link BackendApi.get},
@@ -143,6 +145,12 @@ export function useBackendApi(): BackendApi {
           body: "{}",
         });
         if (!response.ok) throw await readError(response);
+        return (await response.json()) as TResponse;
+      },
+      async del<TResponse>(path: string): Promise<TResponse | null> {
+        const response = await authFetch(buildUrl(path), { method: "DELETE" });
+        if (!response.ok) throw await readError(response);
+        if (response.status === 204) return null;
         return (await response.json()) as TResponse;
       },
       async getBlob(path: string): Promise<Blob> {

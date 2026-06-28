@@ -23,9 +23,9 @@ export interface EncodedAttachment {
   size: number;
   /**
    * The original File. Used by the post-create upload path
-   * (`POST /cases/{id}/attachments`, which standard cases and service requests
-   * use because the create endpoint only honors create-payload attachments for
-   * security reports).
+   * (`POST /attachments` with `referenceType: "case"`, which standard cases and
+   * service requests use because the create endpoint only honors create-payload
+   * attachments for security reports).
    */
   raw: File;
 }

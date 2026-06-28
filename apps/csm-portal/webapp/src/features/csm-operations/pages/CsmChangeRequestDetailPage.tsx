@@ -22,12 +22,15 @@ import {
   Skeleton,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Check, X } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type ReactNode } from "react";
+import { ArrowLeft, Check, Pencil, X } from "@wso2/oxygen-ui-icons-react";
+import { type JSX, type ReactNode, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useGetChangeRequest } from "@features/csm-operations/api/useGetChangeRequest";
+import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
+import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import {
   changeRequestImpactColor,
   changeRequestImpactLabel,
@@ -116,6 +119,9 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data, isLoading, isError } = useGetChangeRequest(id);
+  const { showError } = useErrorBanner();
+  const patchCr = usePatchChangeRequest();
+  const [editOpen, setEditOpen] = useState(false);
 
   const back = (): void => {
     navigate(OPERATIONS_CR_PATH);
@@ -189,6 +195,15 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               label={`${changeRequestImpactLabel(cr.impact)} impact`}
             />
           )}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Pencil size={14} />}
+            onClick={() => setEditOpen(true)}
+            sx={{ ml: "auto", flexShrink: 0 }}
+          >
+            Edit
+          </Button>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
           {cr.number || cr.id}
@@ -280,6 +295,26 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <PlanSection title="Rollback plan" html={cr.rollbackPlan} />
           <PlanSection title="Test plan" html={cr.testPlan} />
         </Card>
+      )}
+
+      {editOpen && (
+        <EditChangeRequestDialog
+          cr={cr}
+          isSaving={patchCr.isPending}
+          onClose={() => {
+            if (!patchCr.isPending) setEditOpen(false);
+          }}
+          onSave={(patch) =>
+            patchCr.mutate(
+              { id: cr.id, patch },
+              {
+                onSuccess: () => setEditOpen(false),
+                onError: (err) =>
+                  showError("Could not update the change request.", err),
+              },
+            )
+          }
+        />
       )}
     </Box>
   );

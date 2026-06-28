@@ -62,6 +62,7 @@ import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
+  useDeleteCsmCaseAttachment,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
@@ -260,6 +261,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   } = useGetCsmCaseAttachments(caseId);
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
+  const deleteAttachment = useDeleteCsmCaseAttachment();
   const patchCase = usePatchCsmCase(caseId);
   const patchCaseById = usePatchCsmCaseById();
   const findMyOngoingCases = useFindMyOngoingCases();
@@ -279,6 +281,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  // Attachment pending delete confirmation (drives the confirm dialog).
+  const [pendingDelete, setPendingDelete] = useState<CaseAttachment | null>(
+    null,
+  );
   // When starting work would leave the engineer with more than one ongoing case,
   // hold the other ongoing case(s) here to drive the confirm dialog.
   const [pauseConflict, setPauseConflict] = useState<MyOngoingCase[] | null>(
@@ -660,27 +666,47 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const onDownloadAttachment = useCallback(
     (attachment: CaseAttachment) => {
-      if (!caseId) return;
-      void downloadAttachment(caseId, attachment).catch((err) =>
+      void downloadAttachment(attachment).catch((err) =>
         showError(`Could not download ${attachment.filename}.`, err),
       );
     },
-    [caseId, downloadAttachment, showError],
+    [downloadAttachment, showError],
   );
 
   const onDownloadAllAttachments = useCallback(() => {
-    if (!caseId) return;
     // No bulk endpoint; fetch each sequentially (not a parallel burst) and save.
     void (async () => {
       for (const a of attachmentList) {
         try {
-          await downloadAttachment(caseId, a);
+          await downloadAttachment(a);
         } catch (err) {
           showError(`Could not download ${a.filename}.`, err);
         }
       }
     })();
-  }, [caseId, attachmentList, downloadAttachment, showError]);
+  }, [attachmentList, downloadAttachment, showError]);
+
+  const onConfirmDeleteAttachment = useCallback(() => {
+    if (!caseId || !pendingDelete) return;
+    const target = pendingDelete;
+    deleteAttachment.mutate(
+      { caseId, attachmentId: target.id },
+      {
+        onSuccess: () => {
+          setPendingDelete(null);
+          setFeedback({
+            message: `Deleted ${target.filename}.`,
+            severity: "success",
+            sticky: false,
+          });
+        },
+        onError: (err) => {
+          setPendingDelete(null);
+          showError(`Could not delete ${target.filename}.`, err);
+        },
+      },
+    );
+  }, [caseId, pendingDelete, deleteAttachment, showError]);
 
   if (isLoading) {
     return (
@@ -1200,6 +1226,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onUpload={onUploadAttachment}
             onDownloadAll={onDownloadAllAttachments}
             onDownload={onDownloadAttachment}
+            onDelete={setPendingDelete}
+            deletingId={deleteAttachment.isPending ? pendingDelete?.id : null}
           />
         </Box>
       )}
@@ -1222,6 +1250,40 @@ export default function CsmCaseDetailPage(): JSX.Element {
           onAssign={onAssign}
         />
       )}
+
+      <Dialog
+        open={!!pendingDelete}
+        onClose={() => {
+          if (!deleteAttachment.isPending) setPendingDelete(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete attachment?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Permanently delete{" "}
+            <strong>{pendingDelete?.filename}</strong>? This can't be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            color="inherit"
+            onClick={() => setPendingDelete(null)}
+            disabled={deleteAttachment.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={onConfirmDeleteAttachment}
+            disabled={deleteAttachment.isPending}
+          >
+            {deleteAttachment.isPending ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog
         open={!!pauseConflict}

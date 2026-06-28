@@ -512,10 +512,21 @@ export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
 // Attachments
 // ---------------------------------------------------------------------------
 
-/** A case attachment as returned by `POST /cases/{id}/attachments/search`. */
+/**
+ * Entity an attachment is linked to. Attachments are no longer case-scoped:
+ * the same endpoints serve change requests, deployments, and conversations.
+ */
+export type BeReferenceType =
+  | "case"
+  | "conversation"
+  | "change_request"
+  | "deployment";
+
+/** A attachment as returned by `POST /attachments/search`. */
 export interface BeAttachment {
   id: string;
-  caseId: string;
+  referenceId: string;
+  referenceType: BeReferenceType;
   name: string;
   /** MIME type (e.g. image/png, application/pdf). */
   type: string;
@@ -527,7 +538,13 @@ export interface BeAttachment {
   previewUrl?: string | null;
 }
 
+/**
+ * Search payload for `POST /attachments/search`. `referenceId` + `referenceType`
+ * scope the search to one entity (both required by the BE).
+ */
 export interface BeAttachmentSearchPayload {
+  referenceId: string;
+  referenceType: BeReferenceType;
   pagination?: BePagination;
 }
 
@@ -536,17 +553,20 @@ export interface BeAttachmentSearchResponse extends BeSearchResponseBase {
 }
 
 /**
- * Upload payload for `POST /cases/{id}/attachments`. `file` is a base64 data
- * URI (e.g. `data:image/png;base64,...`); the BE caps the decoded size at 10 MB.
+ * Upload payload for `POST /attachments`. `referenceId` + `referenceType` link
+ * the file to its owning entity; `file` is a base64 data URI (e.g.
+ * `data:image/png;base64,...`); the BE caps the decoded size at 10 MB.
  */
 export interface BeAttachmentCreatePayload {
+  referenceId: string;
+  referenceType: BeReferenceType;
   name: string;
   type: string;
   file: string;
   description?: string | null;
 }
 
-/** Thin ack returned by `POST /cases/{id}/attachments`. */
+/** Thin ack returned by `POST /attachments`. */
 export interface BeAttachmentDetail {
   id: string;
   sizeBytes: number;
@@ -558,6 +578,11 @@ export interface BeAttachmentDetail {
 export interface BeAttachmentCreateResponse {
   message?: string;
   attachment?: BeAttachmentDetail;
+}
+
+/** Ack returned by `DELETE /attachments/{id}`. */
+export interface BeDeleteAttachmentResponse {
+  message?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -885,6 +910,24 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   approvedBy?: BeEntityRef | null;
   approvedOn?: string | null;
+}
+
+/**
+ * `PATCH /change-requests/{id}` body (ServiceNow data source only). At least
+ * one field is required by the BE (`minProperties: 1`). `plannedStartOn` is a
+ * `YYYY-MM-DD HH:MM:SS` string.
+ */
+export interface BePatchChangeRequestPayload {
+  plannedStartOn?: string;
+  isCustomerApproved?: boolean;
+  isCustomerReviewed?: boolean;
+}
+
+/** `PATCH /change-requests/{id}` response — the touched identifiers. */
+export interface BePatchChangeRequestResponse {
+  id: string;
+  updatedOn?: string;
+  updatedBy?: string;
 }
 
 export interface BeChangeRequestSearchPayload {

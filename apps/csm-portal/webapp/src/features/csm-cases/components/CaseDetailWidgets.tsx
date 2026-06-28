@@ -20,6 +20,8 @@ import {
   Button,
   Card,
   Chip,
+  CircularProgress,
+  IconButton,
   LinearProgress,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -39,6 +41,7 @@ import {
   Plus,
   Server,
   Shield,
+  Trash2,
   TriangleAlert,
   Upload,
   User,
@@ -673,6 +676,8 @@ export function AttachmentsWidget({
   onUpload,
   onDownloadAll,
   onDownload,
+  onDelete,
+  deletingId,
 }: {
   attachments: CaseAttachment[];
   /** List query is loading. */
@@ -687,6 +692,10 @@ export function AttachmentsWidget({
   onUpload?: (file: File) => void;
   onDownloadAll?: () => void;
   onDownload?: (attachment: CaseAttachment) => void;
+  /** Delete an attachment. Omit to hide the per-row delete affordance. */
+  onDelete?: (attachment: CaseAttachment) => void;
+  /** Id of the attachment whose delete is in flight; disables its row actions. */
+  deletingId?: string | null;
 }): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sorted = [...attachments].sort(
@@ -829,6 +838,22 @@ export function AttachmentsWidget({
               >
                 Download
               </Button>
+              {onDelete && (
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => onDelete(a)}
+                  disabled={deletingId === a.id}
+                  aria-label={`Delete ${a.filename}`}
+                  sx={{ flexShrink: 0 }}
+                >
+                  {deletingId === a.id ? (
+                    <CircularProgress size={16} color="inherit" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                </IconButton>
+              )}
             </Box>
           ))}
         </Box>
