@@ -388,3 +388,231 @@ func TestSearchDeployedProducts(t *testing.T) {
 		}
 	})
 }
+
+func TestPostDeployedProduct(t *testing.T) {
+	const validDeploymentID = "11111111-1111-1111-1111-111111111111"
+	const validBody = `{"projectId":"22222222-2222-2222-2222-222222222222","productId":"33333333-3333-3333-3333-333333333333","versionId":"44444444-4444-4444-4444-444444444444"}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := httptest.NewRequest(http.MethodPost, "/deployments/"+validDeploymentID+"/products", strings.NewReader(validBody))
+		r.SetPathValue("id", validDeploymentID)
+		w := httptest.NewRecorder()
+		h.PostDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID deployment id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/not-a-uuid/products", strings.NewReader(validBody)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.PostDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/"+validDeploymentID+"/products", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", validDeploymentID)
+		w := httptest.NewRecorder()
+		h.PostDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/"+validDeploymentID+"/products", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", validDeploymentID)
+		w := httptest.NewRecorder()
+		h.PostDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("injects deploymentId and returns 201", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityDeploymentClient{
+			postDeployedProductFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"Deployed product created","deployedProduct":{"id":"55555555-5555-5555-5555-555555555555","createdOn":"2026-06-28T00:00:00Z","createdBy":"user@wso2.com"}}`), nil
+			},
+		}
+		h := NewDeploymentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/"+validDeploymentID+"/products", strings.NewReader(validBody)))
+		r.SetPathValue("id", validDeploymentID)
+		w := httptest.NewRecorder()
+		h.PostDeployedProduct(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
+		}
+		var injectedID string
+		if err := json.Unmarshal(sent["deploymentId"], &injectedID); err != nil || injectedID != validDeploymentID {
+			t.Errorf("upstream deploymentId = %q, want %q", injectedID, validDeploymentID)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Deployed product created" {
+			t.Errorf("message = %v, want %q", resp["message"], "Deployed product created")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create deployed product.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityDeploymentClient{
+					postDeployedProductFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewDeploymentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/deployments/"+validDeploymentID+"/products", strings.NewReader(validBody)))
+				r.SetPathValue("id", validDeploymentID)
+				w := httptest.NewRecorder()
+				h.PostDeployedProduct(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestPatchDeployedProduct(t *testing.T) {
+	const validDeploymentID = "11111111-1111-1111-1111-111111111111"
+	const validProductID = "55555555-5555-5555-5555-555555555555"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`{"cores":4}`))
+		r.SetPathValue("deploymentId", validDeploymentID)
+		r.SetPathValue("productId", validProductID)
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID deployment id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/not-a-uuid/products/"+validProductID, strings.NewReader(`{"cores":4}`)))
+		r.SetPathValue("deploymentId", "not-a-uuid")
+		r.SetPathValue("productId", validProductID)
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID product id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/not-a-uuid", strings.NewReader(`{"cores":4}`)))
+		r.SetPathValue("deploymentId", validDeploymentID)
+		r.SetPathValue("productId", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("deploymentId", validDeploymentID)
+		r.SetPathValue("productId", validProductID)
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`not-json`)))
+		r.SetPathValue("deploymentId", validDeploymentID)
+		r.SetPathValue("productId", validProductID)
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("injects deploymentId, forwards product id to upstream, and returns 200", func(t *testing.T) {
+		const reqPayload = `{"cores":8}`
+		var capturedID string
+		var capturedBody []byte
+		client := &mockEntityDeploymentClient{
+			patchDeployedProductFn: func(_ context.Context, deployedProductID string, body []byte) ([]byte, error) {
+				capturedID = deployedProductID
+				capturedBody = body
+				return []byte(`{"message":"Deployed product updated","deployedProduct":{"id":"` + validProductID + `","updatedOn":"2026-06-28T00:00:00Z","updatedBy":"user@wso2.com"}}`), nil
+			},
+		}
+		h := NewDeploymentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(reqPayload)))
+		r.SetPathValue("deploymentId", validDeploymentID)
+		r.SetPathValue("productId", validProductID)
+		w := httptest.NewRecorder()
+		h.PatchDeployedProduct(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != validProductID {
+			t.Errorf("upstream received id %q, want %q", capturedID, validProductID)
+		}
+
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
+		}
+		var injectedID string
+		if err := json.Unmarshal(sent["deploymentId"], &injectedID); err != nil || injectedID != validDeploymentID {
+			t.Errorf("upstream deploymentId = %q, want %q", injectedID, validDeploymentID)
+		}
+
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["message"] != "Deployed product updated" {
+			t.Errorf("message = %v, want %q", resp["message"], "Deployed product updated")
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update deployed product.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityDeploymentClient{
+					patchDeployedProductFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewDeploymentHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/deployments/"+validDeploymentID+"/products/"+validProductID, strings.NewReader(`{"cores":4}`)))
+				r.SetPathValue("deploymentId", validDeploymentID)
+				r.SetPathValue("productId", validProductID)
+				w := httptest.NewRecorder()
+				h.PatchDeployedProduct(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

@@ -171,6 +171,9 @@ backend/
 - `POST /cases/{id}/attachments` — Upload an attachment to a case
 - `POST /cases/{id}/attachments/search` — Search attachments on a case
 - `GET /cases/{case_id}/attachments/{attachment_id}/content` — Download an attachment
+- `POST /cases/{id}/call-requests` — Create a call request for a case (ServiceNow only)
+- `POST /cases/{id}/call-requests/search` — Search call requests for a case (ServiceNow only)
+- `PATCH /cases/{id}/call-requests/{callRequestId}` — Update a call request (ServiceNow only)
 
 ### Users
 
@@ -196,8 +199,10 @@ backend/
 ### Deployments
 
 - `POST /deployments` — Create a deployment (ServiceNow data source only)
-- `PATCH /deployments/{id}` — Update a deployment (name, typeKey, description, or deactivate; ServiceNow data source only)
+- `PATCH /deployments/{id}` — Update a deployment (name, type, description, or deactivate; ServiceNow data source only)
 - `POST /deployments/search` — Search deployments
+- `POST /deployments/{id}/products` — Create a deployed product under a deployment (ServiceNow data source only)
+- `PATCH /deployments/{deploymentId}/products/{productId}` — Update a deployed product (cores, tps, description, or deactivate; ServiceNow data source only)
 - `POST /deployments/{id}/products/search` — Search deployed products
 
 ### Change Requests

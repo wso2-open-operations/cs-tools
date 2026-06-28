@@ -97,6 +97,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc)
 
+	var callRequestHandler *handler.CallRequestHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		callRequestHandler = handler.NewCallRequestHandler(service.NewServiceNowCallRequestService(serviceNowIntegrationServiceClient))
+	}
+
 	var changeRequestHandler *handler.ChangeRequestHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		changeRequestHandler = handler.NewChangeRequestHandler(service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient))
@@ -125,7 +130,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /deployments", deploymentHandler.CreateDeployment)
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)
 	mux.HandleFunc("PATCH /deployments/{id}", deploymentHandler.PatchDeployment)
+	mux.HandleFunc("POST /deployed-products", deployedProductHandler.CreateDeployedProduct)
 	mux.HandleFunc("POST /deployed-products/search", deployedProductHandler.SearchDeployedProducts)
+	mux.HandleFunc("PATCH /deployed-products/{id}", deployedProductHandler.PatchDeployedProduct)
 	mux.HandleFunc("GET /cases/{id}", caseHandler.GetCase)
 	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
@@ -135,6 +142,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /cases/{id}/attachments", caseHandler.CreateCaseAttachment)
 	mux.HandleFunc("POST /cases/{id}/attachments/search", caseHandler.SearchCaseAttachments)
 	mux.HandleFunc("GET /cases/{case_id}/attachments/{attachment_id}/content", caseHandler.GetCaseAttachmentContent)
+
+	if callRequestHandler != nil {
+		mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
+		mux.HandleFunc("POST /call-requests/search", callRequestHandler.SearchCallRequests)
+		mux.HandleFunc("PATCH /call-requests/{id}", callRequestHandler.PatchCallRequest)
+	}
 
 	if changeRequestHandler != nil {
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)

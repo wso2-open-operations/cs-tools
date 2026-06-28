@@ -18,7 +18,10 @@
 // entity service. No business logic lives here — only plain structs and enums.
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // UserType classifies a user's role within the system.
 type UserType string
@@ -448,6 +451,58 @@ type SearchDeployedProductsResponse struct {
 	Limit            int                   `json:"limit"`
 	Offset           int                   `json:"offset"`
 	HasMore          bool                  `json:"hasMore"`
+}
+
+// CreateDeployedProductRequest is the input for POST /deployed-products.
+// ProjectID, DeploymentID, ProductID, and VersionID are required.
+type CreateDeployedProductRequest struct {
+	ProjectID    string   `json:"projectId"`
+	DeploymentID string   `json:"deploymentId"`
+	ProductID    string   `json:"productId"`
+	VersionID    string   `json:"versionId"`
+	Cores        *int     `json:"cores"`
+	TPS          *float64 `json:"tps"`
+	Description  *string  `json:"description"`
+}
+
+// CreateDeployedProductResponse is the response for POST /deployed-products.
+type CreateDeployedProductResponse struct {
+	Message         string                 `json:"message"`
+	DeployedProduct CreatedDeployedProduct `json:"deployedProduct"`
+}
+
+// CreatedDeployedProduct carries the key fields of a newly created deployed product.
+type CreatedDeployedProduct struct {
+	ID        string    `json:"id"`
+	CreatedOn time.Time `json:"createdOn"`
+	CreatedBy string    `json:"createdBy"`
+}
+
+// UpdateDeployedProductRequest is the input for PATCH /deployed-products/{id}.
+// Either detail fields (Cores, TPS, Description) or Active=false must be provided, but not both.
+// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear, `"value"` = set.
+// DeploymentID, when provided, scopes the update: the deployed product must belong to that
+// deployment or the operation returns a NotFoundError.
+type UpdateDeployedProductRequest struct {
+	ID           string          `json:"-"`
+	DeploymentID *string         `json:"deploymentId,omitempty"`
+	Cores        *int            `json:"cores"`
+	TPS          *float64        `json:"tps"`
+	Description  json.RawMessage `json:"description,omitempty"`
+	Active       *bool           `json:"active"`
+}
+
+// UpdateDeployedProductResponse is the response for PATCH /deployed-products/{id}.
+type UpdateDeployedProductResponse struct {
+	Message         string                 `json:"message"`
+	DeployedProduct UpdatedDeployedProduct `json:"deployedProduct"`
+}
+
+// UpdatedDeployedProduct carries the fields that may change after an update.
+type UpdatedDeployedProduct struct {
+	ID        string    `json:"id"`
+	UpdatedOn time.Time `json:"updatedOn"`
+	UpdatedBy string    `json:"updatedBy"`
 }
 
 // CaseIssueType classifies the nature of a support case.
@@ -1135,3 +1190,108 @@ type SearchProductVulnerabilitiesResponse struct {
 	Offset                 int                        `json:"offset"`
 }
 
+// CallRequestStateType is the state of a call request as a domain string enum.
+type CallRequestStateType string
+
+const (
+	CallRequestStatePendingOnCustomer CallRequestStateType = "pending_on_customer"
+	CallRequestStatePendingOnWSO2     CallRequestStateType = "pending_on_wso2"
+	CallRequestStateScheduled         CallRequestStateType = "scheduled"
+	CallRequestStateCustomerRejected  CallRequestStateType = "customer_rejected"
+	CallRequestStateWSO2Rejected      CallRequestStateType = "wso2_rejected"
+	CallRequestStateCanceled          CallRequestStateType = "canceled"
+	CallRequestStateNotesPending      CallRequestStateType = "notes_pending"
+	CallRequestStateConcluded         CallRequestStateType = "concluded"
+)
+
+// CallRequestState holds the state of a call request.
+// ID uses json.RawMessage because the ServiceNow API returns either an int or a string.
+type CallRequestState struct {
+	ID    json.RawMessage `json:"id"`
+	Label string          `json:"label"`
+}
+
+// CallRequestCaseRef is a reference to a case embedded in a call request.
+type CallRequestCaseRef struct {
+	ID     string  `json:"id"`
+	Name   string  `json:"name"`
+	Number *string `json:"number,omitempty"`
+}
+
+// CreateCallRequestRequest is the input for POST /call-requests.
+type CreateCallRequestRequest struct {
+	CaseID          string   `json:"caseId"`
+	Reason          string   `json:"reason"`
+	UTCTimes        []string `json:"utcTimes"`
+	DurationMinutes int      `json:"durationInMinutes"`
+}
+
+// CreateCallRequestResponse is the output for POST /call-requests.
+type CreateCallRequestResponse struct {
+	Message     string `json:"message"`
+	CallRequest struct {
+		ID        string           `json:"id"`
+		CreatedOn string           `json:"createdOn"`
+		CreatedBy string           `json:"createdBy"`
+		State     CallRequestState `json:"state"`
+	} `json:"callRequest"`
+}
+
+// SearchCallRequestsFilters holds optional filter criteria for call request searches.
+type SearchCallRequestsFilters struct {
+	States []CallRequestStateType `json:"states,omitempty"`
+}
+
+// SearchCallRequestsRequest is the input for POST /call-requests/search.
+type SearchCallRequestsRequest struct {
+	CaseID     string                     `json:"caseId"`
+	Filters    *SearchCallRequestsFilters `json:"filters,omitempty"`
+	Pagination Pagination                 `json:"pagination"`
+}
+
+// CallRequestView is a single call request returned in a search response.
+type CallRequestView struct {
+	ID                 string             `json:"id"`
+	Number             string             `json:"number"`
+	Case               CallRequestCaseRef `json:"case"`
+	Reason             *string            `json:"reason"`
+	PreferredTimes     []string           `json:"preferredTimes"`
+	DurationMin        int                `json:"durationMin"`
+	ScheduleTime       *string            `json:"scheduleTime"`
+	MeetingLink        *string            `json:"meetingLink"`
+	CreatedOn          string             `json:"createdOn"`
+	UpdatedOn          string             `json:"updatedOn"`
+	State              CallRequestState   `json:"state"`
+	CancellationReason *string            `json:"cancellationReason,omitempty"`
+}
+
+// SearchCallRequestsResponse is the paginated result of a call request search.
+type SearchCallRequestsResponse struct {
+	CallRequests []CallRequestView `json:"callRequests"`
+	Total        int               `json:"total"`
+	Offset       int               `json:"offset"`
+	Limit        int               `json:"limit"`
+}
+
+// UpdateCallRequestRequest is the input for PATCH /call-requests/{id}.
+// ID is injected from the URL path parameter and excluded from JSON decoding.
+// CaseID is optional; when provided the SN service verifies the call request
+// belongs to that case before applying the update (IDOR guard).
+type UpdateCallRequestRequest struct {
+	ID                 string               `json:"-"`
+	CaseID             string               `json:"caseId,omitempty"`
+	State              CallRequestStateType `json:"state"`
+	CancellationReason *string              `json:"cancellationReason,omitempty"`
+	UTCTimes           []string             `json:"utcTimes,omitempty"`
+	DurationMinutes    *int                 `json:"durationInMinutes,omitempty"`
+}
+
+// UpdateCallRequestResponse is the output for PATCH /call-requests/{id}.
+type UpdateCallRequestResponse struct {
+	Message     string `json:"message"`
+	CallRequest struct {
+		ID        string `json:"id"`
+		UpdatedOn string `json:"updatedOn"`
+		UpdatedBy string `json:"updatedBy"`
+	} `json:"callRequest"`
+}

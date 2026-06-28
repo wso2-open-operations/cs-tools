@@ -20,6 +20,7 @@ package service
 import (
 	"context"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -54,4 +55,14 @@ func (s *deployedProductService) SearchDeployedProducts(ctx context.Context, req
 		Offset:           req.Pagination.Offset,
 		HasMore:          req.Pagination.Offset+len(views) < total,
 	}, nil
+}
+
+// CreateDeployedProduct is not supported for the PostgreSQL data source.
+func (s *deployedProductService) CreateDeployedProduct(_ context.Context, _ domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error) {
+	return domain.CreateDeployedProductResponse{}, &apierror.ValidationError{Msg: "CreateDeployedProduct is not supported for the PostgreSQL data source"}
+}
+
+// UpdateDeployedProduct is not supported for the PostgreSQL data source.
+func (s *deployedProductService) UpdateDeployedProduct(_ context.Context, _ domain.UpdateDeployedProductRequest) (domain.UpdateDeployedProductResponse, error) {
+	return domain.UpdateDeployedProductResponse{}, &apierror.ValidationError{Msg: "UpdateDeployedProduct is not supported for the PostgreSQL data source"}
 }

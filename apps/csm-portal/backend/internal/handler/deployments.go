@@ -44,12 +44,31 @@ func injectDeploymentID(body []byte, deploymentID string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// injectDeploymentIDField merges a deployment ID into a JSON request body as deploymentId: id.
+func injectDeploymentIDField(body []byte, deploymentID string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("request body must be a JSON object")
+	}
+	id, err := json.Marshal(deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	m["deploymentId"] = id
+	return json.Marshal(m)
+}
+
 // entityDeploymentClient abstracts the entity service deployment operations used by DeploymentHandler.
 type entityDeploymentClient interface {
 	PostDeployment(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
 	PatchDeployment(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
+	PostDeployedProduct(ctx context.Context, body []byte) ([]byte, error)
+	PatchDeployedProduct(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
 }
 
 // DeploymentHandler handles HTTP requests for deployment operations, delegating to the
@@ -218,6 +237,108 @@ func (h *DeploymentHandler) SearchDeployedProducts(w http.ResponseWriter, r *htt
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProducts failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
 		mapUpstreamError(w, err, "Failed to search deployed products.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// PostDeployedProduct handles POST /deployments/{id}/products.
+// The deployment ID from the path is injected into the body as deploymentId before forwarding.
+func (h *DeploymentHandler) PostDeployedProduct(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	deploymentID := r.PathValue("id")
+	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectDeploymentIDField(body, deploymentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PostDeployedProduct(r.Context(), entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PostDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		mapUpstreamError(w, err, "Failed to create deployed product.")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// PatchDeployedProduct handles PATCH /deployments/{id}/products/{productId}.
+// The {productId} is the deployed product ID forwarded to the entity service.
+func (h *DeploymentHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	deploymentID := r.PathValue("deploymentId")
+	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	productID := r.PathValue("productId")
+	if productID == "" || !uuidRe.MatchString(productID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	entityBody, err := injectDeploymentIDField(body, deploymentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchDeployedProduct(r.Context(), productID, entityBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity PatchDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "productID", productID, "err", err)
+		mapUpstreamError(w, err, "Failed to update deployed product.")
 		return
 	}
 

@@ -125,6 +125,18 @@ func (c *Client) SearchDeployedProducts(ctx context.Context, body []byte) ([]byt
 	return c.do(ctx, http.MethodPost, "/deployed-products/search", body)
 }
 
+// PostDeployedProduct calls POST /deployed-products on the entity service to create a new deployed product.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) PostDeployedProduct(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/deployed-products", body)
+}
+
+// PatchDeployedProduct calls PATCH /deployed-products/{id} on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) PatchDeployedProduct(ctx context.Context, deployedProductID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/deployed-products/%s", url.PathEscape(deployedProductID)), body)
+}
+
 // SearchChangeRequests calls POST /change-requests/search on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) SearchChangeRequests(ctx context.Context, body []byte) ([]byte, error) {
@@ -179,3 +191,20 @@ func (c *Client) GetProductVulnerability(ctx context.Context, id string) ([]byte
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/products/vulnerabilities/%s", url.PathEscape(id)), nil)
 }
 
+// CreateCallRequest calls POST /call-requests on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/call-requests", body)
+}
+
+// SearchCallRequests calls POST /call-requests/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchCallRequests(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/call-requests/search", body)
+}
+
+// PatchCallRequest calls PATCH /call-requests/{id} on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/call-requests/%s", url.PathEscape(callRequestID)), body)
+}
