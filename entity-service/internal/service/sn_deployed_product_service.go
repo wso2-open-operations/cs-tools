@@ -201,24 +201,33 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 
 	// When deploymentId is provided, verify the product belongs to that deployment
 	// before mutating it to prevent cross-deployment modification (IDOR).
+	// Choreo caps pagination at 50, so pages are iterated until the product is found
+	// or all results are exhausted.
 	if req.DeploymentID != nil {
-		searchPayload := snDeployedProductSearchPayload{
-			Filters:    snDeployedProductFilters{DeploymentIDs: []string{uuidToSysid(*req.DeploymentID)}},
-			Pagination: snProjectPagination{Limit: 100, Offset: 0},
-		}
-		raw, err := s.client.Post(ctx, "/deployed-products/search", token, searchPayload)
-		if err != nil {
-			return domain.UpdateDeployedProductResponse{}, err
-		}
-		var searchResp snDeployedProductsResponse
-		if err := json.Unmarshal(raw, &searchResp); err != nil {
-			return domain.UpdateDeployedProductResponse{}, fmt.Errorf("sn update deployed product: parse scope check: %w", err)
-		}
+		const scopePageSize = 50
 		productSysid := uuidToSysid(req.ID)
+		deploymentSysid := uuidToSysid(*req.DeploymentID)
 		found := false
-		for _, dp := range searchResp.DeployedProducts {
-			if dp.ID == productSysid {
-				found = true
+		for offset := 0; !found; offset += scopePageSize {
+			searchPayload := snDeployedProductSearchPayload{
+				Filters:    snDeployedProductFilters{DeploymentIDs: []string{deploymentSysid}},
+				Pagination: snProjectPagination{Limit: scopePageSize, Offset: offset},
+			}
+			raw, err := s.client.Post(ctx, "/deployed-products/search", token, searchPayload)
+			if err != nil {
+				return domain.UpdateDeployedProductResponse{}, err
+			}
+			var searchResp snDeployedProductsResponse
+			if err := json.Unmarshal(raw, &searchResp); err != nil {
+				return domain.UpdateDeployedProductResponse{}, fmt.Errorf("sn update deployed product: parse scope check: %w", err)
+			}
+			for _, dp := range searchResp.DeployedProducts {
+				if dp.ID == productSysid {
+					found = true
+					break
+				}
+			}
+			if offset+len(searchResp.DeployedProducts) >= searchResp.TotalRecords {
 				break
 			}
 		}
