@@ -858,6 +858,61 @@ export interface BeDeployedProductSearchResponse extends BeSearchResponseBase {
   deployedProducts: BeDeployedProduct[];
 }
 
+/**
+ * Request body for `POST /deployments/{id}/products`. All three ID fields are
+ * required per the OpenAPI spec. Sizing fields are optional.
+ */
+export interface BeDeployedProductCreatePayload {
+  projectId: string;
+  productId: string;
+  versionId: string;
+  cores?: number;
+  tps?: number;
+  description?: string;
+}
+
+export interface BeDeployedProductCreateResponse {
+  message?: string;
+  deployedProduct?: {
+    id: string;
+    createdOn: string;
+    createdBy: string;
+  };
+}
+
+/**
+ * Detail-field update for `PATCH /deployments/{deploymentId}/products/{productId}`.
+ * At least one field required. All fields nullable (clears the value).
+ * `active` is forbidden on this variant -- use `BeDeployedProductDeactivatePayload`.
+ */
+export interface BeDeployedProductDetailUpdatePayload {
+  cores?: number | null;
+  tps?: number | null;
+  description?: string | null;
+  active?: never;
+}
+
+/** Deactivation variant: `active` must be `false`, alone. */
+export interface BeDeployedProductDeactivatePayload {
+  active: false;
+  cores?: never;
+  tps?: never;
+  description?: never;
+}
+
+export type BeDeployedProductUpdatePayload =
+  | BeDeployedProductDetailUpdatePayload
+  | BeDeployedProductDeactivatePayload;
+
+export interface BeDeployedProductUpdateResponse {
+  message?: string;
+  deployedProduct?: {
+    id: string;
+    updatedOn: string;
+    updatedBy: string;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Call requests
 // ---------------------------------------------------------------------------

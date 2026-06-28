@@ -108,7 +108,7 @@ export default function DeploymentDetailsDialog({
             </Box>
           )}
 
-          <DeployedProductsPanel deploymentId={deployment.id} />
+          <DeployedProductsPanel deploymentId={deployment.id} projectId={deployment.projectId} />
         </Box>
       </DialogContent>
       <DialogActions>
