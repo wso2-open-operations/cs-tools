@@ -1083,7 +1083,12 @@ type PatchChangeRequestResponse struct {
 type TimeCardState string
 
 const (
-	TimeCardStateApproved TimeCardState = "approved"
+	TimeCardStatePending   TimeCardState = "pending"
+	TimeCardStateSubmitted TimeCardState = "submitted"
+	TimeCardStateApproved  TimeCardState = "approved"
+	TimeCardStateRejected  TimeCardState = "rejected"
+	TimeCardStateProcessed TimeCardState = "processed"
+	TimeCardStateRecalled  TimeCardState = "recalled"
 )
 
 // SearchTimeCardsFilters holds optional filter criteria for POST /time-cards/search.

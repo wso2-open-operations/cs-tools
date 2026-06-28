@@ -30,17 +30,32 @@ import (
 
 // snTimeCardStateLabelToSN maps domain TimeCardState to the SN label string.
 var snTimeCardStateLabelToSN = map[domain.TimeCardState]string{
-	domain.TimeCardStateApproved: "Approved",
+	domain.TimeCardStatePending:   "Pending",
+	domain.TimeCardStateSubmitted: "Submitted",
+	domain.TimeCardStateApproved:  "Approved",
+	domain.TimeCardStateRejected:  "Rejected",
+	domain.TimeCardStateProcessed: "Processed",
+	domain.TimeCardStateRecalled:  "Recalled",
 }
 
 // validTimeCardStates is used to validate incoming state values.
 var validTimeCardStates = map[domain.TimeCardState]struct{}{
-	domain.TimeCardStateApproved: {},
+	domain.TimeCardStatePending:   {},
+	domain.TimeCardStateSubmitted: {},
+	domain.TimeCardStateApproved:  {},
+	domain.TimeCardStateRejected:  {},
+	domain.TimeCardStateProcessed: {},
+	domain.TimeCardStateRecalled:  {},
 }
 
 // snTimeCardStateLabelToDomain maps SN state labels (lowercased) to domain strings.
 var snTimeCardStateLabelToDomain = map[string]string{
-	"approved": string(domain.TimeCardStateApproved),
+	"pending":   string(domain.TimeCardStatePending),
+	"submitted": string(domain.TimeCardStateSubmitted),
+	"approved":  string(domain.TimeCardStateApproved),
+	"rejected":  string(domain.TimeCardStateRejected),
+	"processed": string(domain.TimeCardStateProcessed),
+	"recalled":  string(domain.TimeCardStateRecalled),
 }
 
 type snTimeCardSearchPayload struct {

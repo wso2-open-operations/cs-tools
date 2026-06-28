@@ -1563,7 +1563,12 @@ components:
     TimeCardState:
       type: string
       enum:
+        - pending
+        - submitted
         - approved
+        - rejected
+        - processed
+        - recalled
 
     SearchTimeCardsFilters:
       type: object
