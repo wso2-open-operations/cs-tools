@@ -49,3 +49,35 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// CreateDeployedProduct handles POST /deployed-products.
+func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateDeployedProductRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	result, err := h.svc.CreateDeployedProduct(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// PatchDeployedProduct handles PATCH /deployed-products/{id}.
+func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.Request) {
+	var req domain.UpdateDeployedProductRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	result, err := h.svc.UpdateDeployedProduct(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}

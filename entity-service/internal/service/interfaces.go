@@ -93,6 +93,13 @@ type DeployedProductService interface {
 	// optional deployment IDs. A ValidationError is returned for invalid input; any other
 	// error indicates an infrastructure failure.
 	SearchDeployedProducts(ctx context.Context, req domain.SearchDeployedProductsRequest) (domain.SearchDeployedProductsResponse, error)
+	// CreateDeployedProduct creates a new deployed product in ServiceNow.
+	// Supported by the ServiceNow data source only.
+	CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error)
+	// UpdateDeployedProduct updates a deployed product's cores, tps, description, or deactivates it.
+	// Either detail fields or Active=false must be provided, but not both.
+	// Supported by the ServiceNow data source only.
+	UpdateDeployedProduct(ctx context.Context, req domain.UpdateDeployedProductRequest) (domain.UpdateDeployedProductResponse, error)
 }
 
 // CaseService defines the operations available on the cases entity.

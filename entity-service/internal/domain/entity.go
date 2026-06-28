@@ -18,7 +18,10 @@
 // entity service. No business logic lives here — only plain structs and enums.
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // UserType classifies a user's role within the system.
 type UserType string
@@ -448,6 +451,58 @@ type SearchDeployedProductsResponse struct {
 	Limit            int                   `json:"limit"`
 	Offset           int                   `json:"offset"`
 	HasMore          bool                  `json:"hasMore"`
+}
+
+// CreateDeployedProductRequest is the input for POST /deployed-products.
+// ProjectID, DeploymentID, ProductID, and VersionID are required.
+type CreateDeployedProductRequest struct {
+	ProjectID    string   `json:"projectId"`
+	DeploymentID string   `json:"deploymentId"`
+	ProductID    string   `json:"productId"`
+	VersionID    string   `json:"versionId"`
+	Cores        *int     `json:"cores"`
+	TPS          *float64 `json:"tps"`
+	Description  *string  `json:"description"`
+}
+
+// CreateDeployedProductResponse is the response for POST /deployed-products.
+type CreateDeployedProductResponse struct {
+	Message         string                 `json:"message"`
+	DeployedProduct CreatedDeployedProduct `json:"deployedProduct"`
+}
+
+// CreatedDeployedProduct carries the key fields of a newly created deployed product.
+type CreatedDeployedProduct struct {
+	ID        string    `json:"id"`
+	CreatedOn time.Time `json:"createdOn"`
+	CreatedBy string    `json:"createdBy"`
+}
+
+// UpdateDeployedProductRequest is the input for PATCH /deployed-products/{id}.
+// Either detail fields (Cores, TPS, Description) or Active=false must be provided, but not both.
+// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear, `"value"` = set.
+// DeploymentID, when provided, scopes the update: the deployed product must belong to that
+// deployment or the operation returns a NotFoundError.
+type UpdateDeployedProductRequest struct {
+	ID           string          `json:"-"`
+	DeploymentID *string         `json:"deploymentId,omitempty"`
+	Cores        *int            `json:"cores"`
+	TPS          *float64        `json:"tps"`
+	Description  json.RawMessage `json:"description,omitempty"`
+	Active       *bool           `json:"active"`
+}
+
+// UpdateDeployedProductResponse is the response for PATCH /deployed-products/{id}.
+type UpdateDeployedProductResponse struct {
+	Message         string                 `json:"message"`
+	DeployedProduct UpdatedDeployedProduct `json:"deployedProduct"`
+}
+
+// UpdatedDeployedProduct carries the fields that may change after an update.
+type UpdatedDeployedProduct struct {
+	ID        string    `json:"id"`
+	UpdatedOn time.Time `json:"updatedOn"`
+	UpdatedBy string    `json:"updatedBy"`
 }
 
 // CaseIssueType classifies the nature of a support case.

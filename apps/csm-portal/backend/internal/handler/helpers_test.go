@@ -301,10 +301,12 @@ func (m *mockEntityChangeRequestClient) GetChangeRequest(ctx context.Context, id
 // ----- mock entity deployment client -----
 
 type mockEntityDeploymentClient struct {
-	postDeploymentFn         func(ctx context.Context, body []byte) ([]byte, error)
-	searchDeploymentsFn      func(ctx context.Context, body []byte) ([]byte, error)
-	searchDeployedProductsFn func(ctx context.Context, body []byte) ([]byte, error)
-	patchDeploymentFn        func(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
+	postDeploymentFn          func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeploymentsFn       func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeployedProductsFn  func(ctx context.Context, body []byte) ([]byte, error)
+	patchDeploymentFn         func(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
+	postDeployedProductFn     func(ctx context.Context, body []byte) ([]byte, error)
+	patchDeployedProductFn    func(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityDeploymentClient) PostDeployment(ctx context.Context, body []byte) ([]byte, error) {
@@ -331,6 +333,20 @@ func (m *mockEntityDeploymentClient) SearchDeployedProducts(ctx context.Context,
 func (m *mockEntityDeploymentClient) PatchDeployment(ctx context.Context, deploymentID string, body []byte) ([]byte, error) {
 	if m.patchDeploymentFn != nil {
 		return m.patchDeploymentFn(ctx, deploymentID, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityDeploymentClient) PostDeployedProduct(ctx context.Context, body []byte) ([]byte, error) {
+	if m.postDeployedProductFn != nil {
+		return m.postDeployedProductFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityDeploymentClient) PatchDeployedProduct(ctx context.Context, deployedProductID string, body []byte) ([]byte, error) {
+	if m.patchDeployedProductFn != nil {
+		return m.patchDeployedProductFn(ctx, deployedProductID, body)
 	}
 	return []byte(`{}`), nil
 }

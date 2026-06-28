@@ -195,8 +195,10 @@ backend/
 ### Deployments
 
 - `POST /deployments` — Create a deployment (ServiceNow data source only)
-- `PATCH /deployments/{id}` — Update a deployment (name, typeKey, description, or deactivate; ServiceNow data source only)
+- `PATCH /deployments/{id}` — Update a deployment (name, type, description, or deactivate; ServiceNow data source only)
 - `POST /deployments/search` — Search deployments
+- `POST /deployments/{id}/products` — Create a deployed product under a deployment (ServiceNow data source only)
+- `PATCH /deployments/{deploymentId}/products/{productId}` — Update a deployed product (cores, tps, description, or deactivate; ServiceNow data source only)
 - `POST /deployments/{id}/products/search` — Search deployed products
 
 ### Change Requests
