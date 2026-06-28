@@ -141,6 +141,20 @@ type CatalogService interface {
 	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) (domain.GetCatalogItemVariablesResponse, error)
 }
 
+// CallRequestService defines the operations available on the call_requests entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CallRequestService interface {
+	// CreateCallRequest creates a new call request for the given case.
+	// A ValidationError is returned for invalid input.
+	CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest) (domain.CreateCallRequestResponse, error)
+	// SearchCallRequests returns a paginated list of call requests for the given case.
+	// A ValidationError is returned for invalid input.
+	SearchCallRequests(ctx context.Context, req domain.SearchCallRequestsRequest) (domain.SearchCallRequestsResponse, error)
+	// UpdateCallRequest updates the state or other fields of a call request.
+	// A ValidationError is returned for invalid input; a NotFoundError if no call request matches.
+	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
+}
+
 // ChangeRequestService defines the operations available on the change_requests entity.
 type ChangeRequestService interface {
 	// SearchChangeRequests returns a paginated list of change requests filtered by optional

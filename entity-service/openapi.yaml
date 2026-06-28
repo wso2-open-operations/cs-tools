@@ -750,6 +750,127 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /call-requests:
+    post:
+      summary: Create a call request (ServiceNow data source only).
+      operationId: createCallRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCallRequestRequest'
+      responses:
+        "201":
+          description: Call request created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCallRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/search:
+    post:
+      summary: Search call requests (ServiceNow data source only).
+      operationId: searchCallRequests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCallRequestsRequest'
+      responses:
+        "200":
+          description: Call requests matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCallRequestsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /call-requests/{id}:
+    patch:
+      summary: Update a call request (ServiceNow data source only).
+      operationId: updateCallRequest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCallRequestRequest'
+      responses:
+        "200":
+          description: Call request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCallRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /change-requests/{id}:
     get:
       summary: Get a single change request by ID (ServiceNow data source only).
@@ -2472,6 +2593,171 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogItemVariable'
+
+    CallRequestState:
+      type: object
+      description: Choice-list state item. id may be an integer or a string depending on the ServiceNow configuration.
+      properties:
+        id:
+          description: State key (int or string).
+        label:
+          type: string
+          description: Human-readable state label.
+
+    CallRequestCaseRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        number:
+          type: string
+
+    CreateCallRequestRequest:
+      type: object
+      required: [caseId, reason, utcTimes, durationInMinutes]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case this call request belongs to.
+        reason:
+          type: string
+          description: Reason for the call request.
+        utcTimes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: Preferred UTC times for the call.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Duration of the call in minutes.
+
+    CreateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+            state:
+              $ref: '#/components/schemas/CallRequestState'
+
+    SearchCallRequestsRequest:
+      type: object
+      required: [caseId]
+      additionalProperties: false
+      properties:
+        caseId:
+          type: string
+          format: uuid
+          description: UUID of the case to search call requests for.
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            stateKeys:
+              type: array
+              items:
+                type: integer
+              description: Filter by one or more state keys.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    CallRequestView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        case:
+          $ref: '#/components/schemas/CallRequestCaseRef'
+        reason:
+          type: string
+        preferredTimes:
+          type: array
+          items:
+            type: string
+        durationMin:
+          type: integer
+        scheduleTime:
+          type: string
+        meetingLink:
+          type: string
+        createdOn:
+          type: string
+        updatedOn:
+          type: string
+        state:
+          $ref: '#/components/schemas/CallRequestState'
+        cancellationReason:
+          type: string
+
+    SearchCallRequestsResponse:
+      type: object
+      properties:
+        callRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallRequestView'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    UpdateCallRequestRequest:
+      type: object
+      required: [stateKey]
+      additionalProperties: false
+      properties:
+        stateKey:
+          type: integer
+          description: New state key for the call request.
+        cancellationReason:
+          type: string
+          description: Reason for cancellation (required when cancelling).
+        utcTimes:
+          type: array
+          items:
+            type: string
+          description: Updated preferred UTC times.
+        durationInMinutes:
+          type: integer
+          minimum: 1
+          description: Updated duration in minutes.
+
+    UpdateCallRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        callRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            updatedOn:
+              type: string
+            updatedBy:
+              type: string
 
     ErrorResponse:
       type: object

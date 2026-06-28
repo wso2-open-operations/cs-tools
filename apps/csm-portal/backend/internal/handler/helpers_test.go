@@ -85,15 +85,18 @@ func decodeJSON[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 // ----- mock entity case client -----
 
 type mockEntityCaseClient struct {
-	createCaseFn                func(ctx context.Context, body []byte) ([]byte, error)
-	patchCaseFn                 func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	createCaseCommentFn         func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCaseCommentsFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCasesFn               func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseFn                        func(ctx context.Context, caseID string) ([]byte, error)
-	createCaseAttachmentFn      func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCaseAttachmentsFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	getCaseAttachmentContentFn  func(ctx context.Context, caseID, attachmentID string) ([]byte, string, error)
+	createCaseFn               func(ctx context.Context, body []byte) ([]byte, error)
+	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCaseCommentsFn       func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
+	createCaseAttachmentFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCaseAttachmentsFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	getCaseAttachmentContentFn func(ctx context.Context, caseID, attachmentID string) ([]byte, string, error)
+	createCallRequestFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
+	patchCallRequestFn         func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityCaseClient) CreateCase(ctx context.Context, body []byte) ([]byte, error) {
@@ -157,6 +160,27 @@ func (m *mockEntityCaseClient) GetCaseAttachmentContent(ctx context.Context, cas
 		return m.getCaseAttachmentContentFn(ctx, caseID, attachmentID)
 	}
 	return []byte(`fake-content`), "image/png", nil
+}
+
+func (m *mockEntityCaseClient) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createCallRequestFn != nil {
+		return m.createCallRequestFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) SearchCallRequests(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCallRequestsFn != nil {
+		return m.searchCallRequestsFn(ctx, body)
+	}
+	return []byte(`{"callRequests":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityCaseClient) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	if m.patchCallRequestFn != nil {
+		return m.patchCallRequestFn(ctx, callRequestID, body)
+	}
+	return []byte(`{}`), nil
 }
 
 // ----- mock updates client -----

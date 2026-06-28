@@ -166,3 +166,21 @@ func (c *Client) SearchCatalogs(ctx context.Context, body []byte) ([]byte, error
 func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/catalogs/%s/items/%s/variables", url.PathEscape(catalogID), url.PathEscape(catalogItemID)), nil)
 }
+
+// CreateCallRequest calls POST /call-requests on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/call-requests", body)
+}
+
+// SearchCallRequests calls POST /call-requests/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchCallRequests(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/call-requests/search", body)
+}
+
+// PatchCallRequest calls PATCH /call-requests/{id} on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/call-requests/%s", url.PathEscape(callRequestID)), body)
+}
