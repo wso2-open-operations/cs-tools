@@ -38,6 +38,7 @@ import {
   ListChecks,
   MessageSquarePlus,
   Paperclip,
+  Phone,
   TriangleAlert,
   X,
 } from "@wso2/oxygen-ui-icons-react";
@@ -79,6 +80,7 @@ import {
   TimeLogsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
+import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import {
   publicCommentGateReason,
@@ -201,7 +203,8 @@ type CaseTabId =
   | "details"
   | "sla"
   | "attachments"
-  | "time";
+  | "time"
+  | "call-requests";
 
 /**
  * Walk the parent chain to find the nearest vertically-scrollable element.
@@ -236,6 +239,7 @@ const TAB_DEFS: Array<{
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
   // Time tracking is parked until its backend flow lands; disabled for now.
   { id: "time", label: "Time tracking", icon: <Layers size={16} />, disabled: true },
+  { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
 ];
 
 export default function CsmCaseDetailPage(): JSX.Element {
@@ -1238,6 +1242,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
             logs={c.timeLogs}
             onAdd={() => onAction({ secondary: "log_time" })}
           />
+        </Box>
+      )}
+
+      {activeTab === "call-requests" && caseId && (
+        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
+          <CallRequestsWidget caseId={caseId} />
         </Box>
       )}
 
