@@ -16,6 +16,8 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import { useMemo, type JSX } from "react";
+import { useNavigate } from "react-router";
+import { casesHref } from "@features/csm-cases/utils/casesFiltersUrl";
 import {
   COMPOSITION_STATES,
   useCaseComposition,
@@ -60,6 +62,7 @@ const STATE_SLICE_COLOR: Record<CaseState, string> = {
  */
 export default function CaseCompositionCharts(): JSX.Element {
   const { data, isLoading, isError } = useCaseComposition();
+  const navigate = useNavigate();
 
   const severitySlices = useMemo<CompositionSlice[]>(
     () =>
@@ -101,6 +104,9 @@ export default function CaseCompositionCharts(): JSX.Element {
           total={data?.severityTotal ?? 0}
           isLoading={isLoading}
           isError={isError}
+          onSliceClick={(id) =>
+            navigate(casesHref({ severities: [id as Severity] }))
+          }
         />
         <CompositionDonut
           title="Cases by state"
@@ -109,6 +115,9 @@ export default function CaseCompositionCharts(): JSX.Element {
           total={data?.stateTotal ?? 0}
           isLoading={isLoading}
           isError={isError}
+          onSliceClick={(id) =>
+            navigate(casesHref({ states: [id as CaseState] }))
+          }
         />
       </Box>
       {/* Reconciles the pies with the matrix above: both show active cases only,

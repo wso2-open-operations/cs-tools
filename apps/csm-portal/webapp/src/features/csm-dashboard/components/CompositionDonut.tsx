@@ -38,6 +38,12 @@ interface CompositionDonutProps {
   isError: boolean;
   /** Noun for the empty state, e.g. "cases". */
   emptyNoun?: string;
+  /**
+   * When provided, slices and legend rows become clickable and call this with
+   * the slice `id` (e.g. to navigate to a filtered list). Omit for a static
+   * chart.
+   */
+  onSliceClick?: (id: string) => void;
 }
 
 /**
@@ -53,6 +59,7 @@ export default function CompositionDonut({
   isLoading,
   isError,
   emptyNoun = "cases",
+  onSliceClick,
 }: CompositionDonutProps): JSX.Element {
   const pieData = slices.filter((s) => s.value > 0);
   const isEmpty = !isLoading && !isError && total === 0;
@@ -103,6 +110,9 @@ export default function CompositionDonut({
               width: DONUT_SIZE,
               height: DONUT_SIZE,
               flexShrink: 0,
+              ...(onSliceClick && {
+                "& .recharts-pie-sector": { cursor: "pointer" },
+              }),
             }}
           >
             <PieChart
@@ -123,6 +133,12 @@ export default function CompositionDonut({
                   endAngle: -270,
                   label: false,
                   labelLine: false,
+                  ...(onSliceClick && {
+                    onClick: (_data: unknown, index: number) => {
+                      const slice = pieData[index];
+                      if (slice) onSliceClick(slice.id);
+                    },
+                  }),
                 },
               ]}
             />
@@ -150,11 +166,13 @@ export default function CompositionDonut({
               return (
                 <Box
                   key={s.id}
+                  onClick={onSliceClick ? () => onSliceClick(s.id) : undefined}
                   sx={{
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 1,
+                    cursor: onSliceClick ? "pointer" : "default",
                   }}
                 >
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
