@@ -1008,9 +1008,16 @@ func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.Cre
 	}, nil
 }
 
+var validReferenceTypes = map[domain.ReferenceType]struct{}{
+	domain.ReferenceTypeCase:          {},
+	domain.ReferenceTypeConversation:  {},
+	domain.ReferenceTypeChangeRequest: {},
+	domain.ReferenceTypeDeployment:    {},
+}
+
 type snSearchAttachmentsPayload struct {
-	ReferenceID   string             `json:"referenceId"`
-	ReferenceType string             `json:"referenceType"`
+	ReferenceID   string              `json:"referenceId"`
+	ReferenceType string              `json:"referenceType"`
 	Pagination    snProjectPagination `json:"pagination"`
 }
 
@@ -1044,9 +1051,16 @@ func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.Se
 		return domain.SearchAttachmentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
+	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
+		return domain.SearchAttachmentsResponse{}, err
+	}
+	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
+		return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: "referenceType is invalid: " + string(req.ReferenceType)}
+	}
+
 	payload := snSearchAttachmentsPayload{
-		ReferenceID:   uuidToSysid(req.CaseID),
-		ReferenceType: "case",
+		ReferenceID:   uuidToSysid(req.ReferenceID),
+		ReferenceType: string(req.ReferenceType),
 		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 

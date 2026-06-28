@@ -3431,14 +3431,24 @@ components:
           type: string
           nullable: true
 
+    ReferenceType:
+      type: string
+      enum:
+        - case
+        - conversation
+        - change_request
+        - deployment
+
     AttachmentSearchPayload:
       type: object
-      required: [caseId]
+      required: [referenceId, referenceType]
       properties:
-        caseId:
+        referenceId:
           type: string
           format: uuid
-          description: UUID of the case whose attachments to search.
+          description: UUID of the reference entity (case, change request, etc.)
+        referenceType:
+          $ref: '#/components/schemas/ReferenceType'
         pagination:
           allOf:
             - $ref: '#/components/schemas/Pagination'

@@ -955,10 +955,21 @@ type CreateAttachmentResponse struct {
 	Attachment AttachmentDetail `json:"attachment"`
 }
 
+// ReferenceType identifies the entity type an attachment is associated with.
+type ReferenceType string
+
+const (
+	ReferenceTypeCase          ReferenceType = "case"
+	ReferenceTypeConversation  ReferenceType = "conversation"
+	ReferenceTypeChangeRequest ReferenceType = "change_request"
+	ReferenceTypeDeployment    ReferenceType = "deployment"
+)
+
 // SearchAttachmentsRequest is the input for POST /attachments/search.
 type SearchAttachmentsRequest struct {
-	CaseID     string     `json:"caseId"`
-	Pagination Pagination `json:"pagination"`
+	ReferenceID   string        `json:"referenceId"`
+	ReferenceType ReferenceType `json:"referenceType"`
+	Pagination    Pagination    `json:"pagination"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.

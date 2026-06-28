@@ -168,7 +168,7 @@ backend/
 - `POST /cases/{id}/comments` — Create a comment on a case
 - `POST /cases/{id}/comments/search` — Search comments on a case
 - `POST /attachments` — Upload an attachment to a case (`caseId` in body)
-- `POST /attachments/search` — Search attachments (`caseId` in body)
+- `POST /attachments/search` — Search attachments (`referenceId`, `referenceType` in body)
 - `GET /attachments/{attachmentId}/content` — Download an attachment
 - `DELETE /attachments/{attachmentId}` — Delete an attachment (ServiceNow only)
 - `POST /cases/{id}/call-requests` — Create a call request for a case (ServiceNow only)
