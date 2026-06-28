@@ -478,12 +478,15 @@ type CreatedDeployedProduct struct {
 // UpdateDeployedProductRequest is the input for PATCH /deployed-products/{id}.
 // Either detail fields (Cores, TPS, Description) or Active=false must be provided, but not both.
 // Description uses **string so nil means omit, *nil means clear, and *"val" means set.
+// DeploymentID, when provided, scopes the update: the deployed product must belong to that
+// deployment or the operation returns a NotFoundError.
 type UpdateDeployedProductRequest struct {
-	ID          string   `json:"-"`
-	Cores       *int     `json:"cores"`
-	TPS         *int     `json:"tps"`
-	Description **string `json:"description"`
-	Active      *bool    `json:"active"`
+	ID           string   `json:"-"`
+	DeploymentID *string  `json:"deploymentId,omitempty"`
+	Cores        *int     `json:"cores"`
+	TPS          *int     `json:"tps"`
+	Description  **string `json:"description"`
+	Active       *bool    `json:"active"`
 }
 
 // UpdateDeployedProductResponse is the response for PATCH /deployed-products/{id}.

@@ -177,6 +177,11 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateDeployedProductResponse{}, err
 	}
+	if req.DeploymentID != nil {
+		if err := validateUUIDs("deploymentId", []string{*req.DeploymentID}); err != nil {
+			return domain.UpdateDeployedProductResponse{}, err
+		}
+	}
 
 	hasDetailFields := req.Cores != nil || req.TPS != nil || req.Description != nil
 	if !hasDetailFields && req.Active == nil {
@@ -192,6 +197,34 @@ func (s *snDeployedProductService) UpdateDeployedProduct(ctx context.Context, re
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.UpdateDeployedProductResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	// When deploymentId is provided, verify the product belongs to that deployment
+	// before mutating it to prevent cross-deployment modification (IDOR).
+	if req.DeploymentID != nil {
+		searchPayload := snDeployedProductSearchPayload{
+			Filters:    snDeployedProductFilters{DeploymentIDs: []string{uuidToSysid(*req.DeploymentID)}},
+			Pagination: snProjectPagination{Limit: 100, Offset: 0},
+		}
+		raw, err := s.client.Post(ctx, "/deployed-products/search", token, searchPayload)
+		if err != nil {
+			return domain.UpdateDeployedProductResponse{}, err
+		}
+		var searchResp snDeployedProductsResponse
+		if err := json.Unmarshal(raw, &searchResp); err != nil {
+			return domain.UpdateDeployedProductResponse{}, fmt.Errorf("sn update deployed product: parse scope check: %w", err)
+		}
+		productSysid := uuidToSysid(req.ID)
+		found := false
+		for _, dp := range searchResp.DeployedProducts {
+			if dp.ID == productSysid {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return domain.UpdateDeployedProductResponse{}, &apierror.NotFoundError{Msg: "deployed product not found for the given deployment"}
+		}
 	}
 
 	payload := snUpdateDeployedProductPayload{

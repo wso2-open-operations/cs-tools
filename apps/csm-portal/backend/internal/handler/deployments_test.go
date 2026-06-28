@@ -555,7 +555,7 @@ func TestPatchDeployedProduct(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards body and product id to upstream and returns 200", func(t *testing.T) {
+	t.Run("injects deploymentId, forwards product id to upstream, and returns 200", func(t *testing.T) {
 		const reqPayload = `{"cores":8}`
 		var capturedID string
 		var capturedBody []byte
@@ -578,9 +578,16 @@ func TestPatchDeployedProduct(t *testing.T) {
 		if capturedID != validProductID {
 			t.Errorf("upstream received id %q, want %q", capturedID, validProductID)
 		}
-		if string(capturedBody) != reqPayload {
-			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+
+		var sent map[string]json.RawMessage
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
+		var injectedID string
+		if err := json.Unmarshal(sent["deploymentId"], &injectedID); err != nil || injectedID != validDeploymentID {
+			t.Errorf("upstream deploymentId = %q, want %q", injectedID, validDeploymentID)
+		}
+
 		resp := decodeJSON[map[string]any](t, w)
 		if resp["message"] != "Deployed product updated" {
 			t.Errorf("message = %v, want %q", resp["message"], "Deployed product updated")

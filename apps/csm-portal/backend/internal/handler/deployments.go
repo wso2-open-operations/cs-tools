@@ -329,7 +329,13 @@ func (h *DeploymentHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.
 		return
 	}
 
-	result, err := h.entity.PatchDeployedProduct(r.Context(), productID, body)
+	entityBody, err := injectDeploymentIDField(body, deploymentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.PatchDeployedProduct(r.Context(), productID, entityBody)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "productID", productID, "err", err)
 		mapUpstreamError(w, err, "Failed to update deployed product.")
