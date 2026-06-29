@@ -81,8 +81,8 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 
 	where := "WHERE 1=1"
 
-	if req.SearchQuery != "" {
-		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.SearchQuery)
+	if req.Filters.SearchQuery != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(req.Filters.SearchQuery)
 		pattern := "%" + escaped + "%"
 		// Both branches reference the same positional parameter — PostgreSQL allows $N to appear multiple times.
 		where += fmt.Sprintf(
@@ -91,6 +91,26 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 		)
 		filterArgs = append(filterArgs, pattern)
 		argIdx++
+	}
+
+	if len(req.Filters.UserNames) > 0 {
+		placeholders := make([]string, len(req.Filters.UserNames))
+		for i, un := range req.Filters.UserNames {
+			placeholders[i] = fmt.Sprintf("$%d", argIdx)
+			filterArgs = append(filterArgs, un)
+			argIdx++
+		}
+		where += " AND user_name = ANY(ARRAY[" + strings.Join(placeholders, ",") + "])"
+	}
+
+	if len(req.Filters.Emails) > 0 {
+		placeholders := make([]string, len(req.Filters.Emails))
+		for i, em := range req.Filters.Emails {
+			placeholders[i] = fmt.Sprintf("$%d", argIdx)
+			filterArgs = append(filterArgs, em)
+			argIdx++
+		}
+		where += " AND email = ANY(ARRAY[" + strings.Join(placeholders, ",") + "])"
 	}
 
 	countQuery := "SELECT COUNT(*) FROM users " + where
