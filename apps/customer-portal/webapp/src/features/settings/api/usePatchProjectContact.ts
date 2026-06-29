@@ -28,6 +28,7 @@ import { parseApiResponseMessage } from "@utils/ApiError";
 export interface PatchProjectContactVariables {
   email: string;
   isCsAdmin: boolean;
+  isLead: boolean;
   isPortalUser: boolean;
   isSecurityContact: boolean;
 }
@@ -48,9 +49,9 @@ export function usePatchProjectContact(
   const authFetch = useAuthApiClient();
 
   return useMutation<void, Error, PatchProjectContactVariables>({
-    mutationFn: async ({ email, isCsAdmin, isPortalUser, isSecurityContact }): Promise<void> => {
+    mutationFn: async ({ email, isCsAdmin, isLead, isPortalUser, isSecurityContact }): Promise<void> => {
       logger.debug(
-        `[usePatchProjectContact] Patching ${email} isCsAdmin=${isCsAdmin} isPortalUser=${isPortalUser} isSecurityContact=${isSecurityContact}`,
+        `[usePatchProjectContact] Patching ${email} isCsAdmin=${isCsAdmin} isLead=${isLead} isPortalUser=${isPortalUser} isSecurityContact=${isSecurityContact}`,
       );
 
       try {
@@ -66,7 +67,7 @@ export function usePatchProjectContact(
         const requestUrl = `${baseUrl}/projects/${projectId}/contacts/${encodeURIComponent(email)}`;
         const response = await authFetch(requestUrl, {
           method: "PATCH",
-          body: JSON.stringify({ isCsAdmin, isPortalUser, isSecurityContact }),
+          body: JSON.stringify({ isCsAdmin, isLead, isPortalUser, isSecurityContact }),
         });
 
         if (!response.ok) {

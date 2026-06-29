@@ -15,7 +15,7 @@
 // under the License.
 
 import { colors } from "@wso2/oxygen-ui";
-import { Code, Crown, Monitor, Shield, Users } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield, TriangleAlert, Users } from "@wso2/oxygen-ui-icons-react";
 import {
   NULL_PLACEHOLDER,
   SETTINGS_AVATAR_BACKGROUND_COLORS,
@@ -34,6 +34,10 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
 
   if (contact.isCsAdmin) {
     badges.push({ label: "Admin", Icon: Crown, chipColor: "primary" });
+  }
+
+  if (contact.isLead) {
+    badges.push({ label: "Lead", Icon: TriangleAlert, chipColor: "warning" });
   }
 
   if (contact.isCsIntegrationUser) {
