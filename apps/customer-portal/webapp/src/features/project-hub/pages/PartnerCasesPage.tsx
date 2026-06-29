@@ -35,7 +35,7 @@ import {
 import { ArrowLeft, FileText, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { type ChangeEvent, type JSX, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { useGetGlobalCasesPage } from "@api/useGetGlobalCasesPage";
+import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
@@ -94,16 +94,16 @@ export default function PartnerCasesPage(): JSX.Element {
     setSearchParams(params, { replace: true });
   }, [debouncedSearchQuery, setSearchParams]);
 
-  const { data, isLoading, isError } = useGetGlobalCasesPage(
-    {
-      filters: debouncedSearchQuery ? { searchQuery: debouncedSearchQuery } : undefined,
+  const { data, isLoading, isError } = useGetGlobalSearch({
+    filters: {
+      types: ["cases"],
+      ...(debouncedSearchQuery ? { searchQuery: debouncedSearchQuery } : {}),
     },
-    page * rowsPerPage,
-    rowsPerPage,
-  );
+    casesPagination: { offset: page * rowsPerPage, limit: rowsPerPage },
+  });
 
   const cases = data?.cases ?? [];
-  const totalRecords = data?.totalRecords ?? 0;
+  const totalRecords = data?.casesTotal ?? 0;
 
   const handleChangePage = (_: unknown, newPage: number) => setPage(newPage);
   const handleChangeRowsPerPage = (e: ChangeEvent<HTMLInputElement>) => {
@@ -301,7 +301,7 @@ export default function PartnerCasesPage(): JSX.Element {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          {c.status?.label ?? "--"}
+                          {c.state?.label ?? "--"}
                         </Typography>
                       </TableCell>
                       <TableCell>

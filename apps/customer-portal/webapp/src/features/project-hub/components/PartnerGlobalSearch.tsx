@@ -36,10 +36,9 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown, Download, FileText, FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, type MouseEvent, useCallback, useMemo, useRef, useState } from "react";
+import { type JSX, type MouseEvent, useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useGetGlobalCasesPage } from "@api/useGetGlobalCasesPage";
-import useInfiniteProjects from "@api/useGetProjects";
+import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -50,6 +49,7 @@ import {
   fetchAllProjectsForExport,
 } from "@features/project-hub/utils/projectsExport";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
+import type { GlobalSearchProject, GlobalSearchCase } from "@features/project-hub/types/globalSearch";
 
 type ExportFormat = "csv" | "pdf";
 
@@ -173,55 +173,49 @@ export default function PartnerGlobalSearch(): JSX.Element {
 
   const isExporting = exportingFormat !== null;
 
-  // Table queries — always unfiltered; do not react to the search input
+  // Table query — always unfiltered; does not react to the search input
   const {
-    data: projectsData,
-    isLoading: isLoadingProjects,
-    isError: isErrorProjects,
-  } = useInfiniteProjects({ pageSize: GLOBAL_SEARCH_PAGE_SIZE });
-
-  const {
-    data: casesData,
-    isLoading: isLoadingCases,
-    isError: isErrorCases,
-  } = useGetGlobalCasesPage({}, 0, GLOBAL_SEARCH_PAGE_SIZE);
-
-  // Dropdown queries — filtered by the live search query
-  const {
-    data: dropdownProjectsData,
-    isLoading: isLoadingDropdownProjects,
-  } = useInfiniteProjects({
-    pageSize: DROPDOWN_RESULT_LIMIT,
-    searchQuery: debouncedSearchQuery || undefined,
+    data: tableData,
+    isLoading: isLoadingTable,
+    isError: isErrorTable,
+  } = useGetGlobalSearch({
+    projectsPagination: { offset: 0, limit: GLOBAL_SEARCH_PAGE_SIZE },
+    casesPagination: { offset: 0, limit: GLOBAL_SEARCH_PAGE_SIZE },
   });
 
+  // Dropdown query — filtered by the live search query
   const {
-    data: dropdownCasesData,
-    isLoading: isLoadingDropdownCases,
-  } = useGetGlobalCasesPage(
-    { filters: debouncedSearchQuery ? { searchQuery: debouncedSearchQuery } : undefined },
-    0,
-    DROPDOWN_RESULT_LIMIT,
+    data: dropdownData,
+    isLoading: isLoadingDropdown,
+  } = useGetGlobalSearch(
+    {
+      filters: debouncedSearchQuery ? { searchQuery: debouncedSearchQuery } : undefined,
+      projectsPagination: { offset: 0, limit: DROPDOWN_RESULT_LIMIT },
+      casesPagination: { offset: 0, limit: DROPDOWN_RESULT_LIMIT },
+    },
+    { enabled: Boolean(debouncedSearchQuery) },
   );
 
-  const projects = useMemo(
-    () => (projectsData?.pages[0]?.projects ?? []).slice(0, GLOBAL_SEARCH_PAGE_SIZE),
-    [projectsData],
-  );
-  const projectsTotal = projectsData?.pages[0]?.totalRecords ?? 0;
-  const cases = casesData?.cases ?? [];
-  const casesTotal = casesData?.totalRecords ?? 0;
+  const projects: GlobalSearchProject[] = tableData?.projects ?? [];
+  const projectsTotal = tableData?.projectsTotal ?? 0;
+  const cases: GlobalSearchCase[] = tableData?.cases ?? [];
+  const casesTotal = tableData?.casesTotal ?? 0;
+
+  const isLoadingProjects = isLoadingTable;
+  const isLoadingCases = isLoadingTable;
+  const isErrorProjects = isErrorTable;
+  const isErrorCases = isErrorTable;
 
   const projectsMoreCount = Math.max(0, projectsTotal - projects.length);
   const casesMoreCount = Math.max(0, casesTotal - cases.length);
 
   const isDebouncing = searchQuery.trim() !== debouncedSearchQuery.trim();
-  const dropdownProjects = isDebouncing || isLoadingDropdownProjects
+  const dropdownProjects: GlobalSearchProject[] = isDebouncing || isLoadingDropdown
     ? []
-    : (dropdownProjectsData?.pages[0]?.projects ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
-  const dropdownCases = isDebouncing || isLoadingDropdownCases
+    : (dropdownData?.projects ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
+  const dropdownCases: GlobalSearchCase[] = isDebouncing || isLoadingDropdown
     ? []
-    : (dropdownCasesData?.cases ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
+    : (dropdownData?.cases ?? []).slice(0, DROPDOWN_RESULT_LIMIT);
 
   return (
     <Box
@@ -747,7 +741,7 @@ export default function PartnerGlobalSearch(): JSX.Element {
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">
-                            {c.status?.label ?? "--"}
+                            {c.state?.label ?? "--"}
                           </Typography>
                         </TableCell>
                         <TableCell>
