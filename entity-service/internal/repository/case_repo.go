@@ -400,6 +400,22 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		argIdx++
 	}
 
+	if len(req.Filters.WorkStates) > 0 {
+		workStateStrings := make([]string, len(req.Filters.WorkStates))
+		for i, ws := range req.Filters.WorkStates {
+			workStateStrings[i] = string(ws)
+		}
+		where += fmt.Sprintf(" AND c.work_state = ANY($%d::case_work_state_enum[])", argIdx)
+		filterArgs = append(filterArgs, workStateStrings)
+		argIdx++
+	}
+
+	if len(req.Filters.AssignedUserIDs) > 0 {
+		where += fmt.Sprintf(" AND c.assigned_engineer = ANY($%d::uuid[])", argIdx)
+		filterArgs = append(filterArgs, req.Filters.AssignedUserIDs)
+		argIdx++
+	}
+
 	if req.Filters.ClosedStartDate != nil {
 		where += fmt.Sprintf(" AND c.closed_at >= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Filters.ClosedStartDate)
