@@ -1102,6 +1102,8 @@ public type ContactOnboardPayload record {|
     boolean isCsIntegrationUser;
     # Whether the contact is a customer admin or not
     boolean isCsAdmin = false;
+    # Whether the contact is a lead or not
+    boolean isLead = false;
     # Whether the contact is a portal user or not
     boolean isPortalUser = false;
     # Whether the contact is Security Contact or not
@@ -1112,6 +1114,8 @@ public type ContactOnboardPayload record {|
 public type MembershipRolePayload record {|
     # Whether the contact is a customer admin or not
     boolean isCsAdmin = false;
+    # Whether the contact is a lead or not
+    boolean isLead = false;
     # Whether the contact is a portal user or not
     boolean isPortalUser = false;
     # Whether the contact is a security contact or not

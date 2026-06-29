@@ -4388,6 +4388,10 @@ components:
           type: boolean
           description: Whether the contact is a customer admin or not
           default: false
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
+          default: false
         isPortalUser:
           type: boolean
           description: Whether the contact is a portal user or not
@@ -5019,6 +5023,7 @@ components:
       required:
       - id
       - isCsAdmin
+      - isLead
       - isPortalUser
       - isSecurityContact
       - state
@@ -5033,6 +5038,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+          nullable: true
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
           nullable: true
         isPortalUser:
           type: boolean
@@ -5051,6 +5060,10 @@ components:
         isCsAdmin:
           type: boolean
           description: Whether the contact is a customer admin or not
+          default: false
+        isLead:
+          type: boolean
+          description: Whether the contact is a lead or not
           default: false
         isPortalUser:
           type: boolean
