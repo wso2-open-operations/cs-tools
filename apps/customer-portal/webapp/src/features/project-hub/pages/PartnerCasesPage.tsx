@@ -40,13 +40,13 @@ import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
-import { getStatusColor } from "@features/dashboard/utils/casesTable";
+import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 const DEFAULT_ROWS_PER_PAGE = 10;
 const SKELETON_ROW_COUNT = 5;
-const COL_SPAN = 5;
+const COL_SPAN = 6;
 
 /**
  * Full-page cases search for partner users.
@@ -199,10 +199,10 @@ export default function PartnerCasesPage(): JSX.Element {
           <Table sx={{ minWidth: 720 }}>
             <TableHead>
               <TableRow>
-                <TableCell>Case #</TableCell>
-                <TableCell>Title</TableCell>
+                <TableCell>Details</TableCell>
                 <TableCell>Severity</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Created by</TableCell>
                 <TableCell>Project</TableCell>
               </TableRow>
             </TableHead>
@@ -258,13 +258,19 @@ export default function PartnerCasesPage(): JSX.Element {
                       sx={{ cursor: "pointer" }}
                       tabIndex={0}
                     >
-                      <TableCell>
-                        <Typography fontWeight="medium" variant="body2">
-                          {c.number}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{c.title}</Typography>
+                      <TableCell sx={{ maxWidth: 320 }}>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
+                          <Typography
+                            noWrap
+                            variant="body2"
+                            sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                          >
+                            {c.title ?? "--"}
+                          </Typography>
+                          <Typography color="text.secondary" variant="caption">
+                            {formatCasesTableCaseIdentifier(c.number, c.internalId)}
+                          </Typography>
+                        </Box>
                       </TableCell>
                       <TableCell>
                         {severityLabel ? (
@@ -304,6 +310,11 @@ export default function PartnerCasesPage(): JSX.Element {
                             {c.state?.label ?? "--"}
                           </Typography>
                         </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Typography color="text.secondary" variant="body2">
+                          {c.createdBy ?? "--"}
+                        </Typography>
                       </TableCell>
                       <TableCell>
                         <Typography color="text.secondary" variant="body2">

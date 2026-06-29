@@ -50,7 +50,7 @@ import {
   fetchAllProjectsForExport,
 } from "@features/project-hub/utils/projectsExport";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
-import { getStatusColor } from "@features/dashboard/utils/casesTable";
+import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchProject, GlobalSearchCase } from "@features/project-hub/types/globalSearch";
 
@@ -444,27 +444,6 @@ export default function PartnerGlobalSearch(): JSX.Element {
                 </>
               )}
 
-              {/* Loading state */}
-              {(isDebouncing || isLoadingDropdown) &&
-                dropdownProjects.length === 0 &&
-                dropdownCases.length === 0 && (
-                  <Box
-                    sx={{
-                      alignItems: "center",
-                      display: "flex",
-                      gap: 1.5,
-                      justifyContent: "center",
-                      px: 2,
-                      py: 2,
-                    }}
-                  >
-                    <CircularProgress size={16} />
-                    <Typography color="text.secondary" variant="body2">
-                      Searching…
-                    </Typography>
-                  </Box>
-                )}
-
               {/* No results */}
               {!isDebouncing &&
                 !isLoadingDropdown &&
@@ -668,19 +647,19 @@ export default function PartnerGlobalSearch(): JSX.Element {
             <Table sx={{ minWidth: 720 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>Case #</TableCell>
-                  <TableCell>Title</TableCell>
+                  <TableCell>Details</TableCell>
                   <TableCell>Severity</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Created by</TableCell>
                   <TableCell>Project</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {isLoadingCases ? (
-                  <SkeletonRows cols={5} />
+                  <SkeletonRows cols={6} />
                 ) : isErrorCases ? (
                   <TableRow>
-                    <TableCell align="center" colSpan={5}>
+                    <TableCell align="center" colSpan={6}>
                       <Typography color="text.secondary" variant="body2">
                         Failed to load cases.
                       </Typography>
@@ -688,7 +667,7 @@ export default function PartnerGlobalSearch(): JSX.Element {
                   </TableRow>
                 ) : cases.length === 0 ? (
                   <TableRow>
-                    <TableCell align="center" colSpan={5}>
+                    <TableCell align="center" colSpan={6}>
                       <Typography color="text.secondary" variant="body2">
                         No cases found.
                       </Typography>
@@ -719,13 +698,19 @@ export default function PartnerGlobalSearch(): JSX.Element {
                         sx={{ cursor: "pointer" }}
                         tabIndex={0}
                       >
-                        <TableCell>
-                          <Typography fontWeight="medium" variant="body2">
-                            {c.number}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">{c.title}</Typography>
+                        <TableCell sx={{ maxWidth: 320 }}>
+                          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
+                            <Typography
+                              noWrap
+                              variant="body2"
+                              sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            >
+                              {c.title ?? "--"}
+                            </Typography>
+                            <Typography color="text.secondary" variant="caption">
+                              {formatCasesTableCaseIdentifier(c.number, c.internalId)}
+                            </Typography>
+                          </Box>
                         </TableCell>
                         <TableCell>
                           {severityLabel ? (
@@ -765,6 +750,11 @@ export default function PartnerGlobalSearch(): JSX.Element {
                               {c.state?.label ?? "--"}
                             </Typography>
                           </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography color="text.secondary" variant="body2">
+                            {c.createdBy ?? "--"}
+                          </Typography>
                         </TableCell>
                         <TableCell>
                           <Typography color="text.secondary" variant="body2">
