@@ -106,6 +106,15 @@ func (s *snUserService) SearchUsers(ctx context.Context, req domain.SearchUsersR
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchSNUsersResponse{}, err
 	}
+	if len(req.Filters.Roles) > 20 {
+		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "roles cannot contain more than 20 values"}
+	}
+	if len(req.Filters.UserNames) > 50 {
+		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "userNames cannot contain more than 50 values"}
+	}
+	if len(req.Filters.Emails) > 50 {
+		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "emails cannot contain more than 50 values"}
+	}
 	for _, role := range req.Filters.Roles {
 		if !validUserRole[role] {
 			return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "roles contains invalid value: " + string(role)}
@@ -113,6 +122,9 @@ func (s *snUserService) SearchUsers(ctx context.Context, req domain.SearchUsersR
 	}
 	if req.SortBy.Field != "" && !validUserSortField[req.SortBy.Field] {
 		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "sortBy.field contains invalid value: " + string(req.SortBy.Field)}
+	}
+	if req.SortBy.Order != "" && req.SortBy.Field == "" {
+		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "sortBy.order requires sortBy.field to be set"}
 	}
 	if req.SortBy.Order != "" && !validUserSortOrder[req.SortBy.Order] {
 		return domain.SearchSNUsersResponse{}, &apierror.ValidationError{Msg: "sortBy.order contains invalid value: " + string(req.SortBy.Order)}

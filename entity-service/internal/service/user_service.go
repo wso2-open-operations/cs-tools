@@ -103,6 +103,21 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 		return domain.SearchUsersResponse{}, err
 	}
+	if len(req.Filters.Roles) > 0 {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "roles filter is only supported for the ServiceNow data source"}
+	}
+	if req.Filters.Active != nil {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "active filter is only supported for the ServiceNow data source"}
+	}
+	if req.SortBy.Field != "" {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "sortBy is only supported for the ServiceNow data source"}
+	}
+	if len(req.Filters.UserNames) > 50 {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "userNames cannot contain more than 50 values"}
+	}
+	if len(req.Filters.Emails) > 50 {
+		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "emails cannot contain more than 50 values"}
+	}
 
 	users, total, err := s.repo.SearchUsers(ctx, req)
 	if err != nil {

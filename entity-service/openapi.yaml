@@ -1353,17 +1353,20 @@ components:
           description: Case-insensitive match against username and email.
         roles:
           type: array
+          maxItems: 20
           items:
             type: string
             enum: [internal, agent, admin, commenter, external, customer, customer_admin, partner, partner_admin]
-          description: Filter by one or more ServiceNow roles.
+          description: Filter by one or more ServiceNow roles. ServiceNow data source only.
         userNames:
           type: array
+          maxItems: 50
           items:
             type: string
           description: Filter to specific usernames (exact match).
         emails:
           type: array
+          maxItems: 50
           items:
             type: string
           description: Filter to specific email addresses (exact match).
@@ -1444,6 +1447,7 @@ components:
     SearchUsersResponse:
       type: object
       description: Paginated user list from the postgres data source.
+      required: [users, total, limit, offset, hasMore]
       properties:
         users:
           type: array
@@ -1461,6 +1465,7 @@ components:
     SearchSNUsersResponse:
       type: object
       description: Paginated user list from the ServiceNow data source.
+      required: [users, total, limit, offset]
       properties:
         users:
           type: array
