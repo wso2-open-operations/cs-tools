@@ -53,6 +53,7 @@ import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchProject, GlobalSearchCase } from "@features/project-hub/types/globalSearch";
+import { getCaseNavigationPath, getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
 
 type ExportFormat = "csv" | "pdf";
 
@@ -401,17 +402,18 @@ export default function PartnerGlobalSearch(): JSX.Element {
                     ))
                   ) : (
                     dropdownCases.map((c) => {
-                      const projectId = c.project?.id;
+                      const casePath = getCaseNavigationPath(c);
+                      const { color: caseTypeColor, displayLabel: caseTypeLabel } = getCaseTypeChipProps(c.caseType?.label);
                       return (
                       <Box
                         key={c.id}
-                        onClick={projectId ? () => {
+                        onClick={casePath ? () => {
                           setDropdownOpen(false);
-                          navigate(`/projects/${projectId}/support/cases/${c.id}`);
+                          navigate(casePath, { state: { returnTo: "/" } });
                         } : undefined}
                         sx={{
                           alignItems: "center",
-                          cursor: projectId ? "pointer" : "default",
+                          cursor: casePath ? "pointer" : "default",
                           display: "flex",
                           gap: 1.5,
                           px: 2,
@@ -422,9 +424,9 @@ export default function PartnerGlobalSearch(): JSX.Element {
                         <Box
                           sx={{
                             alignItems: "center",
-                            bgcolor: "warning.main",
+                            bgcolor: alpha(caseTypeColor, 0.15),
                             borderRadius: "50%",
-                            color: "warning.contrastText",
+                            color: caseTypeColor,
                             display: "flex",
                             flexShrink: 0,
                             height: 36,
@@ -444,7 +446,7 @@ export default function PartnerGlobalSearch(): JSX.Element {
                             )}
                           </Typography>
                           <Typography color="text.secondary" variant="caption">
-                            Case
+                            {caseTypeLabel}
                           </Typography>
                         </Box>
                       </Box>
@@ -658,6 +660,7 @@ export default function PartnerGlobalSearch(): JSX.Element {
               <TableHead>
                 <TableRow>
                   <TableCell>Details</TableCell>
+                  <TableCell>Case Type</TableCell>
                   <TableCell>Severity</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Created by</TableCell>
@@ -689,13 +692,12 @@ export default function PartnerGlobalSearch(): JSX.Element {
                     const severityLabel = c.severity?.label;
                     const severityDisplay = mapSeverityToDisplay(severityLabel);
                     const severityColor = getSeverityLegendColor(severityLabel);
-                    const projectId = c.project?.id;
-                    const handleNavigate = projectId
-                      ? () => navigate(`/projects/${projectId}/support/cases/${c.id}`)
-                      : undefined;
+                    const { color: caseTypeColor, displayLabel: caseTypeLabel } = getCaseTypeChipProps(c.caseType?.label);
+                    const casePath = getCaseNavigationPath(c);
+                    const handleNavigate = casePath ? () => navigate(casePath, { state: { returnTo: "/" } }) : undefined;
                     return (
                       <TableRow
-                        hover={Boolean(projectId)}
+                        hover={Boolean(casePath)}
                         key={c.id}
                         onClick={handleNavigate}
                         onKeyDown={(e) => {
@@ -704,8 +706,8 @@ export default function PartnerGlobalSearch(): JSX.Element {
                             handleNavigate();
                           }
                         }}
-                        sx={{ cursor: projectId ? "pointer" : "default" }}
-                        tabIndex={projectId ? 0 : undefined}
+                        sx={{ cursor: casePath ? "pointer" : "default" }}
+                        tabIndex={casePath ? 0 : undefined}
                       >
                         <TableCell sx={{ maxWidth: 320 }}>
                           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
@@ -720,6 +722,23 @@ export default function PartnerGlobalSearch(): JSX.Element {
                               {formatCasesTableCaseIdentifier(c.number, c.internalId)}
                             </Typography>
                           </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={caseTypeLabel}
+                            size="small"
+                            variant="outlined"
+                            sx={(theme) => ({
+                              bgcolor: alpha(caseTypeColor, theme.palette.mode === "dark" ? 0.05 : 0.1),
+                              borderColor: alpha(caseTypeColor, theme.palette.mode === "dark" ? 0.18 : 0.3),
+                              color: caseTypeColor,
+                              fontSize: "0.75rem",
+                              fontWeight: 500,
+                              height: 20,
+                              px: 0,
+                              "& .MuiChip-label": { pl: "6px", pr: "6px" },
+                            })}
+                          />
                         </TableCell>
                         <TableCell>
                           {severityLabel ? (

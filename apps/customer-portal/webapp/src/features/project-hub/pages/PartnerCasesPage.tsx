@@ -42,24 +42,13 @@ import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
+import { getCaseNavigationPath, getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 const DEFAULT_ROWS_PER_PAGE = 10;
 const SKELETON_ROW_COUNT = 5;
-const COL_SPAN = 7;
+const COL_SPAN = 6;
 
-const DATE_LOCALE = "en-US";
-const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-};
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "--";
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? "--" : d.toLocaleDateString(DATE_LOCALE, DATE_FORMAT_OPTIONS);
-}
 
 /**
  * Full-page cases search for partner users.
@@ -227,10 +216,10 @@ export default function PartnerCasesPage(): JSX.Element {
             <TableHead>
               <TableRow>
                 <TableCell>Details</TableCell>
+                <TableCell>Case Type</TableCell>
                 <TableCell>Severity</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Created by</TableCell>
-                <TableCell>Created on</TableCell>
                 <TableCell>Project</TableCell>
               </TableRow>
             </TableHead>
@@ -266,13 +255,13 @@ export default function PartnerCasesPage(): JSX.Element {
                   const severityLabel = c.severity?.label;
                   const severityDisplay = mapSeverityToDisplay(severityLabel);
                   const severityColor = getSeverityLegendColor(severityLabel);
-                  const projectId = c.project?.id;
-                  const handleNavigate = projectId
-                    ? () => navigate(`/projects/${projectId}/support/cases/${c.id}`)
-                    : undefined;
+                  const { color: caseTypeColor, displayLabel: caseTypeLabel } = getCaseTypeChipProps(c.caseType?.label);
+                  const casePath = getCaseNavigationPath(c);
+                  const returnTo = `/partner/cases${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+                  const handleNavigate = casePath ? () => navigate(casePath, { state: { returnTo } }) : undefined;
                   return (
                     <TableRow
-                      hover={Boolean(projectId)}
+                      hover={Boolean(casePath)}
                       key={c.id}
                       onClick={handleNavigate}
                       onKeyDown={(e) => {
@@ -281,8 +270,8 @@ export default function PartnerCasesPage(): JSX.Element {
                           handleNavigate();
                         }
                       }}
-                      sx={{ cursor: projectId ? "pointer" : "default" }}
-                      tabIndex={projectId ? 0 : undefined}
+                      sx={{ cursor: casePath ? "pointer" : "default" }}
+                      tabIndex={casePath ? 0 : undefined}
                     >
                       <TableCell sx={{ maxWidth: 320 }}>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
@@ -297,6 +286,23 @@ export default function PartnerCasesPage(): JSX.Element {
                             {formatCasesTableCaseIdentifier(c.number, c.internalId)}
                           </Typography>
                         </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={caseTypeLabel}
+                          size="small"
+                          variant="outlined"
+                          sx={(theme) => ({
+                            bgcolor: alpha(caseTypeColor, theme.palette.mode === "dark" ? 0.05 : 0.1),
+                            borderColor: alpha(caseTypeColor, theme.palette.mode === "dark" ? 0.18 : 0.3),
+                            color: caseTypeColor,
+                            fontSize: "0.75rem",
+                            fontWeight: 500,
+                            height: 20,
+                            px: 0,
+                            "& .MuiChip-label": { pl: "6px", pr: "6px" },
+                          })}
+                        />
                       </TableCell>
                       <TableCell>
                         {severityLabel ? (
@@ -340,11 +346,6 @@ export default function PartnerCasesPage(): JSX.Element {
                       <TableCell>
                         <Typography color="text.secondary" variant="body2">
                           {c.createdBy ?? "--"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography color="text.secondary" variant="body2">
-                          {formatDate(c.createdOn)}
                         </Typography>
                       </TableCell>
                       <TableCell>

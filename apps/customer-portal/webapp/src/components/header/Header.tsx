@@ -61,8 +61,9 @@ export default function Header({
   const isStackedHeader = useIsStackedHeaderLayout();
 
   const isProjectHub = location.pathname === "/";
+  const isPartnerPage = location.pathname.startsWith("/partner/");
   const showProjectToolbar =
-    !isProjectHub && !hideProjectControls;
+    !isProjectHub && !isPartnerPage && !hideProjectControls;
   const showSearchBar =
     showProjectToolbar && !isProjectSuspended;
 
