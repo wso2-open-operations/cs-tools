@@ -150,6 +150,15 @@ export default function PartnerProjectsPage(): JSX.Element {
         </Typography>
       </Box>
 
+      {/* Filtered-results hint */}
+      {debouncedSearchQuery.trim() && !isLoading && (
+        <Box sx={{ flexShrink: 0, pb: 0.5, px: 2 }}>
+          <Typography color="text.secondary" variant="caption">
+            Showing results for &ldquo;{debouncedSearchQuery.trim()}&rdquo;
+          </Typography>
+        </Box>
+      )}
+
       {/* Search bar */}
       <Box sx={{ flexShrink: 0, pb: 1.5, px: 2 }}>
         <TextField
