@@ -115,18 +115,23 @@ export default function EditUserModal({
       const next = new Set(prev);
       if (next.has(roleId)) {
         next.delete(roleId);
+        // Removing Portal User also removes Lead (Lead requires portal access)
+        if (roleId === "portal") next.delete("lead");
       } else {
         next.add(roleId);
+        // Adding Lead implicitly requires Portal User
+        if (roleId === "lead") next.add("portal");
       }
       return next;
     });
   };
 
   const handleSave = useCallback(() => {
+    const isLead = selectedRoles.has("lead");
     onSubmit({
       isCsAdmin: selectedRoles.has("admin"),
-      isLead: selectedRoles.has("lead"),
-      isPortalUser: selectedRoles.has("portal"),
+      isLead,
+      isPortalUser: selectedRoles.has("portal") || isLead,
       isSecurityContact: selectedRoles.has("security"),
     });
   }, [selectedRoles, onSubmit]);

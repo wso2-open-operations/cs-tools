@@ -50,9 +50,7 @@ export function usePatchProjectContact(
 
   return useMutation<void, Error, PatchProjectContactVariables>({
     mutationFn: async ({ email, isCsAdmin, isLead, isPortalUser, isSecurityContact }): Promise<void> => {
-      logger.debug(
-        `[usePatchProjectContact] Patching ${email} isCsAdmin=${isCsAdmin} isLead=${isLead} isPortalUser=${isPortalUser} isSecurityContact=${isSecurityContact}`,
-      );
+      logger.debug("[usePatchProjectContact] Updating project contact membership roles");
 
       try {
         if (!isSignedIn || isAuthLoading) {
