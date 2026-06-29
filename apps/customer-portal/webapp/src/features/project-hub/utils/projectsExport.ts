@@ -23,7 +23,7 @@ export type AuthFetchFn = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-const EXPORT_ALL_PAGE_SIZE = 100;
+const EXPORT_ALL_PAGE_SIZE = 50;
 
 const EXPORT_HEADERS = [
   "Project Key",
