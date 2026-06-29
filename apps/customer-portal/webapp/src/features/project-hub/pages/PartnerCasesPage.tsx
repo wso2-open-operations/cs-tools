@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  alpha,
   Box,
   Chip,
   IconButton,
@@ -38,33 +39,13 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 const DEFAULT_ROWS_PER_PAGE = 10;
 const SKELETON_ROW_COUNT = 5;
 const COL_SPAN = 5;
-
-function getSeverityChipColor(
-  label?: string,
-): "default" | "error" | "info" | "secondary" | "success" | "warning" {
-  const display = mapSeverityToDisplay(label);
-  const token = display.replace(/\s*\(.*$/, "").toUpperCase();
-  switch (token) {
-    case "S0":
-      return "error";
-    case "S1":
-      return "warning";
-    case "S2":
-      return "info";
-    case "S3":
-      return "secondary";
-    case "S4":
-      return "success";
-    default:
-      return "default";
-  }
-}
 
 /**
  * Full-page cases search for partner users.
@@ -255,7 +236,7 @@ export default function PartnerCasesPage(): JSX.Element {
                 cases.map((c) => {
                   const severityLabel = c.severity?.label;
                   const severityDisplay = mapSeverityToDisplay(severityLabel);
-                  const severityColor = getSeverityChipColor(severityLabel);
+                  const severityColor = getSeverityLegendColor(severityLabel);
                   return (
                     <TableRow
                       hover
@@ -287,11 +268,19 @@ export default function PartnerCasesPage(): JSX.Element {
                       <TableCell>
                         {severityLabel ? (
                           <Chip
-                            color={severityColor}
                             label={severityDisplay}
                             size="small"
-                            sx={{ fontWeight: 500 }}
                             variant="outlined"
+                            sx={{
+                              bgcolor: alpha(severityColor, 0.1),
+                              borderColor: alpha(severityColor, 0.3),
+                              color: severityColor,
+                              fontSize: "0.75rem",
+                              fontWeight: 500,
+                              height: 20,
+                              px: 0,
+                              "& .MuiChip-label": { pl: "6px", pr: "6px" },
+                            }}
                           />
                         ) : (
                           <Typography color="text.secondary" variant="body2">

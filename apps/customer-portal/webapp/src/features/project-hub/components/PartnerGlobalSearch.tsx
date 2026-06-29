@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  alpha,
   Box,
   Button,
   Chip,
@@ -48,6 +49,7 @@ import {
   downloadProjectListPdf,
   fetchAllProjectsForExport,
 } from "@features/project-hub/utils/projectsExport";
+import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchProject, GlobalSearchCase } from "@features/project-hub/types/globalSearch";
 
@@ -67,27 +69,6 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return "--";
   const d = new Date(value);
   return isNaN(d.getTime()) ? "--" : d.toLocaleDateString(DATE_LOCALE, DATE_FORMAT_OPTIONS);
-}
-
-function getSeverityChipColor(
-  label?: string,
-): "default" | "error" | "info" | "secondary" | "success" | "warning" {
-  const display = mapSeverityToDisplay(label);
-  const token = display.replace(/\s*\(.*$/, "").toUpperCase();
-  switch (token) {
-    case "S0":
-      return "error";
-    case "S1":
-      return "warning";
-    case "S2":
-      return "info";
-    case "S3":
-      return "secondary";
-    case "S4":
-      return "success";
-    default:
-      return "default";
-  }
 }
 
 function highlightMatch(text: string, query: string): JSX.Element {
@@ -462,10 +443,30 @@ export default function PartnerGlobalSearch(): JSX.Element {
                 </>
               )}
 
+              {/* Loading state */}
+              {(isDebouncing || isLoadingDropdown) &&
+                dropdownProjects.length === 0 &&
+                dropdownCases.length === 0 && (
+                  <Box
+                    sx={{
+                      alignItems: "center",
+                      display: "flex",
+                      gap: 1.5,
+                      justifyContent: "center",
+                      px: 2,
+                      py: 2,
+                    }}
+                  >
+                    <CircularProgress size={16} />
+                    <Typography color="text.secondary" variant="body2">
+                      Searching…
+                    </Typography>
+                  </Box>
+                )}
+
               {/* No results */}
               {!isDebouncing &&
-                !isLoadingProjects &&
-                !isLoadingCases &&
+                !isLoadingDropdown &&
                 dropdownProjects.length === 0 &&
                 dropdownCases.length === 0 && (
                   <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
@@ -625,21 +626,22 @@ export default function PartnerGlobalSearch(): JSX.Element {
             </Table>
           </TableContainer>
 
-          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
-            <Button
-              onClick={() => {
-                const params = debouncedSearchQuery
-                  ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
-                  : "";
-                navigate(`/partner/projects${params}`);
-              }}
-              size="small"
-              variant="text"
-            >
-              View More
-              {projectsMoreCount > 0 && ` (${projectsMoreCount} more)`}
-            </Button>
-          </Box>
+          {projectsMoreCount > 0 && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+              <Button
+                onClick={() => {
+                  const params = debouncedSearchQuery
+                    ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
+                    : "";
+                  navigate(`/partner/projects${params}`);
+                }}
+                size="small"
+                variant="text"
+              >
+                {`View More (${projectsMoreCount} more)`}
+              </Button>
+            </Box>
+          )}
         </Box>
 
         {/* Cases section */}
@@ -695,7 +697,7 @@ export default function PartnerGlobalSearch(): JSX.Element {
                   cases.map((c) => {
                     const severityLabel = c.severity?.label;
                     const severityDisplay = mapSeverityToDisplay(severityLabel);
-                    const severityColor = getSeverityChipColor(severityLabel);
+                    const severityColor = getSeverityLegendColor(severityLabel);
                     return (
                       <TableRow
                         hover
@@ -727,11 +729,19 @@ export default function PartnerGlobalSearch(): JSX.Element {
                         <TableCell>
                           {severityLabel ? (
                             <Chip
-                              color={severityColor}
                               label={severityDisplay}
                               size="small"
-                              sx={{ fontWeight: 500 }}
                               variant="outlined"
+                              sx={{
+                                bgcolor: alpha(severityColor, 0.1),
+                                borderColor: alpha(severityColor, 0.3),
+                                color: severityColor,
+                                fontSize: "0.75rem",
+                                fontWeight: 500,
+                                height: 20,
+                                px: 0,
+                                "& .MuiChip-label": { pl: "6px", pr: "6px" },
+                              }}
                             />
                           ) : (
                             <Typography color="text.secondary" variant="body2">
@@ -757,21 +767,22 @@ export default function PartnerGlobalSearch(): JSX.Element {
             </Table>
           </TableContainer>
 
-          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
-            <Button
-              onClick={() => {
-                const params = debouncedSearchQuery
-                  ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
-                  : "";
-                navigate(`/partner/cases${params}`);
-              }}
-              size="small"
-              variant="text"
-            >
-              View More
-              {casesMoreCount > 0 && ` (${casesMoreCount} more)`}
-            </Button>
-          </Box>
+          {casesMoreCount > 0 && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+              <Button
+                onClick={() => {
+                  const params = debouncedSearchQuery
+                    ? `?q=${encodeURIComponent(debouncedSearchQuery)}`
+                    : "";
+                  navigate(`/partner/cases${params}`);
+                }}
+                size="small"
+                variant="text"
+              >
+                {`View More (${casesMoreCount} more)`}
+              </Button>
+            </Box>
+          )}
         </Box>
       </Box>
     </Box>
