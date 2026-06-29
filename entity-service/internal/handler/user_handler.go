@@ -39,8 +39,33 @@ func NewUserHandler(svc service.UserService) *UserHandler {
 	return &UserHandler{svc: svc}
 }
 
-// SearchUsers handles POST /users/search.
+// SearchUsers handles POST /users/search for the postgres data source.
 func (h *UserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchUsersRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchUsers(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SNUserHandler handles HTTP requests for the user resource backed by ServiceNow.
+type SNUserHandler struct {
+	svc service.SNUserService
+}
+
+// NewSNUserHandler constructs an SNUserHandler with the given service.
+func NewSNUserHandler(svc service.SNUserService) *SNUserHandler {
+	return &SNUserHandler{svc: svc}
+}
+
+// SearchUsers handles POST /users/search for the ServiceNow data source.
+func (h *SNUserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchUsersRequest
 	if !decodeRequest(w, r, &req) {
 		return
