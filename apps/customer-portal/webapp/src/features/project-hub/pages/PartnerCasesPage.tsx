@@ -77,6 +77,11 @@ export default function PartnerCasesPage(): JSX.Element {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
+  // Resync input when the URL ?q= changes externally (back/forward navigation).
+  useEffect(() => {
+    setSearchQuery(urlQuery);
+  }, [urlQuery]);
+
   // Reset to first page when the search query changes.
   useEffect(() => {
     setPage(0);
@@ -261,25 +266,23 @@ export default function PartnerCasesPage(): JSX.Element {
                   const severityLabel = c.severity?.label;
                   const severityDisplay = mapSeverityToDisplay(severityLabel);
                   const severityColor = getSeverityLegendColor(severityLabel);
+                  const projectId = c.project?.id;
+                  const handleNavigate = projectId
+                    ? () => navigate(`/projects/${projectId}/support/cases/${c.id}`)
+                    : undefined;
                   return (
                     <TableRow
-                      hover
+                      hover={Boolean(projectId)}
                       key={c.id}
-                      onClick={() =>
-                        navigate(
-                          `/projects/${c.project?.id}/support/cases/${c.id}`,
-                        )
-                      }
+                      onClick={handleNavigate}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+                        if (handleNavigate && (e.key === "Enter" || e.key === " ")) {
                           e.preventDefault();
-                          navigate(
-                            `/projects/${c.project?.id}/support/cases/${c.id}`,
-                          );
+                          handleNavigate();
                         }
                       }}
-                      sx={{ cursor: "pointer" }}
-                      tabIndex={0}
+                      sx={{ cursor: projectId ? "pointer" : "default" }}
+                      tabIndex={projectId ? 0 : undefined}
                     >
                       <TableCell sx={{ maxWidth: 320 }}>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>

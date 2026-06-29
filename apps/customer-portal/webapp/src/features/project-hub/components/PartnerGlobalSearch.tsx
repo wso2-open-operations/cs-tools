@@ -400,18 +400,18 @@ export default function PartnerGlobalSearch(): JSX.Element {
                       </Box>
                     ))
                   ) : (
-                    dropdownCases.map((c) => (
+                    dropdownCases.map((c) => {
+                      const projectId = c.project?.id;
+                      return (
                       <Box
                         key={c.id}
-                        onClick={() => {
+                        onClick={projectId ? () => {
                           setDropdownOpen(false);
-                          navigate(
-                            `/projects/${c.project?.id}/support/cases/${c.id}`,
-                          );
-                        }}
+                          navigate(`/projects/${projectId}/support/cases/${c.id}`);
+                        } : undefined}
                         sx={{
                           alignItems: "center",
-                          cursor: "pointer",
+                          cursor: projectId ? "pointer" : "default",
                           display: "flex",
                           gap: 1.5,
                           px: 2,
@@ -448,7 +448,8 @@ export default function PartnerGlobalSearch(): JSX.Element {
                           </Typography>
                         </Box>
                       </Box>
-                    ))
+                      );
+                    })
                   )}
                 </>
               )}
@@ -688,25 +689,23 @@ export default function PartnerGlobalSearch(): JSX.Element {
                     const severityLabel = c.severity?.label;
                     const severityDisplay = mapSeverityToDisplay(severityLabel);
                     const severityColor = getSeverityLegendColor(severityLabel);
+                    const projectId = c.project?.id;
+                    const handleNavigate = projectId
+                      ? () => navigate(`/projects/${projectId}/support/cases/${c.id}`)
+                      : undefined;
                     return (
                       <TableRow
-                        hover
+                        hover={Boolean(projectId)}
                         key={c.id}
-                        onClick={() =>
-                          navigate(
-                            `/projects/${c.project?.id}/support/cases/${c.id}`,
-                          )
-                        }
+                        onClick={handleNavigate}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
+                          if (handleNavigate && (e.key === "Enter" || e.key === " ")) {
                             e.preventDefault();
-                            navigate(
-                              `/projects/${c.project?.id}/support/cases/${c.id}`,
-                            );
+                            handleNavigate();
                           }
                         }}
-                        sx={{ cursor: "pointer" }}
-                        tabIndex={0}
+                        sx={{ cursor: projectId ? "pointer" : "default" }}
+                        tabIndex={projectId ? 0 : undefined}
                       >
                         <TableCell sx={{ maxWidth: 320 }}>
                           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>

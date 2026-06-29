@@ -45,7 +45,7 @@ export function useGetGlobalSearch(
 
   return useQuery<GlobalSearchResponse, Error>({
     queryKey: [ApiQueryKeys.GLOBAL_SEARCH, payload],
-    queryFn: async (): Promise<GlobalSearchResponse> => {
+    queryFn: async ({ signal }): Promise<GlobalSearchResponse> => {
       logger.debug("[useGetGlobalSearch] Executing global search", payload);
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
       if (!baseUrl) {
@@ -53,6 +53,7 @@ export function useGetGlobalSearch(
       }
       const response = await authFetch(`${baseUrl}/search`, {
         method: "POST",
+        signal,
         body: JSON.stringify(payload),
       });
       if (!response.ok) {

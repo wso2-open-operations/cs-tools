@@ -73,6 +73,11 @@ export default function PartnerProjectsPage(): JSX.Element {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
+  // Resync input when the URL ?q= changes externally (back/forward navigation).
+  useEffect(() => {
+    setSearchQuery(urlQuery);
+  }, [urlQuery]);
+
   // Reset to first page when search changes.
   useEffect(() => {
     setPage(0);
