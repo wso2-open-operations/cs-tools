@@ -90,3 +90,9 @@ public enum ProductCategory {
     MS = "ms",
     PC = "pc"
 }
+
+# Valid global search type values.
+public enum GlobalSearchType {
+    PROJECTS = "projects",
+    CASES = "cases"
+}

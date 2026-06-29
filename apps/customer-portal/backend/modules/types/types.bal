@@ -1928,3 +1928,97 @@ public type InstanceMetricStatsResponse record {|
     # End date of the queried range
     string endDate;
 |};
+
+# Request payload for global search across projects and cases.
+public type GlobalSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Search query string
+        string searchQuery?;
+        # Types to search in (projects, cases). Defaults to both if not specified.
+        entity:GlobalSearchType[] types?;
+    |} filters?;
+    # Sort configuration
+    record {|
+        # Field to sort by
+        string 'field?;
+        # Sort order
+        entity:SortOrder 'order?;
+    |} sortBy?;
+    # Pagination for projects results
+    entity:Pagination projectsPagination?;
+    # Pagination for cases results
+    entity:Pagination casesPagination?;
+|};
+
+# Project item in a global search response.
+public type GlobalSearchProject record {|
+    # System ID of the project
+    entity:IdString id;
+    # Name of the project
+    string name;
+    # Description of the project
+    string? description;
+    # Project key
+    string key;
+    # Project type
+    ReferenceItem 'type;
+    # Created date and time
+    string createdOn;
+    # Project start date
+    entity:Date? startDate;
+    # Project end date
+    entity:Date? endDate;
+    # Indicates whether the project has a PDP subscription
+    boolean hasPdpSubscription;
+    # Closure state
+    string? closureState;
+    # Associated account
+    ReferenceItem account;
+|};
+
+# Case item in a global search response.
+public type GlobalSearchCase record {|
+    # System ID of the case
+    entity:IdString id;
+    # WSO2 internal ID of the case
+    string internalId;
+    # Case number
+    string number;
+    # Case title
+    string? title;
+    # Case description
+    string? description;
+    # Created date and time
+    string createdOn;
+    # Created by (user email)
+    string createdBy;
+    # Last updated date and time
+    string updatedOn;
+    # Associated project
+    ReferenceItem? project;
+    # Case type information
+    ReferenceItem? caseType;
+    # Status information
+    ReferenceItem? state;
+    # Severity information
+    ReferenceItem? severity;
+    # Assigned engineer
+    ReferenceItem? assignedEngineer;
+    # Associated account
+    ReferenceItem account;
+|};
+
+# Global search response.
+public type GlobalSearchResponse record {|
+    # The search query string that was used
+    string query;
+    # Total number of matching projects
+    int projectsTotal;
+    # Total number of matching cases
+    int casesTotal;
+    # List of matching projects
+    GlobalSearchProject[] projects;
+    # List of matching cases
+    GlobalSearchCase[] cases;
+|};

@@ -635,6 +635,15 @@ public isolated function searchInstanceMetricsStats(string idToken, InstanceMetr
     return csEntityClient->/instances/metrics/stats/search.post(payload, generateHeaders(idToken));
 }
 
+# Perform a global search across projects and cases.
+#
+# + idToken - ID token for authorization
+# + payload - Global search request payload containing optional filters, sort, and pagination
+# + return - Global search response or error
+public isolated function globalSearch(string idToken, GlobalSearchPayload payload) returns GlobalSearchResponse|error {
+    return csEntityClient->/search.post(payload, generateHeaders(idToken));
+}
+
 # Download attachment content by attachment ID.
 #
 # + idToken - ID token for authorization

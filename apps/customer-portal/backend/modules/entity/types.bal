@@ -2519,3 +2519,100 @@ public type EscalationsResponse record {|
     *Pagination;
     json...;
 |};
+
+# Request payload for global search across projects and cases.
+public type GlobalSearchPayload record {|
+    # Filter criteria
+    record {|
+        # Search query string
+        string searchQuery?;
+        # Tables to search in (projects, cases). Defaults to both if not specified.
+        GlobalSearchType[] tables?;
+    |} filters?;
+    # Sort configuration
+    record {|
+        # Field to sort by
+        string 'field?;
+        # Sort order
+        SortOrder 'order?;
+    |} sortBy?;
+    # Pagination for projects results
+    Pagination projectsPagination?;
+    # Pagination for cases results
+    Pagination casesPagination?;
+|};
+
+# Project item in a global search response.
+public type GlobalSearchProject record {|
+    # System ID of the project
+    IdString id;
+    # Name of the project
+    string name;
+    # Description of the project
+    string? description;
+    # Project key
+    string key;
+    # Project type
+    ReferenceTableItem 'type;
+    # Created date and time
+    string createdOn;
+    # Project start date
+    Date? startDate;
+    # Project end date
+    Date? endDate;
+    # Indicates whether the project has a PDP subscription
+    boolean hasPdpSubscription;
+    # Closure state
+    string? closureState;
+    # Associated account
+    ReferenceTableItem account;
+    json...;
+|};
+
+# Case item in a global search response.
+public type GlobalSearchCase record {|
+    # System ID of the case
+    IdString id;
+    # WSO2 internal ID of the case
+    string internalId;
+    # Case number
+    string number;
+    # Case title
+    string? title;
+    # Case description
+    string? description;
+    # Created date and time
+    string createdOn;
+    # Created by (user email)
+    string createdBy;
+    # Last updated date and time
+    string updatedOn;
+    # Associated project
+    ReferenceTableItem? project;
+    # Case type information
+    ReferenceTableItem? caseType;
+    # Status information
+    ChoiceListItem? state;
+    # Severity information
+    ChoiceListItem? severity;
+    # Assigned engineer
+    ReferenceTableItem? assignedEngineer;
+    # Associated account
+    ReferenceTableItem account;
+    json...;
+|};
+
+# Global search response.
+public type GlobalSearchResponse record {|
+    # The search query string that was used
+    string query;
+    # Total number of matching projects
+    int projectsTotal;
+    # Total number of matching cases
+    int casesTotal;
+    # List of matching projects
+    GlobalSearchProject[] projects;
+    # List of matching cases
+    GlobalSearchCase[] cases;
+    json...;
+|};

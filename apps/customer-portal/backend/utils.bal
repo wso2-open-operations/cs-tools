@@ -1243,6 +1243,76 @@ public isolated function mapEscalationsResponse(entity:EscalationsResponse respo
     };
 }
 
+# Perform a global search across projects and cases.
+#
+# + idToken - ID token for authorization
+# + payload - Global search payload with optional filters, sort, and pagination
+# + return - Global search response or error
+public isolated function globalSearch(string idToken, types:GlobalSearchPayload payload)
+    returns types:GlobalSearchResponse|error {
+
+    entity:GlobalSearchPayload searchPayload = {
+        filters: {
+            searchQuery: payload.filters?.searchQuery,
+            tables: payload.filters?.types
+        },
+        sortBy: payload.sortBy,
+        projectsPagination: payload.projectsPagination,
+        casesPagination: payload.casesPagination
+    };
+
+    entity:GlobalSearchResponse response = check entity:globalSearch(idToken, searchPayload);
+
+    types:GlobalSearchProject[] projects = from entity:GlobalSearchProject project in response.projects
+        let entity:ReferenceTableItem 'type = project.'type
+        let entity:ReferenceTableItem account = project.account
+        select {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            key: project.key,
+            'type: {id: 'type.id, label: 'type.name},
+            createdOn: project.createdOn,
+            startDate: project.startDate,
+            endDate: project.endDate,
+            hasPdpSubscription: project.hasPdpSubscription,
+            closureState: project.closureState,
+            account: {id: account.id, label: account.name}
+        };
+
+    types:GlobalSearchCase[] cases = from entity:GlobalSearchCase entityCase in response.cases
+        let entity:ReferenceTableItem? project = entityCase.project
+        let entity:ReferenceTableItem? caseType = entityCase.caseType
+        let entity:ChoiceListItem? state = entityCase.state
+        let entity:ChoiceListItem? severity = entityCase.severity
+        let entity:ReferenceTableItem? assignedEngineer = entityCase.assignedEngineer
+        let entity:ReferenceTableItem account = entityCase.account
+        select {
+            id: entityCase.id,
+            internalId: entityCase.internalId,
+            number: entityCase.number,
+            title: entityCase.title,
+            description: entityCase.description,
+            createdOn: entityCase.createdOn,
+            createdBy: entityCase.createdBy,
+            updatedOn: entityCase.updatedOn,
+            project: project != () ? {id: project.id, label: project.name} : (),
+            caseType: caseType != () ? {id: caseType.id, label: caseType.name} : (),
+            state: state != () ? {id: state.id.toString(), label: state.label} : (),
+            severity: severity != () ? {id: severity.id.toString(), label: severity.label} : (),
+            assignedEngineer: assignedEngineer != () ? {id: assignedEngineer.id, label: assignedEngineer.name} : (),
+            account: {id: account.id, label: account.name}
+        };
+
+    return {
+        query: response.query,
+        projectsTotal: response.projectsTotal,
+        casesTotal: response.casesTotal,
+        projects,
+        cases
+    };
+}
+
 # Map instance metric stats response to the desired structure.
 #
 # + response - Instance metric stats response from the entity service

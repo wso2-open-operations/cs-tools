@@ -127,6 +127,52 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         return mapMetadataResponse(metadataResponse);
     }
 
+    # Global search across projects and cases.
+    #
+    # + payload - Global search request payload with optional filters and pagination (optional)
+    # + return - Global search results or error response
+    resource function post search(http:RequestContext ctx, types:GlobalSearchPayload? payload)
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:InternalServerError {
+
+        authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
+        if userInfo is error {
+            return <http:InternalServerError>{
+                body: {
+                    message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        types:GlobalSearchPayload searchPayload = payload ?: {};
+        types:GlobalSearchResponse|error result = globalSearch(userInfo.idToken, searchPayload);
+        if result is error {
+            if getStatusCode(result) == http:STATUS_BAD_REQUEST {
+                return <http:BadRequest>{
+                    body: {
+                        message: "Invalid request parameters for global search."
+                    }
+                };
+            }
+            if getStatusCode(result) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+
+            string customError = "Failed to perform global search.";
+            log:printError(customError, result);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+        return <http:Ok>{body: result};
+    }
+
     # Fetch user information of the logged in user.
     #
     # + return - User info object or error response

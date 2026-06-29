@@ -32,6 +32,30 @@ paths:
           description: Unauthorized
         "500":
           description: InternalServerError
+  /search:
+    post:
+      summary: Global search across projects and cases.
+      operationId: postSearch
+      requestBody:
+        description: Global search request payload with optional filters and pagination
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlobalSearchPayload'
+        required: false
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalSearchResponse'
+        "400":
+          description: BadRequest
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
   /users/me:
     get:
       summary: Fetch user information of the logged in user.
@@ -6702,3 +6726,182 @@ components:
           description: Limit for pagination
           format: int64
       description: Escalations search response.
+    GlobalSearchType:
+      type: string
+      enum:
+        - projects
+        - cases
+      description: Valid global search type values.
+    GlobalSearchPayload:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+              description: Search query string
+            types:
+              type: array
+              items:
+                $ref: '#/components/schemas/GlobalSearchType'
+              description: Types to search in (projects, cases). Defaults to both if not specified.
+          additionalProperties: false
+        sortBy:
+          type: object
+          properties:
+            field:
+              type: string
+              description: Field to sort by
+            order:
+              type: string
+              enum:
+                - asc
+                - desc
+              description: Sort order
+          additionalProperties: false
+        projectsPagination:
+          $ref: '#/components/schemas/Pagination'
+        casesPagination:
+          $ref: '#/components/schemas/Pagination'
+      additionalProperties: false
+      description: Request payload for global search across projects and cases.
+    GlobalSearchProject:
+      type: object
+      required:
+        - id
+        - name
+        - key
+        - type
+        - createdOn
+        - hasPdpSubscription
+        - account
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        name:
+          type: string
+          description: Name of the project
+        description:
+          type: string
+          description: Description of the project
+          nullable: true
+        key:
+          type: string
+          description: Project key
+        type:
+          $ref: '#/components/schemas/ReferenceItem'
+        createdOn:
+          type: string
+          description: Created date and time
+        startDate:
+          type: string
+          description: Project start date
+          nullable: true
+        endDate:
+          type: string
+          description: Project end date
+          nullable: true
+        hasPdpSubscription:
+          type: boolean
+          description: Indicates whether the project has a PDP subscription
+        closureState:
+          type: string
+          description: Closure state
+          nullable: true
+        account:
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Project item in a global search response.
+    GlobalSearchCase:
+      type: object
+      required:
+        - id
+        - internalId
+        - number
+        - createdOn
+        - createdBy
+        - updatedOn
+        - account
+      properties:
+        id:
+          $ref: '#/components/schemas/IdString'
+        internalId:
+          type: string
+          description: WSO2 internal ID of the case
+        number:
+          type: string
+          description: Case number
+        title:
+          type: string
+          description: Case title
+          nullable: true
+        description:
+          type: string
+          description: Case description
+          nullable: true
+        createdOn:
+          type: string
+          description: Created date and time
+        createdBy:
+          type: string
+          description: Created by (user email)
+        updatedOn:
+          type: string
+          description: Last updated date and time
+        project:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        caseType:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        state:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        severity:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        assignedEngineer:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+        account:
+          $ref: '#/components/schemas/ReferenceItem'
+      additionalProperties: false
+      description: Case item in a global search response.
+    GlobalSearchResponse:
+      type: object
+      required:
+        - query
+        - projectsTotal
+        - casesTotal
+        - projects
+        - cases
+      properties:
+        query:
+          type: string
+          description: The search query string that was used
+        projectsTotal:
+          type: integer
+          description: Total number of matching projects
+          format: int64
+        casesTotal:
+          type: integer
+          description: Total number of matching cases
+          format: int64
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalSearchProject'
+          description: List of matching projects
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/GlobalSearchCase'
+          description: List of matching cases
+      additionalProperties: false
+      description: Global search response.
