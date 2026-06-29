@@ -269,6 +269,15 @@ export default function PartnerGlobalSearch(): JSX.Element {
             }}
             value={searchQuery}
           />
+          {!dropdownOpen && debouncedSearchQuery.trim() && !isLoadingTable && (
+            <Typography
+              color="text.secondary"
+              sx={{ display: "block", mt: 1, textAlign: "left" }}
+              variant="caption"
+            >
+              Showing results for &ldquo;{debouncedSearchQuery.trim()}&rdquo;
+            </Typography>
+          )}
           {dropdownOpen && (
             <Paper
               elevation={4}
