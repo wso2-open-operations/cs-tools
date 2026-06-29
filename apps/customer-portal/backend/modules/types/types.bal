@@ -132,6 +132,10 @@ public type Case record {|
     ReferenceItem? product;
     # Engagement type information
     ReferenceItem engagementType?;
+    # Current escalation level of the case
+    ReferenceItem? escalationLevel;
+    # Indicates whether the case is escalated
+    boolean? isEscalated;
 |};
 
 # Case information.
@@ -1176,6 +1180,102 @@ public type CallRequestCreatePayload record {|
     # Duration in minutes
     @constraint:Int {minValue: 1}
     int durationInMinutes;
+|};
+
+# Request payload for creating an escalation.
+public type EscalationCreatePayload record {|
+    # Reason for the escalation
+    string reason;
+|};
+
+# Created escalation details.
+public type CreatedEscalation record {|
+    # ID
+    entity:IdString id;
+    # Associated case information
+    ReferenceItem case;
+    # Current escalation level
+    ReferenceItem? currentLevel;
+    # Previous escalation level
+    ReferenceItem? previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # ID of the user
+        entity:IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
+|};
+
+# Response from creating an escalation.
+public type EscalationCreateResponse record {|
+    # Success message
+    string message;
+    # Created escalation details
+    CreatedEscalation escalation;
+|};
+
+# Request payload for searching escalations.
+public type EscalationSearchPayload record {|
+    # Sort configuration
+    record {|
+        # Field to sort by
+        entity:EscalationSortField 'field;
+        # Sort order
+        entity:SortOrder 'order;
+    |} sortBy?;
+    # Pagination details
+    entity:Pagination pagination?;
+|};
+
+# Escalation data.
+public type Escalation record {|
+    # ID
+    entity:IdString id;
+    # Associated case information
+    ReferenceItem case;
+    # Current escalation level
+    ReferenceItem? currentLevel;
+    # Previous escalation level
+    ReferenceItem? previousLevel;
+    # User who created the escalation
+    string createdBy;
+    # Created date and time
+    string createdOn;
+    # Updated date and time
+    string updatedOn;
+    # Reason for the escalation
+    string reason;
+    # Users notified about the escalation
+    record {|
+        # ID of the user
+        entity:IdString id;
+        # User name
+        string userName;
+        # Full name of the user
+        string? name;
+        # Email address of the user
+        string? email;
+    |}[]? notificationSentTo;
+|};
+
+# Escalations search response.
+public type EscalationsResponse record {|
+    # List of escalations
+    Escalation[] escalations;
+    # Total records count
+    int totalRecords;
+    *entity:Pagination;
 |};
 
 # Product version data.

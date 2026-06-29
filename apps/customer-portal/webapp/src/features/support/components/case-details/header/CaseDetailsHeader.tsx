@@ -23,7 +23,9 @@ import {
   Tooltip,
   Typography,
   alpha,
+  useTheme,
 } from "@wso2/oxygen-ui";
+import { TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import {
@@ -52,7 +54,10 @@ export default function CaseDetailsHeader({
   showSeverityChip = true,
   showStatusChip = true,
   variant = "default",
+  isEscalated = false,
+  escalationLevelLabel,
 }: CaseDetailsHeaderProps): JSX.Element {
+  const theme = useTheme();
   const titleRef = useRef<HTMLDivElement | null>(null);
   const [showTitleTooltip, setShowTitleTooltip] = useState(false);
 
@@ -144,6 +149,24 @@ export default function CaseDetailsHeader({
                 pl: "6px",
                 pr: "6px",
               },
+            }}
+          />
+        )}
+        {isEscalated && escalationLevelLabel && (
+          <Chip
+            icon={<TriangleAlert size={11} />}
+            label={`Escalated to ${escalationLevelLabel}`}
+            size="small"
+            variant="outlined"
+            sx={{
+              color: theme.palette.warning.dark,
+              borderColor: alpha(theme.palette.warning.main, 0.5),
+              bgcolor: alpha(theme.palette.warning.light, 0.12),
+              fontWeight: 500,
+              height: 20,
+              fontSize: "0.7rem",
+              "& .MuiChip-icon": { color: theme.palette.warning.main, ml: "4px" },
+              "& .MuiChip-label": { pl: "4px", pr: "8px" },
             }}
           />
         )}

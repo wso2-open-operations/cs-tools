@@ -36,7 +36,7 @@ import {
   Server as ServerIcon,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import usePostProjectInstancesUsagesStats from "@features/project-details/api/usePostProjectInstancesUsagesStats";
 import DataSourceStatCard from "@features/usage-metrics/components/DataSourceStatCard";
 import type { MetricTypeSummary } from "@features/project-details/types/usage";
@@ -361,23 +361,27 @@ function EnvironmentBreakdownAccordion({
 }: EnvironmentBreakdownAccordionProps): JSX.Element {
   const a = getUsageOverviewAccentForTypeId(row.kind);
 
+  // Track whether this row has ever been expanded so hooks stay enabled after
+  // the first expansion and React Query can serve cached data on collapse.
+  const hasExpandedRef = useRef(false);
+  useEffect(() => {
+    if (expanded) hasExpandedRef.current = true;
+  }, [expanded]);
+  const fetchDeploymentId = (expanded || hasExpandedRef.current) ? row.deploymentId : undefined;
+
   const metricsPayload = useMemo(
     () => ({ filters: { startDate: dateRange.startDate, endDate: dateRange.endDate } }),
     [dateRange],
   );
 
-  // Both hooks gated on expanded — avoids N concurrent calls on mount and prevents
-  // API gateway throttling when many accordion rows are rendered simultaneously.
-  const { data: depInstancesData } = usePostDeploymentInstancesSearch(
-    expanded ? row.deploymentId : undefined,
-  );
+  const { data: depInstancesData } = usePostDeploymentInstancesSearch(fetchDeploymentId);
   const { data: depUsagesData } = usePostDeploymentInstancesUsagesSearch(
-    expanded ? row.deploymentId : undefined,
+    fetchDeploymentId,
     metricsPayload,
   );
 
   const { productCount, instanceCount, totalCores, transactionsLabel } = useMemo(() => {
-    if (!expanded || !depInstancesData) {
+    if (!depInstancesData) {
       return {
         productCount: row.productCount,
         instanceCount: row.instanceCount,
@@ -398,7 +402,7 @@ function EnvironmentBreakdownAccordion({
       totalCores: instances.reduce((sum, i) => sum + (i.metadata?.coreCount ?? 0), 0),
       transactionsLabel: formatUsageMetricCount(totalTx),
     };
-  }, [expanded, depInstancesData, depUsagesData, row]);
+  }, [depInstancesData, depUsagesData, row]);
 
   return (
     <Accordion
@@ -460,9 +464,7 @@ function EnvironmentBreakdownAccordion({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {productCount} product{productCount !== 1 ? "s" : ""}
-                <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>
-                  |
-                </Box>
+                <Box component="span" sx={{ mx: 0.75, opacity: 0.4 }}>|</Box>
                 {instanceCount} instance{instanceCount !== 1 ? "s" : ""}
               </Typography>
             </Box>
@@ -678,8 +680,8 @@ export default function UsageOverviewPanel({
 
   // ── Environment breakdown rows ─────────────────────────────────────────────
   const environmentBreakdown = useMemo((): EnvironmentBreakdownRow[] => {
-    if (!deploymentsData) return [];
-    const instances = instancesData?.instances ?? [];
+    if (!deploymentsData || !instancesData) return [];
+    const instances = instancesData.instances ?? [];
 
     return deploymentsData.map((dep) => {
       const depInstances = instances.filter((i) => i.deployment?.id === dep.id);

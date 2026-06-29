@@ -40,16 +40,18 @@ vi.mock("@features/usage-metrics/utils/usageMetricsEnvironmentProducts", () => (
     {
       id: "prod-1",
       name: "Gateway",
-      transactionsLabel: "10",
-      thirdMetricLabel: "APIs",
-      thirdMetricValue: "2",
+      version: "",
+      runningInstances: 1,
+      metricKeys: ["TRANSACTION_COUNT"],
+      summaryStats: [{ label: "Transactions", value: "10" }],
       coreMetrics: [
         { label: "Total Cores", value: "4" },
         { label: "Instances", value: "1" },
       ],
-      transactionTrend: [],
-      coreUsageTrend: [],
+      chartTrends: [],
       instances: [],
+      instanceSummary: { label: "", curr: 0, min: 0, max: 0, avg: 0, trend: [] },
+      coreSummary: { label: "", curr: 0, min: 0, max: 0, avg: 0, trend: [] },
     },
   ],
 }));

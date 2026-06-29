@@ -56,6 +56,9 @@ export default function usePostProjectInstancesUsagesSearch(
       return response.json() as Promise<InstanceUsageResponse>;
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
-    staleTime: 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }

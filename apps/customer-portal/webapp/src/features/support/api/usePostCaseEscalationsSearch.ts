@@ -14,51 +14,45 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useAsgardeo } from "@asgardeo/react";
 import { useQuery } from "@tanstack/react-query";
+import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { InstanceSearchRequest } from "@features/project-details/types/usage";
-import type { InstancesResponse } from "@features/project-details/types/usage";
+import type { EscalationSearchResponse } from "@features/support/types/cases";
 
 /**
- * Searches all instances for a project.
+ * Fetches escalation history for a specific case.
+ * Uses POST /cases/{caseId}/escalations/search; caseId is auto-injected by the backend.
  *
- * @param {string | undefined} projectId - The project ID.
- * @param {InstanceSearchRequest} payload - Optional filters and pagination.
- * @returns {UseQueryResult<InstancesResponse>} React Query result.
+ * @param {string} caseId - The ID of the case.
+ * @param {boolean} [enabled] - Whether the query should run.
+ * @returns Query result containing escalation records sorted newest-first.
  */
-export default function usePostProjectInstancesSearch(
-  projectId: string | undefined,
-  payload: InstanceSearchRequest = {},
-) {
+export function usePostCaseEscalationsSearch(caseId: string, enabled = true) {
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
-
   const authFetch = useAuthApiClient();
 
-  return useQuery<InstancesResponse>({
-    queryKey: [ApiQueryKeys.PROJECT_INSTANCES_SEARCH, projectId, payload],
-    queryFn: async () => {
+  return useQuery<EscalationSearchResponse, Error>({
+    queryKey: [ApiQueryKeys.CASE_ESCALATIONS_SEARCH, caseId],
+    queryFn: async (): Promise<EscalationSearchResponse> => {
       const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL ?? "";
       const response = await authFetch(
-        `${baseUrl}/projects/${projectId}/instances/search`,
+        `${baseUrl}/cases/${caseId}/escalations/search`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            sortBy: { field: "createdOn", order: "desc" },
+            pagination: { limit: 20, offset: 0 },
+          }),
         },
       );
       if (!response.ok) {
-        throw new Error(
-          `Failed to search project instances: ${response.status}`,
-        );
+        throw new Error(`Failed to fetch escalation history: ${response.statusText}`);
       }
-      return response.json() as Promise<InstancesResponse>;
+      return response.json() as Promise<EscalationSearchResponse>;
     },
-    enabled: !!projectId && isSignedIn && !isAuthLoading,
-    staleTime: Infinity,
-    gcTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    enabled: !!caseId && !isAuthLoading && isSignedIn && enabled,
+    staleTime: 0,
   });
 }

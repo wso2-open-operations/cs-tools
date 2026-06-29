@@ -46,6 +46,9 @@ export default function useGetProjectUsageStats(projectId: string | undefined) {
       return response.json() as Promise<UsageStatsResponse>;
     },
     enabled: !!projectId && isSignedIn && !isAuthLoading,
-    staleTime: 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
