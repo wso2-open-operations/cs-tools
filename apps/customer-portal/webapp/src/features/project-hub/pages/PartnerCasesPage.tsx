@@ -40,6 +40,7 @@ import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
+import { getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
@@ -289,9 +290,20 @@ export default function PartnerCasesPage(): JSX.Element {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">
-                          {c.state?.label ?? "--"}
-                        </Typography>
+                        <Box sx={{ alignItems: "center", display: "flex", gap: 1 }}>
+                          <Box
+                            sx={{
+                              backgroundColor: getStatusColor(c.state?.label),
+                              borderRadius: "50%",
+                              flexShrink: 0,
+                              height: 8,
+                              width: 8,
+                            }}
+                          />
+                          <Typography variant="body2">
+                            {c.state?.label ?? "--"}
+                          </Typography>
+                        </Box>
                       </TableCell>
                       <TableCell>
                         <Typography color="text.secondary" variant="body2">

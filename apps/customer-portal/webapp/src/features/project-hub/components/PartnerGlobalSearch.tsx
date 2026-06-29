@@ -50,12 +50,13 @@ import {
   fetchAllProjectsForExport,
 } from "@features/project-hub/utils/projectsExport";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
+import { getStatusColor } from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchProject, GlobalSearchCase } from "@features/project-hub/types/globalSearch";
 
 type ExportFormat = "csv" | "pdf";
 
-const GLOBAL_SEARCH_PAGE_SIZE = 10;
+const GLOBAL_SEARCH_PAGE_SIZE = 5;
 const SKELETON_ROW_COUNT = 5;
 const DROPDOWN_RESULT_LIMIT = 5;
 const DATE_LOCALE = "en-US";
@@ -750,9 +751,20 @@ export default function PartnerGlobalSearch(): JSX.Element {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">
-                            {c.state?.label ?? "--"}
-                          </Typography>
+                          <Box sx={{ alignItems: "center", display: "flex", gap: 1 }}>
+                            <Box
+                              sx={{
+                                backgroundColor: getStatusColor(c.state?.label),
+                                borderRadius: "50%",
+                                flexShrink: 0,
+                                height: 8,
+                                width: 8,
+                              }}
+                            />
+                            <Typography variant="body2">
+                              {c.state?.label ?? "--"}
+                            </Typography>
+                          </Box>
                         </TableCell>
                         <TableCell>
                           <Typography color="text.secondary" variant="body2">
