@@ -2846,6 +2846,7 @@ components:
     UserSearchResponse:
       type: object
       description: Paginated user list from the postgres data source.
+      required: [users, total, limit, offset, hasMore]
       properties:
         users:
           type: array
@@ -2891,6 +2892,7 @@ components:
     SNUserSearchResponse:
       type: object
       description: Paginated user list from the ServiceNow data source.
+      required: [users, total, limit, offset]
       properties:
         users:
           type: array
