@@ -3481,9 +3481,9 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     contactLastName: payload.contactLastName,
                     isCsIntegrationUser: payload.isCsIntegrationUser,
                     isCsAdmin: payload.isCsAdmin,
+                    isLead: payload.isLead,
                     isPortalUser: payload.isPortalUser,
                     isSecurityContact: payload.isSecurityContact
-
                 });
         if response is error {
             if getStatusCode(response) == http:STATUS_FORBIDDEN {
@@ -3632,6 +3632,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 {
                     adminEmail: userInfo.email,
                     isCsAdmin: payload.isCsAdmin,
+                    isLead: payload.isLead,
                     isPortalUser: payload.isPortalUser,
                     isSecurityContact: payload.isSecurityContact
                 });
