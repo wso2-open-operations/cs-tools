@@ -191,6 +191,8 @@ type snCaseFilters struct {
 	EndUpdatedDate      string   `json:"endUpdatedDate,omitempty"`
 	CreatedBy           []string `json:"createdBy,omitempty"`
 	CreatedByMe         bool     `json:"createdByMe,omitempty"`
+	WorkStateKeys       []int    `json:"workStateKeys,omitempty"`
+	AssignedUserIDs     []string `json:"assignedUserIds,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -256,6 +258,16 @@ func domainIssueTypesToSNIDs(issueTypes []domain.CaseIssueType) []int {
 	ids := make([]int, 0, len(issueTypes))
 	for _, it := range issueTypes {
 		if id, ok := snIssueTypeIDMap[it]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func domainWorkStatesToSNIDs(workStates []domain.CaseWorkState) []int {
+	ids := make([]int, 0, len(workStates))
+	for _, ws := range workStates {
+		if id, ok := snWorkStateIDMap[ws]; ok {
 			ids = append(ids, id)
 		}
 	}
@@ -1169,6 +1181,15 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "endUpdatedDate must not be before startUpdatedDate"}
 	}
 
+	for _, ws := range req.Filters.WorkStates {
+		if ws != domain.CaseWorkStateOngoing && ws != domain.CaseWorkStatePaused {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "workStates contains invalid value: " + string(ws)}
+		}
+	}
+	if err := validateUUIDs("assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
 		return domain.SearchCasesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
@@ -1213,8 +1234,10 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			EndCreatedDate:     formatSNDate(req.Filters.EndCreatedDate),
 			StartUpdatedDate:   formatSNDate(req.Filters.StartUpdatedDate),
 			EndUpdatedDate:     formatSNDate(req.Filters.EndUpdatedDate),
-			CreatedBy:          req.Filters.CreatedBy,
-			CreatedByMe:        req.Filters.CreatedByMe,
+			CreatedBy:           req.Filters.CreatedBy,
+			CreatedByMe:         req.Filters.CreatedByMe,
+			WorkStateKeys:       domainWorkStatesToSNIDs(req.Filters.WorkStates),
+			AssignedUserIDs:     uuidsToSysids(req.Filters.AssignedUserIDs),
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},

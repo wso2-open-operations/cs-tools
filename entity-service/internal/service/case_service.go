@@ -379,6 +379,14 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "engagementTypes contains invalid value: " + string(et)}
 		}
 	}
+	for _, ws := range req.Filters.WorkStates {
+		if !validCaseWorkState[ws] {
+			return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "workStates contains invalid value: " + string(ws)}
+		}
+	}
+	if err := validateUUIDs("assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
 
 	if req.Filters.CreatedByMe {
 		token := middleware.UserIDTokenFromContext(ctx)

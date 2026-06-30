@@ -2349,6 +2349,20 @@ components:
         createdByMe:
           type: boolean
           description: When true, restrict results to cases created by the authenticated user.
+        workStates:
+          type: array
+          items:
+            type: string
+            enum: [ongoing, paused]
+          description: |
+            Filter by work sub-state. Only applicable when state is work_in_progress.
+            For the ServiceNow data source, ongoing maps to key 1 and paused maps to key 2.
+        assignedUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by assigned engineer user UUIDs.
 
     SearchCasesRequest:
       type: object

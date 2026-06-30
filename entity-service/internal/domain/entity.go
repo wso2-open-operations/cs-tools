@@ -768,8 +768,10 @@ type SearchCasesFilters struct {
 	EndCreatedDate     *time.Time `json:"endCreatedDate"`
 	StartUpdatedDate   *time.Time `json:"startUpdatedDate"`
 	EndUpdatedDate     *time.Time `json:"endUpdatedDate"`
-	CreatedBy          []string   `json:"createdBy"`
-	CreatedByMe        bool       `json:"createdByMe"`
+	CreatedBy          []string         `json:"createdBy"`
+	CreatedByMe        bool             `json:"createdByMe"`
+	WorkStates         []CaseWorkState  `json:"workStates"`
+	AssignedUserIDs    []string         `json:"assignedUserIds"`
 }
 
 // SearchCasesRequest is the input for a case search operation.
