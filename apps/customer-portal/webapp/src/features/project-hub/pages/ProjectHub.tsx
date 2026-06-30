@@ -238,11 +238,6 @@ export default function ProjectHub(): JSX.Element {
     clearLastSelectedProject();
   }, []);
 
-  // Partner users always see the global search page (projects + cases).
-  if (isPartner && !isAuthLoading && !isLoadingUserDetails) {
-    return <PartnerGlobalSearch />;
-  }
-
   const hasSearchQuery = Boolean(searchQuery.trim());
 
   const contentView = useMemo(
@@ -264,6 +259,11 @@ export default function ProjectHub(): JSX.Element {
       projects.length,
     ],
   );
+
+  // Partner users always see the global search page (projects + cases).
+  if (isPartner && !isAuthLoading && !isLoadingUserDetails) {
+    return <PartnerGlobalSearch />;
+  }
 
   const showSearchBar = shouldShowProjectHubSearchBar(
     titleTotalRecords,
