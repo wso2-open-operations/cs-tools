@@ -32,7 +32,7 @@ import {
   colors,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Crown, Monitor, Settings, Shield, TriangleAlert, X } from "@wso2/oxygen-ui-icons-react";
+import { Crown, Monitor, Settings, Shield, Star, X } from "@wso2/oxygen-ui-icons-react";
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
 import type { EditUserModalProps } from "@features/settings/types/settings";
@@ -49,7 +49,7 @@ const EDITABLE_ROLES = [
     id: "lead" as const,
     label: "Lead",
     description: "A portal user who can escalate an issue beyond level 3",
-    Icon: TriangleAlert,
+    Icon: Star,
     color: "warning" as const,
   },
   {
@@ -57,7 +57,7 @@ const EDITABLE_ROLES = [
     label: "Portal User",
     description: "Can log in to and access the Support Portal",
     Icon: Monitor,
-    color: "primary" as const,
+    color: "info" as const,
   },
   {
     id: "security" as const,
@@ -115,12 +115,8 @@ export default function EditUserModal({
       const next = new Set(prev);
       if (next.has(roleId)) {
         next.delete(roleId);
-        // Removing Portal User also removes Lead (Lead requires portal access)
-        if (roleId === "portal") next.delete("lead");
       } else {
         next.add(roleId);
-        // Adding Lead implicitly requires Portal User
-        if (roleId === "lead") next.add("portal");
       }
       return next;
     });

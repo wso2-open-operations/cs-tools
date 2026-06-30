@@ -15,7 +15,7 @@
 // under the License.
 
 import { colors } from "@wso2/oxygen-ui";
-import { Code, Crown, Monitor, Shield, TriangleAlert, Users } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield, Star, Users } from "@wso2/oxygen-ui-icons-react";
 import {
   NULL_PLACEHOLDER,
   SETTINGS_AVATAR_BACKGROUND_COLORS,
@@ -33,15 +33,15 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   const badges: SettingsRoleBadge[] = [];
 
   if (contact.isCsAdmin) {
-    badges.push({ label: "Admin", Icon: Crown, chipColor: "primary" });
+    badges.push({ label: "Admin", Icon: Crown, chipColor: "secondary" });
   }
 
   if (contact.isLead) {
-    badges.push({ label: "Lead", Icon: TriangleAlert, chipColor: "warning" });
+    badges.push({ label: "Lead", Icon: Star, chipColor: "warning" });
   }
 
   if (contact.isCsIntegrationUser) {
-    badges.push({ label: "System User", Icon: Code, chipColor: "info" });
+    badges.push({ label: "System User", Icon: Code, chipColor: "success" });
   } else {
     if (contact.isPortalUser) {
       badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
@@ -55,7 +55,7 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   }
 
   if (contact.account?.classification === "Partner") {
-    badges.push({ label: "Partner", Icon: Users, chipColor: "warning" });
+    badges.push({ label: "Partner", Icon: Users, chipColor: "secondary" });
   }
 
   return badges;
@@ -75,7 +75,7 @@ export function getRoleChipSx(chipColor: string): object {
     "& .MuiChip-label": { pl: 0.5 },
   };
   switch (chipColor) {
-    case "primary":
+    case "secondary":
       return {
         ...baseStyles,
         color: purple,

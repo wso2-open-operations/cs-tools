@@ -21,7 +21,7 @@ import {
   KeyRound,
   Monitor,
   Shield,
-  TriangleAlert,
+  Star,
   Type,
   Users,
 } from "@wso2/oxygen-ui-icons-react";
@@ -114,7 +114,7 @@ export const ROLE_CONFIG = [
   {
     id: SettingsRoleInfoId.LEAD,
     label: "Lead",
-    Icon: TriangleAlert,
+    Icon: Star,
     paletteKey: "warning" as const,
     permissions: [
       "A portal user who can escalate an issue beyond level 3",
@@ -124,7 +124,7 @@ export const ROLE_CONFIG = [
     id: SettingsRoleInfoId.SYSTEM_USER,
     label: "System User",
     Icon: Code,
-    paletteKey: "info" as const,
+    paletteKey: "success" as const,
     permissions: [
       "Used exclusively for system to system integrations",
       "Cannot log in to the Support Portal",
