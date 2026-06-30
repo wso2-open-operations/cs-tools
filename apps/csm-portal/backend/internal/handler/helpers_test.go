@@ -354,15 +354,44 @@ func (m *mockEntityChangeRequestClient) PatchChangeRequest(ctx context.Context, 
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","updatedOn":"2026-01-01T00:00:00Z","updatedBy":"user@example.com"}`), nil
 }
 
+// ----- mock entity time-card client -----
+
+type mockEntityTimeCardClient struct {
+	searchTimeCardsFn func(ctx context.Context, body []byte) ([]byte, error)
+	createTimeCardFn  func(ctx context.Context, body []byte) ([]byte, error)
+	updateTimeCardFn  func(ctx context.Context, id string, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityTimeCardClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchTimeCardsFn != nil {
+		return m.searchTimeCardsFn(ctx, body)
+	}
+	return []byte(`{"timeCards":[],"total":0,"limit":20,"offset":0}`), nil
+}
+
+func (m *mockEntityTimeCardClient) CreateTimeCard(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createTimeCardFn != nil {
+		return m.createTimeCardFn(ctx, body)
+	}
+	return []byte(`{"timeCard":{"id":"11111111-1111-1111-1111-111111111111","state":"submitted"}}`), nil
+}
+
+func (m *mockEntityTimeCardClient) UpdateTimeCard(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.updateTimeCardFn != nil {
+		return m.updateTimeCardFn(ctx, id, body)
+	}
+	return []byte(`{"timeCard":{"id":"` + id + `","state":"submitted"}}`), nil
+}
+
 // ----- mock entity deployment client -----
 
 type mockEntityDeploymentClient struct {
-	postDeploymentFn          func(ctx context.Context, body []byte) ([]byte, error)
-	searchDeploymentsFn       func(ctx context.Context, body []byte) ([]byte, error)
-	searchDeployedProductsFn  func(ctx context.Context, body []byte) ([]byte, error)
-	patchDeploymentFn         func(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
-	postDeployedProductFn     func(ctx context.Context, body []byte) ([]byte, error)
-	patchDeployedProductFn    func(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
+	postDeploymentFn         func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeploymentsFn      func(ctx context.Context, body []byte) ([]byte, error)
+	searchDeployedProductsFn func(ctx context.Context, body []byte) ([]byte, error)
+	patchDeploymentFn        func(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
+	postDeployedProductFn    func(ctx context.Context, body []byte) ([]byte, error)
+	patchDeployedProductFn   func(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
 }
 
 func (m *mockEntityDeploymentClient) PostDeployment(ctx context.Context, body []byte) ([]byte, error) {

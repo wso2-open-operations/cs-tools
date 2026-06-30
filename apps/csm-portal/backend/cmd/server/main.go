@@ -125,6 +125,8 @@ func main() {
 	mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 	mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
+	mux.HandleFunc("POST /time-cards", timeCardHandler.CreateTimeCard)
+	mux.HandleFunc("PATCH /time-cards/{id}", timeCardHandler.UpdateTimeCard)
 	mux.HandleFunc("POST /catalogs/search", catalogHandler.SearchCatalogs)
 	mux.HandleFunc("GET /catalogs/{catalogId}/items/{catalogItemId}/variables", catalogHandler.GetCatalogItemVariables)
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
