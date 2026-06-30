@@ -19,6 +19,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   type JSX,
   type ReactNode,
@@ -27,6 +28,7 @@ import {
   useGetUsersMe,
   type UsersMeResponse,
 } from "@features/settings/api/useGetUsersMe";
+import { setUserPreferredTimeZone } from "@utils/dateTime";
 
 interface CurrentUserContextType {
   /** The signed-in user's platform profile (`GET /users/me`), once loaded. */
@@ -59,6 +61,12 @@ export function CurrentUserProvider({
   children,
 }: CurrentUserProviderProps): JSX.Element {
   const { data, isLoading, isError } = useGetUsersMe();
+
+  // Seed the app-wide preferred-timezone store (used for view-only date
+  // formatting) from the profile, so dates render in the user's own zone.
+  useEffect(() => {
+    setUserPreferredTimeZone(data?.timeZone);
+  }, [data?.timeZone]);
 
   const value = useMemo<CurrentUserContextType>(
     () => ({ user: data, isLoading, isError }),

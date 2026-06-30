@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Autocomplete,
   Avatar,
   Box,
   Button,
@@ -27,13 +28,20 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { PencilLine, X } from "@wso2/oxygen-ui-icons-react";
-import { type JSX, useCallback, useEffect, useState } from "react";
+import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
-import { usePatchUsersMe } from "@features/settings/api/usePatchUsersMe";
+import {
+  usePatchUsersMe,
+  type UpdateUserPayload,
+} from "@features/settings/api/usePatchUsersMe";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
+import {
+  listSupportedTimeZones,
+  normalizeUserTimeZone,
+} from "@utils/dateTime";
 
 // E.164 phone validator: leading + required, then country code digit + 7-14 more digits.
 const E164 = /^\+[1-9]\d{7,14}$/;
@@ -58,56 +66,81 @@ export default function UserProfileModal({
 
   const [phoneDraft, setPhoneDraft] = useState("");
   const [isPhoneEditing, setIsPhoneEditing] = useState(false);
+  const [tzDraft, setTzDraft] = useState<string | null>(null);
+  const [isTzEditing, setIsTzEditing] = useState(false);
 
   const info = resolveUserInfo(claims);
   const email = userMe?.email || info.email || "—";
   const initials = initialsOf(info.fullName);
+  const timeZoneOptions = useMemo(() => listSupportedTimeZones(), []);
 
   useEffect(() => {
     if (open && userMe) {
-      // Seed the editable draft from the latest server value each time the
+      // Seed the editable drafts from the latest server values each time the
       // dialog opens (the accepted "reset form state on open" pattern).
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- form reset on dialog open
+      /* eslint-disable react-hooks/set-state-in-effect -- form reset on dialog open */
       setPhoneDraft(userMe.phoneNumber ?? "");
+      setTzDraft(normalizeUserTimeZone(userMe.timeZone));
       setIsPhoneEditing(false);
+      setIsTzEditing(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [open, userMe]);
 
-  const handlePhoneEditCancel = useCallback(() => {
+  const handleEditCancel = useCallback(() => {
     setPhoneDraft(userMe?.phoneNumber ?? "");
+    setTzDraft(normalizeUserTimeZone(userMe?.timeZone));
     setIsPhoneEditing(false);
-  }, [userMe?.phoneNumber]);
+    setIsTzEditing(false);
+  }, [userMe?.phoneNumber, userMe?.timeZone]);
 
   const handleSave = useCallback(() => {
-    const current = userMe?.phoneNumber ?? "";
-    const next = phoneDraft.trim();
+    const currentPhone = userMe?.phoneNumber ?? "";
+    const nextPhone = phoneDraft.trim();
+    const phoneChanged = nextPhone !== currentPhone;
 
-    if (next === current) {
+    const currentTz = normalizeUserTimeZone(userMe?.timeZone) ?? "";
+    const nextTz = tzDraft ?? "";
+    const tzChanged = nextTz !== currentTz;
+
+    if (!phoneChanged && !tzChanged) {
       onClose();
       return;
     }
 
-    if (next && !E164.test(next)) {
+    if (phoneChanged && nextPhone && !E164.test(nextPhone)) {
       showError("Phone number must be in E.164 format, e.g. +14155552671.");
       return;
     }
 
-    patchUserMe.mutate(
-      { phoneNumber: next },
-      {
-        onSuccess: () => {
-          showSuccess("Profile updated.");
-          setIsPhoneEditing(false);
-          onClose();
-        },
-        onError: () => {
-          showError("Could not update phone number. Please try again.");
-        },
+    if (tzChanged && nextTz && !normalizeUserTimeZone(nextTz)) {
+      showError("Select a valid time zone.");
+      return;
+    }
+
+    const payload: UpdateUserPayload = {
+      ...(phoneChanged && { phoneNumber: nextPhone }),
+      ...(tzChanged && { timeZone: nextTz }),
+    };
+
+    patchUserMe.mutate(payload, {
+      onSuccess: () => {
+        // The mutation invalidates `users-me`; CurrentUserProvider re-seeds the
+        // preferred-timezone store from the refetched profile.
+        showSuccess("Profile updated.");
+        setIsPhoneEditing(false);
+        setIsTzEditing(false);
+        onClose();
       },
-    );
+      onError: () => {
+        showError("Could not update profile. Please try again.");
+      },
+    });
   }, [
     phoneDraft,
+    tzDraft,
     userMe?.phoneNumber,
+    userMe?.timeZone,
     patchUserMe,
     showError,
     showSuccess,
@@ -229,11 +262,59 @@ export default function UserProfileModal({
               </Box>
             )}
           </Box>
+
+          <Box>
+            <Typography variant="caption" color="text.secondary">
+              Time zone
+            </Typography>
+            {isTzEditing ? (
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 0.5 }}>
+                <Autocomplete
+                  size="small"
+                  fullWidth
+                  options={timeZoneOptions}
+                  value={tzDraft}
+                  onChange={(_, next) => setTzDraft(next)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder="Select a time zone"
+                      helperText="Used to display dates and times in your zone"
+                    />
+                  )}
+                />
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  mt: 0.5,
+                }}
+              >
+                <Typography variant="body2">
+                  {isLoading ? (
+                    <Skeleton width={160} />
+                  ) : (
+                    normalizeUserTimeZone(userMe?.timeZone) || "Not set"
+                  )}
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setIsTzEditing(true)}
+                  aria-label="Edit time zone"
+                >
+                  <PencilLine size={16} />
+                </IconButton>
+              </Box>
+            )}
+          </Box>
         </Box>
 
         <Stack direction="row" justifyContent="flex-end" spacing={1}>
-          {isPhoneEditing && (
-            <Button variant="text" onClick={handlePhoneEditCancel}>
+          {(isPhoneEditing || isTzEditing) && (
+            <Button variant="text" onClick={handleEditCancel}>
               Cancel
             </Button>
           )}
@@ -242,7 +323,7 @@ export default function UserProfileModal({
             onClick={handleSave}
             disabled={patchUserMe.isPending}
           >
-            {isPhoneEditing ? "Save" : "Close"}
+            {isPhoneEditing || isTzEditing ? "Save" : "Close"}
           </Button>
         </Stack>
       </Box>

@@ -51,6 +51,29 @@ export function normalizeUserTimeZone(
 }
 
 /**
+ * Lists the IANA time zones the runtime supports, for the profile time-zone
+ * picker. Uses `Intl.supportedValuesOf` where available; falls back to the
+ * browser's own zone on older runtimes so the picker is never empty.
+ *
+ * @returns {string[]} Sorted IANA time-zone identifiers.
+ */
+export function listSupportedTimeZones(): string[] {
+  try {
+    const fn = (Intl as { supportedValuesOf?: (key: string) => string[] })
+      .supportedValuesOf;
+    if (typeof fn === "function") return fn("timeZone");
+  } catch {
+    /* older runtime without Intl.supportedValuesOf */
+  }
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone ? [zone] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Stores user timezone globally for view-only date formatting.
  *
  * @param timeZone - Timezone from users/me response.
