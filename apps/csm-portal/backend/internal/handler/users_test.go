@@ -81,16 +81,14 @@ func TestGetMe(t *testing.T) {
 		}
 	})
 
-	t.Run("searches SCIM by the JWT email and returns phone and password timestamp", func(t *testing.T) {
+	t.Run("searches SCIM by the JWT email and returns phone number", func(t *testing.T) {
 		phone := "+94771234567"
-		ts := "2025-01-15T10:00:00Z"
 		var capturedEmail string
 		scimClient := &mockSCIMClient{
 			searchUserFn: func(_ context.Context, email string) (*scim.UserInfo, error) {
 				capturedEmail = email
 				return &scim.UserInfo{
-					PhoneNumber:            &phone,
-					LastPasswordUpdateTime: &ts,
+					PhoneNumber: &phone,
 				}, nil
 			},
 		}
@@ -105,9 +103,8 @@ func TestGetMe(t *testing.T) {
 			t.Errorf("SCIM searched email %q, want %q", capturedEmail, testUser.Email)
 		}
 		type getMeResp struct {
-			Email                  string  `json:"email"`
-			PhoneNumber            *string `json:"phoneNumber"`
-			LastPasswordUpdateTime *string `json:"lastPasswordUpdateTime"`
+			Email       string  `json:"email"`
+			PhoneNumber *string `json:"phoneNumber"`
 		}
 		resp := decodeJSON[getMeResp](t, w)
 		if resp.Email != testUser.Email {
@@ -115,9 +112,6 @@ func TestGetMe(t *testing.T) {
 		}
 		if resp.PhoneNumber == nil || *resp.PhoneNumber != phone {
 			t.Errorf("phoneNumber = %v, want %q", resp.PhoneNumber, phone)
-		}
-		if resp.LastPasswordUpdateTime == nil || *resp.LastPasswordUpdateTime != ts {
-			t.Errorf("lastPasswordUpdateTime = %v, want %q", resp.LastPasswordUpdateTime, ts)
 		}
 	})
 }

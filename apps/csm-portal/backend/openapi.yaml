@@ -2752,13 +2752,26 @@ components:
     UserResponse:
       type: object
       properties:
+        id:
+          type: string
+          format: uuid
+          description: User's entity service UUID (absent when entity service is unavailable)
         email:
           type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        timeZone:
+          type: string
+          description: User's preferred time zone (e.g. "America/New_York")
+        roles:
+          type: array
+          items:
+            type: string
         phoneNumber:
           type: string
-        lastPasswordUpdateTime:
-          type: string
-        # TODO: id, firstName, lastName, timeZone, roles — requires entity
+          description: Mobile phone number in E.164 format (sourced from SCIM)
 
     UserUpdatePayload:
       type: object
@@ -2767,14 +2780,19 @@ components:
         phoneNumber:
           type: string
           description: Mobile phone number in E.164 format
-        # TODO: timeZone — requires entity
+        timeZone:
+          type: string
+          description: User's preferred time zone (e.g. "America/New_York")
 
     UpdatedUser:
       type: object
       properties:
         phoneNumber:
           type: string
-        # TODO: timeZone — requires entity
+          description: Updated phone number (present when phoneNumber was in the request)
+        timeZone:
+          type: string
+          description: Updated time zone (present when timeZone was in the request)
 
     UserSearchPayload:
       type: object

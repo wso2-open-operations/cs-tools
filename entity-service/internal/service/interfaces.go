@@ -34,12 +34,18 @@ type UserService interface {
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error)
 }
 
-// SNUserService defines the user search operation backed by the ServiceNow data source.
+// SNUserService defines the user operations backed by the ServiceNow data source.
 type SNUserService interface {
 	// SearchUsers returns a paginated list of ServiceNow users that match the
 	// filters in req. A ValidationError is returned for invalid input; any other
 	// error indicates an infrastructure failure.
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchSNUsersResponse, error)
+	// GetMe returns the profile of the currently authenticated user from ServiceNow.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	GetMe(ctx context.Context) (domain.GetUserMeResponse, error)
+	// PatchMe updates mutable fields on the currently authenticated user in ServiceNow.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error)
 }
 
 // AccountService defines the operations available on the account entity.

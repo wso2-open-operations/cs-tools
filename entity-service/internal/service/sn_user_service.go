@@ -27,6 +27,34 @@ import (
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
+// snUserMeResponse mirrors the Choreo GET /users/me response.
+type snUserMeResponse struct {
+	ID        string   `json:"id"`
+	Email     string   `json:"email"`
+	FirstName *string  `json:"firstName"`
+	LastName  string   `json:"lastName"`
+	TimeZone  *string  `json:"timeZone"`
+	Roles     []string `json:"roles"`
+}
+
+// snPatchUserMePayload is the Choreo PATCH /users/me request body.
+type snPatchUserMePayload struct {
+	TimeZone string `json:"timeZone"`
+}
+
+// snPatchUserMeUpdated is the user sub-object in the Choreo PATCH /users/me response.
+type snPatchUserMeUpdated struct {
+	ID        string `json:"id"`
+	UpdatedBy string `json:"updatedBy"`
+	UpdatedOn string `json:"updatedOn"`
+}
+
+// snPatchUserMeResponse mirrors the Choreo PATCH /users/me response.
+type snPatchUserMeResponse struct {
+	Message string               `json:"message"`
+	User    snPatchUserMeUpdated `json:"user"`
+}
+
 // snUsersResponse mirrors the Choreo POST /users/search response.
 type snUsersResponse struct {
 	Users        []snUser `json:"users"`
@@ -195,5 +223,66 @@ func (s *snUserService) SearchUsers(ctx context.Context, req domain.SearchUsersR
 		Total:  snResp.TotalRecords,
 		Limit:  req.Pagination.Limit,
 		Offset: req.Pagination.Offset,
+	}, nil
+}
+
+func (s *snUserService) GetMe(ctx context.Context) (domain.GetUserMeResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.GetUserMeResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	raw, err := s.client.Get(ctx, "/users/me", token)
+	if err != nil {
+		return domain.GetUserMeResponse{}, err
+	}
+
+	var snResp snUserMeResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.GetUserMeResponse{}, fmt.Errorf("sn users: parse get-me response: %w", err)
+	}
+
+	roles := snResp.Roles
+	if roles == nil {
+		roles = []string{}
+	}
+
+	return domain.GetUserMeResponse{
+		ID:        sysidToUUID(snResp.ID),
+		Email:     snResp.Email,
+		FirstName: snResp.FirstName,
+		LastName:  snResp.LastName,
+		TimeZone:  snResp.TimeZone,
+		Roles:     roles,
+	}, nil
+}
+
+func (s *snUserService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error) {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.PatchUserMeResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	if req.TimeZone == "" {
+		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "timeZone is required"}
+	}
+
+	raw, err := s.client.Patch(ctx, "/users/me", token, snPatchUserMePayload{TimeZone: req.TimeZone})
+	if err != nil {
+		return domain.PatchUserMeResponse{}, err
+	}
+
+	var snResp snPatchUserMeResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.PatchUserMeResponse{}, fmt.Errorf("sn users: parse patch-me response: %w", err)
+	}
+
+	return domain.PatchUserMeResponse{
+		Message: snResp.Message,
+		User: domain.PatchUserMeUpdated{
+			ID:        sysidToUUID(snResp.User.ID),
+			UpdatedBy: snResp.User.UpdatedBy,
+			UpdatedOn: snResp.User.UpdatedOn,
+		},
 	}, nil
 }
