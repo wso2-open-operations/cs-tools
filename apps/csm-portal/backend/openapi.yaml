@@ -2373,6 +2373,22 @@ components:
         createdByMe:
           type: boolean
           description: When true, the caller's email (from JWT) is appended to createdBy (optional)
+        workStates:
+          type: array
+          items:
+            type: string
+            enum:
+              - ongoing
+              - paused
+          description: >
+            Filter by work sub-state (optional). Only applicable when state is work_in_progress.
+            For the ServiceNow data source, ongoing maps to key 1 and paused maps to key 2.
+        assignedUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by assigned engineer user UUIDs (optional)
 
     CaseSearchPayload:
       type: object
