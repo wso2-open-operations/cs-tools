@@ -51,6 +51,7 @@ import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
+import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevelsCard";
 import ApiErrorState from "@components/error/ApiErrorState";
 import {
   formatValue,
@@ -479,7 +480,15 @@ export default function CaseDetailsDetailsPanel({
         )
       )}
 
-      {/* Section 2: Product & Environment */}
+      {/* Section 2: Escalation Levels */}
+      {!isEngagement && !isServiceRequest && !isSecurityReportAnalysis && caseId && (
+        <CaseEscalationLevelsCard
+          caseId={caseId}
+          currentLevelId={data?.escalationLevel?.id}
+        />
+      )}
+
+      {/* Section 3: Product & Environment */}
       {!isEngagement && (
         <CaseDetailsCard
           title="Product & Environment"
@@ -522,7 +531,7 @@ export default function CaseDetailsDetailsPanel({
         </CaseDetailsCard>
       )}
 
-      {/* Section 3: Closed Case Details (only when case is closed) */}
+      {/* Section 4: Closed Case Details (only when case is closed) */}
       {statusLabel?.toLowerCase() === "closed" && (
         <CaseDetailsCard
           title={
@@ -562,7 +571,7 @@ export default function CaseDetailsDetailsPanel({
         </CaseDetailsCard>
       )}
 
-      {/* Section 4: Customer Information */}
+      {/* Section 5: Customer Information */}
       <CaseDetailsCard
         title="Customer Information"
         icon={<Building2 size={20} aria-hidden />}
@@ -609,7 +618,7 @@ export default function CaseDetailsDetailsPanel({
         </Box>
       </CaseDetailsCard>
 
-      {/* Section 5: Watch List */}
+      {/* Section 6: Watch List */}
       <CaseDetailsCard
         title="Watch List"
         icon={<Mail size={20} aria-hidden />}
