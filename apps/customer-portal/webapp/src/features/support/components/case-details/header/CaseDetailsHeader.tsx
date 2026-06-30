@@ -165,7 +165,7 @@ export default function CaseDetailsHeader({
               fontWeight: 500,
               height: 20,
               fontSize: "0.7rem",
-              "& .MuiChip-icon": { color: theme.palette.warning.main, ml: "4px" },
+              "& .MuiChip-icon": { color: theme.palette.warning.main, ml: "4px", mr: "2px" },
               "& .MuiChip-label": { pl: "4px", pr: "8px" },
             }}
           />

@@ -71,6 +71,7 @@ type Props = {
 
 export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Props): JSX.Element {
   const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
   const { data: escalationData } = usePostCaseEscalationsSearch(caseId);
 
   const currentLevelNum = Math.max(0, Number(currentLevelId ?? 0));
@@ -85,7 +86,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
 
   const showLeadWarning = currentLevelNum >= LEAD_WARNING_THRESHOLD;
 
-  const neutralGrayLegend = theme.palette.grey[500];
+  const neutralGrayLegend = isDark ? theme.palette.grey[400] : theme.palette.grey[500];
   const LEGEND = [
     { label: "Previous", color: neutralGrayLegend, outlined: false },
     { label: "Active", color: theme.palette.warning.main, outlined: false },
@@ -102,8 +103,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
           const record = recordByLevel.get(levelNum);
           const canShowTooltip = status === "previous" || status === "active";
 
-          // Use a fixed neutral gray for "previous" so it stays gray regardless of theme accent colour
-          const neutralGray = theme.palette.grey[500];
+          const neutralGray = isDark ? theme.palette.grey[400] : theme.palette.grey[500];
 
           let circleSx: object;
           if (status === "active") {
@@ -116,7 +116,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
           } else if (status === "previous") {
             circleSx = {
               bgcolor: neutralGray,
-              color: "#fff",
+              color: isDark ? theme.palette.grey[900] : "#fff",
               border: `2px solid ${neutralGray}`,
             };
           } else if (status === "available") {
@@ -126,22 +126,19 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
               border: `2px solid ${theme.palette.primary.main}`,
             };
           } else {
-            // locked — render dimmed via opacity on the wrapper; circleSx is neutral
             circleSx = {
               bgcolor: "transparent",
-              color: theme.palette.text.secondary,
-              border: `2px solid ${theme.palette.text.secondary}`,
+              color: neutralGray,
+              border: `2px solid ${neutralGray}`,
             };
           }
 
           const labelColor =
             status === "active"
               ? "warning.main"
-              : status === "previous"
-                ? neutralGray
-                : status === "locked"
-                  ? theme.palette.text.secondary
-                  : "primary.main";
+              : status === "available"
+                ? "primary.main"
+                : neutralGray;
 
           const stepNode = (
             <Box
@@ -151,8 +148,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
                 alignItems: "center",
                 gap: 0.75,
                 flexShrink: 0,
-                // dim locked steps to make the deactivated state clear
-                opacity: status === "locked" ? 0.55 : 1,
+                opacity: status === "locked" ? (isDark ? 0.85 : 0.65) : 1,
               }}
             >
               <Box
@@ -183,7 +179,8 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
                   sx={{
                     flex: 1,
                     height: 2,
-                    bgcolor: levelNum <= currentLevelNum ? "text.secondary" : "divider",
+                    bgcolor: neutralGray,
+                    opacity: levelNum <= currentLevelNum ? 1 : (isDark ? 0.5 : 0.35),
                     alignSelf: "flex-start",
                     mt: "19px",
                     mx: 0.5,
