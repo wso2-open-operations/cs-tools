@@ -156,11 +156,13 @@ export function useGetCsmCases(
       // taken from the app-wide CurrentUserProvider (no per-query `/users/me`).
       // Runs only when the assignee filter is active. A user whose id can't be
       // resolved (e.g. `@me` when `/users/me` omits `id` — entity service down
-      // — or an email with no match) is dropped; if nothing resolves, the
-      // filter is omitted rather
-      // than sent empty. A transport failure of the lookup is NOT swallowed —
-      // it throws so the query errors (the list shows an error) instead of
-      // silently broadening an active assignee filter to all cases.
+      // — or an email with no match) is dropped. If an active assignee filter
+      // resolves to NO ids, the result is definitionally empty (cases assigned
+      // to engineers we couldn't identify), so we return an empty list rather
+      // than omitting the filter — omitting it would broaden the search to ALL
+      // cases, the opposite of what the user asked for. A transport failure of
+      // the lookup is NOT swallowed — it throws so the query errors (the list
+      // shows an error) instead of silently broadening to all cases.
       let assignedUserIds: string[] | undefined;
       if (filters.assignees.length > 0) {
         const wantsMe = filters.assignees.includes(ASSIGNEE_ME_TOKEN);
@@ -188,6 +190,12 @@ export function useGetCsmCases(
         });
         if (wantsMe && currentUserId) ids.add(currentUserId);
         if (ids.size > 0) assignedUserIds = [...ids];
+      }
+
+      // Active assignee filter that resolved to nothing → empty result, not a
+      // broadened (filter-less) search. See the resolution note above.
+      if (filters.assignees.length > 0 && !assignedUserIds) {
+        return { cases: [], total: 0, limit: pageSize, offset, hasMore: false };
       }
 
       // One cross-project case search, plus project/account lookups for the

@@ -80,13 +80,21 @@ function parseFreeFormCsv(raw: string | null, maxEntryLen = 120): string[] {
 export function readCasesFiltersFromUrl(
   params: URLSearchParams,
 ): CasesFilters {
+  const states = parseCsv(params.get("states"), VALID_STATES);
+  // Work sub-states only apply to `work_in_progress` cases. Mirror the
+  // filter-bar invariant (the State control clears work states when that state
+  // leaves the selection) so a hand-edited / stale URL can't load an active but
+  // un-clearable work-state filter behind the disabled control.
+  const workStates = states.includes("work_in_progress")
+    ? parseCsv(params.get("workStates"), VALID_WORK_STATES)
+    : [];
   return {
     search: params.get("q") ?? "",
     severities: parseCsv(params.get("severities"), VALID_SEVERITIES),
-    states: parseCsv(params.get("states"), VALID_STATES),
+    states,
     caseTypes: parseCsv(params.get("types"), VALID_CASE_TYPES),
     assignees: parseFreeFormCsv(params.get("assignees")),
-    workStates: parseCsv(params.get("workStates"), VALID_WORK_STATES),
+    workStates,
     projects: parseFreeFormCsv(params.get("projects")),
     engagementTypes: parseCsv(params.get("engagementTypes"), VALID_ENGAGEMENT_TYPES),
   };

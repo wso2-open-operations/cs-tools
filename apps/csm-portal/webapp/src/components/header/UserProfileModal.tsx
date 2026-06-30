@@ -113,7 +113,9 @@ export default function UserProfileModal({
       return;
     }
 
-    if (tzChanged && nextTz && !normalizeUserTimeZone(nextTz)) {
+    // Time zone has no "unset" on the backend; clearing the picker (empty
+    // draft) must not PATCH `timeZone: ""`. Require a valid zone when changed.
+    if (tzChanged && (!nextTz || !normalizeUserTimeZone(nextTz))) {
       showError("Select a valid time zone.");
       return;
     }
