@@ -115,12 +115,8 @@ export default function EditUserModal({
       const next = new Set(prev);
       if (next.has(roleId)) {
         next.delete(roleId);
-        // Removing Portal User also removes Lead (Lead requires portal access)
-        if (roleId === "portal") next.delete("lead");
       } else {
         next.add(roleId);
-        // Adding Lead implicitly requires Portal User
-        if (roleId === "lead") next.add("portal");
       }
       return next;
     });
