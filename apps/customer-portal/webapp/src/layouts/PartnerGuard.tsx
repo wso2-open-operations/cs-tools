@@ -18,7 +18,7 @@ import { type JSX } from "react";
 import { Navigate, Outlet } from "react-router";
 import { Box, LinearProgress, Typography } from "@wso2/oxygen-ui";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
-import { SETTINGS_PARTNER_ROLE } from "@features/settings/constants/settingsConstants";
+import { hasPartnerAccess } from "@features/settings/constants/settingsConstants";
 
 /**
  * Guards all /partner/* routes so only users with the partner role can access them.
@@ -46,7 +46,7 @@ export default function PartnerGuard(): JSX.Element {
     );
   }
 
-  const isPartner = (userDetails?.roles ?? []).includes(SETTINGS_PARTNER_ROLE);
+  const isPartner = hasPartnerAccess(userDetails?.roles ?? []);
 
   if (!isPartner) {
     return <Navigate replace to="/" />;

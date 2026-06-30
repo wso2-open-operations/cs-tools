@@ -40,7 +40,7 @@ import ProjectCard from "@features/project-hub/components/ProjectCard";
 import ProjectCardSkeleton from "@features/project-hub/components/project-card/ProjectCardSkeleton";
 import PartnerGlobalSearch from "@features/project-hub/components/PartnerGlobalSearch";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
-import { SETTINGS_PARTNER_ROLE } from "@features/settings/constants/settingsConstants";
+import { hasPartnerAccess } from "@features/settings/constants/settingsConstants";
 import { clearLastSelectedProject } from "@features/settings/utils/settingsStorage";
 import { ChevronUp, FolderOpen, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useAsgardeo } from "@asgardeo/react";
@@ -176,7 +176,7 @@ export default function ProjectHub(): JSX.Element {
 
   const isPartner =
     !isLoadingUserDetails &&
-    (userDetails?.roles ?? []).includes(SETTINGS_PARTNER_ROLE);
+    hasPartnerAccess(userDetails?.roles ?? []);
 
   const isCheckingAllSuspended =
     !isLoading &&
@@ -238,11 +238,6 @@ export default function ProjectHub(): JSX.Element {
     clearLastSelectedProject();
   }, []);
 
-  // Partner users always see the global search page (projects + cases).
-  if (isPartner && !isAuthLoading && !isLoadingUserDetails) {
-    return <PartnerGlobalSearch />;
-  }
-
   const hasSearchQuery = Boolean(searchQuery.trim());
 
   const contentView = useMemo(
@@ -264,6 +259,11 @@ export default function ProjectHub(): JSX.Element {
       projects.length,
     ],
   );
+
+  // Partner users always see the global search page (projects + cases).
+  if (isPartner && !isAuthLoading && !isLoadingUserDetails) {
+    return <PartnerGlobalSearch />;
+  }
 
   const showSearchBar = shouldShowProjectHubSearchBar(
     titleTotalRecords,

@@ -46,6 +46,14 @@ export const SETTINGS_CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
 /** ServiceNow partner role — triggers list view in ProjectHub when >4 projects. */
 export const SETTINGS_PARTNER_ROLE = "sn_customerservice.partner";
 
+/** ServiceNow partner admin role — same partner UI access as SETTINGS_PARTNER_ROLE. */
+export const SETTINGS_PARTNER_ADMIN_ROLE = "sn_customerservice.partner_admin";
+
+/** Returns true if the given role list grants partner-level UI access. */
+export function hasPartnerAccess(roles: string[]): boolean {
+  return roles.includes(SETTINGS_PARTNER_ROLE) || roles.includes(SETTINGS_PARTNER_ADMIN_ROLE);
+}
+
 export const SETTINGS_PAGE_TABS = [
   {
     id: SettingsPageTabId.USERS,
