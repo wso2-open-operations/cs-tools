@@ -62,8 +62,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	projectHandler := handler.NewProjectHandler(activeProjectSvc)
 
 	productRepo := repository.NewProductRepository(db)
-	productSvc := service.NewProductService(productRepo)
-	productHandler := handler.NewProductHandler(productSvc)
+	pgProductSvc := service.NewProductService(productRepo)
+	var activeProductSvc service.ProductService
+	if cfg.DataSource == config.DataSourceServiceNow {
+		activeProductSvc = service.NewServiceNowProductService(serviceNowIntegrationServiceClient)
+	} else {
+		activeProductSvc = pgProductSvc
+	}
+	productHandler := handler.NewProductHandler(activeProductSvc)
 
 	productVersionRepo := repository.NewProductVersionRepository(db)
 	productVersionSvc := service.NewProductVersionService(productVersionRepo)
