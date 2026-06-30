@@ -173,6 +173,19 @@ func (c *Client) SearchTimeCards(ctx context.Context, body []byte) ([]byte, erro
 	return c.do(ctx, http.MethodPost, "/time-cards/search", body)
 }
 
+// CreateTimeCard calls POST /time-cards on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateTimeCard(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/time-cards", body)
+}
+
+// UpdateTimeCard calls PATCH /time-cards/{id} on the entity service. The body may
+// carry editable fields, or a state transition ({"state":"approved"} or
+// {"state":"rejected","leadComment":"..."}). Response is returned as raw JSON.
+func (c *Client) UpdateTimeCard(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/time-cards/%s", url.PathEscape(id)), body)
+}
+
 // CreateCaseAttachment calls POST /attachments on the entity service.
 // Response is returned as raw JSON.
 func (c *Client) CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error) {

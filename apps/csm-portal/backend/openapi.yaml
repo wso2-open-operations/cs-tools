@@ -1963,6 +1963,123 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /time-cards:
+    post:
+      summary: Create a time card in the submitted state (ServiceNow data source only).
+      operationId: createTimeCard
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTimeCardPayload'
+      responses:
+        "201":
+          description: The created time card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeCardMutationResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /time-cards/{id}:
+    patch:
+      summary: >
+        Update a time card (ServiceNow data source only). Carries either editable
+        fields (submitter, while submitted) or a state transition:
+        {"state":"approved"} or {"state":"rejected","leadComment":"..."} (an
+        eligible approver). The entity service enforces authorization.
+      operationId: updateTimeCard
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTimeCardPayload'
+      responses:
+        "200":
+          description: The updated time card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeCardMutationResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Time card not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2103,6 +2220,90 @@ components:
           type: integer
         offset:
           type: integer
+
+    CreateTimeCardPayload:
+      type: object
+      required: [caseId, projectId, date, approverIds]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        approverIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Eligible approvers (approver_list). Must be non-empty.
+        isBillable:
+          type: boolean
+        issueComplexity:
+          type: string
+        workLogComment:
+          type: string
+        timeAnalyzing:
+          type: integer
+        timeSettingUp:
+          type: integer
+        timeReproducingDebugging:
+          type: integer
+        timeProvidingSolution:
+          type: integer
+        timePatching:
+          type: integer
+
+    UpdateTimeCardPayload:
+      type: object
+      minProperties: 1
+      description: >
+        Either editable fields (no `state`), or a state transition: `state`
+        = `approved`, or `state` = `rejected` with a `leadComment`. The two are
+        mutually exclusive and an empty body is rejected; the entity service
+        enforces this.
+      properties:
+        state:
+          type: string
+          enum: [approved, rejected]
+        leadComment:
+          type: string
+          description: Required when state is rejected.
+        date:
+          type: string
+          description: ISO 8601 date (YYYY-MM-DD).
+        approverIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        isBillable:
+          type: boolean
+        issueComplexity:
+          type: string
+        workLogComment:
+          type: string
+        timeAnalyzing:
+          type: integer
+        timeSettingUp:
+          type: integer
+        timeReproducingDebugging:
+          type: integer
+        timeProvidingSolution:
+          type: integer
+        timePatching:
+          type: integer
+
+    TimeCardMutationResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        timeCard:
+          $ref: '#/components/schemas/TimeCardView'
 
     UpdateCaseRequest:
       type: object
