@@ -84,17 +84,23 @@ export default function AssignEngineerDialog({
       // Internal-facing roles only (ServiceNow source); the BE applies the
       // filter, so we no longer client-gate on `userType` (absent on SnUser).
       roles: INTERNAL_USER_ROLES,
+      // Don't offer inactive accounts as assignment targets.
+      active: true,
     },
     pagination: { limit: 8, offset: 0 },
   });
 
-  // Assignment is email-based, so an assignee must carry an email. The role
-  // filter above already restricts to internal staff; we keep a userType guard
-  // only for the postgres source (where roles are absent).
+  // Assignment is email-based, so an assignee must carry an email. The role +
+  // active filters above already restrict server-side; we keep a defensive
+  // `active !== false` check and a userType guard for the postgres source
+  // (where `roles`/`active` are absent).
   const engineers = useMemo(
     () =>
       (data?.users ?? []).filter(
-        (u) => !!u.email && (u.userType ? u.userType === "internal" : true),
+        (u) =>
+          !!u.email &&
+          u.active !== false &&
+          (u.userType ? u.userType === "internal" : true),
       ),
     [data],
   );

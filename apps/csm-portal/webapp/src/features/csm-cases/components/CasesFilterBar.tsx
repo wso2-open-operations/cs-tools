@@ -70,7 +70,11 @@ import {
   SUGGESTED_FILTER_VIEWS,
   useSavedFilterViews,
 } from "@features/csm-cases/utils/savedFilterViews";
-import type { BeCaseType, BeEngagementType } from "@api/backend/types";
+import type {
+  BeCaseType,
+  BeCaseWorkState,
+  BeEngagementType,
+} from "@api/backend/types";
 import {
   ALL_CASE_TYPES,
   CASE_TYPE_LABEL,
@@ -83,10 +87,10 @@ export const ASSIGNEE_ME_TOKEN = "@me";
 /**
  * Filter state for the CSM cases list. `severities` / `states` / `caseTypes`
  * are multi-select arrays driven by fixed enums; `projects` is an id-based
- * type-to-search multi-select. `assignees` holds engineer **emails** (the
- * stable identity the backend filters on) plus the sentinel `@me` (resolves to
- * the caller via `assignedToMe`). All are pushed into the `/cases/search`
- * payload server-side.
+ * type-to-search multi-select. `assignees` holds engineer **emails** plus the
+ * sentinel `@me`; the control is disabled for now (the BE filter is UUID-based
+ * and `@me` has no current-user UUID to resolve to yet). The rest are pushed
+ * into the `/cases/search` payload server-side.
  */
 export interface CasesFilters {
   search: string;
@@ -96,6 +100,8 @@ export interface CasesFilters {
   caseTypes: BeCaseType[];
   /** Engineer emails (+ the `@me` sentinel) to filter by assigned engineer. */
   assignees: string[];
+  /** Work sub-state filter; only meaningful when `states` includes `work_in_progress`. */
+  workStates: BeCaseWorkState[];
   projects: string[];
   /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
   engagementTypes: BeEngagementType[];
@@ -142,6 +148,12 @@ const ENGAGEMENT_TYPE_LABEL: Record<BeEngagementType, string> = {
   new_feature_improvement: "New feature / improvement",
   follow_up: "Follow-up",
   onboarding: "Onboarding",
+};
+
+const ALL_WORK_STATES: BeCaseWorkState[] = ["ongoing", "paused"];
+const WORK_STATE_LABEL: Record<BeCaseWorkState, string> = {
+  ongoing: "Ongoing",
+  paused: "Paused",
 };
 
 const ALL_SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
@@ -383,6 +395,10 @@ export default function CasesFilterBar({
   );
   const stateOptions = useMemo(
     () => PRIMARY_STATES.map((s) => ({ value: s, label: STATE_LABEL[s] })),
+    [],
+  );
+  const workStateOptions = useMemo(
+    () => ALL_WORK_STATES.map((s) => ({ value: s, label: WORK_STATE_LABEL[s] })),
     [],
   );
   const caseTypeOptions = useMemo(
@@ -635,6 +651,15 @@ export default function CasesFilterBar({
                 onChange={(next) => onChange({ ...filters, states: next })}
               />
             </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+              <MultiSelectField
+                id="cases-filter-work-state"
+                label="Work state"
+                values={filters.workStates}
+                options={workStateOptions}
+                onChange={(next) => onChange({ ...filters, workStates: next })}
+              />
+            </Grid>
             {showEngagementTypeFilter && (
               <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
                 <MultiSelectField
@@ -658,11 +683,11 @@ export default function CasesFilterBar({
               </Grid>
             )}
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
-              {/* Disabled until the backend `/cases/search` supports an
-                  assigned-engineer filter. The picker is email-backed and ready
-                  to enable (options labelled by name, `@me` sentinel); the hook
-                  does NOT send any assignee field meanwhile, so the search is
-                  never broken. */}
+              {/* Still disabled. `/cases/search` now has `assignedUserIds`,
+                  but it is UUID-based while this picker is email/`@me`-based,
+                  and `GET /users/me` does not return the caller's UUID yet, so
+                  `@me` cannot be resolved. The hook sends no assignee field
+                  meanwhile, so the search is never broken. */}
               <Tooltip title="Assignee filtering is coming soon.">
                 <Box>
                   <SearchableMultiSelect

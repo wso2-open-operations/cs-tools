@@ -408,9 +408,21 @@ export interface BeCaseSearchFilters {
   createdBy?: string[];
   /** When true, the caller's email (from the JWT) is appended to `createdBy`. */
   createdByMe?: boolean;
-  // NOTE: there is no assigned-engineer filter here yet. The cases-list
-  // assignee control is disabled until the entity/BFF add one (e.g.
-  // `assignedTo`/`assignedToMe`, mirroring `createdBy`/`createdByMe`).
+  /**
+   * Work sub-state filter (ServiceNow: `ongoing` → 1, `paused` → 2). Only
+   * meaningful when `states` includes `work_in_progress`.
+   */
+  workStates?: BeCaseWorkState[];
+  /**
+   * Filter by assigned-engineer user UUIDs. NOTE: the cases-list assignee
+   * control stays disabled for now. The picker is email/`@me`-based, but this
+   * filter is UUID-based with no `assignedToMe` equivalent, and `GET /users/me`
+   * does not yet return the caller's UUID (BE TODO) — so `@me` cannot be
+   * resolved. Enable once `/users/me` returns an `id` (or the BE adds
+   * `assignedToMe`); named-engineer UUIDs are already available via
+   * `/users/search`.
+   */
+  assignedUserIds?: string[];
 }
 
 export interface BeCaseSearchPayload {

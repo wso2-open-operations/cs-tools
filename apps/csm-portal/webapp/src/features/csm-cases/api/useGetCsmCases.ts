@@ -130,6 +130,7 @@ export function useGetCsmCases(
       [...filters.severities].sort(),
       [...filters.states].sort(),
       [...filters.caseTypes].sort(),
+      [...filters.workStates].sort(),
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
       currentUserEmail ?? "",
@@ -158,6 +159,12 @@ export function useGetCsmCases(
             ...(filters.caseTypes.length > 0 && {
               types: filters.caseTypes,
             }),
+            // Work sub-state filter (ongoing/paused); only meaningful when
+            // `states` includes `work_in_progress`, but the BE accepts it
+            // independently so we forward it as-is.
+            ...(filters.workStates.length > 0 && {
+              workStates: filters.workStates,
+            }),
             ...(filters.engagementTypes.length > 0 && {
               engagementTypes: filters.engagementTypes,
             }),
@@ -165,8 +172,10 @@ export function useGetCsmCases(
             ...(filters.projects.length > 0 && {
               projectIds: filters.projects,
             }),
-            // No assignee filter: `/cases/search` has no assigned-engineer
-            // filter yet, so the (disabled) assignee control sends nothing.
+            // No assignee filter: `/cases/search` has `assignedUserIds`, but
+            // it is UUID-based and `@me` has no current-user UUID to resolve to
+            // yet (see BeCaseSearchFilters), so the disabled control sends
+            // nothing.
           },
         }),
         queryClient.fetchQuery(projectOptionsQueryOptions(api)).catch((err) => {

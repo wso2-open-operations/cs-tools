@@ -18,7 +18,11 @@ import type {
   CaseState,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
-import type { BeCaseType, BeEngagementType } from "@api/backend/types";
+import type {
+  BeCaseType,
+  BeCaseWorkState,
+  BeEngagementType,
+} from "@api/backend/types";
 import type { CasesFilters } from "@features/csm-cases/components/CasesFilterBar";
 import { ALL_CASE_TYPES } from "@features/csm-cases/utils/caseType";
 
@@ -28,6 +32,7 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   states: [],
   caseTypes: [],
   assignees: [],
+  workStates: [],
   projects: [],
   engagementTypes: [],
 };
@@ -42,6 +47,7 @@ const VALID_STATES: CaseState[] = [
   "closed",
 ];
 const VALID_CASE_TYPES: BeCaseType[] = ALL_CASE_TYPES;
+const VALID_WORK_STATES: BeCaseWorkState[] = ["ongoing", "paused"];
 const VALID_ENGAGEMENT_TYPES: BeEngagementType[] = [
   "migration",
   "consultancy",
@@ -80,6 +86,7 @@ export function readCasesFiltersFromUrl(
     states: parseCsv(params.get("states"), VALID_STATES),
     caseTypes: parseCsv(params.get("types"), VALID_CASE_TYPES),
     assignees: parseFreeFormCsv(params.get("assignees")),
+    workStates: parseCsv(params.get("workStates"), VALID_WORK_STATES),
     projects: parseFreeFormCsv(params.get("projects")),
     engagementTypes: parseCsv(params.get("engagementTypes"), VALID_ENGAGEMENT_TYPES),
   };
@@ -96,6 +103,7 @@ export function writeCasesFiltersToUrl(f: CasesFilters): URLSearchParams {
   if (f.states.length) out.set("states", f.states.join(","));
   if (f.caseTypes.length) out.set("types", f.caseTypes.join(","));
   if (f.assignees.length) out.set("assignees", f.assignees.join(","));
+  if (f.workStates.length) out.set("workStates", f.workStates.join(","));
   if (f.projects.length) out.set("projects", f.projects.join(","));
   if (f.engagementTypes.length) out.set("engagementTypes", f.engagementTypes.join(","));
   return out;
@@ -114,6 +122,7 @@ export function countActiveFilters(f: CasesFilters): number {
   if (f.states.length) n += 1;
   if (f.caseTypes.length) n += 1;
   if (f.assignees.length) n += 1;
+  if (f.workStates.length) n += 1;
   if (f.projects.length) n += 1;
   if (f.engagementTypes.length) n += 1;
   return n;
