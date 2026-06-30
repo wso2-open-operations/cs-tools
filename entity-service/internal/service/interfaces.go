@@ -78,6 +78,13 @@ type ProductService interface {
 	SearchProducts(ctx context.Context, req domain.SearchProductsRequest) (domain.SearchProductsResponse, error)
 }
 
+// SNProductService defines the product operations backed by the ServiceNow data source.
+type SNProductService interface {
+	// SearchProducts returns a paginated list of ServiceNow products matching the
+	// search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchProducts(ctx context.Context, req domain.SearchProductsRequest) (domain.SearchSNProductsResponse, error)
+}
+
 // ProductVersionService defines the operations available on the product version entity.
 type ProductVersionService interface {
 	// SearchProductVersions returns a paginated list of product versions filtered

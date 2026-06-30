@@ -65,6 +65,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	productSvc := service.NewProductService(productRepo)
 	productHandler := handler.NewProductHandler(productSvc)
 
+	var snProductHandler *handler.SNProductHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		snProductHandler = handler.NewSNProductHandler(service.NewServiceNowProductService(serviceNowIntegrationServiceClient))
+	}
+
 	productVersionRepo := repository.NewProductVersionRepository(db)
 	productVersionSvc := service.NewProductVersionService(productVersionRepo)
 	productVersionHandler := handler.NewProductVersionHandler(productVersionSvc)
@@ -141,7 +146,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
-	mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
+	if snProductHandler != nil {
+		mux.HandleFunc("POST /products/search", snProductHandler.SearchProducts)
+	} else {
+		mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
+	}
 	mux.HandleFunc("POST /products/{id}/versions/search", productVersionHandler.SearchProductVersions)
 	mux.HandleFunc("POST /deployments", deploymentHandler.CreateDeployment)
 	mux.HandleFunc("POST /deployments/search", deploymentHandler.SearchDeployments)

@@ -255,6 +255,11 @@ paths:
   /products/search:
     post:
       summary: Search products by name.
+      description: >
+        Returns a paginated list of products matching the search query.
+        When the ServiceNow data source is active the response uses
+        SearchSNProductsResponse (no timestamp fields; class is a ServiceNow label).
+        Otherwise the response uses SearchProductsResponse.
       operationId: searchProducts
       requestBody:
         required: true
@@ -268,9 +273,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SearchProductsResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/SearchProductsResponse'
+                  - $ref: '#/components/schemas/SearchSNProductsResponse'
         "400":
           description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
           content:
             application/json:
               schema:
@@ -1796,6 +1809,34 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    SNProduct:
+      description: Product returned by the ServiceNow data source. Timestamp fields are absent; class is a ServiceNow label (e.g. "Software Model").
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        class:
+          type: string
+
+    SearchSNProductsResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNProduct'
         total:
           type: integer
         limit:

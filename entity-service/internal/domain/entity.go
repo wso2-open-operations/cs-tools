@@ -347,6 +347,23 @@ type SearchProductsResponse struct {
 	HasMore  bool      `json:"hasMore"`
 }
 
+// SNProduct is the product view returned by the ServiceNow data source.
+// SN products do not carry timestamp fields; class is a free-form label from ServiceNow.
+type SNProduct struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Class string `json:"class"`
+}
+
+// SearchSNProductsResponse is the paginated result of a ServiceNow product search.
+type SearchSNProductsResponse struct {
+	Products []SNProduct `json:"products"`
+	Total    int         `json:"total"`
+	Limit    int         `json:"limit"`
+	Offset   int         `json:"offset"`
+	HasMore  bool        `json:"hasMore"`
+}
+
 // SupportStatus represents the lifecycle state of a product version.
 type SupportStatus string
 
