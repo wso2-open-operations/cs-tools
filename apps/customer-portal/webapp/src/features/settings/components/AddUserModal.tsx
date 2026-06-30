@@ -99,7 +99,7 @@ const ADD_USER_ROLES = [
     label: "System User",
     description: "Used exclusively for system to system integrations. Cannot log in to the Support Portal",
     Icon: Code,
-    colorKey: "warning" as const,
+    colorKey: "success" as const,
   },
 ] as const;
 
@@ -435,7 +435,7 @@ export default function AddUserModal({
                     const resolvedColor =
                       role.colorKey === "admin"
                         ? ADMIN_COLOR
-                        : theme.palette[role.colorKey as "info" | "error" | "warning"]
+                        : theme.palette[role.colorKey as "info" | "error" | "warning" | "success"]
                             ?.main ?? theme.palette.text.primary;
                     const isOtherRole = role.id !== "webuser";
                     const isChecked =

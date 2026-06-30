@@ -124,7 +124,7 @@ export const ROLE_CONFIG = [
     id: SettingsRoleInfoId.SYSTEM_USER,
     label: "System User",
     Icon: Code,
-    paletteKey: "info" as const,
+    paletteKey: "success" as const,
     permissions: [
       "Used exclusively for system to system integrations",
       "Cannot log in to the Support Portal",
