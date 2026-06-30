@@ -33,7 +33,7 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   const badges: SettingsRoleBadge[] = [];
 
   if (contact.isCsAdmin) {
-    badges.push({ label: "Admin", Icon: Crown, chipColor: "secondary" });
+    badges.push({ label: "Admin", Icon: Crown, chipColor: "primary" });
   }
 
   if (contact.isLead) {
@@ -41,7 +41,7 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   }
 
   if (contact.isCsIntegrationUser) {
-    badges.push({ label: "System User", Icon: Code, chipColor: "success" });
+    badges.push({ label: "System User", Icon: Code, chipColor: "info" });
   } else {
     if (contact.isPortalUser) {
       badges.push({ label: "Portal User", Icon: Monitor, chipColor: "default" });
@@ -55,7 +55,7 @@ export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   }
 
   if (contact.account?.classification === "Partner") {
-    badges.push({ label: "Partner", Icon: Users, chipColor: "secondary" });
+    badges.push({ label: "Partner", Icon: Users, chipColor: "primary" });
   }
 
   return badges;
@@ -75,7 +75,7 @@ export function getRoleChipSx(chipColor: string): object {
     "& .MuiChip-label": { pl: 0.5 },
   };
   switch (chipColor) {
-    case "secondary":
+    case "primary":
       return {
         ...baseStyles,
         color: purple,
