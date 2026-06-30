@@ -19,6 +19,70 @@ paths:
         "200":
           description: Ok
 
+  /users/me:
+    get:
+      summary: Get the profile of the currently authenticated user.
+      description: >
+        Returns profile fields for the user identified by the x-user-id-token header.
+        Supported by the ServiceNow data source only.
+      operationId: getUserMe
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUserMeResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update the profile of the currently authenticated user.
+      description: >
+        Updates mutable profile fields for the user identified by the x-user-id-token header.
+        Supported by the ServiceNow data source only.
+      operationId: patchUserMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchUserMeRequest'
+      responses:
+        "200":
+          description: User profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchUserMeResponse'
+        "400":
+          description: Bad request — missing or invalid field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/search:
     post:
       summary: Search users with optional filters, sort, and pagination.
@@ -1318,6 +1382,55 @@ components:
         offset:
           type: integer
           description: Zero-based offset into the result set.
+
+    GetUserMeResponse:
+      type: object
+      required: [id, email, lastName, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        timeZone:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+
+    PatchUserMeRequest:
+      type: object
+      required: [timeZone]
+      properties:
+        timeZone:
+          type: string
+          description: User's preferred time zone (e.g. "America/New_York")
+
+    PatchUserMeUpdated:
+      type: object
+      required: [id, updatedBy, updatedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        updatedBy:
+          type: string
+        updatedOn:
+          type: string
+
+    PatchUserMeResponse:
+      type: object
+      required: [message, user]
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/PatchUserMeUpdated'
 
     SearchUsersRequest:
       type: object

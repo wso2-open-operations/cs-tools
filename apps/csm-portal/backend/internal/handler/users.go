@@ -17,8 +17,8 @@
 package handler
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -37,6 +37,8 @@ type scimClient interface {
 
 // entityUserClient abstracts the entity service user operations used by UsersHandler.
 type entityUserClient interface {
+	GetUserMe(ctx context.Context) ([]byte, error)
+	PatchUserMe(ctx context.Context, body []byte) ([]byte, error)
 	SearchUsers(ctx context.Context, body []byte) ([]byte, error)
 }
 
@@ -53,32 +55,40 @@ func NewUsersHandler(scim scimClient, entity entityUserClient) *UsersHandler {
 
 // userMeResponse is the GET /users/me response shape.
 type userMeResponse struct {
-	Email                  string  `json:"email"`
-	PhoneNumber            *string `json:"phoneNumber,omitempty"`
-	LastPasswordUpdateTime *string `json:"lastPasswordUpdateTime,omitempty"`
-	// TODO: once entity user management is available:
-	// ID        string   `json:"id"`
-	// FirstName string   `json:"firstName"`
-	// LastName  string   `json:"lastName"`
-	// TimeZone  *string  `json:"timeZone,omitempty"`
-	// Roles     []string `json:"roles"`
+	ID          *string  `json:"id,omitempty"`
+	Email       string   `json:"email"`
+	FirstName   *string  `json:"firstName,omitempty"`
+	LastName    *string  `json:"lastName,omitempty"`
+	TimeZone    *string  `json:"timeZone,omitempty"`
+	Roles       []string `json:"roles,omitempty"`
+	PhoneNumber *string  `json:"phoneNumber,omitempty"`
+}
+
+// entityUserMeResponse is the subset of the entity GET /users/me response we care about.
+type entityUserMeResponse struct {
+	ID        string   `json:"id"`
+	Email     string   `json:"email"`
+	FirstName *string  `json:"firstName"`
+	LastName  string   `json:"lastName"`
+	TimeZone  *string  `json:"timeZone"`
+	Roles     []string `json:"roles"`
 }
 
 // userUpdateRequest is the PATCH /users/me request shape.
 type userUpdateRequest struct {
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
-	// TODO: TimeZone *string `json:"timeZone,omitempty"` — requires entity
+	TimeZone    *string `json:"timeZone,omitempty"`
 }
 
 // userUpdateResponse is the PATCH /users/me response shape.
 type userUpdateResponse struct {
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
-	// TODO: TimeZone *string `json:"timeZone,omitempty"` — requires entity
+	TimeZone    *string `json:"timeZone,omitempty"`
 }
 
 // GetMe handles GET /users/me.
-// Phone number and last password update time are sourced from SCIM.
-// Other user fields (id, firstName, lastName, timeZone, roles) are TODO pending entity.
+// id, firstName, lastName, timeZone, and roles are sourced from the entity service.
+// phoneNumber is sourced from SCIM.
 func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -88,7 +98,23 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 	resp := userMeResponse{Email: user.Email}
 
-	// TODO: fetch id, firstName, lastName, timeZone, roles from entity once available.
+	entityRaw, err := h.entity.GetUserMe(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetUserMe failed", "userID", user.UserID, "err", err)
+	} else {
+		var entityResp entityUserMeResponse
+		if jsonErr := json.Unmarshal(entityRaw, &entityResp); jsonErr != nil {
+			slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed", "userID", user.UserID, "err", jsonErr)
+		} else {
+			resp.ID = &entityResp.ID
+			resp.FirstName = entityResp.FirstName
+			resp.LastName = &entityResp.LastName
+			resp.TimeZone = entityResp.TimeZone
+			if entityResp.Roles != nil {
+				resp.Roles = entityResp.Roles
+			}
+		}
+	}
 
 	scimInfo, err := h.scim.SearchUser(r.Context(), user.Email)
 	if err != nil {
@@ -97,15 +123,13 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "no SCIM user found", "userID", user.UserID)
 	} else {
 		resp.PhoneNumber = scimInfo.PhoneNumber
-		resp.LastPasswordUpdateTime = scimInfo.LastPasswordUpdateTime
 	}
 
 	writeJSONValue(w, http.StatusOK, resp)
 }
 
 // PatchMe handles PATCH /users/me.
-// Phone number update is handled via SCIM.
-// Time zone update is TODO pending entity.
+// phoneNumber update is handled via SCIM; timeZone update is handled via the entity service.
 func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -135,8 +159,7 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: add timeZone nil-check here once entity is available.
-	if payload.PhoneNumber == nil {
+	if payload.PhoneNumber == nil && payload.TimeZone == nil {
 		writeError(w, http.StatusBadRequest, "At least one field must be provided for update.")
 		return
 	}
@@ -153,7 +176,19 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		resp.PhoneNumber = updatedPhone
 	}
 
-	// TODO: update timeZone via entity once available.
+	if payload.TimeZone != nil {
+		patchBody, marshalErr := json.Marshal(map[string]string{"timeZone": *payload.TimeZone})
+		if marshalErr != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to update time zone.")
+			return
+		}
+		if _, entityErr := h.entity.PatchUserMe(r.Context(), patchBody); entityErr != nil {
+			slog.ErrorContext(r.Context(), "entity PatchUserMe failed", "userID", user.UserID, "err", entityErr)
+			mapUpstreamError(w, entityErr, "Failed to update time zone.")
+			return
+		}
+		resp.TimeZone = payload.TimeZone
+	}
 
 	writeJSONValue(w, http.StatusOK, resp)
 }

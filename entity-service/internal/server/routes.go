@@ -131,6 +131,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 	if snUserHandler != nil {
+		mux.HandleFunc("GET /users/me", snUserHandler.GetMe)
+		mux.HandleFunc("PATCH /users/me", snUserHandler.PatchMe)
 		mux.HandleFunc("POST /users/search", snUserHandler.SearchUsers)
 	} else {
 		mux.HandleFunc("POST /users/search", userHandler.SearchUsers)

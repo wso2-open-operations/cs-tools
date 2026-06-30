@@ -236,7 +236,23 @@ func (m *mockSCIMClient) UpdateUserPhone(ctx context.Context, userID, mobile str
 // ----- mock entity user client -----
 
 type mockEntityUserClient struct {
+	getUserMeFn   func(ctx context.Context) ([]byte, error)
+	patchUserMeFn func(ctx context.Context, body []byte) ([]byte, error)
 	searchUsersFn func(ctx context.Context, body []byte) ([]byte, error)
+}
+
+func (m *mockEntityUserClient) GetUserMe(ctx context.Context) ([]byte, error) {
+	if m.getUserMeFn != nil {
+		return m.getUserMeFn(ctx)
+	}
+	return []byte(`{"id":"11111111-1111-1111-1111-111111111111","email":"","lastName":"","roles":[]}`), nil
+}
+
+func (m *mockEntityUserClient) PatchUserMe(ctx context.Context, body []byte) ([]byte, error) {
+	if m.patchUserMeFn != nil {
+		return m.patchUserMeFn(ctx, body)
+	}
+	return []byte(`{}`), nil
 }
 
 func (m *mockEntityUserClient) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {

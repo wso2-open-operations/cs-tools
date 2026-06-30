@@ -59,6 +59,18 @@ func (c *Client) SearchCaseComments(ctx context.Context, caseID string, body []b
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/comments/search", url.PathEscape(caseID)), body)
 }
 
+// GetUserMe calls GET /users/me on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) GetUserMe(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/users/me", nil)
+}
+
+// PatchUserMe calls PATCH /users/me on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) PatchUserMe(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/users/me", body)
+}
+
 // SearchUsers calls POST /users/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *Client) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {

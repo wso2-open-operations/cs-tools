@@ -78,3 +78,29 @@ func (h *SNUserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// GetMe handles GET /users/me for the ServiceNow data source.
+func (h *SNUserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.GetMe(r.Context())
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// PatchMe handles PATCH /users/me for the ServiceNow data source.
+func (h *SNUserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
+	var req domain.PatchUserMeRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.PatchMe(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

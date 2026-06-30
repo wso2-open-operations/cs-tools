@@ -142,6 +142,34 @@ type SearchSNUsersResponse struct {
 	Offset int      `json:"offset"`
 }
 
+// GetUserMeResponse is the response for GET /users/me from the ServiceNow data source.
+type GetUserMeResponse struct {
+	ID        string   `json:"id"`
+	Email     string   `json:"email"`
+	FirstName *string  `json:"firstName,omitempty"`
+	LastName  string   `json:"lastName"`
+	TimeZone  *string  `json:"timeZone,omitempty"`
+	Roles     []string `json:"roles"`
+}
+
+// PatchUserMeRequest is the request body for PATCH /users/me.
+type PatchUserMeRequest struct {
+	TimeZone string `json:"timeZone"`
+}
+
+// PatchUserMeUpdated contains the key fields returned after a successful user update.
+type PatchUserMeUpdated struct {
+	ID        string `json:"id"`
+	UpdatedBy string `json:"updatedBy"`
+	UpdatedOn string `json:"updatedOn"`
+}
+
+// PatchUserMeResponse is the response for PATCH /users/me.
+type PatchUserMeResponse struct {
+	Message string             `json:"message"`
+	User    PatchUserMeUpdated `json:"user"`
+}
+
 // AccountTier represents the subscription tier of an account.
 type AccountTier string
 
