@@ -80,6 +80,12 @@ function parseMajorVersion(label: string): number {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+const PRODUCT_TYPE_PATTERNS: [WsoProductType, RegExp][] = [
+  [WsoProductType.APIM, /api[\s-]?manager|\bapim\b/i],
+  [WsoProductType.IS, /identity[\s-]server/i],
+  [WsoProductType.MI, /micro[\s-]integrator|\bintegrator\b/i],
+];
+
 /**
  * Classifies a product label into a WSO2 product type and extracts major version.
  *
@@ -90,16 +96,11 @@ export function classifyProductLabel(label: string): {
   type: WsoProductType;
   majorVersion: number;
 } {
-  const lower = label.toLowerCase();
   const majorVersion = parseMajorVersion(label);
-  if (lower.includes("api manager") || lower.includes("apim")) {
-    return { type: WsoProductType.APIM, majorVersion };
-  }
-  if (lower.includes("identity server")) {
-    return { type: WsoProductType.IS, majorVersion };
-  }
-  if (lower.includes("micro integrator")) {
-    return { type: WsoProductType.MI, majorVersion };
+  for (const [type, pattern] of PRODUCT_TYPE_PATTERNS) {
+    if (pattern.test(label)) {
+      return { type, majorVersion };
+    }
   }
   return { type: WsoProductType.UNKNOWN, majorVersion };
 }
