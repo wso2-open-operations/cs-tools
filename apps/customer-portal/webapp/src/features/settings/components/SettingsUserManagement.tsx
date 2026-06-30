@@ -158,12 +158,13 @@ export default function SettingsUserManagement({
   }, [removeTarget, deleteContact, showSuccess, showError]);
 
   const handleEditUser = useCallback(
-    (next: { isCsAdmin: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => {
+    (next: { isCsAdmin: boolean; isLead: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => {
       if (!editTarget?.email) return;
       patchContact.mutate(
         {
           email: editTarget.email,
           isCsAdmin: next.isCsAdmin,
+          isLead: next.isLead,
           isPortalUser: next.isPortalUser,
           isSecurityContact: next.isSecurityContact,
         },

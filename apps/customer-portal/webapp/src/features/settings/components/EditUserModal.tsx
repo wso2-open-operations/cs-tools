@@ -32,7 +32,7 @@ import {
   colors,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Crown, Monitor, Settings, Shield, X } from "@wso2/oxygen-ui-icons-react";
+import { Crown, Monitor, Settings, Shield, TriangleAlert, X } from "@wso2/oxygen-ui-icons-react";
 import { NULL_PLACEHOLDER } from "@features/settings/constants/settingsConstants";
 import { getAvatarColor, getInitials } from "@features/settings/utils/settings";
 import type { EditUserModalProps } from "@features/settings/types/settings";
@@ -44,6 +44,13 @@ const EDITABLE_ROLES = [
     description: "Full administrative privileges and user management",
     Icon: Crown,
     color: "secondary" as const,
+  },
+  {
+    id: "lead" as const,
+    label: "Lead",
+    description: "A portal user who can escalate an issue beyond level 3",
+    Icon: TriangleAlert,
+    color: "warning" as const,
   },
   {
     id: "portal" as const,
@@ -84,6 +91,7 @@ export default function EditUserModal({
     if (!contact) return new Set<EditableRoleId>();
     const initial = new Set<EditableRoleId>();
     if (contact.isCsAdmin) initial.add("admin");
+    if (contact.isLead) initial.add("lead");
     // isPortalUser is the explicit flag; fall back to !isCsIntegrationUser if absent
     const portalUser = contact.isPortalUser ?? !contact.isCsIntegrationUser;
     if (portalUser) initial.add("portal");
@@ -107,17 +115,23 @@ export default function EditUserModal({
       const next = new Set(prev);
       if (next.has(roleId)) {
         next.delete(roleId);
+        // Removing Portal User also removes Lead (Lead requires portal access)
+        if (roleId === "portal") next.delete("lead");
       } else {
         next.add(roleId);
+        // Adding Lead implicitly requires Portal User
+        if (roleId === "lead") next.add("portal");
       }
       return next;
     });
   };
 
   const handleSave = useCallback(() => {
+    const isLead = selectedRoles.has("lead");
     onSubmit({
       isCsAdmin: selectedRoles.has("admin"),
-      isPortalUser: selectedRoles.has("portal"),
+      isLead,
+      isPortalUser: selectedRoles.has("portal") || isLead,
       isSecurityContact: selectedRoles.has("security"),
     });
   }, [selectedRoles, onSubmit]);
@@ -125,6 +139,7 @@ export default function EditUserModal({
   const initialRoles = getInitialRoles();
   const isDirty =
     selectedRoles.has("admin") !== initialRoles.has("admin") ||
+    selectedRoles.has("lead") !== initialRoles.has("lead") ||
     selectedRoles.has("portal") !== initialRoles.has("portal") ||
     selectedRoles.has("security") !== initialRoles.has("security");
 
