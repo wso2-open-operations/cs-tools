@@ -684,8 +684,9 @@ export default function CasesFilterBar({
             )}
             <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
               {/* Email/`@me`-based picker; `useGetCsmCases` resolves the
-                  selection to the UUIDs `/cases/search` expects (`@me` via
-                  `/users/me`, named engineers via `/users/search`). */}
+                  selection to the UUIDs `/cases/search` expects (`@me` via the
+                  app-wide current-user context, named engineers via
+                  `/users/search`). */}
               <SearchableMultiSelect
                 id="cases-filter-assignee"
                 label="Assignee"

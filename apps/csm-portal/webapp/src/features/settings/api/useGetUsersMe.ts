@@ -48,5 +48,9 @@ export function useGetUsersMe() {
       }
       return (await res.json()) as UsersMeResponse;
     },
+    // The signed-in user's profile is effectively static for a session; this is
+    // fetched once app-wide via CurrentUserProvider, so keep it fresh to avoid
+    // refetches on incidental remounts.
+    staleTime: 5 * 60_000,
   });
 }

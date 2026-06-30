@@ -416,9 +416,10 @@ export interface BeCaseSearchFilters {
   /**
    * Filter by assigned-engineer user UUIDs. The cases-list assignee picker is
    * email/`@me`-based; `useGetCsmCases` resolves the selection to UUIDs (named
-   * engineers via `/users/search`, `@me` via `/users/me`). `@me` resolution
-   * depends on `/users/me` returning an `id` — a BFF TODO; until it lands, an
-   * `@me`-only selection resolves to nothing and the filter is omitted.
+   * engineers via `/users/search`, `@me` via the app-wide current-user context
+   * / `/users/me`). `@me` resolution depends on `/users/me` returning an `id` —
+   * a BFF TODO; until it lands, an `@me`-only selection resolves to nothing and
+   * the filter is omitted.
    */
   assignedUserIds?: string[];
 }

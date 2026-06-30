@@ -31,7 +31,7 @@ import {
 } from "@api/backend/mappers";
 import { projectOptionsQueryOptions } from "@features/csm-cases/api/useProjectOptions";
 import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
-import type { UsersMeResponse } from "@features/settings/api/useGetUsersMe";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import type {
   BeAccount,
   BeAccountSearchPayload,
@@ -119,6 +119,10 @@ export function useGetCsmCases(
   // Signed-in email, to resolve `assigneeIsMe` per row against the assigned
   // engineer's email. In the key so a late-arriving claim recomputes.
   const currentUserEmail = useIdTokenClaims()?.email;
+  // The caller's platform UUID, fetched once app-wide (CurrentUserProvider) and
+  // used to resolve the `@me` assignee filter. In the key so a late-arriving id
+  // re-resolves an `@me` selection.
+  const currentUserId = useCurrentUser().user?.id;
 
   const offset = page * pageSize;
   const search = filters.search.trim();
@@ -140,6 +144,7 @@ export function useGetCsmCases(
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
       currentUserEmail ?? "",
+      currentUserId ?? "",
       page,
       pageSize,
     ],
@@ -147,18 +152,18 @@ export function useGetCsmCases(
       // Resolve the assignee filter (engineer emails + the `@me` sentinel) to
       // the UUIDs `/cases/search` expects. Named engineers → ids from a
       // targeted `/users/search` by email (selectable emails always come from
-      // the directory, so this resolves them all); `@me` → the caller's id from
-      // `/users/me`. Runs only when the assignee filter is active. A user whose
-      // id can't be resolved (e.g. `@me` before the BFF populates `id`) is
-      // dropped; if nothing resolves, the filter is omitted rather than sent
-      // empty.
+      // the directory, so this resolves them all); `@me` → the caller's id,
+      // taken from the app-wide CurrentUserProvider (no per-query `/users/me`).
+      // Runs only when the assignee filter is active. A user whose id can't be
+      // resolved (e.g. `@me` before the BFF populates `id`) is dropped; if
+      // nothing resolves, the filter is omitted rather than sent empty.
       let assignedUserIds: string[] | undefined;
       if (filters.assignees.length > 0) {
         const wantsMe = filters.assignees.includes(ASSIGNEE_ME_TOKEN);
         const emails = filters.assignees.filter((a) => a !== ASSIGNEE_ME_TOKEN);
-        const [byEmail, me] = await Promise.all([
+        const byEmail =
           emails.length > 0
-            ? api
+            ? await api
                 .post<
                   { filters: { emails: string[] }; pagination: { limit: number } },
                   BeUserSearchResponse
@@ -172,22 +177,12 @@ export function useGetCsmCases(
                   );
                   return null;
                 })
-            : Promise.resolve(null),
-          wantsMe
-            ? queryClient
-                .fetchQuery({
-                  queryKey: ["users-me"],
-                  queryFn: () => api.get<UsersMeResponse>("/users/me"),
-                  staleTime: 60_000,
-                })
-                .catch(() => null)
-            : Promise.resolve(null),
-        ]);
+            : null;
         const ids = new Set<string>();
         (byEmail?.users ?? []).forEach((u) => {
           if (u.id) ids.add(u.id);
         });
-        if (wantsMe && me?.id) ids.add(me.id);
+        if (wantsMe && currentUserId) ids.add(currentUserId);
         if (ids.size > 0) assignedUserIds = [...ids];
       }
 

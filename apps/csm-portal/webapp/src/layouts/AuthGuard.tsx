@@ -20,6 +20,7 @@ import { ProtectedRoute } from "@asgardeo/react-router";
 import { useLocation, useNavigate } from "react-router";
 import AppLayout from "@layouts/AppLayout";
 import { POST_LOGIN_REDIRECT_KEY } from "@layouts/postLoginRedirect";
+import { CurrentUserProvider } from "@context/current-user/CurrentUserContext";
 
 /**
  * AuthGuard renders AppLayout (header/footer) so loading state is visible
@@ -73,7 +74,9 @@ export default function AuthGuard(): JSX.Element {
         defaultSignIn(signInOptions);
       }}
     >
-      <AppLayout />
+      <CurrentUserProvider>
+        <AppLayout />
+      </CurrentUserProvider>
     </ProtectedRoute>
   );
 }
