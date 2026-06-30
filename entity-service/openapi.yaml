@@ -1450,6 +1450,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Time card not found.
           content:
@@ -3535,10 +3541,12 @@ components:
 
     UpdateTimeCardRequest:
       type: object
+      minProperties: 1
       description: >
         Carries either editable fields (submitter, while the card is submitted),
         or a state transition: state=approved, or state=rejected with leadComment.
-        The entity service enforces authorization.
+        The two are mutually exclusive and an empty body is rejected (400); the
+        entity service enforces this and authorization.
       properties:
         state:
           type: string

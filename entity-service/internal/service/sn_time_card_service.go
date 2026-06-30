@@ -379,6 +379,20 @@ func (s *snTimeCardService) UpdateTimeCard(ctx context.Context, req domain.Updat
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.TimeCardMutationResponse{}, err
 	}
+	// Reject no-op and ambiguous updates: the PATCH carries either a state
+	// transition OR editable fields, never neither and never both (a transition
+	// ignores field edits downstream, so combining them would silently drop them).
+	hasEdit := req.Date != nil || req.ApproverIDs != nil || req.IsBillable != nil ||
+		req.IssueComplexity != nil || req.WorkLogComment != nil ||
+		req.TimeAnalyzing != nil || req.TimeSettingUp != nil ||
+		req.TimeReproducingDebugging != nil || req.TimeProvidingSolution != nil ||
+		req.TimePatching != nil
+	if req.State == nil && !hasEdit {
+		return domain.TimeCardMutationResponse{}, &apierror.ValidationError{Msg: "no fields to update"}
+	}
+	if req.State != nil && hasEdit {
+		return domain.TimeCardMutationResponse{}, &apierror.ValidationError{Msg: "a state transition cannot be combined with field edits"}
+	}
 	if req.State != nil {
 		if *req.State != domain.TimeCardStateApproved && *req.State != domain.TimeCardStateRejected {
 			return domain.TimeCardMutationResponse{}, &apierror.ValidationError{Msg: "state must be approved or rejected"}
