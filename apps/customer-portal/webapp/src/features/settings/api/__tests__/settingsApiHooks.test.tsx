@@ -138,6 +138,7 @@ describe("settings API hooks", () => {
     await result.current.mutateAsync({
       email: "abc+1@test.dev",
       isCsAdmin: true,
+      isLead: false,
       isPortalUser: true,
       isSecurityContact: false,
     });
