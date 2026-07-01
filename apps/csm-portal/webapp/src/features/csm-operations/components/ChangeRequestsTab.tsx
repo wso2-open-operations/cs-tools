@@ -18,7 +18,6 @@ import {
   Alert,
   Box,
   Chip,
-  InputAdornment,
   Paper,
   Skeleton,
   Table,
@@ -28,10 +27,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Search } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
@@ -43,6 +40,10 @@ import {
   changeRequestStateColor,
   changeRequestStateLabel,
 } from "@features/csm-operations/utils/changeRequests";
+import ChangeRequestsFilterBar, {
+  DEFAULT_CR_FILTERS,
+  type ChangeRequestFilters,
+} from "@features/csm-operations/components/ChangeRequestsFilterBar";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -57,26 +58,45 @@ function formatDate(value?: string | null): string {
   );
 }
 
+/** Convert a YYYY-MM-DD date picker value to an ISO 8601 string at midnight UTC. */
+function toISOStart(date: string): string {
+  return `${date}T00:00:00Z`;
+}
+
+/** Convert a YYYY-MM-DD date picker value to an ISO 8601 string at end-of-day UTC. */
+function toISOEnd(date: string): string {
+  return `${date}T23:59:59Z`;
+}
+
 /**
  * Change-requests listing for the Operations → Change requests tab. Searches
- * `POST /change-requests/search` (subject + number) with server-side
- * pagination; a row opens the change-request detail page.
+ * `POST /change-requests/search` with server-side pagination and filters
+ * (state, impact, closed date range, free-text search).
  */
 export default function ChangeRequestsTab(): JSX.Element {
   const navigate = useNavigate();
-  const [searchInput, setSearchInput] = useState("");
+  const [filters, setFilters] = useState<ChangeRequestFilters>(DEFAULT_CR_FILTERS);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
-  const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
+  const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
 
   const payload = useMemo(
     () => ({
       filters: {
         ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
+        ...(filters.states.length > 0 && { states: filters.states }),
+        ...(filters.impacts.length > 0 && { impacts: filters.impacts }),
+        ...(filters.closedStartDate && {
+          closedStartDate: toISOStart(filters.closedStartDate),
+        }),
+        ...(filters.closedEndDate && {
+          closedEndDate: toISOEnd(filters.closedEndDate),
+        }),
       },
       pagination: { offset: page * rowsPerPage, limit: rowsPerPage },
     }),
-    [debouncedSearch, page, rowsPerPage],
+    [debouncedSearch, filters.states, filters.impacts, filters.closedStartDate, filters.closedEndDate, page, rowsPerPage],
   );
 
   const { data, isLoading, isError, error, isFetching } =
@@ -85,8 +105,13 @@ export default function ChangeRequestsTab(): JSX.Element {
   const changeRequests = data?.changeRequests ?? [];
   const total = data?.total ?? 0;
 
-  const handleSearchChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setSearchInput(e.target.value);
+  const handleFiltersChange = (next: ChangeRequestFilters): void => {
+    setFilters(next);
+    setPage(0);
+  };
+
+  const handleReset = (): void => {
+    setFilters(DEFAULT_CR_FILTERS);
     setPage(0);
   };
 
@@ -97,22 +122,12 @@ export default function ChangeRequestsTab(): JSX.Element {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <TextField
-        value={searchInput}
-        onChange={handleSearchChange}
-        placeholder="Search change requests by number or subject…"
-        size="small"
-        sx={{ maxWidth: 480 }}
-        slotProps={{
-          htmlInput: { "aria-label": "Search change requests by number or subject" },
-          input: {
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search size={16} />
-              </InputAdornment>
-            ),
-          },
-        }}
+      <ChangeRequestsFilterBar
+        filters={filters}
+        onChange={handleFiltersChange}
+        onReset={handleReset}
+        isFiltersOpen={isFiltersOpen}
+        onFiltersToggle={() => setIsFiltersOpen((prev: boolean) => !prev)}
       />
 
       {isError && (
@@ -208,7 +223,7 @@ export default function ChangeRequestsTab(): JSX.Element {
           component="div"
           count={total}
           page={page}
-          onPageChange={(_, newPage) => setPage(newPage)}
+          onPageChange={(_: unknown, newPage: number) => setPage(newPage)}
           rowsPerPage={rowsPerPage}
           onRowsPerPageChange={handleChangeRowsPerPage}
           rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}

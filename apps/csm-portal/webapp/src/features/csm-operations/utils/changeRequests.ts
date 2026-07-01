@@ -60,6 +60,9 @@ const IMPACT_COLOR: Record<BeChangeRequestImpact, ChipColor> = {
 /** All CR states, for a filter control. */
 export const CHANGE_REQUEST_STATES = Object.keys(STATE_LABEL) as BeChangeRequestState[];
 
+/** All CR impact levels, for a filter control. */
+export const CHANGE_REQUEST_IMPACTS = Object.keys(IMPACT_LABEL) as BeChangeRequestImpact[];
+
 function humanize(value: string): string {
   return value.replace(/_/g, " ");
 }
