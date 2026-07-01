@@ -95,6 +95,9 @@ const ProductVulnerabilityDetailPage = lazy(
 const CsmEngagementsPage = lazy(
   () => import("@features/csm-engagements/pages/CsmEngagementsPage"),
 );
+const CsmTimeCardsPage = lazy(
+  () => import("@features/csm-timecards/pages/CsmTimeCardsPage"),
+);
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -258,16 +261,7 @@ export default function App(): JSX.Element {
                   path="security-center/vulnerabilities/:id"
                   element={<ProductVulnerabilityDetailPage />}
                 />
-                <Route
-                  path="time-cards"
-                  element={
-                    <CsmComingSoonPage
-                      title="Time cards"
-                      description="Engineer time-tracking entries against cases, with approval flow."
-                      blockedOn="csm-portal/backend time-cards endpoints"
-                    />
-                  }
-                />
+                <Route path="time-cards" element={<CsmTimeCardsPage />} />
               </Route>
 
               <Route
