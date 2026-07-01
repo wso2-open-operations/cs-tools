@@ -19,13 +19,6 @@ window.config = {
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "ERROR",
 
-  // Time-card roles, matched case-insensitively against the OIDC `groups` claim.
-  // Approvers accept/reject/recall; admins also edit any user's Pending/Rejected
-  // cards and approve by exception. The backend must enforce the same gates.
-  // Defaults: "csm-leads" (approver), "csm-timecard-admins" (admin).
-  // CSM_PORTAL_TEAM_LEAD_GROUP: "csm-leads",
-  // CSM_PORTAL_TIMECARD_ADMIN_GROUP: "csm-timecard-admins",
-
   // Mock data: when true, data hooks short-circuit to seeded fixtures instead
   // of calling the backend. Leave false (or unset) to use the live backend.
   CSM_PORTAL_USE_MOCKS: false,

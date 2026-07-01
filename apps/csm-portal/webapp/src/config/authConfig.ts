@@ -38,10 +38,6 @@ declare global {
       CSM_PORTAL_ANNOUNCEMENT_BANNER_VISIBLE?: boolean;
       CSM_PORTAL_ANNOUNCEMENT_BANNER_STORAGE_KEY?: string;
       CSM_PORTAL_ANNOUNCEMENT_BANNER_HTML?: string;
-      // Groups for the time-card feature. See
-      // `features/csm-timecards/constants/timeCardConstants.ts`.
-      CSM_PORTAL_TEAM_LEAD_GROUP?: string;
-      CSM_PORTAL_TIMECARD_ADMIN_GROUP?: string;
     };
   }
 }

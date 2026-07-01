@@ -157,30 +157,21 @@ export const TIME_SHEET_STATE_META: Record<
 };
 
 /**
- * Group whose members may accept/reject time cards. Configurable at runtime via
- * `window.config.CSM_PORTAL_TEAM_LEAD_GROUP`; falls back to this default when
- * unset so the gate is closed-by-default rather than open.
+ * Role that grants approve/reject/recall on time cards, matched (case-
+ * insensitively) against `roles` from `GET /users/me`.
+ * "csm-leads" doesn't exist yet in the real role set — there's no dedicated
+ * team-lead/approver role provisioned. Once one exists, put its real name
+ * here.
  */
-export const DEFAULT_TEAM_LEAD_GROUP = "csm-leads";
-
-/** Resolve the configured team-lead (approver) group name, or the default. */
-export function teamLeadGroup(): string {
-  const configured = window.config?.CSM_PORTAL_TEAM_LEAD_GROUP?.trim();
-  return configured || DEFAULT_TEAM_LEAD_GROUP;
-}
+export const TIMECARD_APPROVER_GROUP = "csm-leads";
 
 /**
- * Group whose members are time-card admins (edit any user's Pending/Rejected
- * cards, approve by exception). Configurable via
- * `window.config.CSM_PORTAL_TIMECARD_ADMIN_GROUP`.
+ * Role that grants time-card admin (edit any user's editable cards, approve
+ * by exception), matched against `roles` from `GET /users/me`.
+ * Mapped to the real "admin" role for now so approver/admin-gated paths are
+ * testable; revisit once dedicated time-card roles are provisioned.
  */
-export const DEFAULT_TIMECARD_ADMIN_GROUP = "csm-timecard-admins";
-
-/** Resolve the configured time-card admin group name, or the default. */
-export function timecardAdminGroup(): string {
-  const configured = window.config?.CSM_PORTAL_TIMECARD_ADMIN_GROUP?.trim();
-  return configured || DEFAULT_TIMECARD_ADMIN_GROUP;
-}
+export const TIMECARD_ADMIN_GROUP = "admin";
 
 /**
  * One-line summary of a breakdown's non-zero activities, e.g.
