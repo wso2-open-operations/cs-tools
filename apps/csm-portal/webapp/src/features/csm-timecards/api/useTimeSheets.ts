@@ -70,18 +70,18 @@ import {
 } from "@features/csm-timecards/api/timeCardStore";
 
 /**
- * The signed-in engineer's stable identity.
- * `id` is sourced from `GET /users/me` (platform-owned data) so it is
- * consistent with the BFF's own user resolution and avoids keying time-card
- * data against whichever ID-token claim (`sub` vs email) happens to be
- * populated.  Falls back to the ID-token email while the query loads.
- * Phase 2: once `/users/me` returns `id` and `displayName`, replace the
- * token-derived name below with those fields.
+ * The signed-in engineer's stable identity, resolved from `GET /users/me`.
+ * `id` is the entity-service UUID — the same stable identifier the platform
+ * uses across all services. Display name is built from firstName + lastName
+ * returned by the entity service. Both fall back to ID-token values while
+ * the query is in flight.
  */
 export function useCurrentEngineer(): { id: string; name: string } {
   const { data: me } = useGetUsersMe();
   const info = resolveUserInfo(useIdTokenClaims());
-  return { id: me?.email ?? info.email ?? "me", name: info.fullName };
+  const displayName =
+    [me?.firstName, me?.lastName].filter(Boolean).join(" ") || info.fullName;
+  return { id: me?.id ?? me?.email ?? info.email ?? "me", name: displayName };
 }
 
 /** Invalidate every time-card/-sheet query so all views refresh after a write. */
