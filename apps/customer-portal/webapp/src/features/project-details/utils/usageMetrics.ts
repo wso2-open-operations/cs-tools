@@ -30,32 +30,13 @@ import type {
  */
 export function formatIsoDateForUsageChart(
   isoDate: string,
-  isSmallScreen: boolean = false,
+  _isSmallScreen: boolean = false,
 ): string {
   try {
     const date = new Date(`${isoDate}T00:00:00Z`);
-    const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    const month = monthNames[date.getUTCMonth()];
-    const day = date.getUTCDate();
-    const year = date.getUTCFullYear();
-
-    if (isSmallScreen) {
-      return `${month} ${day}`;
-    }
-    return `${month} ${day}\n${year}`;
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    return `${mm}/${dd}`;
   } catch {
     return isoDate.slice(5);
   }

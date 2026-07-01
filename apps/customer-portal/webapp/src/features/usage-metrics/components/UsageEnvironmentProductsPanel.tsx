@@ -119,6 +119,7 @@ function ProductExpandedView({
                   width="100%"
                   margin={USAGE_LINE_CHART_MARGIN}
                   accessibilityLayer={false}
+                  xAxis={{ interval: Math.max(0, Math.ceil(trend.data.length / 6) - 1) }}
                   legend={{ show: false }}
                   grid={{ show: true, strokeDasharray: "3 3" }}
                   lines={[
@@ -218,6 +219,7 @@ function InstanceMiniTrendCard({
           width="100%"
           margin={USAGE_LINE_CHART_MARGIN}
           accessibilityLayer={false}
+          xAxis={{ interval: Math.max(0, Math.ceil(block.data.length / 6) - 1) }}
           legend={{ show: false }}
           grid={{ show: true, strokeDasharray: "3 3" }}
           lines={[

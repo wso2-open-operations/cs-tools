@@ -66,12 +66,12 @@ const ContactInfoCard = ({
 
   return (
     <Card sx={{ height: "100%" }}>
-      <CardContent sx={{ p: 3 }}>
+      <CardContent sx={{ p: 3, overflow: "auto" }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <Users size={20} />
           <Typography variant="h6">Contact Information</Typography>
         </Box>
-        <Divider sx={{ mb: 2, pb: 2 }} />
+        <Divider sx={{ mt: 1, mb: 2 }} />
 
         {isLoading ? (
           <Box sx={{ display: "flex", flexDirection: "column" }}>
