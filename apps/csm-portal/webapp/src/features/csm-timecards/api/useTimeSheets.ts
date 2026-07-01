@@ -39,6 +39,7 @@ import {
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { resolveUserInfo } from "@utils/userClaims";
+import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import type {
   ApproverDelegation,
   CsmTimeCard,
@@ -68,11 +69,19 @@ import {
   updateCard,
 } from "@features/csm-timecards/api/timeCardStore";
 
-/** The signed-in engineer's identity. */
+/**
+ * The signed-in engineer's stable identity.
+ * `id` is sourced from `GET /users/me` (platform-owned data) so it is
+ * consistent with the BFF's own user resolution and avoids keying time-card
+ * data against whichever ID-token claim (`sub` vs email) happens to be
+ * populated.  Falls back to the ID-token email while the query loads.
+ * Phase 2: once `/users/me` returns `id` and `displayName`, replace the
+ * token-derived name below with those fields.
+ */
 export function useCurrentEngineer(): { id: string; name: string } {
+  const { data: me } = useGetUsersMe();
   const info = resolveUserInfo(useIdTokenClaims());
-  const claims = useIdTokenClaims();
-  return { id: claims?.sub ?? info.email ?? "me", name: info.fullName };
+  return { id: me?.email ?? info.email ?? "me", name: info.fullName };
 }
 
 /** Invalidate every time-card/-sheet query so all views refresh after a write. */
