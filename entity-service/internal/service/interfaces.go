@@ -171,6 +171,15 @@ type CaseService interface {
 	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
 }
 
+// CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CaseGithubIssueService interface {
+	// CreateCaseGithubIssue files a new GitHub issue on the internal repo mapped to the
+	// case's product, and appends a work note on the case with the resulting issue URL.
+	// A ValidationError is returned for invalid input; a NotFoundError if no case matches.
+	CreateCaseGithubIssue(ctx context.Context, req domain.CreateCaseGithubIssueRequest) (domain.CreateCaseGithubIssueResponse, error)
+}
+
 // CatalogService defines the operations available on service catalogs.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type CatalogService interface {
