@@ -17,8 +17,8 @@
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { resolveUserInfo } from "@utils/userClaims";
 import {
-  teamLeadGroup,
-  timecardAdminGroup,
+  TIMECARD_ADMIN_GROUP,
+  TIMECARD_APPROVER_GROUP,
 } from "@features/csm-timecards/constants/timeCardConstants";
 
 export interface TimecardRole {
@@ -29,14 +29,16 @@ export interface TimecardRole {
 }
 
 /**
- * The signed-in user's time-card role, from the OIDC `groups` claim. Admins are
- * a superset of approvers. Client-side affordance only — the backend must
- * enforce the same gates (Phase 2).
+ * The signed-in user's time-card role, derived from the Asgardeo `groups` claim.
+ * Phase 1 / FE-first interim: role flags should come from `GET /users/me` once
+ * the backend exposes `isTimecardApprover` / `isTimecardAdmin` (ISSU-009 Phase 2).
+ * Admins are a superset of approvers. Client-side affordance only — the backend
+ * must enforce the same gates.
  */
 export function useTimecardRole(): TimecardRole {
   const { groups } = resolveUserInfo(useIdTokenClaims());
   const lower = groups.map((g) => g.toLowerCase());
-  const isAdmin = lower.includes(timecardAdminGroup().toLowerCase());
-  const isApprover = isAdmin || lower.includes(teamLeadGroup().toLowerCase());
+  const isAdmin = lower.includes(TIMECARD_ADMIN_GROUP.toLowerCase());
+  const isApprover = isAdmin || lower.includes(TIMECARD_APPROVER_GROUP.toLowerCase());
   return { isApprover, isAdmin };
 }
