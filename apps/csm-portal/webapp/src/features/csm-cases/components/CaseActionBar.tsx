@@ -231,7 +231,7 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
     { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, disabled: true },
     { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
     { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
-    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true, disabled: true },
+    { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },
     { key: "copy_link", label: "Copy case link", icon: <Copy size={16} /> },
   );
 
