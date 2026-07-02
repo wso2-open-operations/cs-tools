@@ -31,3 +31,11 @@ dist-ssr
 
 # Runtime config (per-deployment)
 config.js
+
+# Playwright E2E
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+# Captured auth sessions hold real tokens — never commit them.
+tests/e2e/storageState/*.json

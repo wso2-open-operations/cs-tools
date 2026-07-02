@@ -16,21 +16,50 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
+// Base URL of the locally-served app. Override with E2E_BASE_URL to point at a
+// deployed environment (the `webServer` block below is skipped in that case by
+// setting E2E_NO_WEBSERVER=1).
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3001";
+
+// The `capture` project (auth/capture.setup.ts) reuses your real browser session
+// to produce tests/e2e/storageState/<role>.json — it must not run as part of the
+// normal suite. The `chromium` project runs the actual specs and ignores it.
+const CAPTURE_MATCH = /auth\/capture\.setup\.ts/;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
   fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: 0,
   outputDir: "test-results",
+  reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: BASE_URL,
     trace: "retain-on-failure",
     video: "retain-on-failure",
   },
+  // Boot the local dev server for the run (reused if already running). Skipped
+  // when targeting a remote E2E_BASE_URL.
+  webServer: process.env.E2E_NO_WEBSERVER
+    ? undefined
+    : {
+        command: "pnpm run dev",
+        url: BASE_URL,
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
   projects: [
     {
+      // On-demand: `ROLE=approver CHROME_PROFILE_DIR=… pnpm exec playwright test --project=capture`
+      name: "capture",
+      testMatch: CAPTURE_MATCH,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
+      testIgnore: CAPTURE_MATCH,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
 });
-
