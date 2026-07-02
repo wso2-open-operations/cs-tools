@@ -1057,6 +1057,52 @@ type SearchCaseCommentsResponse struct {
 	HasMore  bool          `json:"hasMore"`
 }
 
+// CaseGithubIssueReason classifies why a GitHub issue is being filed from a case.
+type CaseGithubIssueReason string
+
+const (
+	CaseGithubIssueReasonDefault   CaseGithubIssueReason = "default"
+	CaseGithubIssueReasonMigration CaseGithubIssueReason = "migration"
+	CaseGithubIssueReasonRDTicket  CaseGithubIssueReason = "rd_ticket"
+)
+
+// CaseGithubIssueRepoOverride explicitly overrides the product-based repo
+// routing lookup for a GitHub issue.
+type CaseGithubIssueRepoOverride struct {
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
+}
+
+// CreateCaseGithubIssueRequest is the input for POST /cases/{id}/github-issues.
+// CaseID is populated from the URL path parameter and is not part of the JSON body.
+// Supported by the ServiceNow data source only.
+type CreateCaseGithubIssueRequest struct {
+	CaseID         string                       `json:"-"`
+	Reason         CaseGithubIssueReason        `json:"reason"`
+	Title          string                       `json:"title"`
+	Description    string                       `json:"description"`
+	RepoOverride   *CaseGithubIssueRepoOverride `json:"repoOverride,omitempty"`
+	UpdateLevel    *string                      `json:"updateLevel,omitempty"`
+	PublicIssueURL *string                      `json:"publicIssueUrl,omitempty"`
+	Regression     bool                         `json:"regression,omitempty"`
+	HotFixRequired bool                         `json:"hotFixRequired,omitempty"`
+	IssueTypeLabel *string                      `json:"issueTypeLabel,omitempty"`
+	PriorityLevel  *string                      `json:"priorityLevel,omitempty"`
+}
+
+// CaseGithubIssueDetail holds the result of filing a GitHub issue from a case.
+type CaseGithubIssueDetail struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	Repo   string `json:"repo"`
+}
+
+// CreateCaseGithubIssueResponse is the response for POST /cases/{id}/github-issues.
+type CreateCaseGithubIssueResponse struct {
+	Message string                `json:"message"`
+	Issue   CaseGithubIssueDetail `json:"issue"`
+}
+
 // Attachment represents a file attachment linked to a reference entity.
 type Attachment struct {
 	ID            string        `json:"id"`

@@ -111,6 +111,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		callRequestHandler = handler.NewCallRequestHandler(service.NewServiceNowCallRequestService(serviceNowIntegrationServiceClient))
 	}
 
+	var caseGithubIssueHandler *handler.CaseGithubIssueHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		caseGithubIssueHandler = handler.NewCaseGithubIssueHandler(service.NewServiceNowCaseGithubIssueService(serviceNowIntegrationServiceClient))
+	}
+
 	var changeRequestHandler *handler.ChangeRequestHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		changeRequestHandler = handler.NewChangeRequestHandler(service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient))
@@ -182,6 +187,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		mux.HandleFunc("POST /call-requests", callRequestHandler.CreateCallRequest)
 		mux.HandleFunc("POST /call-requests/search", callRequestHandler.SearchCallRequests)
 		mux.HandleFunc("PATCH /call-requests/{id}", callRequestHandler.PatchCallRequest)
+	}
+
+	if caseGithubIssueHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/github-issues", caseGithubIssueHandler.CreateCaseGithubIssue)
 	}
 
 	if changeRequestHandler != nil {

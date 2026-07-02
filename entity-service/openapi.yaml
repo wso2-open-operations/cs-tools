@@ -663,6 +663,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/github-issues:
+    post:
+      summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
+      operationId: createCaseGithubIssue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseGithubIssueRequest'
+      responses:
+        "201":
+          description: GitHub issue created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCaseGithubIssueResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments:
     post:
       summary: Upload a file attachment to a support case.
@@ -3735,6 +3784,74 @@ components:
               type: string
             state:
               $ref: '#/components/schemas/CallRequestState'
+
+    CaseGithubIssueRepoOverride:
+      type: object
+      required: [owner, repo]
+      additionalProperties: false
+      properties:
+        owner:
+          type: string
+          description: GitHub org/owner, overriding the product-based routing lookup.
+        repo:
+          type: string
+          description: GitHub repo, overriding the product-based routing lookup.
+
+    CreateCaseGithubIssueRequest:
+      type: object
+      required: [reason, title, description]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [default, migration, rd_ticket]
+          description: Why the issue is being filed; selects labels applied on the GitHub issue.
+        title:
+          type: string
+          description: GitHub issue title.
+        description:
+          type: string
+          description: GitHub issue body. Case number, product, and reporter are appended server-side.
+        repoOverride:
+          $ref: '#/components/schemas/CaseGithubIssueRepoOverride'
+        updateLevel:
+          type: string
+          description: Product update level, appended to the issue body.
+        publicIssueUrl:
+          type: string
+          description: Link to a related public-facing GitHub issue, appended to the issue body.
+        regression:
+          type: boolean
+          default: false
+          description: Whether this is a regression; adds a "regression" label and tags the case.
+        hotFixRequired:
+          type: boolean
+          default: false
+          description: Whether a hotfix is required; appended to the issue body.
+        issueTypeLabel:
+          type: string
+          description: Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident").
+        priorityLevel:
+          type: string
+          description: Priority label to apply when issueTypeLabel is "Type/Incident".
+
+    CaseGithubIssueDetail:
+      type: object
+      properties:
+        url:
+          type: string
+        number:
+          type: integer
+        repo:
+          type: string
+
+    CreateCaseGithubIssueResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        issue:
+          $ref: '#/components/schemas/CaseGithubIssueDetail'
 
     SearchCallRequestsRequest:
       type: object
