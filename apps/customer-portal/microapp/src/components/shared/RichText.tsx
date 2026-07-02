@@ -52,6 +52,14 @@ export const RichTextBase = styled(Box)(({ theme }) => ({
     fontFamily: "inherit !important",
     lineHeight: "inherit !important",
   },
+
+  ...theme.applyStyles("dark", {
+    color: "#000",
+    filter: "invert(0.88) hue-rotate(180deg)",
+    "& *": { backgroundColor: "transparent !important" },
+    "& pre": { backgroundColor: "#ececec !important", color: "#000 !important" },
+    "& img": { filter: "invert(1) hue-rotate(180deg)" },
+  }),
 }));
 
 export const RichText = (props: React.ComponentProps<typeof RichTextBase>) => {
