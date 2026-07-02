@@ -20,6 +20,7 @@ package middleware
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,9 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// sanitizePath strips newline characters from a URL path to prevent log injection.
+var sanitizePath = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace
+
 // Logger is an HTTP middleware that logs each request's method, path, response
 // status code, and elapsed time.
 func Logger(next http.Handler) http.Handler {
@@ -42,6 +46,6 @@ func Logger(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		log.Printf("%s %s correlationID=%s status=%d elapsed=%s", r.Method, r.URL.Path, CorrelationIDFromContext(r.Context()), rw.status, time.Since(start))
+		log.Printf("%s %s correlationID=%s status=%d elapsed=%s", r.Method, sanitizePath(r.URL.Path), CorrelationIDFromContext(r.Context()), rw.status, time.Since(start)) // #nosec G706 -- path sanitized above
 	})
 }

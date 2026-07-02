@@ -36,8 +36,8 @@ var tokenFetchTimeout = 10 * time.Second
 
 type ctxKey string
 
-const userIDTokenKey ctxKey = "x-user-id-token"
-const correlationIDKey ctxKey = "x-csm-correlation-id"
+const userIDTokenKey ctxKey = "x-user-id-token"    // #nosec G101 -- context map key, not a credential
+const correlationIDKey ctxKey = "x-csm-correlation-id" // #nosec G101 -- context map key, not a credential
 
 // WithUserIDToken returns a copy of ctx carrying the x-user-id-token value to
 // be forwarded on every outgoing entity request.

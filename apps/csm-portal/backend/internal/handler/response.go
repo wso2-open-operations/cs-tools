@@ -55,7 +55,7 @@ func writeError(w http.ResponseWriter, statusCode int, message string) {
 func writeJSON(w http.ResponseWriter, statusCode int, data []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) // #nosec G705 -- Content-Type: application/json already set; SecurityHeaders middleware adds X-Content-Type-Options: nosniff
 }
 
 // writeJSONValue marshals v and writes the result as a JSON response.

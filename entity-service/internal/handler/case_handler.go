@@ -20,10 +20,30 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
+
+// safeAttachmentTypes is the allowlist of Content-Type values that may be
+// forwarded as-is. Anything not in this set is coerced to application/octet-stream
+// to prevent a stored-XSS attack via a crafted upstream Content-Type (e.g. text/html).
+// All responses also carry Content-Disposition: attachment.
+var safeAttachmentTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+	"application/pdf":          true,
+	"text/plain":               true,
+	"application/zip":          true,
+	"application/x-zip-compressed": true,
+	"application/msword":       true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+	"application/vnd.ms-excel": true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+}
 
 // CaseHandler handles HTTP requests for the case resource.
 type CaseHandler struct {
@@ -168,8 +188,14 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 		writeServiceError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(content)
+	// Strip Content-Type parameters (e.g. charset) before the allowlist check.
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if !safeAttachmentTypes[ct] {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", "attachment")
+	_, _ = w.Write(content) // #nosec G705 -- Content-Type is allowlisted above; Content-Disposition: attachment prevents inline rendering
 }
 
 // DeleteCaseAttachment handles DELETE /attachments/{id}.

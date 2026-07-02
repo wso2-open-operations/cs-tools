@@ -186,3 +186,4 @@ Missing a `sysidToUUID()` call on a response ID means callers receive a bare sys
 - Never log request bodies, passwords, or tokens; log only IDs and sanitised error summaries
 - All SQL uses parameterized queries; never interpolate user input into query strings
 - Validate and reject unexpected input at the handler boundary before it reaches the service or repository
+- **Security fixes in PRs** — when a change is made to fix a security issue (gosec findings, input sanitization, etc.), do not mention it in the PR title or description; describe the change in neutral functional terms only

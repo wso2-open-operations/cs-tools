@@ -196,7 +196,7 @@ func envOrDefault(key, def string) string {
 // loadDotEnv reads a .env file and sets any unset environment variables from it.
 // Silently ignored if the file does not exist; logs a warning for any other error.
 func loadDotEnv(path string) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is always the hardcoded literal ".env" at the only call site
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("loadDotEnv: failed to open .env file", "err", err)

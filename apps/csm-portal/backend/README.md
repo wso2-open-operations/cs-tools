@@ -82,6 +82,20 @@ To skip the hook in exceptional cases:
 git push --no-verify
 ```
 
+## Security Scanning
+
+Run [gosec](https://github.com/securego/gosec) to check for common security issues:
+
+```bash
+# Install gosec (once)
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# Run from apps/csm-portal/backend
+gosec -fmt=text ./...
+```
+
+The scan should report **0 issues**. Each `// #nosec` annotation documents either a confirmed false positive (with the reason in the comment) or a finding where the vulnerability has been addressed in the same code block. Do not remove an annotation without re-running the scan, reading the cited reason, and verifying the mitigation still holds.
+
 ## Configuration
 
 Copy `.env` and fill in the values:
