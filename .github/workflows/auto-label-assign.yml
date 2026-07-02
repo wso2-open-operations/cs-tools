@@ -45,20 +45,35 @@ jobs:
             const filenames = files.map(f => f.filename);
             core.info(`Changed files:\n${filenames.join('\n')}`);
 
-            // Label rules — order does not matter, all matching labels are applied
-            const labelRules = [
-              { label: 'App/CSM Portal',       test: f => f.startsWith('apps/csm-portal/') },
-              { label: 'App/Customer Portal',  test: f => f.startsWith('apps/customer-portal/') },
-              { label: 'Area/Frontend',        test: f => /^apps\/[^/]+\/webapp\//.test(f) },
-              { label: 'Area/Backend',         test: f => /^apps\/[^/]+\/backend\//.test(f) },
-              { label: 'Platform/Microapp',    test: f => /^apps\/[^/]+\/microapp\//.test(f) },
-              { label: 'Platform/Web',         test: f => /^apps\/[^/]+\/webapp\//.test(f) },
-              { label: 'Entity Service',       test: f => f.startsWith('entity-service/') },
+            // App labels — applied when any file under the app changes
+            // Area/Platform labels — generic across all apps (covers both CSM Portal and Customer Portal)
+            const fileRules = [
+              { label: 'App/CSM Portal',      test: f => f.startsWith('apps/csm-portal/') },
+              { label: 'App/Customer Portal', test: f => f.startsWith('apps/customer-portal/') },
+              { label: 'Area/Backend',        test: f => /^apps\/[^/]+\/backend\//.test(f) },
+              { label: 'Area/Frontend',       test: f => /^apps\/[^/]+\/webapp\//.test(f) },
+              { label: 'Platform/Microapp',   test: f => /^apps\/[^/]+\/microapp\//.test(f) },
+              { label: 'Platform/Web',        test: f => /^apps\/[^/]+\/webapp\//.test(f) },
+              { label: 'Entity Service',      test: f => f.startsWith('entity-service/') },
             ];
 
-            const labelsToApply = labelRules
+            const labelsToApply = fileRules
               .filter(({ test }) => filenames.some(test))
               .map(({ label }) => label);
+
+            // Type label — inferred from the conventional-commit prefix in the PR title.
+            // Strips leading [TAG] prefixes (e.g. "[CSM][Web] fix: ...") before matching.
+            const titleBody = pr.title.toLowerCase().trim().replace(/^(\[[^\]]*\]\s*)+/, '');
+            const typeRules = [
+              { label: 'Type/Bug',         pattern: /^fix[:(!]/ },
+              { label: 'Type/New Feature', pattern: /^feat[:(!]/ },
+              { label: 'Type/Improvement', pattern: /^(perf|improve)[:(!]/ },
+              { label: 'Type/Docs',        pattern: /^docs?[:(!]/ },
+              { label: 'Type/UX',          pattern: /^ux[:(!]/ },
+              { label: 'Type/Task',        pattern: /^(chore|ci|refactor|build|test)[:(!]/ },
+            ];
+            const typeLabel = typeRules.find(r => r.pattern.test(titleBody))?.label;
+            if (typeLabel) labelsToApply.push(typeLabel);
 
             core.info(`Labels to apply: ${labelsToApply.join(', ') || '(none)'}`);
 
