@@ -13,12 +13,12 @@ dayjs.extend(relativeTime);
  * falls back to the device timezone. Guards against placeholder values
  * (e.g. ServiceNow's "--None--") that would make Intl/dayjs throw.
  */
-const resolveTimezone = (timezone?: string): string => {
+const resolveTimezone = (tz?: string): string => {
   const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (!timezone) return fallback;
+  if (!tz) return fallback;
   try {
-    Intl.DateTimeFormat(undefined, { timeZone: timezone });
-    return timezone;
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return tz;
   } catch {
     return fallback;
   }
