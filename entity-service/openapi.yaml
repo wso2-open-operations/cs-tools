@@ -1231,6 +1231,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /configuration-items/search:
+    post:
+      summary: Search CMDB configuration items (ServiceNow data source only).
+      operationId: searchConfigurationItems
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchConfigurationItemsRequest'
+      responses:
+        "200":
+          description: Configuration items matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchConfigurationItemsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
   /groups/search:
     post:
       summary: Search groups (ServiceNow data source only).
@@ -3967,6 +4004,51 @@ components:
               type: string
             updatedBy:
               type: string
+
+    SearchConfigurationItemsFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchConfigurationItemsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchConfigurationItemsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ConfigurationItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+
+    SearchConfigurationItemsResponse:
+      type: object
+      properties:
+        configurationItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigurationItem'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
 
     SearchGroupsFilters:
       type: object

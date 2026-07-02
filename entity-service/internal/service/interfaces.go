@@ -221,6 +221,14 @@ type TimeCardService interface {
 	UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error)
 }
 
+// ConfigurationItemService defines the operations available on the configuration items entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ConfigurationItemService interface {
+	// SearchConfigurationItems returns a paginated list of CMDB configuration items filtered by
+	// optional search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
+}
+
 // GroupService defines the operations available on the groups entity.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type GroupService interface {

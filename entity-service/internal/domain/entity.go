@@ -1530,6 +1530,33 @@ type ITService struct {
 	ServiceClassification *ServiceClassification `json:"serviceClassification"`
 }
 
+// ConfigurationItem is a single CMDB configuration item returned in a search response.
+type ConfigurationItem struct {
+	ID          string  `json:"id"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Class       *string `json:"class"`
+}
+
+// SearchConfigurationItemsFilters holds optional filter criteria for configuration item searches.
+type SearchConfigurationItemsFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchConfigurationItemsRequest is the input for POST /configuration-items/search.
+type SearchConfigurationItemsRequest struct {
+	Filters    *SearchConfigurationItemsFilters `json:"filters,omitempty"`
+	Pagination Pagination                       `json:"pagination"`
+}
+
+// SearchConfigurationItemsResponse is the paginated result of a configuration items search.
+type SearchConfigurationItemsResponse struct {
+	ConfigurationItems []ConfigurationItem `json:"configurationItems"`
+	Total              int                 `json:"total"`
+	Offset             int                 `json:"offset"`
+	Limit              int                 `json:"limit"`
+}
+
 // GroupParentRef is the parent group reference within a group.
 type GroupParentRef struct {
 	ID   string `json:"id"`
