@@ -17,21 +17,25 @@ a session.
 ## Run
 
 ```bash
-# one-time: capture an approver session (see auth/README.md)
-ROLE=approver CHROME_PROFILE_DIR="…/Chrome/Default" pnpm exec playwright test --project=capture
+# one-time: capture an approver session (browser console) — see auth/README.md,
+# then save the copied bundle:
+pbpaste > tests/e2e/storageState/approver.json
 
 # run the suite (boots dev server automatically)
-pnpm run test:e2e                      # all timecard specs
-pnpm exec playwright test --ui         # author/debug interactively
-pnpm exec playwright show-report       # open the last HTML report
+pnpm run test:e2e                          # all timecard specs
+node_modules/.bin/playwright test --ui     # author/debug interactively
+node_modules/.bin/playwright show-report   # open the last HTML report
 ```
 
 Specs skip themselves (not fail) when the session they need is missing.
 
+> Note: `pnpm exec playwright …` fails in this repo ("packages field missing");
+> call the binary directly via `node_modules/.bin/playwright …`.
+
 ## Layout
 
-- `auth/capture.setup.ts` — on-demand `capture` project → `storageState/<role>.json`.
-- `fixtures/test.ts` — `withRole(test, role)` sets the session + skips if absent.
+- `auth/README.md` — how to capture a session bundle (localStorage + sessionStorage).
+- `fixtures/test.ts` — `withRole(test, role)` replays the session + skips if absent.
 - `pages/TimeCardsPage.ts` — page object for `/time-cards`.
 - `utils/selectors.ts` — stable anchors for the seeded store's demo data.
 - `specs/timecards/` — the specs.

@@ -21,15 +21,15 @@ import { defineConfig, devices } from "@playwright/test";
 // setting E2E_NO_WEBSERVER=1).
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3001";
 
-// The `capture` project (auth/capture.setup.ts) reuses your real browser session
-// to produce tests/e2e/storageState/<role>.json — it must not run as part of the
-// normal suite. The `chromium` project runs the actual specs and ignores it.
-const CAPTURE_MATCH = /auth\/capture\.setup\.ts/;
-
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
-  fullyParallel: true,
+  // Specs run against a real staging backend (no mocking), all under the same
+  // captured account -- concurrent workers cause real network contention and
+  // flaky timeouts (observed directly: a state-filter assertion failed under
+  // 4 workers, passed cleanly serial). One worker trades speed for determinism.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
   outputDir: "test-results",
@@ -51,14 +51,7 @@ export default defineConfig({
       },
   projects: [
     {
-      // On-demand: `ROLE=approver CHROME_PROFILE_DIR=… pnpm exec playwright test --project=capture`
-      name: "capture",
-      testMatch: CAPTURE_MATCH,
-      use: { ...devices["Desktop Chrome"] },
-    },
-    {
       name: "chromium",
-      testIgnore: CAPTURE_MATCH,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

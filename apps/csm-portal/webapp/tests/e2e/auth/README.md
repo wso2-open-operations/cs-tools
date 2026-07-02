@@ -9,54 +9,52 @@ http://www.apache.org/licenses/LICENSE-2.0
 
 # E2E auth — captured sessions (local)
 
-The time-card specs run **authenticated** by loading a captured browser session,
-so no login page or 2FA is ever driven locally. You capture a session once per
-role into `tests/e2e/storageState/<role>.json` (git-ignored — it holds real
-tokens).
+The specs run **authenticated** by replaying a captured browser session, so no
+login page or 2FA is driven locally. You capture a session once per role into
+`tests/e2e/storageState/<role>.json` (git-ignored — it holds real tokens).
+
+> **Why a full bundle, not just localStorage:** the Asgardeo React SDK keeps its
+> tokens in **`sessionStorage`** (`session_data-instance_…`), with only an
+> `asgardeo-session-active` flag in localStorage. Playwright's `storageState`
+> restores localStorage/cookies but **not** sessionStorage, so we capture both
+> stores and replay them via an init script (see `fixtures/test.ts`).
 
 Two roles:
 
 - **`approver.json`** — an account whose `GET /users/me` `roles` include
   `csm-leads` (and/or `csm-timecard-admins`). Sees the **Approvals** tab.
-- **`engineer.json`** — a plain account **without** those roles. Used for the
-  negative role-gating case (must NOT see Approvals).
+- **`engineer.json`** — a plain account **without** those roles (negative
+  role-gating case). Optional; that one test skips without it.
 
-You only need `approver.json` to run most specs; `engineer.json` unlocks the
-engineer negative test (others skip cleanly when a session file is missing).
+## Capture a session (browser console)
 
-## Option A — reuse your Chrome profile (recommended)
+1. Sign in to the app (`http://localhost:3001`) as the account you want.
+2. Open DevTools → **Console**. If Chrome shows the self-XSS warning, type
+   `allow pasting` and press Enter.
+3. Run — this copies a session bundle (both stores) to your clipboard:
 
-1. Sign in to the app in Chrome as the account you want to capture.
-2. **Fully quit Chrome** (the profile is locked while it runs).
-3. Run, pointing at that profile directory:
-
-   ```bash
-   ROLE=approver \
-   CHROME_PROFILE_DIR="$HOME/Library/Application Support/Google/Chrome/Default" \
-   pnpm exec playwright test --project=capture
+   ```js
+   copy(JSON.stringify({
+     origin: location.origin,
+     localStorage: Object.fromEntries(Object.entries(localStorage)),
+     sessionStorage: Object.fromEntries(Object.entries(sessionStorage)),
+   }, null, 2))
    ```
 
-   Repeat with `ROLE=engineer` (and the engineer account's profile) if needed.
+4. Save it to the role's file (from `apps/csm-portal/webapp`):
 
-The `capture` project opens the profile, confirms the Time cards page renders,
-and writes `storageState/<role>.json`.
+   ```bash
+   pbpaste > tests/e2e/storageState/approver.json
+   ```
 
-> Tip: use a dedicated Chrome profile per test account so their sessions don't
-> clobber each other. Point `CHROME_PROFILE_DIR` at
-> `…/Google/Chrome/Profile 1`, etc.
-
-## Option B — manual DevTools export
-
-If launching the profile is inconvenient: in the app tab, DevTools →
-Application → Local Storage → copy the Asgardeo entries into a hand-written
-`storageState.json` under `origins[].localStorage[]` (Playwright storageState
-shape). Save as `tests/e2e/storageState/approver.json`.
+   Repeat from a plain-account tab → `engineer.json` if you want the negative test.
 
 ## Notes
 
-- **Staleness:** a captured access token expires (~1h). If the session's refresh
-  token is still valid the Asgardeo SDK refreshes silently and the file keeps
-  working; otherwise re-capture.
+- **Staleness:** the captured access token expires (~1h). If the run fails on
+  auth, re-capture. (The bundle also carries the refresh token, so the SDK may
+  refresh silently within a run.)
 - **Secrecy:** `storageState/*.json` is git-ignored. Never commit it.
-- **Config:** the app must have a working `public/config.js` pointing at the same
-  tenant/backend the captured session was issued against.
+- **Config:** the app must have a working `public/config.js` for the same
+  tenant/backend the session was issued against (the client-instance hash in the
+  sessionStorage keys must match, which it does when the config is unchanged).

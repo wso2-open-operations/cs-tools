@@ -34,7 +34,13 @@ test.describe("time cards — case integration", () => {
     const firstCase = page
       .locator('a[href^="/cases/"]:not([href="/cases/new"])')
       .first();
-    if ((await firstCase.count()) === 0) {
+    // The search round-trips a few backend calls before the list renders;
+    // wait for a row rather than counting immediately (which raced the fetch).
+    const hasCase = await firstCase
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!hasCase) {
       test.skip(true, "No cases available in this environment to open.");
     }
     await firstCase.click();

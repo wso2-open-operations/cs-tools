@@ -15,10 +15,12 @@
 // under the License.
 
 //
-// Shared Playwright test helpers. Auth is by reusing a captured browser session
-// (see auth/capture.setup.ts) — no login page is driven. Each spec picks the
-// role whose session it needs and is skipped (not failed) when that session
-// hasn't been captured, so the suite degrades gracefully on a fresh checkout.
+// Shared Playwright test helpers. Auth is by replaying a captured browser
+// session — no login page is driven. The Asgardeo React SDK keeps its tokens in
+// **sessionStorage** (session_data-instance_… etc.), which Playwright's
+// storageState does not restore, so we replay both localStorage and
+// sessionStorage via an init script that runs before the app boots. A file is
+// skipped (not failed) when its role's session bundle hasn't been captured.
 //
 
 import { test as base, expect } from "@playwright/test";
@@ -27,27 +29,49 @@ import path from "node:path";
 
 export type TimecardRole = "approver" | "engineer";
 
-/** Absolute path to a role's captured storageState file. */
+/** A captured session: the origin's localStorage + sessionStorage snapshots. */
+interface SessionBundle {
+  origin?: string;
+  localStorage?: Record<string, string>;
+  sessionStorage?: Record<string, string>;
+}
+
+/** Absolute path to a role's captured session bundle. */
 export function sessionPath(role: TimecardRole): string {
   return path.join(process.cwd(), "tests", "e2e", "storageState", `${role}.json`);
 }
 
 /**
- * Configure a test file to run authenticated as `role`. Sets the storageState
- * and, in a `beforeAll`, skips the whole file when the session file is absent
- * with a message telling you how to capture it.
+ * Configure a test file to run authenticated as `role`. Replays the captured
+ * localStorage + sessionStorage before each page loads (so the Asgardeo SDK
+ * finds its session and boots signed-in). Skips the whole file when the bundle
+ * is absent, with a message pointing at the capture steps.
  *
  * Usage at the top of a spec:
  *   withRole(test, "approver");
  */
 export function withRole(t: typeof base, role: TimecardRole): void {
-  t.use({ storageState: sessionPath(role) });
-  t.beforeAll(() => {
+  t.beforeEach(async ({ context }) => {
+    const p = sessionPath(role);
     t.skip(
-      !fs.existsSync(sessionPath(role)),
-      `No captured session for '${role}'. Run: ROLE=${role} CHROME_PROFILE_DIR=<your Chrome profile> ` +
-        `pnpm exec playwright test --project=capture`,
+      !fs.existsSync(p),
+      `No captured session for '${role}'. See tests/e2e/auth/README.md to create ` +
+        `tests/e2e/storageState/${role}.json.`,
     );
+    const bundle = JSON.parse(fs.readFileSync(p, "utf8")) as SessionBundle;
+    await context.addInitScript((b: SessionBundle) => {
+      try {
+        for (const [k, v] of Object.entries(b.localStorage ?? {})) {
+          window.localStorage.setItem(k, v);
+        }
+        for (const [k, v] of Object.entries(b.sessionStorage ?? {})) {
+          window.sessionStorage.setItem(k, v);
+        }
+      } catch {
+        // Storage not accessible on this document yet; the next navigation
+        // re-runs this init script, so it's safe to ignore.
+      }
+    }, bundle);
   });
 }
 
