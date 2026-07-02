@@ -3939,6 +3939,9 @@ components:
           items:
             type: string
             format: uuid
+        searchQuery:
+          type: string
+          description: Free-text search query.
 
     SearchServiceOfferingsRequest:
       type: object
@@ -3983,9 +3986,18 @@ components:
         limit:
           type: integer
 
+    SearchITServicesFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
     SearchITServicesRequest:
       type: object
       properties:
+        filters:
+          $ref: '#/components/schemas/SearchITServicesFilters'
         pagination:
           $ref: '#/components/schemas/Pagination'
 

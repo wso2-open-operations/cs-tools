@@ -1545,7 +1545,8 @@ type ServiceOffering struct {
 
 // SearchServiceOfferingsFilters holds optional filter criteria for service offering searches.
 type SearchServiceOfferingsFilters struct {
-	ServiceIDs []string `json:"serviceIds,omitempty"`
+	ServiceIDs  []string `json:"serviceIds,omitempty"`
+	SearchQuery string   `json:"searchQuery,omitempty"`
 }
 
 // SearchServiceOfferingsRequest is the input for POST /service-offerings/search.
@@ -1562,9 +1563,15 @@ type SearchServiceOfferingsResponse struct {
 	Limit            int               `json:"limit"`
 }
 
+// SearchITServicesFilters holds optional filter criteria for IT service searches.
+type SearchITServicesFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
 // SearchITServicesRequest is the input for POST /services/search.
 type SearchITServicesRequest struct {
-	Pagination Pagination `json:"pagination"`
+	Filters    *SearchITServicesFilters `json:"filters,omitempty"`
+	Pagination Pagination               `json:"pagination"`
 }
 
 // SearchITServicesResponse is the paginated result of a services search.

@@ -53,7 +53,8 @@ type snServiceOfferingSearchPayload struct {
 }
 
 type snServiceOfferingFilters struct {
-	ServiceIDs []string `json:"serviceIds,omitempty"`
+	ServiceIDs  []string `json:"serviceIds,omitempty"`
+	SearchQuery string   `json:"searchQuery,omitempty"`
 }
 
 type snServiceOfferingService struct {
@@ -76,13 +77,14 @@ func (s *snServiceOfferingService) SearchServiceOfferings(ctx context.Context, r
 		return domain.SearchServiceOfferingsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
-	var serviceIDs []string
+	var filters snServiceOfferingFilters
 	if req.Filters != nil {
-		serviceIDs = uuidsToSysids(req.Filters.ServiceIDs)
+		filters.ServiceIDs = uuidsToSysids(req.Filters.ServiceIDs)
+		filters.SearchQuery = req.Filters.SearchQuery
 	}
 
 	payload := snServiceOfferingSearchPayload{
-		Filters:    snServiceOfferingFilters{ServiceIDs: serviceIDs},
+		Filters:    filters,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/service-offerings/search", token, payload)

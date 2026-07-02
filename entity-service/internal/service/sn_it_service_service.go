@@ -50,7 +50,12 @@ type snITServiceLabel struct {
 
 // snITServiceSearchPayload is the Choreo POST /services/search request body.
 type snITServiceSearchPayload struct {
+	Filters    snITServiceFilters  `json:"filters"`
 	Pagination snProjectPagination `json:"pagination"`
+}
+
+type snITServiceFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
 }
 
 type snITServiceService struct {
@@ -73,7 +78,12 @@ func (s *snITServiceService) SearchITServices(ctx context.Context, req domain.Se
 		return domain.SearchITServicesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
+	var filters snITServiceFilters
+	if req.Filters != nil {
+		filters.SearchQuery = req.Filters.SearchQuery
+	}
 	payload := snITServiceSearchPayload{
+		Filters:    filters,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 	raw, err := s.client.Post(ctx, "/services/search", token, payload)
