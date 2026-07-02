@@ -198,6 +198,10 @@ type CallRequestService interface {
 
 // ChangeRequestService defines the operations available on the change_requests entity.
 type ChangeRequestService interface {
+	// CreateChangeRequest creates a new change request in ServiceNow. Subject is required.
+	// Supported by the ServiceNow data source only.
+	CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error)
+
 	// SearchChangeRequests returns a paginated list of change requests filtered by optional
 	// project IDs, state keys, impact keys, date ranges, and search query.
 	SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest) (domain.SearchChangeRequestsResponse, error)
