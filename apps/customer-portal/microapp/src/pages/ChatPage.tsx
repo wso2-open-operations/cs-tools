@@ -289,6 +289,7 @@ export default function ChatPage() {
         loading={!!activeStreamingMessage}
         value={comment}
         placeholder="Type your message"
+        submitOnEnter={false}
         onChange={setComment}
         onSend={handleSend}
         topSlot={
