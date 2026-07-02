@@ -29,8 +29,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
 
-// sanitizePath strips newline characters from a URL path to prevent log injection.
-var sanitizePath = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace
+// sanitizeLog strips CR/LF characters from a string to prevent log injection.
+// Apply to every user-derived operand before passing it to a log call.
+var sanitizeLog = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace
 
 // decodeRequest decodes a JSON request body into dst, enforcing unknown-field
 // rejection, a 1 MiB body cap, and no trailing data after the JSON object.
@@ -89,42 +90,42 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &ve):
 		// 400 – caller-supplied input is invalid; the message is safe to return.
-		log.Printf("Bad request: %s %s: %s", r.Method, sanitizePath(r.URL.Path), ve.Msg) // #nosec G706 -- path sanitized
+		log.Printf("Bad request: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ve.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusBadRequest, ve.Msg)
 
 	case errors.As(err, &ue):
 		// 401 – caller is not authenticated.
-		log.Printf("Unauthorized: %s %s: %s", r.Method, sanitizePath(r.URL.Path), ue.Msg) // #nosec G706 -- path sanitized
+		log.Printf("Unauthorized: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ue.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusUnauthorized, ue.Msg)
 
 	case errors.As(err, &fe):
 		// 403 – caller is authenticated but not permitted.
-		log.Printf("Forbidden: %s %s: %s", r.Method, sanitizePath(r.URL.Path), fe.Msg) // #nosec G706 -- path sanitized
+		log.Printf("Forbidden: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(fe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusForbidden, fe.Msg)
 
 	case errors.As(err, &nfe):
 		// 404 – resource not found; message is safe to return.
-		log.Printf("Not found: %s %s: %s", r.Method, sanitizePath(r.URL.Path), nfe.Msg) // #nosec G706 -- path sanitized
+		log.Printf("Not found: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(nfe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
 
 	case errors.As(err, &sue):
 		// 503 – downstream dependency unavailable; log details, return generic message.
-		log.Printf("Service unavailable: %s %s: %s", r.Method, sanitizePath(r.URL.Path), sue.Msg) // #nosec G706 -- path sanitized
+		log.Printf("Service unavailable: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(sue.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusServiceUnavailable, "service temporarily unavailable, please try again later")
 
 	case errors.Is(err, context.DeadlineExceeded):
 		// 408 – request timed out waiting for a downstream call or DB query.
-		log.Printf("Request timeout: %s %s", r.Method, sanitizePath(r.URL.Path)) // #nosec G706 -- path sanitized
+		log.Printf("Request timeout: %s %s", r.Method, sanitizeLog(r.URL.Path)) // #nosec G706 -- path sanitized
 		apierror.WriteJSON(w, http.StatusRequestTimeout, "request timed out")
 
 	case errors.Is(err, context.Canceled):
 		// Client closed the connection — log it and return nothing; the response is already gone.
-		log.Printf("Request canceled: %s %s", r.Method, sanitizePath(r.URL.Path)) // #nosec G706 -- path sanitized
+		log.Printf("Request canceled: %s %s", r.Method, sanitizeLog(r.URL.Path)) // #nosec G706 -- path sanitized
 
 	default:
 		// 500 – unexpected infrastructure error (DB, network, etc.).
 		// Log the full error for debugging; the client only receives the generic message.
-		log.Printf("Internal error: %s %s: %v", r.Method, sanitizePath(r.URL.Path), err) // #nosec G706 -- path sanitized
+		log.Printf("Internal error: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(err.Error())) // #nosec G706 -- path and error sanitized
 		apierror.WriteJSON(w, http.StatusInternalServerError, "internal server error")
 	}
 }
