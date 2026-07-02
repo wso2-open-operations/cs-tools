@@ -8,9 +8,25 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(relativeTime);
 
+/**
+ * Returns the given timezone if it is a valid IANA identifier, otherwise
+ * falls back to the device timezone. Guards against placeholder values
+ * (e.g. ServiceNow's "--None--") that would make Intl/dayjs throw.
+ */
+const resolveTimezone = (timezone?: string): string => {
+  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!timezone) return fallback;
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+    return timezone;
+  } catch {
+    return fallback;
+  }
+};
+
 export function useDateTime() {
   const { timezone } = useMe();
-  const tz = timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tz = resolveTimezone(timezone);
 
   const toUtc = (date: Date | string) => {
     if (date instanceof Date) {

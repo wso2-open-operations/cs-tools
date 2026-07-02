@@ -70,7 +70,8 @@ export default function MeProvider({ children }: { children: React.ReactNode }) 
         id: meData.id,
         roles: meData.roles,
         isAdmin: meData.roles.includes(ADMIN_USER_ROLE),
-        timezone: meData.timezone,
+        // ServiceNow returns "--None--" for unset choice fields; treat it as absent.
+        timezone: meData.timezone && meData.timezone !== "--None--" ? meData.timezone : undefined,
       }}
     >
       {children}
