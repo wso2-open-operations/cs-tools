@@ -26,6 +26,7 @@ interface StickyCommentBarProps {
   bottomSlot?: ReactNode;
   loading?: boolean;
   disabled?: boolean;
+  submitOnEnter?: boolean;
 
   onChange: (value: string) => void;
   onSend: () => void;
@@ -38,6 +39,7 @@ export function StickyCommentBar({
   bottomSlot,
   loading = false,
   disabled = false,
+  submitOnEnter = true,
   onChange,
   onSend,
 }: StickyCommentBarProps) {
@@ -50,7 +52,7 @@ export function StickyCommentBar({
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Enter" && hasContent) {
+    if (submitOnEnter && event.key === "Enter" && hasContent) {
       event.preventDefault();
       send();
     }
