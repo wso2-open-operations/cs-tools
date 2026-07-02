@@ -358,6 +358,293 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 	}, nil
 }
 
+// snCreateChangeRequestPayload is the Choreo POST /change-requests request body.
+type snCreateChangeRequestPayload struct {
+	Subject             string  `json:"subject"`
+	CategoryKey         *string `json:"categoryKey,omitempty"`
+	ServiceID           *string `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string `json:"configurationItemId,omitempty"`
+	PriorityKey         *string `json:"priorityKey,omitempty"`
+	ImpactKey           *string `json:"impactKey,omitempty"`
+	TypeKey             *string `json:"typeKey,omitempty"`
+	StateKey            *string `json:"stateKey,omitempty"`
+	GroupID             *string `json:"groupId,omitempty"`
+	AssignedEngineerID  *string `json:"assignedEngineerId,omitempty"`
+	RiskKey             *string `json:"riskKey,omitempty"`
+	RequestedByID       *string `json:"requestedById,omitempty"`
+	Description         *string `json:"description,omitempty"`
+	Justification       *string `json:"justification,omitempty"`
+	ImplementationPlan  *string `json:"implementationPlan,omitempty"`
+	RiskImpactAnalysis  *string `json:"riskImpactAnalysis,omitempty"`
+	BackoutPlan         *string `json:"backoutPlan,omitempty"`
+	TestPlan            *string `json:"testPlan,omitempty"`
+	PlannedStartDate    *string `json:"plannedStartDate,omitempty"`
+	PlannedEndDate      *string `json:"plannedEndDate,omitempty"`
+	Comment             *string `json:"comment,omitempty"`
+	WorkNote            *string `json:"workNote,omitempty"`
+}
+
+// snCreateChangeRequestResponse mirrors the Choreo POST /change-requests response.
+type snCreateChangeRequestResponse struct {
+	Message       string `json:"message"`
+	ChangeRequest struct {
+		ID        string `json:"id"`
+		Number    string `json:"number"`
+		CreatedOn string `json:"createdOn"`
+		CreatedBy string `json:"createdBy"`
+	} `json:"changeRequest"`
+}
+
+// snCRCreateStateIDMap maps domain ChangeRequestState enums to SN string state IDs for create.
+var snCRCreateStateIDMap = map[domain.ChangeRequestState]string{
+	domain.ChangeRequestStateNew:              "-5",
+	domain.ChangeRequestStateAssess:           "-4",
+	domain.ChangeRequestStateAuthorize:        "-3",
+	domain.ChangeRequestStateCustomerApproval: "5",
+	domain.ChangeRequestStateScheduled:        "-2",
+	domain.ChangeRequestStateImplement:        "-1",
+	domain.ChangeRequestStateReview:           "0",
+	domain.ChangeRequestStateCustomerReview:   "1",
+	domain.ChangeRequestStateRollback:         "2",
+	domain.ChangeRequestStateClosed:           "3",
+	domain.ChangeRequestStateCanceled:         "4",
+}
+
+// snCRCreateTypeIDMap maps domain ChangeRequestType enums to SN string type IDs for create.
+var snCRCreateTypeIDMap = map[domain.ChangeRequestType]string{
+	domain.ChangeRequestTypeStandard:           "standard",
+	domain.ChangeRequestTypeNormal:             "normal",
+	domain.ChangeRequestTypeEmergency:          "emergency",
+	domain.ChangeRequestTypeModel:              "model",
+	domain.ChangeRequestTypeSiteReliabilityOps: "site_reliability_ops",
+	domain.ChangeRequestTypeAzure:              "azure",
+}
+
+// snCRRiskIDMap maps domain ChangeRequestRisk enums to SN string risk IDs.
+var snCRRiskIDMap = map[domain.ChangeRequestRisk]string{
+	domain.ChangeRequestRiskHigh:     "2",
+	domain.ChangeRequestRiskModerate: "3",
+	domain.ChangeRequestRiskLow:      "4",
+}
+
+// snCRPriorityIDMap maps domain ChangeRequestPriority enums to SN string priority IDs.
+var snCRPriorityIDMap = map[domain.ChangeRequestPriority]string{
+	domain.ChangeRequestPriorityCritical: "1",
+	domain.ChangeRequestPriorityHigh:     "2",
+	domain.ChangeRequestPriorityModerate: "3",
+	domain.ChangeRequestPriorityLow:      "4",
+}
+
+// snCRImpactCreateIDMap maps domain ChangeRequestImpact enums to SN string impact IDs.
+var snCRImpactCreateIDMap = map[domain.ChangeRequestImpact]string{
+	domain.ChangeRequestImpactHigh:   "1",
+	domain.ChangeRequestImpactMedium: "2",
+	domain.ChangeRequestImpactLow:    "3",
+}
+
+// snCRCategoryIDMap maps domain ChangeRequestCategory enums to SN category string IDs.
+var snCRCategoryIDMap = map[domain.ChangeRequestCategory]string{
+	domain.ChangeRequestCategoryHardware:             "Hardware",
+	domain.ChangeRequestCategorySoftware:             "Software",
+	domain.ChangeRequestCategoryService:              "Service",
+	domain.ChangeRequestCategorySystemSoftware:       "System Software",
+	domain.ChangeRequestCategoryApplicationsSoftware: "Applications Software",
+	domain.ChangeRequestCategoryNetwork:              "Network",
+	domain.ChangeRequestCategoryTelecom:              "Telecom",
+	domain.ChangeRequestCategoryDocumentation:        "Documentation",
+	domain.ChangeRequestCategoryOther:                "Other",
+	domain.ChangeRequestCategoryRegularReleaseCloud:  "Regular Release - Cloud",
+	domain.ChangeRequestCategoryHotfixReleaseCloud:   "Hotfix Release - Cloud",
+	domain.ChangeRequestCategoryDevOps:               "DevOps",
+	domain.ChangeRequestCategoryCloudComputing:       "cloud computing",
+}
+
+var validChangeRequestTypes = map[domain.ChangeRequestType]struct{}{
+	domain.ChangeRequestTypeStandard:           {},
+	domain.ChangeRequestTypeNormal:             {},
+	domain.ChangeRequestTypeEmergency:          {},
+	domain.ChangeRequestTypeModel:              {},
+	domain.ChangeRequestTypeSiteReliabilityOps: {},
+	domain.ChangeRequestTypeAzure:              {},
+}
+
+var validChangeRequestRisks = map[domain.ChangeRequestRisk]struct{}{
+	domain.ChangeRequestRiskHigh:     {},
+	domain.ChangeRequestRiskModerate: {},
+	domain.ChangeRequestRiskLow:      {},
+}
+
+var validChangeRequestPriorities = map[domain.ChangeRequestPriority]struct{}{
+	domain.ChangeRequestPriorityCritical: {},
+	domain.ChangeRequestPriorityHigh:     {},
+	domain.ChangeRequestPriorityModerate: {},
+	domain.ChangeRequestPriorityLow:      {},
+}
+
+var validChangeRequestCategories = map[domain.ChangeRequestCategory]struct{}{
+	domain.ChangeRequestCategoryHardware:             {},
+	domain.ChangeRequestCategorySoftware:             {},
+	domain.ChangeRequestCategoryService:              {},
+	domain.ChangeRequestCategorySystemSoftware:       {},
+	domain.ChangeRequestCategoryApplicationsSoftware: {},
+	domain.ChangeRequestCategoryNetwork:              {},
+	domain.ChangeRequestCategoryTelecom:              {},
+	domain.ChangeRequestCategoryDocumentation:        {},
+	domain.ChangeRequestCategoryOther:                {},
+	domain.ChangeRequestCategoryRegularReleaseCloud:  {},
+	domain.ChangeRequestCategoryHotfixReleaseCloud:   {},
+	domain.ChangeRequestCategoryDevOps:               {},
+	domain.ChangeRequestCategoryCloudComputing:       {},
+}
+
+var validChangeRequestCreateStates = map[domain.ChangeRequestState]struct{}{
+	domain.ChangeRequestStateNew:              {},
+	domain.ChangeRequestStateAssess:           {},
+	domain.ChangeRequestStateAuthorize:        {},
+	domain.ChangeRequestStateCustomerApproval: {},
+	domain.ChangeRequestStateScheduled:        {},
+	domain.ChangeRequestStateImplement:        {},
+	domain.ChangeRequestStateReview:           {},
+	domain.ChangeRequestStateCustomerReview:   {},
+	domain.ChangeRequestStateRollback:         {},
+	domain.ChangeRequestStateClosed:           {},
+	domain.ChangeRequestStateCanceled:         {},
+}
+
+func strPtr(s string) *string { return &s }
+
+// CreateChangeRequest implements ChangeRequestService for the ServiceNow data source.
+func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+	if req.Subject == "" {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "subject is required"}
+	}
+	if req.Category != nil {
+		if _, ok := validChangeRequestCategories[*req.Category]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid category %q", *req.Category)}
+		}
+	}
+	if req.Type != nil {
+		if _, ok := validChangeRequestTypes[*req.Type]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
+	}
+	if req.State != nil {
+		if _, ok := validChangeRequestCreateStates[*req.State]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid state %q", *req.State)}
+		}
+	}
+	if req.Risk != nil {
+		if _, ok := validChangeRequestRisks[*req.Risk]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid risk %q", *req.Risk)}
+		}
+	}
+	if req.Priority != nil {
+		if _, ok := validChangeRequestPriorities[*req.Priority]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid priority %q", *req.Priority)}
+		}
+	}
+	if req.Impact != nil {
+		if _, ok := snCRImpactCreateIDMap[*req.Impact]; !ok {
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid impact %q", *req.Impact)}
+		}
+	}
+
+	uuidFields := map[string]*string{
+		"serviceId":           req.ServiceID,
+		"serviceOfferingId":   req.ServiceOfferingID,
+		"configurationItemId": req.ConfigurationItemID,
+		"groupId":             req.GroupID,
+		"assignedEngineerId":  req.AssignedEngineerID,
+		"requestedById":       req.RequestedByID,
+	}
+	for field, val := range uuidFields {
+		if val != nil {
+			if err := validateUUIDs(field, []string{*val}); err != nil {
+				return domain.CreateChangeRequestResponse{}, err
+			}
+		}
+	}
+
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return domain.CreateChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+	}
+
+	payload := snCreateChangeRequestPayload{
+		Subject:            req.Subject,
+		Description:        req.Description,
+		Justification:      req.Justification,
+		ImplementationPlan: req.ImplementationPlan,
+		RiskImpactAnalysis: req.RiskImpactAnalysis,
+		BackoutPlan:        req.BackoutPlan,
+		TestPlan:           req.TestPlan,
+		PlannedStartDate:   req.PlannedStartDate,
+		PlannedEndDate:     req.PlannedEndDate,
+		Comment:            req.Comment,
+		WorkNote:           req.WorkNote,
+	}
+	if req.Category != nil {
+		v := snCRCategoryIDMap[*req.Category]
+		payload.CategoryKey = &v
+	}
+	if req.Type != nil {
+		v := snCRCreateTypeIDMap[*req.Type]
+		payload.TypeKey = &v
+	}
+	if req.State != nil {
+		v := snCRCreateStateIDMap[*req.State]
+		payload.StateKey = &v
+	}
+	if req.Risk != nil {
+		v := snCRRiskIDMap[*req.Risk]
+		payload.RiskKey = &v
+	}
+	if req.Priority != nil {
+		v := snCRPriorityIDMap[*req.Priority]
+		payload.PriorityKey = &v
+	}
+	if req.Impact != nil {
+		v := snCRImpactCreateIDMap[*req.Impact]
+		payload.ImpactKey = &v
+	}
+	if req.ServiceID != nil {
+		payload.ServiceID = strPtr(uuidToSysid(*req.ServiceID))
+	}
+	if req.ServiceOfferingID != nil {
+		payload.ServiceOfferingID = strPtr(uuidToSysid(*req.ServiceOfferingID))
+	}
+	if req.ConfigurationItemID != nil {
+		payload.ConfigurationItemID = strPtr(uuidToSysid(*req.ConfigurationItemID))
+	}
+	if req.GroupID != nil {
+		payload.GroupID = strPtr(uuidToSysid(*req.GroupID))
+	}
+	if req.AssignedEngineerID != nil {
+		payload.AssignedEngineerID = strPtr(uuidToSysid(*req.AssignedEngineerID))
+	}
+	if req.RequestedByID != nil {
+		payload.RequestedByID = strPtr(uuidToSysid(*req.RequestedByID))
+	}
+
+	raw, err := s.client.Post(ctx, "/change-requests", token, payload)
+	if err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
+
+	var snResp snCreateChangeRequestResponse
+	if err := json.Unmarshal(raw, &snResp); err != nil {
+		return domain.CreateChangeRequestResponse{}, fmt.Errorf("sn create change request: parse response: %w", err)
+	}
+
+	resp := domain.CreateChangeRequestResponse{Message: snResp.Message}
+	resp.ChangeRequest.ID = sysidToUUID(snResp.ChangeRequest.ID)
+	resp.ChangeRequest.Number = snResp.ChangeRequest.Number
+	resp.ChangeRequest.CreatedOn = snResp.ChangeRequest.CreatedOn
+	resp.ChangeRequest.CreatedBy = snResp.ChangeRequest.CreatedBy
+	return resp, nil
+}
+
 // snPatchChangeRequestPayload mirrors the Choreo PATCH /change-requests/{id} request body.
 type snPatchChangeRequestPayload struct {
 	PlannedStartOn     *string `json:"plannedStartOn,omitempty"`
