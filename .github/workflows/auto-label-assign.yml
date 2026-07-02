@@ -65,12 +65,12 @@ jobs:
             // Strips leading [TAG] prefixes (e.g. "[CSM][Web] fix: ...") before matching.
             const titleBody = pr.title.toLowerCase().trim().replace(/^(\[[^\]]*\]\s*)+/, '');
             const typeRules = [
-              { label: 'Type/Bug',         pattern: /^fix[:(]/ },
-              { label: 'Type/New Feature', pattern: /^feat[:(]/ },
-              { label: 'Type/Improvement', pattern: /^(perf|improve)[:(]/ },
-              { label: 'Type/Docs',        pattern: /^docs?[:(]/ },
-              { label: 'Type/UX',          pattern: /^ux[:(]/ },
-              { label: 'Type/Task',        pattern: /^(chore|ci|refactor|build|test)[:(]/ },
+              { label: 'Type/Bug',         pattern: /^fix[:(!]/ },
+              { label: 'Type/New Feature', pattern: /^feat[:(!]/ },
+              { label: 'Type/Improvement', pattern: /^(perf|improve)[:(!]/ },
+              { label: 'Type/Docs',        pattern: /^docs?[:(!]/ },
+              { label: 'Type/UX',          pattern: /^ux[:(!]/ },
+              { label: 'Type/Task',        pattern: /^(chore|ci|refactor|build|test)[:(!]/ },
             ];
             const typeLabel = typeRules.find(r => r.pattern.test(titleBody))?.label;
             if (typeLabel) labelsToApply.push(typeLabel);
