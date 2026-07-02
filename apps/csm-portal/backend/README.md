@@ -82,6 +82,20 @@ To skip the hook in exceptional cases:
 git push --no-verify
 ```
 
+## Security Scanning
+
+Run [gosec](https://github.com/securego/gosec) to check for common security issues:
+
+```bash
+# Install gosec (once)
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# Run from apps/csm-portal/backend
+gosec -fmt=text ./...
+```
+
+The scan should report **0 issues**. Existing `// #nosec` annotations document confirmed false positives; do not remove them without re-running the scan and reviewing the finding.
+
 ## Configuration
 
 Copy `.env` and fill in the values:

@@ -111,6 +111,20 @@ HTTP Request
 
 > `.env` file is loaded automatically if present. Absent `.env` is silently ignored; a malformed one causes a fatal startup error.
 
+## Security Scanning
+
+Run [gosec](https://github.com/securego/gosec) to check for common security issues:
+
+```bash
+# Install gosec (once)
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# Run from entity-service
+gosec -fmt=text ./...
+```
+
+The scan should report **0 issues**. Existing `// #nosec` annotations document confirmed false positives or findings that have been addressed in code; do not remove them without re-running the scan and reviewing the finding.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

@@ -169,7 +169,7 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(content)
+	_, _ = w.Write(content) // #nosec G705 -- Content-Type is set from the upstream response before writing
 }
 
 // DeleteCaseAttachment handles DELETE /attachments/{id}.
