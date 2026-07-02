@@ -1054,6 +1054,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests:
+    post:
+      summary: Create a change request (ServiceNow data source only).
+      operationId: createChangeRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequestRequest'
+      responses:
+        "201":
+          description: Change request created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateChangeRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -3506,6 +3543,130 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogItemVariable'
+
+    CreateChangeRequestRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+          enum:
+            - hardware
+            - software
+            - service
+            - system_software
+            - applications_software
+            - network
+            - telecom
+            - documentation
+            - other
+            - regular_release_cloud
+            - hotfix_release_cloud
+            - devops
+            - cloud_computing
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        priority:
+          type: string
+          enum:
+            - critical
+            - high
+            - moderate
+            - low
+        impact:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+        type:
+          type: string
+          enum:
+            - standard
+            - normal
+            - emergency
+            - model
+            - site_reliability_ops
+            - azure
+        state:
+          type: string
+          enum:
+            - new
+            - assess
+            - authorize
+            - customer_approval
+            - scheduled
+            - implement
+            - review
+            - customer_review
+            - rollback
+            - closed
+            - canceled
+        groupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        risk:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+        requestedById:
+          type: string
+          format: uuid
+        description:
+          type: string
+        justification:
+          type: string
+        implementationPlan:
+          type: string
+        riskImpactAnalysis:
+          type: string
+        backoutPlan:
+          type: string
+        testPlan:
+          type: string
+        plannedStartDate:
+          type: string
+          format: date-time
+        plannedEndDate:
+          type: string
+          format: date-time
+        comment:
+          type: string
+        workNote:
+          type: string
+
+    CreateChangeRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        changeRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            createdOn:
+              type: string
+            createdBy:
+              type: string
 
     PatchChangeRequestRequest:
       type: object
