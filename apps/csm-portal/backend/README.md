@@ -94,7 +94,7 @@ go install github.com/securego/gosec/v2/cmd/gosec@latest
 gosec -fmt=text ./...
 ```
 
-The scan should report **0 issues**. Each `// #nosec` annotation documents either a confirmed false positive (with the reason in the comment) or a finding where the vulnerability has been addressed in the same code block. Do not remove an annotation without re-running the scan, reading the cited reason, and verifying the mitigation still holds.
+The scan should report **0 issues**. If a new finding appears, fix the root cause before merging — do not suppress it without a code review.
 
 ## Configuration
 
