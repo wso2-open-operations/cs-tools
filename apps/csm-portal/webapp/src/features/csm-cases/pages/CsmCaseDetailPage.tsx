@@ -77,10 +77,12 @@ import {
   LinkedItemsWidget,
   ProductContextWidget,
   SlaTimelineWidget,
-  TimeLogsWidget,
   WatchersWidget,
 } from "@features/csm-cases/components/CaseDetailWidgets";
 import { CallRequestsWidget } from "@features/csm-cases/components/CallRequestsWidget";
+import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
+import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
+import { usePostTimeCard } from "@features/csm-timecards/api/useTimeCards";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import {
   publicCommentGateReason,
@@ -237,8 +239,7 @@ const TAB_DEFS: Array<{
   // SLA tab is parked until its backend clock data is wired; disabled for now.
   { id: "sla", label: "SLA", icon: <Clock size={16} />, disabled: true },
   { id: "attachments", label: "Attachments", icon: <Paperclip size={16} /> },
-  // Time tracking is parked until its backend flow lands; disabled for now.
-  { id: "time", label: "Time tracking", icon: <Layers size={16} />, disabled: true },
+  { id: "time", label: "Time tracking", icon: <Layers size={16} /> },
   { id: "call-requests", label: "Call requests", icon: <Phone size={16} /> },
 ];
 
@@ -285,6 +286,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [metaCollapsed, setMetaCollapsed] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [logTimeOpen, setLogTimeOpen] = useState(false);
+  const postTimeCard = usePostTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
   const [pendingDelete, setPendingDelete] = useState<CaseAttachment | null>(
     null,
@@ -574,6 +577,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
         } else {
           showError("Could not copy link.");
         }
+        return;
+      }
+
+      if (action.secondary === "log_time") {
+        // CAMG-006: closed cases are read-only — no new time entries.
+        if (data?.state === "closed") {
+          showError("This case is closed — time tracking is read-only.");
+          return;
+        }
+        setLogTimeOpen(true);
         return;
       }
 
@@ -1238,9 +1251,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "time" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <TimeLogsWidget
-            logs={c.timeLogs}
-            onAdd={() => onAction({ secondary: "log_time" })}
+          <CaseTimeCardsPanel
+            caseId={c.id}
+            onLogTime={() => setLogTimeOpen(true)}
+            readOnly={isClosed}
           />
         </Box>
       )}
@@ -1258,6 +1272,31 @@ export default function CsmCaseDetailPage(): JSX.Element {
           isAssigning={patchCase.isPending}
           onClose={() => setAssignOpen(false)}
           onAssign={onAssign}
+        />
+      )}
+
+      {logTimeOpen && (
+        <LogTimeCardDialog
+          caseId={c.id}
+          caseNumber={c.caseNumber ?? c.id}
+          projectId={c.projectId}
+          projectName={c.projectName}
+          isSubmitting={postTimeCard.isPending}
+          onClose={() => setLogTimeOpen(false)}
+          onSubmit={(input) =>
+            postTimeCard.mutate(input, {
+              onSuccess: () => {
+                setLogTimeOpen(false);
+                setActiveTab("time");
+                setFeedback({
+                  message: "Time card submitted for review.",
+                  severity: "success",
+                  sticky: false,
+                });
+              },
+              onError: () => showError("Could not log time."),
+            })
+          }
         />
       )}
 
