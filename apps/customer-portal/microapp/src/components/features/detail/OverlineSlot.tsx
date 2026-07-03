@@ -38,6 +38,7 @@ export function OverlineSlot({
 }) {
   const { icon: Icon, color } = TYPE_CONFIG[type];
   const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   const handleCopy = async (value: string) => {
     try {
@@ -70,7 +71,12 @@ export function OverlineSlot({
             <Typography variant="body1" fontWeight="medium" noWrap>
               {ids.join(" | ")}
             </Typography>
-            <Tooltip title={copied ? "Copied!" : "Copy"}>
+            <Tooltip
+              title={copied ? "Copied!" : "Copy"}
+              open={copied || hovered}
+              onOpen={() => setHovered(true)}
+              onClose={() => setHovered(false)}
+            >
               <IconButton
                 size="small"
                 color={copied ? "success" : "default"}
