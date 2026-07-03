@@ -251,3 +251,33 @@ func (c *Client) SearchCallRequests(ctx context.Context, body []byte) ([]byte, e
 func (c *Client) PatchCallRequest(ctx context.Context, callRequestID string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/call-requests/%s", url.PathEscape(callRequestID)), body)
 }
+
+// CreateChangeRequest calls POST /change-requests on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/change-requests", body)
+}
+
+// SearchITServices calls POST /services/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchITServices(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/services/search", body)
+}
+
+// SearchServiceOfferings calls POST /service-offerings/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchServiceOfferings(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/service-offerings/search", body)
+}
+
+// SearchGroups calls POST /groups/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchGroups(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/groups/search", body)
+}
+
+// SearchConfigurationItems calls POST /configuration-items/search on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) SearchConfigurationItems(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/configuration-items/search", body)
+}

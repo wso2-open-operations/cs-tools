@@ -222,9 +222,17 @@ backend/
 
 ### Change Requests
 
+- `POST /change-requests` — Create a change request (ServiceNow data source only)
 - `GET /change-requests/{id}` — Get change request by ID (ServiceNow data source only)
 - `PATCH /change-requests/{id}` — Update a change request (`plannedStartOn`, `isCustomerApproved`, `isCustomerReviewed`; ServiceNow data source only)
 - `POST /change-requests/search` — Search change requests (ServiceNow data source only)
+
+### CMDB
+
+- `POST /services/search` — Search IT services (ServiceNow data source only)
+- `POST /service-offerings/search` — Search service offerings (ServiceNow data source only)
+- `POST /groups/search` — Search assignment groups (ServiceNow data source only)
+- `POST /configuration-items/search` — Search configuration items (ServiceNow data source only)
 
 ### Time Cards
 
