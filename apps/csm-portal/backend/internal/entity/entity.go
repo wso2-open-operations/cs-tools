@@ -288,12 +288,8 @@ func (c *Client) CreateCaseGithubIssue(ctx context.Context, caseID string, body 
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/github-issues", url.PathEscape(caseID)), body)
 }
 
-// GetConversationMessages calls GET /conversations/{id}/messages on the entity service.
-// rawQuery is the URL-encoded query string (e.g. "limit=20&offset=0"); pass empty string for defaults.
-func (c *Client) GetConversationMessages(ctx context.Context, conversationID string, rawQuery string) ([]byte, error) {
-	path := fmt.Sprintf("/conversations/%s/messages", url.PathEscape(conversationID))
-	if rawQuery != "" {
-		path += "?" + rawQuery
-	}
-	return c.do(ctx, http.MethodGet, path, nil)
+// SearchComments calls POST /comments/search on the entity service.
+// The body must be a JSON-encoded SearchCommentsRequest (referenceId, referenceType, pagination).
+func (c *Client) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/comments/search", body)
 }

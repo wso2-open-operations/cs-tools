@@ -28,50 +28,57 @@ import (
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
-type snConversationService struct {
+type snCommentSearchService struct {
 	client *integrationservice.Client
 }
 
-// NewServiceNowConversationService constructs a ConversationService backed by the Choreo API.
-func NewServiceNowConversationService(client *integrationservice.Client) ConversationService {
-	return &snConversationService{client: client}
+// NewServiceNowCommentService constructs a CommentService backed by the Choreo API.
+func NewServiceNowCommentService(client *integrationservice.Client) CommentService {
+	return &snCommentSearchService{client: client}
 }
 
-func (s *snConversationService) GetConversationMessages(ctx context.Context, req domain.GetConversationMessagesRequest) (domain.GetConversationMessagesResponse, error) {
+func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {
-		return domain.GetConversationMessagesResponse{}, err
+		return domain.SearchCommentsResponse{}, err
+	}
+
+	if req.ReferenceID == "" {
+		return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "referenceId is required"}
+	}
+	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
+		return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "referenceType must be one of: case, conversation, change_request, deployment"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
-		return domain.GetConversationMessagesResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+		return domain.SearchCommentsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
 
 	payload := snSearchCommentsPayload{
-		ReferenceID:   uuidToSysid(req.ConversationID),
-		ReferenceType: "conversation",
+		ReferenceID:   uuidToSysid(req.ReferenceID),
+		ReferenceType: string(req.ReferenceType),
 		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 
 	raw, err := s.client.Post(ctx, "/comments/search", token, payload)
 	if err != nil {
-		return domain.GetConversationMessagesResponse{}, err
+		return domain.SearchCommentsResponse{}, err
 	}
 
 	var snResp snSearchCommentsResponse
 	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.GetConversationMessagesResponse{}, fmt.Errorf("sn conversation messages: parse response: %w", err)
+		return domain.SearchCommentsResponse{}, fmt.Errorf("sn search comments: parse response: %w", err)
 	}
 
-	messages := make([]domain.ConversationMessage, 0, len(snResp.Comments))
+	comments := make([]domain.Comment, 0, len(snResp.Comments))
 	for _, c := range snResp.Comments {
 		createdAt, err := time.Parse(snCreatedOnLayout, c.CreatedOn)
 		if err != nil {
-			return domain.GetConversationMessagesResponse{}, fmt.Errorf("sn conversation messages: parse createdOn %q: %w", c.CreatedOn, err)
+			return domain.SearchCommentsResponse{}, fmt.Errorf("sn search comments: parse createdOn %q: %w", c.CreatedOn, err)
 		}
-		messages = append(messages, domain.ConversationMessage{
+		comments = append(comments, domain.Comment{
 			ID:                 sysidToUUID(c.ID),
-			ConversationID:     sysidToUUID(c.ReferenceID),
+			ReferenceID:        sysidToUUID(c.ReferenceID),
 			Content:            c.Content,
 			Type:               c.Type,
 			CreatedOn:          createdAt,
@@ -83,11 +90,11 @@ func (s *snConversationService) GetConversationMessages(ctx context.Context, req
 	}
 
 	total := snResp.TotalRecords
-	return domain.GetConversationMessagesResponse{
-		Comments: messages,
+	return domain.SearchCommentsResponse{
+		Comments: comments,
 		Total:    total,
 		Limit:    req.Pagination.Limit,
 		Offset:   req.Pagination.Offset,
-		HasMore:  req.Pagination.Offset+len(messages) < total,
+		HasMore:  req.Pagination.Offset+len(comments) < total,
 	}, nil
 }

@@ -1079,10 +1079,11 @@ type SearchCaseCommentsResponse struct {
 	HasMore  bool          `json:"hasMore"`
 }
 
-// ConversationMessage represents a single message within a conversation thread.
-type ConversationMessage struct {
+// Comment is a generic comment associated with any reference entity type
+// (case, conversation, change_request, etc.).
+type Comment struct {
 	ID                 string    `json:"id"`
-	ConversationID     string    `json:"conversationId"`
+	ReferenceID        string    `json:"referenceId"`
 	Content            string    `json:"content"`
 	Type               string    `json:"type"`
 	CreatedOn          time.Time `json:"createdOn"`
@@ -1092,20 +1093,20 @@ type ConversationMessage struct {
 	CreatedByFullName  string    `json:"createdByFullName"`
 }
 
-// GetConversationMessagesRequest is the input for GET /conversations/{id}/messages.
-// ConversationID is populated from the URL path parameter.
-type GetConversationMessagesRequest struct {
-	ConversationID string
-	Pagination     Pagination
+// SearchCommentsRequest is the input for POST /comments/search.
+type SearchCommentsRequest struct {
+	ReferenceID   string        `json:"referenceId"`
+	ReferenceType ReferenceType `json:"referenceType"`
+	Pagination    Pagination    `json:"pagination"`
 }
 
-// GetConversationMessagesResponse is the paginated result of a conversation messages query.
-type GetConversationMessagesResponse struct {
-	Comments []ConversationMessage `json:"comments"`
-	Total    int                   `json:"total"`
-	Limit    int                   `json:"limit"`
-	Offset   int                   `json:"offset"`
-	HasMore  bool                  `json:"hasMore"`
+// SearchCommentsResponse is the paginated result of a generic comment search.
+type SearchCommentsResponse struct {
+	Comments []Comment `json:"comments"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
 }
 
 // CaseGithubIssueReason classifies why a GitHub issue is being filed from a case.

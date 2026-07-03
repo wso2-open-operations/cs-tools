@@ -507,12 +507,12 @@ func (m *mockEntityDeploymentClient) PatchDeployedProduct(ctx context.Context, d
 // ----- mock entity conversation client -----
 
 type mockEntityConversationClient struct {
-	getConversationMessagesFn func(ctx context.Context, conversationID string, rawQuery string) ([]byte, error)
+	searchCommentsFn func(ctx context.Context, body []byte) ([]byte, error)
 }
 
-func (m *mockEntityConversationClient) GetConversationMessages(ctx context.Context, conversationID string, rawQuery string) ([]byte, error) {
-	if m.getConversationMessagesFn != nil {
-		return m.getConversationMessagesFn(ctx, conversationID, rawQuery)
+func (m *mockEntityConversationClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }
