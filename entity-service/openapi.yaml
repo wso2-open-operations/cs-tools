@@ -1103,6 +1103,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /change-requests:
+    post:
+      summary: Create a change request (ServiceNow data source only).
+      operationId: createChangeRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequestRequest'
+      responses:
+        "201":
+          description: Change request created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateChangeRequestResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -1280,12 +1317,160 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /configuration-items/search:
+    post:
+      summary: Search CMDB configuration items (ServiceNow data source only).
+      operationId: searchConfigurationItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchConfigurationItemsRequest'
+      responses:
+        "200":
+          description: Configuration items matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchConfigurationItemsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /groups/search:
+    post:
+      summary: Search groups (ServiceNow data source only).
+      operationId: searchGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchGroupsRequest'
+      responses:
+        "200":
+          description: Groups matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchGroupsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /service-offerings/search:
+    post:
+      summary: Search service offerings (ServiceNow data source only).
+      operationId: searchServiceOfferings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchServiceOfferingsRequest'
+      responses:
+        "200":
+          description: Service offerings matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchServiceOfferingsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /services/search:
+    post:
+      summary: Search CMDB IT services (ServiceNow data source only).
+      operationId: searchITServices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchITServicesRequest'
+      responses:
+        "200":
+          description: IT services matching the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchITServicesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
   /products/vulnerabilities/search:
     post:
       summary: Search product vulnerabilities (ServiceNow data source only).
       operationId: searchProductVulnerabilities
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1402,7 +1587,7 @@ paths:
       summary: Search time cards (ServiceNow data source only).
       operationId: searchTimeCards
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -3408,6 +3593,130 @@ components:
           items:
             $ref: '#/components/schemas/CatalogItemVariable'
 
+    CreateChangeRequestRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          type: string
+        category:
+          type: string
+          enum:
+            - hardware
+            - software
+            - service
+            - system_software
+            - applications_software
+            - network
+            - telecom
+            - documentation
+            - other
+            - regular_release_cloud
+            - hotfix_release_cloud
+            - devops
+            - cloud_computing
+        serviceId:
+          type: string
+          format: uuid
+        serviceOfferingId:
+          type: string
+          format: uuid
+        configurationItemId:
+          type: string
+          format: uuid
+        priority:
+          type: string
+          enum:
+            - critical
+            - high
+            - moderate
+            - low
+        impact:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+        type:
+          type: string
+          enum:
+            - standard
+            - normal
+            - emergency
+            - model
+            - site_reliability_ops
+            - azure
+        state:
+          type: string
+          enum:
+            - new
+            - assess
+            - authorize
+            - customer_approval
+            - scheduled
+            - implement
+            - review
+            - customer_review
+            - rollback
+            - closed
+            - canceled
+        groupId:
+          type: string
+          format: uuid
+        assignedEngineerId:
+          type: string
+          format: uuid
+        risk:
+          type: string
+          enum:
+            - high
+            - moderate
+            - low
+        requestedById:
+          type: string
+          format: uuid
+        description:
+          type: string
+        justification:
+          type: string
+        implementationPlan:
+          type: string
+        riskImpactAnalysis:
+          type: string
+        backoutPlan:
+          type: string
+        testPlan:
+          type: string
+        plannedStartDate:
+          type: string
+          format: date-time
+        plannedEndDate:
+          type: string
+          format: date-time
+        comment:
+          type: string
+        workNote:
+          type: string
+
+    CreateChangeRequestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        changeRequest:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            createdOn:
+              type: string
+            createdBy:
+              type: string
+
     PatchChangeRequestRequest:
       type: object
       minProperties: 1
@@ -3973,6 +4282,215 @@ components:
               type: string
             updatedBy:
               type: string
+
+    SearchConfigurationItemsFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchConfigurationItemsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchConfigurationItemsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ConfigurationItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+
+    SearchConfigurationItemsResponse:
+      type: object
+      properties:
+        configurationItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigurationItem'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchGroupsFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchGroupsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchGroupsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    GroupParentRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        active:
+          type: boolean
+        parent:
+          $ref: '#/components/schemas/GroupParentRef'
+          nullable: true
+
+    SearchGroupsResponse:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchServiceOfferingsFilters:
+      type: object
+      properties:
+        serviceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchServiceOfferingsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchServiceOfferingsFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ServiceOfferingServiceRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    ServiceOffering:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        service:
+          $ref: '#/components/schemas/ServiceOfferingServiceRef'
+          nullable: true
+
+    SearchServiceOfferingsResponse:
+      type: object
+      properties:
+        serviceOfferings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceOffering'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    SearchITServicesFilters:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Free-text search query.
+
+    SearchITServicesRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchITServicesFilters'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ITService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+        businessCriticality:
+          type: string
+          nullable: true
+          enum:
+            - most_critical
+            - somewhat_critical
+            - less_critical
+            - not_critical
+        serviceClassification:
+          type: string
+          nullable: true
+          enum:
+            - business_service
+            - technology_management_service
+            - application_service
+
+    SearchITServicesResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ITService'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
 
     ErrorResponse:
       type: object

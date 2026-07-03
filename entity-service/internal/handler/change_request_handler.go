@@ -34,6 +34,22 @@ func NewChangeRequestHandler(svc service.ChangeRequestService) *ChangeRequestHan
 	return &ChangeRequestHandler{svc: svc}
 }
 
+// CreateChangeRequest handles POST /change-requests.
+func (h *ChangeRequestHandler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateChangeRequestRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.CreateChangeRequest(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchChangeRequests handles POST /change-requests/search.
 func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchChangeRequestsRequest

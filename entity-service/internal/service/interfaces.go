@@ -207,6 +207,10 @@ type CallRequestService interface {
 
 // ChangeRequestService defines the operations available on the change_requests entity.
 type ChangeRequestService interface {
+	// CreateChangeRequest creates a new change request in ServiceNow. Subject is required.
+	// Supported by the ServiceNow data source only.
+	CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error)
+
 	// SearchChangeRequests returns a paginated list of change requests filtered by optional
 	// project IDs, state keys, impact keys, date ranges, and search query.
 	SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest) (domain.SearchChangeRequestsResponse, error)
@@ -228,6 +232,38 @@ type TimeCardService interface {
 	// UpdateTimeCard edits an editable (submitted) time card, or transitions its
 	// state (approve/reject) when req.State is set. SN enforces authorization.
 	UpdateTimeCard(ctx context.Context, req domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error)
+}
+
+// ConfigurationItemService defines the operations available on the configuration items entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ConfigurationItemService interface {
+	// SearchConfigurationItems returns a paginated list of CMDB configuration items filtered by
+	// optional search query. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchConfigurationItems(ctx context.Context, req domain.SearchConfigurationItemsRequest) (domain.SearchConfigurationItemsResponse, error)
+}
+
+// GroupService defines the operations available on the groups entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type GroupService interface {
+	// SearchGroups returns a paginated list of groups filtered by optional search query.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchGroups(ctx context.Context, req domain.SearchGroupsRequest) (domain.SearchGroupsResponse, error)
+}
+
+// ServiceOfferingService defines the operations available on the service offerings entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ServiceOfferingService interface {
+	// SearchServiceOfferings returns a paginated list of service offerings filtered by
+	// optional service IDs. An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchServiceOfferings(ctx context.Context, req domain.SearchServiceOfferingsRequest) (domain.SearchServiceOfferingsResponse, error)
+}
+
+// ITServiceService defines the operations available on the CMDB IT services entity.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type ITServiceService interface {
+	// SearchITServices returns a paginated list of CMDB services from ServiceNow.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
 }
 
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
