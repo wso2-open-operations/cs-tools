@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
+import { Box, Chip, Skeleton, Typography, useTheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import RelativeTime from "@components/RelativeTime";
@@ -207,16 +207,13 @@ export default function CasesList({
               <Box sx={{ justifySelf: "start", minWidth: 0 }}>
                 <StateChip state={c.state} clickable />
                 {c.state === "work_in_progress" && c.workState && (
-                  <Typography
-                    variant="caption"
-                    noWrap
-                    color={
-                      c.workState === "paused" ? "warning.main" : "text.secondary"
-                    }
-                    sx={{ display: "block", mt: 0.25 }}
-                  >
-                    {WORK_STATE_LABEL[c.workState]}
-                  </Typography>
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={c.workState === "paused" ? "warning" : "default"}
+                    label={WORK_STATE_LABEL[c.workState]}
+                    sx={{ display: "flex", mt: 0.25, fontWeight: 600, width: "fit-content" }}
+                  />
                 )}
               </Box>
               <Typography variant="caption" color="text.secondary" noWrap>
