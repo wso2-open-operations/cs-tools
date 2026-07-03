@@ -16,7 +16,7 @@
 
 import { useState } from "react";
 import { motion, type Variants } from "framer-motion";
-import { IconButton, Skeleton, Stack, Typography, pxToRem } from "@wso2/oxygen-ui";
+import { IconButton, Skeleton, Stack, Tooltip, Typography, pxToRem } from "@wso2/oxygen-ui";
 import { Check, Copy } from "@wso2/oxygen-ui-icons-react";
 import type { ItemCardProps } from "../support";
 
@@ -70,14 +70,16 @@ export function OverlineSlot({
             <Typography variant="body1" fontWeight="medium" noWrap>
               {ids.join(" | ")}
             </Typography>
-            <IconButton
-              size="small"
-              color={copied ? "success" : "default"}
-              onClick={() => handleCopy(ids.join(" | "))}
-              aria-label="Copy IDs"
-            >
-              {copied ? <Check size={pxToRem(14)} /> : <Copy size={pxToRem(14)} />}
-            </IconButton>
+            <Tooltip title={copied ? "Copied!" : "Copy"}>
+              <IconButton
+                size="small"
+                color={copied ? "success" : "default"}
+                onClick={() => handleCopy(ids.join(" | "))}
+                aria-label="Copy IDs"
+              >
+                {copied ? <Check size={pxToRem(16)} /> : <Copy size={pxToRem(16)} />}
+              </IconButton>
+            </Tooltip>
           </Stack>
         ) : (
           <Typography variant="body1" fontWeight="medium" noWrap>
