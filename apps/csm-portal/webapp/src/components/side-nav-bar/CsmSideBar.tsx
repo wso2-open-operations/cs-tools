@@ -25,7 +25,8 @@ import {
 
 /** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
  *  (which hides the label) still says which feature it is. */
-const wipTooltip = (label: string): string => `${label} (work in progress)`;
+const wipTooltip = (label: string): string =>
+  `${label} — this section is still under construction`;
 
 const COMPANY_NAME = "WSO2 LLC";
 const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
