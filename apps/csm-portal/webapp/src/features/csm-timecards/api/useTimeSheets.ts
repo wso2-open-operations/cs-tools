@@ -164,10 +164,26 @@ export async function searchTimeCards(
       filters: baseFilters,
       pagination: { limit: BE_MAX_PAGE_LIMIT, offset },
     };
-    const res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
-      "/time-cards/search",
-      payload,
-    );
+    let res: BeSearchTimeCardsResponse;
+    try {
+      res = await api.post<BeSearchTimeCardsPayload, BeSearchTimeCardsResponse>(
+        "/time-cards/search",
+        payload,
+      );
+    } catch (err) {
+      // The first page failing is a real error — surface it as before (empty
+      // scope, auth issue, etc). A *later* page failing is different, and
+      // confirmed live: the backend parses a whole page's worth of records
+      // in one shot, so a single malformed record (e.g. a non-numeric
+      // totalTime) fails the *entire* page, discarding every valid record
+      // alongside it. Reported upstream (correlation IDs on file) — until
+      // it's fixed there, degrade to what was already fetched rather than
+      // losing an otherwise-successful search to one bad record several
+      // pages in.
+      if (page === 0) throw err;
+      truncated = true;
+      break;
+    }
     const pageCards = res.timeCards ?? [];
     all.push(...pageCards);
     if (pageCards.length < BE_MAX_PAGE_LIMIT) break;
