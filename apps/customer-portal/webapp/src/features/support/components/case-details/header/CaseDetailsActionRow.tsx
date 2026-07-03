@@ -115,10 +115,11 @@ export default function CaseDetailsActionRow({
   } | null>(null);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
 
-  const resolvedEscalationLevelId = String(escalationLevelId ?? "0");
-  const escalationLevelInfo = ESCALATION_NEXT_LEVEL[resolvedEscalationLevelId];
-  const needsLead = ESCALATION_LEAD_REQUIRED_FROM_LEVEL.has(resolvedEscalationLevelId);
+  const resolvedEscalationLevelId = escalationLevelId != null ? String(escalationLevelId) : null;
+  const escalationLevelInfo = resolvedEscalationLevelId != null ? ESCALATION_NEXT_LEVEL[resolvedEscalationLevelId ?? "0"] : null;
+  const needsLead = resolvedEscalationLevelId != null && ESCALATION_LEAD_REQUIRED_FROM_LEVEL.has(resolvedEscalationLevelId);
   const showEscalateButton =
+    resolvedEscalationLevelId != null &&
     statusLabel !== "Closed" &&
     resolvedEscalationLevelId !== ESCALATION_MAX_LEVEL_ID &&
     !!escalationLevelInfo &&
