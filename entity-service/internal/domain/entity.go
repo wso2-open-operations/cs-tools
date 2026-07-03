@@ -1085,7 +1085,7 @@ type Comment struct {
 	ID          string         `json:"id"`
 	ReferenceID string         `json:"referenceId"`
 	Content     string         `json:"content"`
-	Type        string         `json:"type"`
+	Type        CommentType    `json:"type"`
 	CreatedOn   time.Time      `json:"createdOn"`
 	CreatedBy   CommentUserRef `json:"createdBy"`
 }
