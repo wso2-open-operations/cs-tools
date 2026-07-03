@@ -123,7 +123,7 @@ export default function ChatDetailPage() {
 
   return (
     <>
-      <Stack gap={2} mb={10}>
+      <Stack gap={2} mb={isReadOnly ? 2 : 10}>
         <Typography ref={ref} variant="h5" fontWeight="medium">
           {data?.description}
         </Typography>
@@ -171,15 +171,17 @@ export default function ChatDetailPage() {
       </Stack>
       <div ref={bottomRef} />
 
-      <StickyCommentBar
-        value={comment}
-        placeholder={isReadOnly ? "This conversation is no longer active" : "Type your message"}
-        submitOnEnter={false}
-        loading={mutation.isPending}
-        disabled={!projectId || isReadOnly}
-        onChange={setComment}
-        onSend={handleSend}
-      />
+      {!isReadOnly && (
+        <StickyCommentBar
+          value={comment}
+          placeholder="Type your message"
+          submitOnEnter={false}
+          loading={mutation.isPending}
+          disabled={!projectId}
+          onChange={setComment}
+          onSend={handleSend}
+        />
+      )}
     </>
   );
 }
