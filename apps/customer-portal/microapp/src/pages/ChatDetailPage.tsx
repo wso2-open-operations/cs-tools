@@ -17,7 +17,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Grid, Skeleton, Stack, Typography } from "@wso2/oxygen-ui";
 import { StatusChip } from "@components/features/support";
-import { InfoField, OverlineSlot } from "@components/features/detail";
+import { InfoField, OverlineSlot, StickyCommentBar } from "@components/features/detail";
 import {
   ConversationFeedback,
   MessageBubble,
@@ -25,20 +25,40 @@ import {
   type ChatMessage,
 } from "@components/features/chat";
 import { useLayout } from "@context/layout";
+import { useProject } from "@context/project";
+import { useNotify } from "@context/snackbar";
 import { SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { chats } from "@src/services/chats";
 import { useDateTime } from "../utils/useDateTime";
 
 export default function ChatDetailPage() {
   const layout = useLayout();
+  const notify = useNotify();
+  const queryClient = useQueryClient();
+  const { projectId } = useProject();
   const [messages, setMessages] = useState<(ChatMessage & { id: string })[]>([]);
+  const [comment, setComment] = useState("");
 
   const { fromNow, format } = useDateTime();
   const { id } = useParams();
   const { data } = useQuery(chats.get(id!));
   const { data: comments, isLoading: isCommentsLoading } = useQuery(chats.comments(id!));
+
+  const mutation = useMutation({
+    ...chats.send(projectId!, id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: chats.comments(id!).queryKey });
+      setComment("");
+    },
+    onError: () => notify.error("Failed to send message. Please try again."),
+  });
+
+  const handleSend = () => {
+    if (!comment.trim()) return;
+    mutation.mutate({ message: comment, envProducts: {} });
+  };
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -144,6 +164,16 @@ export default function ChatDetailPage() {
         <ConversationFeedback />
       </Stack>
       <div ref={bottomRef} />
+
+      <StickyCommentBar
+        value={comment}
+        placeholder="Type your message"
+        submitOnEnter={false}
+        loading={mutation.isPending}
+        disabled={!projectId}
+        onChange={setComment}
+        onSend={handleSend}
+      />
     </>
   );
 }
