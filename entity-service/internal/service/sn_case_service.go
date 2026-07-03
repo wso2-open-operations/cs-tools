@@ -1259,7 +1259,7 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		description := c.Description
 		severityLabel := snSeverityLabelStr(c.Severity)
 		issueTypeLabel := snIssueTypeLabelStr(c.IssueType)
-		workStateLabel := snLabelStr(c.WorkState)
+		workStateLabel := snWorkStateLabelStr(c.WorkState)
 		engagementTypeLabel := snLabelStr(c.EngagementType)
 
 		stateLabel := ""
@@ -1358,6 +1358,21 @@ func snLabelStr(l *snCaseLabel) *string {
 		return nil
 	}
 	return &l.Label
+}
+
+// snWorkStateLabelStr normalizes an SN work-state label to the lowercased
+// domain enum value ("ongoing"/"paused") as a string, or nil when absent or
+// unrecognised. The search view carries workState as a plain string, but it
+// must match the enum the detail endpoint returns (GET /cases/{id} maps via
+// snWorkStateLabelToEnum) so both paths agree on casing. Returning the raw SN
+// label here (e.g. "Ongoing") breaks clients that gate on the lowercased value.
+func snWorkStateLabelStr(ws *snCaseLabel) *string {
+	e := snWorkStateLabelToEnum(ws)
+	if e == nil {
+		return nil
+	}
+	s := string(*e)
+	return &s
 }
 
 // snCaseStateMap maps SN state labels (lowercased) to domain CaseState enums.
