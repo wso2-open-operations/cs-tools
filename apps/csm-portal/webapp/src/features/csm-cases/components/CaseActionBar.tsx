@@ -44,7 +44,6 @@ import {
   ShieldAlert,
   TriangleAlert,
   User,
-  Users,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type {
@@ -184,7 +183,7 @@ interface SecondaryItem {
 /**
  * The "More" overflow lists state-independent actions on a case. Items here
  * map to documented use cases — see `UseCases.md`:
- *   - Reassign / group               → ISSU-002 (self-assign generalised)
+ *   - Reassign engineer              → ISSU-002 (self-assign generalised)
  *   - Escalate / Severity change     → ISSU-006, ISSU-007
  *   - Hold auto-closure              → ISSU-027
  *   - Create incident / link incident → ISSU-021
@@ -221,14 +220,13 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
   // their backend flows land, so the menu advertises the roadmap without
   // exposing dead actions that would no-op or toast a mock message.
   items.push(
-    { key: "reassign_engineer", label: "Assign / reassign engineer…", icon: <User size={16} /> },
-    { key: "reassign_group", label: "Reassign to group…", icon: <Users size={16} />, divider: true, disabled: true },
+    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
+    { key: "reassign_engineer", label: "Assign / reassign engineer…", icon: <User size={16} />, divider: true },
     { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
     { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
     { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
     { key: "create_incident", label: "Create incident from case…", icon: <AlertTriangle size={16} />, disabled: true },
-    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, disabled: true },
-    { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, disabled: true },
+    { key: "link_incident", label: "Link to incident…", icon: <LinkIcon size={16} />, divider: true, disabled: true },
     { key: "create_task", label: "Create task…", icon: <ListChecks size={16} />, divider: true, disabled: true },
     { key: "request_call", label: "Request a call…", icon: <Phone size={16} />, disabled: true },
     { key: "log_time", label: "Log time…", icon: <Clock size={16} />, divider: true },

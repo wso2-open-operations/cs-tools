@@ -69,6 +69,8 @@ import {
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar from "@features/csm-cases/components/CaseActionBar";
 import AssignEngineerDialog from "@features/csm-cases/components/AssignEngineerDialog";
+import { CreateGithubIssueDialog } from "@features/csm-cases/components/CreateGithubIssueDialog";
+import { usePostCaseGithubIssue } from "@features/csm-cases/api/useCsmCaseGithubIssue";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CaseMetaBand from "@features/csm-cases/components/CaseMetaBand";
 import {
@@ -194,7 +196,6 @@ const SECONDARY_TOAST: Record<string, string> = {
   link_case: "Link related case picker (mock).",
   link_incident: "Link to incident picker (mock).",
   manage_watchers: "Add/remove watcher dialog (mock).",
-  raise_git_issue: "Raise internal Git issue (mock).",
   create_task: "Create task dialog (mock).",
   request_call: "Request a call dialog (mock).",
   log_time: "Log time dialog (mock).",
@@ -288,6 +289,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [logTimeOpen, setLogTimeOpen] = useState(false);
+  const [githubIssueOpen, setGithubIssueOpen] = useState(false);
+  // Inline error shown inside the Git-issue dialog (e.g. the SN routing 422 /
+  // state 409). Cleared when the dialog opens or a submit is retried.
+  const [githubIssueError, setGithubIssueError] = useState<string | null>(null);
+  const postGithubIssue = usePostCaseGithubIssue();
   const postTimeCard = usePostTimeCard();
   // Attachment pending delete confirmation (drives the confirm dialog).
   const [pendingDelete, setPendingDelete] = useState<CaseAttachment | null>(
@@ -588,6 +594,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
           return;
         }
         setLogTimeOpen(true);
+        return;
+      }
+
+      // ISSU-020: file an internal GitHub issue from the case. The SN side
+      // gates on the case state (only certain states may file) and resolves
+      // the target repo from the product; we don't pre-gate here — open the
+      // dialog and surface any backend rejection inline.
+      if (action.secondary === "raise_git_issue") {
+        setGithubIssueError(null);
+        setGithubIssueOpen(true);
         return;
       }
 
@@ -1308,6 +1324,54 @@ export default function CsmCaseDetailPage(): JSX.Element {
               },
             })
           }
+        />
+      )}
+
+      {githubIssueOpen && (
+        <CreateGithubIssueDialog
+          open={githubIssueOpen}
+          submitting={postGithubIssue.isPending}
+          error={githubIssueError}
+          defaultUpdateLevel={c.productContext.updateLevel}
+          onClose={() => {
+            setGithubIssueOpen(false);
+            setGithubIssueError(null);
+          }}
+          onSubmit={(payload) => {
+            setGithubIssueError(null);
+            postGithubIssue.mutate(
+              { caseId: c.id, ...payload },
+              {
+                onSuccess: (res) => {
+                  setGithubIssueOpen(false);
+                  // The SN side writes the issue URL into work notes; show that
+                  // entry by switching to the activities feed (just refetched).
+                  setActiveTab("activities");
+                  setFeedback({
+                    message: res.issue?.url
+                      ? `Internal Git issue created: ${res.issue.url}`
+                      : "Internal Git issue created.",
+                    severity: "success",
+                    sticky: true,
+                  });
+                },
+                onError: (err) => {
+                  // Surface the backend's own message on 4xx (invalid state,
+                  // product not routable) inline in the dialog; fall back to a
+                  // generic banner for 5xx.
+                  if (
+                    err instanceof BackendApiError &&
+                    err.status < 500 &&
+                    err.message
+                  ) {
+                    setGithubIssueError(err.message);
+                  } else {
+                    showError("Could not create the Git issue.", err);
+                  }
+                },
+              },
+            );
+          }}
         />
       )}
 

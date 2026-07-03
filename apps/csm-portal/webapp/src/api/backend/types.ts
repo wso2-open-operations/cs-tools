@@ -992,6 +992,60 @@ export interface BeCreateCallRequestResponse {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GitHub issue creation from a case — `POST /cases/{id}/github-issues`
+// (ServiceNow data source only; the BFF forwards the body opaquely to the
+// entity service, which validates and routes it to the SN scoped app).
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the issue is being filed. Selects the label set applied on the GitHub
+ * issue and collapses the three legacy "open git issue" flows into one:
+ * `default` (Open Git Issue), `migration` (Open Migration Git Issue),
+ * `rd_ticket` (Open R&D ticket).
+ */
+export type BeCaseGithubIssueReason = "default" | "migration" | "rd_ticket";
+
+/** Explicit owner/repo, overriding the product-based routing lookup on the SN side. */
+export interface BeCaseGithubIssueRepoOverride {
+  owner: string;
+  repo: string;
+}
+
+/** `POST /cases/{id}/github-issues` request body. */
+export interface BeCreateCaseGithubIssuePayload {
+  reason: BeCaseGithubIssueReason;
+  title: string;
+  description: string;
+  /** Explicit target repo; when omitted, the SN side routes by the case's product unit. */
+  repoOverride?: BeCaseGithubIssueRepoOverride;
+  /** Product update level, appended to the issue body. */
+  updateLevel?: string;
+  /** Link to a related public-facing GitHub issue, appended to the issue body. */
+  publicIssueUrl?: string;
+  /** When true: adds a `regression` label and tags the case as a regression. */
+  regression?: boolean;
+  /** When true: appends "Hotfix Required : Yes" to the issue body. */
+  hotFixRequired?: boolean;
+  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
+  issueTypeLabel?: string;
+  /** Priority label, applied only when `issueTypeLabel` is "Type/Incident". */
+  priorityLevel?: string;
+}
+
+/** `POST /cases/{id}/github-issues` response. */
+export interface BeCreateCaseGithubIssueResponse {
+  message?: string;
+  issue?: {
+    /** URL of the created GitHub issue. */
+    url: string;
+    /** GitHub issue number. */
+    number: number;
+    /** Repo the issue was created in. */
+    repo: string;
+  };
+}
+
 /** `POST /cases/{id}/call-requests/search` request body. */
 export interface BeSearchCallRequestsPayload {
   filters?: {
