@@ -1263,7 +1263,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {activeTab === "call-requests" && caseId && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
-          <CallRequestsWidget caseId={caseId} />
+          <CallRequestsWidget caseId={caseId} severity={c.severity} />
         </Box>
       )}
 

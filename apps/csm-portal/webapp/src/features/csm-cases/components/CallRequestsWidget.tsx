@@ -30,6 +30,7 @@ import {
 import { Phone, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
+import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import {
   useGetCsmCaseCallRequests,
   usePostCsmCaseCallRequest,
@@ -49,13 +50,18 @@ import { CallRequestRow } from "./CallRequestRow";
 
 interface CallRequestsWidgetProps {
   caseId: string;
+  /** Case severity (S0-S4) — passed to the create dialog to enforce the lead-time rule. */
+  severity?: Severity;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function CallRequestsWidget({ caseId }: CallRequestsWidgetProps): JSX.Element {
+export function CallRequestsWidget({
+  caseId,
+  severity,
+}: CallRequestsWidgetProps): JSX.Element {
   const { data, isLoading, isError, refetch } = useGetCsmCaseCallRequests(caseId);
   const postCallRequest = usePostCsmCaseCallRequest();
   const patchCallRequest = usePatchCsmCaseCallRequest();
@@ -232,6 +238,7 @@ export function CallRequestsWidget({ caseId }: CallRequestsWidgetProps): JSX.Ele
         open={createOpen}
         submitting={postCallRequest.isPending}
         error={createError}
+        severity={severity}
         onClose={() => {
           setCreateOpen(false);
           setCreateError(null);
