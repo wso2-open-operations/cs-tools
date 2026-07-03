@@ -268,9 +268,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	if commentHandler != nil {
 		mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
-		mux.HandleFunc("POST /cases/{id}/comments/search", commentHandler.SearchCaseComments)
-	} else {
-		mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	}
 
 	return middleware.CorrelationID(

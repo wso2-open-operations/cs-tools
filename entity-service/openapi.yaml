@@ -626,43 +626,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/comments/search:
-    post:
-      summary: Search comments on a support case.
-      operationId: searchCaseComments
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Case UUID.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchCaseCommentsRequest'
-      responses:
-        "200":
-          description: Comments for the case, ordered by created_at DESC.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchCaseCommentsResponse'
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /cases/{id}/github-issues:
     post:
       summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
