@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import { severityFromPriority, uiStateFromBe } from "@api/backend/mappers";
@@ -154,6 +158,9 @@ export function useGetMyAssignedOpenCases(
         hasMore: res.hasMore ?? false,
       };
     },
+    // Keep the previous page's rows/total while the next page loads, so the
+    // pager and count stay stable instead of blinking out on page change.
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }
