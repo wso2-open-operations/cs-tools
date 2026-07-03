@@ -36,11 +36,11 @@ type snITServicesResponse struct {
 }
 
 type snITService struct {
-	ID                    string             `json:"id"`
-	Name                  *string            `json:"name"`
-	Class                 *string            `json:"class"`
-	BusinessCriticality   *snITServiceLabel  `json:"businessCriticality"`
-	ServiceClassification *snITServiceLabel  `json:"serviceClassification"`
+	ID                    string            `json:"id"`
+	Name                  *string           `json:"name"`
+	Class                 *string           `json:"class"`
+	BusinessCriticality   *snITServiceLabel `json:"businessCriticality"`
+	ServiceClassification *snITServiceLabel `json:"serviceClassification"`
 }
 
 type snITServiceLabel struct {
@@ -134,7 +134,7 @@ var snBusinessCriticalityIDToEnum = map[string]domain.BusinessCriticality{
 
 // snServiceClassificationLabelToEnum maps ServiceNow service classification labels to domain enums.
 var snServiceClassificationLabelToEnum = map[string]domain.ServiceClassification{
-	"Business Service":             domain.ServiceClassificationBusinessService,
+	"Business Service":              domain.ServiceClassificationBusinessService,
 	"Technology Management Service": domain.ServiceClassificationTechnologyManagementService,
-	"Application Service":          domain.ServiceClassificationApplicationService,
+	"Application Service":           domain.ServiceClassificationApplicationService,
 }

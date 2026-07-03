@@ -36,9 +36,9 @@ type snServiceOfferingsResponse struct {
 }
 
 type snServiceOffering struct {
-	ID      string              `json:"id"`
-	Name    string              `json:"name"`
-	Service *snOfferingService  `json:"service"`
+	ID      string             `json:"id"`
+	Name    string             `json:"name"`
+	Service *snOfferingService `json:"service"`
 }
 
 type snOfferingService struct {

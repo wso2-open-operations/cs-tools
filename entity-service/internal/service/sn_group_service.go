@@ -36,9 +36,9 @@ type snGroupsResponse struct {
 }
 
 type snGroup struct {
-	ID     string        `json:"id"`
-	Name   string        `json:"name"`
-	Active bool          `json:"active"`
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Active bool           `json:"active"`
 	Parent *snGroupParent `json:"parent"`
 }
 
