@@ -76,17 +76,26 @@ export function priorityFromSeverity(severity: Severity): BeCaseSeverity {
 }
 
 /**
- * The UI and backend state vocabularies are identical (`CaseState` ===
- * `BeCaseState`), so these are identity maps. They survive as the single API
- * boundary and, deliberately, pass an *unknown* backend state straight through
- * rather than collapsing it to a known one: a state the frontend has not been
- * taught about must still reach the UI so it can render with a humanized label
- * (see `stateLabel`/`stateColor`). That is what lets the backend introduce a new
- * state with no frontend change. Only a genuinely absent value defaults to
- * `open`.
+ * Map a backend case state onto the UI `CaseState` vocabulary.
+ *
+ * The Postgres source already sends the domain enum (`work_in_progress`), but
+ * the ServiceNow case-search view sends the raw SN label (`"Work In Progress"`)
+ * because the entity-service normalizes every sibling field (severity, work
+ * state, issue type) EXCEPT state. So we normalize label → enum here at the
+ * boundary — lowercase and collapse whitespace to underscores — so both sources
+ * render with the curated label/colour and downstream `state === "…"` checks
+ * (e.g. the in-progress work-state indicator) work regardless of source.
+ * (Ideal fix is BE-side: normalize `state` in the SN search view like the other
+ * fields — tracked as a follow-up.)
+ *
+ * A state the frontend has not been taught about still passes through (in
+ * normalized form) so `stateLabel`/`stateColor` can humanize it — that is what
+ * lets the backend introduce a new state with no frontend change. A genuinely
+ * absent value defaults to `open`.
  */
 export function uiStateFromBe(state: string | undefined): CaseState {
-  return (state ?? "open") as CaseState;
+  if (!state) return "open";
+  return state.trim().toLowerCase().replace(/\s+/g, "_") as CaseState;
 }
 
 export function beStateFromUi(state: CaseState): BeCaseState {

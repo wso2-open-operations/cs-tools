@@ -20,6 +20,7 @@ import { Link as RouterLink } from "react-router";
 import RelativeTime from "@components/RelativeTime";
 import SeverityChip from "@components/SeverityChip";
 import StateChip from "@components/StateChip";
+import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
 interface CasesListProps {
@@ -200,8 +201,23 @@ export default function CasesList({
               <Box sx={{ justifySelf: "start" }}>
                 <SeverityChip severity={c.severity} clickable />
               </Box>
-              <Box sx={{ justifySelf: "start" }}>
+              {/* State, plus the work sub-state (Ongoing/Paused) when the case
+                  is in progress. Paused is coloured to stand out as a stalled
+                  case; ongoing stays quiet. */}
+              <Box sx={{ justifySelf: "start", minWidth: 0 }}>
                 <StateChip state={c.state} clickable />
+                {c.state === "work_in_progress" && c.workState && (
+                  <Typography
+                    variant="caption"
+                    noWrap
+                    color={
+                      c.workState === "paused" ? "warning.main" : "text.secondary"
+                    }
+                    sx={{ display: "block", mt: 0.25 }}
+                  >
+                    {WORK_STATE_LABEL[c.workState]}
+                  </Typography>
+                )}
               </Box>
               <Typography variant="caption" color="text.secondary" noWrap>
                 <RelativeTime iso={c.updatedAt} />

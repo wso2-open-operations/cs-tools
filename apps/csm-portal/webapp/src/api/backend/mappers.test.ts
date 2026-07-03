@@ -83,6 +83,15 @@ describe("uiStateFromBe / beStateFromUi", () => {
     // known state — that is what lets the backend add a state with no FE change.
     expect(uiStateFromBe("pending_review")).toBe("pending_review");
   });
+
+  it("normalizes the raw ServiceNow label form to the enum", () => {
+    // The SN case-search view sends the human label instead of the enum; the
+    // mapper lowercases + collapses whitespace so SN cases render with the
+    // curated label/colour and `state === "work_in_progress"` checks match.
+    expect(uiStateFromBe("Work In Progress")).toBe("work_in_progress");
+    expect(uiStateFromBe("Waiting On WSO2")).toBe("waiting_on_wso2");
+    expect(uiStateFromBe("Solution Proposed")).toBe("solution_proposed");
+  });
 });
 
 describe("commentTypeFromInternal", () => {

@@ -19,6 +19,7 @@ import { useState, type JSX } from "react";
 import AbtDashboardHeader from "@features/csm-dashboard/components/AbtDashboardHeader";
 import CaseCompositionCharts from "@features/csm-dashboard/components/CaseCompositionCharts";
 import CaseCountsMatrix from "@features/csm-dashboard/components/CaseCountsMatrix";
+import MyAssignedCases from "@features/csm-dashboard/components/MyAssignedCases";
 import { useGetCsmDashboard } from "@features/csm-dashboard/api/useGetCsmDashboard";
 import {
   DASHBOARD_OPTIONS,
@@ -60,6 +61,7 @@ export default function CsmDashboardPage(): JSX.Element {
       />
       {dashboardKey === "engineer" ? (
         <>
+          <MyAssignedCases />
           <CaseCountsMatrix />
           <CaseCompositionCharts />
         </>
