@@ -47,7 +47,15 @@ export default function ChatDetailPage() {
   const { data: comments, isLoading: isCommentsLoading } = useQuery(chats.comments(id!));
 
   const mutation = useMutation({
-    ...chats.send(projectId!, id!),
+    mutationFn: (body: { message: string; envProducts: Record<string, string[]> }) => {
+      if (!projectId) {
+        return Promise.reject(new Error("Project ID is not available"));
+      }
+      if (!id) {
+        return Promise.reject(new Error("Conversation ID is not available"));
+      }
+      return chats.send(projectId, id).mutationFn!(body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: chats.comments(id!).queryKey });
       setComment("");
@@ -56,8 +64,9 @@ export default function ChatDetailPage() {
   });
 
   const handleSend = () => {
-    if (!comment.trim()) return;
-    mutation.mutate({ message: comment, envProducts: {} });
+    const trimmed = comment.trim();
+    if (!trimmed || !projectId || !id) return;
+    mutation.mutate({ message: trimmed, envProducts: {} });
   };
 
   const bottomRef = useRef<HTMLDivElement>(null);
