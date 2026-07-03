@@ -43,6 +43,7 @@ import {
 import { type JSX, useState, useMemo } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -91,6 +92,11 @@ export default function CaseDetailsDetailsPanel({
   const [savedWatchList, setSavedWatchList] = useState<string[] | null>(null);
 
   const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
+  const { data: userDetails } = useGetUserDetails();
+  const isCurrentUserLead =
+    contactsData?.find(
+      (c) => c.email?.toLowerCase() === userDetails?.email?.toLowerCase(),
+    )?.isLead ?? false;
   const contactOptions = useMemo(
     () =>
       (contactsData ?? [])
@@ -485,6 +491,7 @@ export default function CaseDetailsDetailsPanel({
         <CaseEscalationLevelsCard
           caseId={caseId}
           currentLevelId={data?.escalationLevel?.id}
+          isLead={isCurrentUserLead}
         />
       )}
 
