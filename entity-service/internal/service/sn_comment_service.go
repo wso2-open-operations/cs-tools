@@ -87,16 +87,22 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 				"commentID", c.ID, "createdOn", c.CreatedOn, "error", err)
 			continue
 		}
+		commentType, ok := snCommentTypeToCommentType[c.Type]
+		if !ok {
+			commentType = domain.CommentTypeComment
+		}
 		comments = append(comments, domain.Comment{
-			ID:                 sysidToUUID(c.ID),
-			ReferenceID:        sysidToUUID(c.ReferenceID),
-			Content:            c.Content,
-			Type:               c.Type,
-			CreatedOn:          createdAt,
-			CreatedBy:          c.CreatedBy,
-			CreatedByFirstName: c.CreatedByFirstName,
-			CreatedByLastName:  c.CreatedByLastName,
-			CreatedByFullName:  c.CreatedByFullName,
+			ID:          sysidToUUID(c.ID),
+			ReferenceID: sysidToUUID(c.ReferenceID),
+			Content:     c.Content,
+			Type:        commentType,
+			CreatedOn:   createdAt,
+			CreatedBy: domain.CommentUserRef{
+				ID:        c.CreatedBy,
+				FirstName: c.CreatedByFirstName,
+				LastName:  c.CreatedByLastName,
+				FullName:  c.CreatedByFullName,
+			},
 		})
 	}
 

@@ -677,6 +677,13 @@ var snCommentTypeMap = map[domain.CommentType]string{
 	domain.CommentTypeWorkNote: "work_notes",
 }
 
+// snCommentTypeToCommentType maps the SN API type string back to the domain enum.
+var snCommentTypeToCommentType = map[string]domain.CommentType{
+	"comments":   domain.CommentTypeComment,
+	"work_notes": domain.CommentTypeWorkNote,
+	"activity":   domain.CommentTypeActivity,
+}
+
 func (s *snCaseService) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) (domain.SearchCaseCommentsResponse, error) {
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchCaseCommentsResponse{}, err

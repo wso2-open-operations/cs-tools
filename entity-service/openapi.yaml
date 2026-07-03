@@ -3167,6 +3167,19 @@ components:
         content:
           type: string
 
+    CommentUserRef:
+      type: object
+      properties:
+        id:
+          type: string
+          description: User identifier (email).
+        firstName:
+          type: string
+        lastName:
+          type: string
+        fullName:
+          type: string
+
     CaseComment:
       type: object
       properties:
@@ -3180,7 +3193,7 @@ components:
         content:
           type: string
         createdBy:
-          type: string
+          $ref: '#/components/schemas/CommentUserRef'
         createdOn:
           type: string
           format: date-time
@@ -4513,17 +4526,7 @@ components:
           format: date-time
           description: Timestamp when the comment was created.
         createdBy:
-          type: string
-          description: User identifier of the comment author.
-        createdByFirstName:
-          type: string
-          description: First name of the comment author.
-        createdByLastName:
-          type: string
-          description: Last name of the comment author.
-        createdByFullName:
-          type: string
-          description: Full name of the comment author.
+          $ref: '#/components/schemas/CommentUserRef'
 
     SearchCommentsRequest:
       type: object

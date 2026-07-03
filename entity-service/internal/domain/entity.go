@@ -1082,15 +1082,12 @@ type SearchCaseCommentsResponse struct {
 // Comment is a generic comment associated with any reference entity type
 // (case, conversation, change_request, etc.).
 type Comment struct {
-	ID                 string    `json:"id"`
-	ReferenceID        string    `json:"referenceId"`
-	Content            string    `json:"content"`
-	Type               string    `json:"type"`
-	CreatedOn          time.Time `json:"createdOn"`
-	CreatedBy          string    `json:"createdBy"`
-	CreatedByFirstName string    `json:"createdByFirstName"`
-	CreatedByLastName  string    `json:"createdByLastName"`
-	CreatedByFullName  string    `json:"createdByFullName"`
+	ID          string         `json:"id"`
+	ReferenceID string         `json:"referenceId"`
+	Content     string         `json:"content"`
+	Type        CommentType    `json:"type"`
+	CreatedOn   time.Time      `json:"createdOn"`
+	CreatedBy   CommentUserRef `json:"createdBy"`
 }
 
 // SearchCommentsRequest is the input for POST /comments/search.

@@ -5063,17 +5063,18 @@ components:
           format: date-time
           description: Timestamp when the message was created.
         createdBy:
-          type: string
-          description: User identifier of the message author.
-        createdByFirstName:
-          type: string
-          description: First name of the message author.
-        createdByLastName:
-          type: string
-          description: Last name of the message author.
-        createdByFullName:
-          type: string
-          description: Full name of the message author.
+          type: object
+          description: Author of the message.
+          properties:
+            id:
+              type: string
+              description: User identifier (email).
+            firstName:
+              type: string
+            lastName:
+              type: string
+            fullName:
+              type: string
 
     ConversationMessagesResponse:
       type: object
