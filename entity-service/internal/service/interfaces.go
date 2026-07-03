@@ -103,6 +103,13 @@ type ProductVersionService interface {
 	SearchProductVersions(ctx context.Context, req domain.SearchProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
 }
 
+// SNProductVersionService is the ServiceNow-backed variant of ProductVersionService.
+// It returns SNProductVersion items with string date fields to avoid time.Parse errors
+// on empty SN date strings.
+type SNProductVersionService interface {
+	SearchProductVersions(ctx context.Context, req domain.SearchProductVersionsRequest) (domain.SearchSNProductVersionsResponse, error)
+}
+
 // DeploymentService defines the operations available on the deployment entity.
 type DeploymentService interface {
 	// SearchDeployments returns a paginated list of deployments filtered by optional

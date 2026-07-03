@@ -50,3 +50,29 @@ func (h *ProductVersionHandler) SearchProductVersions(w http.ResponseWriter, r *
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// SNProductVersionHandler handles POST /products/{id}/versions/search via ServiceNow.
+type SNProductVersionHandler struct {
+	svc service.SNProductVersionService
+}
+
+// NewSNProductVersionHandler constructs an SNProductVersionHandler with the given service.
+func NewSNProductVersionHandler(svc service.SNProductVersionService) *SNProductVersionHandler {
+	return &SNProductVersionHandler{svc: svc}
+}
+
+// SearchProductVersions handles POST /products/{id}/versions/search for the SN data source.
+func (h *SNProductVersionHandler) SearchProductVersions(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchProductVersionsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ProductID = r.PathValue("id")
+	resp, err := h.svc.SearchProductVersions(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

@@ -401,6 +401,28 @@ const (
 	SupportStatusDiscontinued SupportStatus = "discontinued"
 )
 
+// SNProductVersion is the ServiceNow-backed product version type.
+// Date fields are strings (e.g. "2024-01-15") rather than time.Time to avoid
+// parse errors when SN returns empty strings for optional date fields.
+type SNProductVersion struct {
+	ID                             string  `json:"id"`
+	ProductID                      string  `json:"productId"`
+	Version                        string  `json:"version"`
+	CurrentSupportStatus           string  `json:"currentSupportStatus"`
+	ReleaseDate                    string  `json:"releaseDate"`
+	SupportEOLDate                 *string `json:"supportEolDate"`
+	EarliestPossibleSupportEOLDate *string `json:"earliestPossibleSupportEolDate"`
+}
+
+// SearchSNProductVersionsResponse is the paginated SN product version search result.
+type SearchSNProductVersionsResponse struct {
+	ProductVersions []SNProductVersion `json:"productVersions"`
+	Total           int                `json:"total"`
+	Limit           int                `json:"limit"`
+	Offset          int                `json:"offset"`
+	HasMore         bool               `json:"hasMore"`
+}
+
 // ProductVersion represents a versioned release of a software product.
 // SupportEOLDate and EarliestPossibleSupportEOLDate are optional.
 type ProductVersion struct {

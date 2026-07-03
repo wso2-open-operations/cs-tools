@@ -75,7 +75,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	}
 
 	var productVersionHandler *handler.ProductVersionHandler
-	if db != nil {
+	var snProductVersionHandler *handler.SNProductVersionHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		snProductVersionHandler = handler.NewSNProductVersionHandler(service.NewServiceNowProductVersionService(serviceNowIntegrationServiceClient))
+	} else if db != nil {
 		productVersionRepo := repository.NewProductVersionRepository(db)
 		productVersionSvc := service.NewProductVersionService(productVersionRepo)
 		productVersionHandler = handler.NewProductVersionHandler(productVersionSvc)
@@ -188,7 +191,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	} else {
 		mux.HandleFunc("POST /products/search", productHandler.SearchProducts)
 	}
-	if productVersionHandler != nil {
+	if snProductVersionHandler != nil {
+		mux.HandleFunc("POST /products/{id}/versions/search", snProductVersionHandler.SearchProductVersions)
+	} else if productVersionHandler != nil {
 		mux.HandleFunc("POST /products/{id}/versions/search", productVersionHandler.SearchProductVersions)
 	}
 	mux.HandleFunc("POST /deployments", deploymentHandler.CreateDeployment)
