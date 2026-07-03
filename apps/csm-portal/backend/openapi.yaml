@@ -1547,6 +1547,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/github-issues:
+    post:
+      summary: Create a GitHub issue from a case (ServiceNow data source only).
+      operationId: createCaseGithubIssue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the case.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseGithubIssuePayload'
+      responses:
+        "201":
+          description: GitHub issue created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCaseGithubIssueResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
@@ -4857,3 +4921,53 @@ components:
               type: string
             updatedBy:
               type: string
+
+    CreateCaseGithubIssuePayload:
+      type: object
+      required: [reason, title, description]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [default, migration, rd_ticket]
+          description: Reason code that selects the GitHub repo target.
+        title:
+          type: string
+          description: Title of the GitHub issue.
+        description:
+          type: string
+          description: Body/description of the GitHub issue.
+        repoOverride:
+          type: string
+          description: Optional repository override (e.g. org/repo).
+        updateLevel:
+          type: string
+          description: Affected product update level.
+        publicIssueUrl:
+          type: string
+          description: URL of a related public issue.
+        regression:
+          type: boolean
+          description: Whether the issue is a regression.
+        hotFixRequired:
+          type: boolean
+          description: Whether a hot fix is required.
+        issueTypeLabel:
+          type: string
+          description: GitHub label for the issue type.
+        priorityLevel:
+          type: string
+          description: Priority level for the issue.
+
+    CreateCaseGithubIssueResponse:
+      type: object
+      properties:
+        issueUrl:
+          type: string
+          description: URL of the created GitHub issue.
+        issueNumber:
+          type: integer
+          description: Number of the created GitHub issue.
+        repository:
+          type: string
+          description: Repository where the issue was created (org/repo).

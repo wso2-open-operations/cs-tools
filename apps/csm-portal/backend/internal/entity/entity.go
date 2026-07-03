@@ -281,3 +281,9 @@ func (c *Client) SearchGroups(ctx context.Context, body []byte) ([]byte, error) 
 func (c *Client) SearchConfigurationItems(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/configuration-items/search", body)
 }
+
+// CreateCaseGithubIssue calls POST /cases/{id}/github-issues on the entity service.
+// Response is returned as raw JSON.
+func (c *Client) CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/github-issues", url.PathEscape(caseID)), body)
+}

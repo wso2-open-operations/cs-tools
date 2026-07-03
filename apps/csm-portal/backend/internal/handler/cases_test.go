@@ -1200,3 +1200,109 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateCaseGithubIssue(t *testing.T) {
+	const caseID = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`{"title":"crash"}`))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//github-issues", strings.NewReader(`{"title":"crash"}`)))
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID case ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/github-issues", strings.NewReader(`{"title":"crash"}`)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`not-json`)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards case ID and body to upstream and returns 201", func(t *testing.T) {
+		const reqPayload = `{"reason":"default","title":"crash on startup","description":"details"}`
+		var capturedCaseID string
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			createCaseGithubIssueFn: func(_ context.Context, id string, body []byte) ([]byte, error) {
+				capturedCaseID = id
+				capturedBody = body
+				return []byte(`{"issueUrl":"https://github.com/org/repo/issues/1","issueNumber":1,"repository":"org/repo"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(reqPayload)))
+		r.SetPathValue("id", caseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseGithubIssue(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		assertContentType(t, w, "application/json")
+		if capturedCaseID != caseID {
+			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, caseID)
+		}
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to create GitHub issue.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					createCaseGithubIssueFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+caseID+"/github-issues", strings.NewReader(`{"title":"crash"}`)))
+				r.SetPathValue("id", caseID)
+				w := httptest.NewRecorder()
+				h.CreateCaseGithubIssue(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

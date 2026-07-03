@@ -189,6 +189,7 @@ backend/
 - `POST /cases/{id}/call-requests` — Create a call request for a case (ServiceNow only)
 - `POST /cases/{id}/call-requests/search` — Search call requests for a case (ServiceNow only)
 - `PATCH /cases/{id}/call-requests/{callRequestId}` — Update a call request (ServiceNow only)
+- `POST /cases/{id}/github-issues` — Create a GitHub issue from a case; `reason` selects target repo (`default`/`migration`/`rd_ticket`; ServiceNow only)
 
 ### Users
 

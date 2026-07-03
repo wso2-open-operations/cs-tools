@@ -107,6 +107,7 @@ func main() {
 	mux.HandleFunc("POST /cases/{id}/call-requests", caseHandler.CreateCallRequest)
 	mux.HandleFunc("POST /cases/{id}/call-requests/search", caseHandler.SearchCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{callRequestId}", caseHandler.PatchCallRequest)
+	mux.HandleFunc("POST /cases/{id}/github-issues", caseHandler.CreateCaseGithubIssue)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
