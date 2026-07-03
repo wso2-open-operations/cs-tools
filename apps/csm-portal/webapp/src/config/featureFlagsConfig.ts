@@ -22,8 +22,9 @@
 
 /**
  * When true, every page/menu item flagged `wip` (see `csmNavItems.ts`) is shown
- * in the sidebar but disabled — greyed out, non-clickable, with a
- * "work in progress" tooltip — and its routes redirect to the dashboard. Lets a
+ * in the sidebar but disabled: greyed out, non-clickable, with a
+ * "work in progress" tooltip. Its routes render the shared "coming soon" page
+ * instead of the unfinished feature (see `App.tsx`'s `WipRouteGuard`). Lets a
  * deployment advertise upcoming sections without exposing unfinished pages.
  * Defaults to false (everything enabled) when the key is absent.
  */

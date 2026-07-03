@@ -37,8 +37,9 @@ export interface CsmNavItem {
    * Marks a still-in-progress section. When the `CSM_PORTAL_DISABLE_WIP_FEATURES`
    * runtime flag is on, these stay visible in the sidebar but are disabled (with
    * a "work in progress" tooltip), dropped from the quick-nav palette, and their
-   * routes redirect to the dashboard (see `isWipDisabled`, `navigableNavItems`,
-   * `isDisabledWipPath`, and `App.tsx`).
+   * routes render the shared "coming soon" page instead of the unfinished
+   * feature (see `isWipDisabled`, `navigableNavItems`, `isDisabledWipPath`, and
+   * `App.tsx`'s `WipRouteGuard`).
    */
   wip?: boolean;
 }

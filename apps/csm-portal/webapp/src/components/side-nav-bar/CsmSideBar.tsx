@@ -77,9 +77,11 @@ export default function CsmSideBar({
 
             // WIP sections stay visible but disabled: no navigating Link, dimmed
             // and non-clickable (pointer events blocked on the inner box so no
-            // click reaches Oxygen's select handler), with a "work in progress"
-            // tooltip on the outer span (which still receives hover). Their
-            // routes also redirect to the dashboard (see App.tsx).
+            // click reaches Oxygen's select handler). The outer element is a
+            // focusable div (tabIndex 0, aria-disabled) so keyboard users can
+            // reach it and reveal the "work in progress" tooltip, which fires on
+            // both hover and focus. Their routes render the coming-soon page
+            // (see App.tsx's WipRouteGuard).
             if (isWipDisabled(item)) {
               return (
                 <Tooltip
@@ -88,8 +90,8 @@ export default function CsmSideBar({
                   placement="right"
                 >
                   <Box
-                    component="span"
                     aria-disabled
+                    tabIndex={0}
                     sx={{ display: "block", cursor: "not-allowed" }}
                   >
                     <Box sx={{ opacity: 0.45, pointerEvents: "none" }}>
