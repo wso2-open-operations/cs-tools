@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -82,7 +83,9 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 	for _, c := range snResp.Comments {
 		createdAt, err := time.Parse(snCreatedOnLayout, c.CreatedOn)
 		if err != nil {
-			return domain.SearchCommentsResponse{}, fmt.Errorf("sn search comments: parse createdOn %q: %w", c.CreatedOn, err)
+			slog.WarnContext(ctx, "sn search comments: skipping comment with unparsable createdOn",
+				"commentID", c.ID, "createdOn", c.CreatedOn, "error", err)
+			continue
 		}
 		comments = append(comments, domain.Comment{
 			ID:                 sysidToUUID(c.ID),
