@@ -4662,6 +4662,8 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
         );
         if response is error {
             if getStatusCode(response) == http:STATUS_BAD_REQUEST {
+                log:printWarn(string `Invalid request parameters for creating registry token by user: ${
+                    userInfo.userId}`, response);
                 return <http:BadRequest>{
                     body: {
                         message: "Invalid request parameters for creating registry token."
