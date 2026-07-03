@@ -287,3 +287,9 @@ func (c *Client) SearchConfigurationItems(ctx context.Context, body []byte) ([]b
 func (c *Client) CreateCaseGithubIssue(ctx context.Context, caseID string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/cases/%s/github-issues", url.PathEscape(caseID)), body)
 }
+
+// SearchComments calls POST /comments/search on the entity service.
+// The body must be a JSON-encoded SearchCommentsRequest (referenceId, referenceType, pagination).
+func (c *Client) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/comments/search", body)
+}

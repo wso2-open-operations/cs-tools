@@ -1079,6 +1079,37 @@ type SearchCaseCommentsResponse struct {
 	HasMore  bool          `json:"hasMore"`
 }
 
+// Comment is a generic comment associated with any reference entity type
+// (case, conversation, change_request, etc.).
+type Comment struct {
+	ID                 string    `json:"id"`
+	ReferenceID        string    `json:"referenceId"`
+	Content            string    `json:"content"`
+	Type               string    `json:"type"`
+	CreatedOn          time.Time `json:"createdOn"`
+	CreatedBy          string    `json:"createdBy"`
+	CreatedByFirstName string    `json:"createdByFirstName"`
+	CreatedByLastName  string    `json:"createdByLastName"`
+	CreatedByFullName  string    `json:"createdByFullName"`
+}
+
+// SearchCommentsRequest is the input for POST /comments/search.
+type SearchCommentsRequest struct {
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType ReferenceType   `json:"referenceType"`
+	Pagination    Pagination      `json:"pagination"`
+	Filters       *CommentFilters `json:"filters,omitempty"`
+}
+
+// SearchCommentsResponse is the paginated result of a generic comment search.
+type SearchCommentsResponse struct {
+	Comments []Comment `json:"comments"`
+	Total    int       `json:"total"`
+	Limit    int       `json:"limit"`
+	Offset   int       `json:"offset"`
+	HasMore  bool      `json:"hasMore"`
+}
+
 // CaseGithubIssueReason classifies why a GitHub issue is being filed from a case.
 type CaseGithubIssueReason string
 

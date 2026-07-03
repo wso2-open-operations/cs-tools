@@ -47,7 +47,7 @@ type entityCaseClient interface {
 	CreateCase(ctx context.Context, body []byte) ([]byte, error)
 	PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error)
@@ -224,6 +224,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 }
 
 // SearchCaseComments handles POST /cases/{id}/comments/search.
+// Injects referenceId and referenceType into the payload and forwards to POST /comments/search.
 func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -248,14 +249,23 @@ func (h *CaseHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !json.Valid(body) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	payload["referenceId"] = caseID
+	payload["referenceType"] = "case"
 
-	result, err := h.entity.SearchCaseComments(r.Context(), caseID, body)
+	newBody, err := json.Marshal(payload)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCaseComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SearchComments(r.Context(), newBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "caseID", caseID, "err", err)
 		mapUpstreamError(w, err, "Failed to search case comments.")
 		return
 	}

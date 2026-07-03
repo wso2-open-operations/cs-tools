@@ -249,6 +249,10 @@ backend/
 - `POST /products/vulnerabilities/search` — Search product vulnerabilities; requires `pagination`, optional `filters` (`priority`, `searchQuery`, `productName`, `productVersion`) (ServiceNow data source only)
 - `GET /products/vulnerabilities/{id}` — Get product vulnerability by ID (ServiceNow data source only)
 
+### Conversations
+
+- `GET /conversations/{id}/messages` — Get paginated messages for a conversation; optional query params `limit` (1–100, default 20) and `offset` (default 0) (ServiceNow data source only)
+
 ### Updates
 
 - `GET /updates/product-update-levels` — Get product update levels

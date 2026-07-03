@@ -273,6 +273,15 @@ type ITServiceService interface {
 	SearchITServices(ctx context.Context, req domain.SearchITServicesRequest) (domain.SearchITServicesResponse, error)
 }
 
+// CommentService defines generic comment search operations across all reference types
+// (case, conversation, change_request, etc.).
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type CommentService interface {
+	// SearchComments returns a paginated list of comments for the given reference entity.
+	// An UnauthorizedError is returned when x-user-id-token is absent.
+	SearchComments(ctx context.Context, req domain.SearchCommentsRequest) (domain.SearchCommentsResponse, error)
+}
+
 // ProductVulnerabilityService defines the operations available on product vulnerabilities.
 // All methods require the ServiceNow data source; there is no Postgres fallback.
 type ProductVulnerabilityService interface {

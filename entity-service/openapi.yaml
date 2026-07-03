@@ -626,43 +626,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /cases/{id}/comments/search:
-    post:
-      summary: Search comments on a support case.
-      operationId: searchCaseComments
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Case UUID.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchCaseCommentsRequest'
-      responses:
-        "200":
-          description: Comments for the case, ordered by created_at DESC.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchCaseCommentsResponse'
-        "400":
-          description: Bad request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /cases/{id}/github-issues:
     post:
       summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
@@ -1692,6 +1655,42 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Time card not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /comments/search:
+    post:
+      summary: Search comments by reference entity (ServiceNow data source only).
+      operationId: searchComments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCommentsRequest'
+      responses:
+        "200":
+          description: Paginated list of comments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCommentsResponse'
+        "400":
+          description: Bad request (missing or invalid referenceId/referenceType).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
           content:
             application/json:
               schema:
@@ -4491,6 +4490,78 @@ components:
           type: integer
         limit:
           type: integer
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Comment UUID.
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the referenced entity (case, conversation, etc.).
+        content:
+          type: string
+          description: Comment content.
+        type:
+          type: string
+          description: Comment type (e.g. comment, work_notes).
+        createdOn:
+          type: string
+          format: date-time
+          description: Timestamp when the comment was created.
+        createdBy:
+          type: string
+          description: User identifier of the comment author.
+        createdByFirstName:
+          type: string
+          description: First name of the comment author.
+        createdByLastName:
+          type: string
+          description: Last name of the comment author.
+        createdByFullName:
+          type: string
+          description: Full name of the comment author.
+
+    SearchCommentsRequest:
+      type: object
+      required:
+        - referenceId
+        - referenceType
+      properties:
+        referenceId:
+          type: string
+          format: uuid
+          description: UUID of the entity to fetch comments for.
+        referenceType:
+          type: string
+          enum: [case, conversation, change_request, deployment]
+          description: Type of the referenced entity.
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchCommentsResponse:
+      type: object
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+          description: List of comments.
+        total:
+          type: integer
+          description: Total number of comments matching the query.
+        limit:
+          type: integer
+          description: Maximum number of comments returned in this page.
+        offset:
+          type: integer
+          description: Number of comments skipped before this page.
+        hasMore:
+          type: boolean
+          description: Whether additional pages are available.
 
     ErrorResponse:
       type: object
