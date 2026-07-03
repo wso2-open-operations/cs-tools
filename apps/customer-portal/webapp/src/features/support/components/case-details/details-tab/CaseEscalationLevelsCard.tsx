@@ -71,7 +71,7 @@ type Props = {
   isLead?: boolean;
 };
 
-export default function CaseEscalationLevelsCard({ caseId, currentLevelId, isLead = false }: Props): JSX.Element {
+export default function CaseEscalationLevelsCard({ caseId, currentLevelId, isLead }: Props): JSX.Element {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
   const { data: escalationData } = usePostCaseEscalationsSearch(caseId);
@@ -101,7 +101,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId, isLea
       {/* Stepper */}
       <Box sx={{ display: "flex", alignItems: "flex-start", width: "100%", px: 2, pt: 2, pb: 1 }}>
         {Array.from({ length: TOTAL_LEVELS }, (_, i) => i + 1).map((levelNum, idx) => {
-          const status: StepStatus = getStepStatus(levelNum, currentLevelNum, isLead);
+          const status: StepStatus = getStepStatus(levelNum, currentLevelNum, isLead ?? false);
           const record = recordByLevel.get(levelNum);
           const canShowTooltip = status === "previous" || status === "active";
 

@@ -92,11 +92,13 @@ export default function CaseDetailsDetailsPanel({
   const [savedWatchList, setSavedWatchList] = useState<string[] | null>(null);
 
   const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
-  const { data: userDetails } = useGetUserDetails();
+  const { data: userDetails, isLoading: isUserDetailsLoading } = useGetUserDetails();
   const isCurrentUserLead =
-    contactsData?.find(
-      (c) => c.email?.toLowerCase() === userDetails?.email?.toLowerCase(),
-    )?.isLead ?? false;
+    isContactsLoading || isUserDetailsLoading
+      ? undefined
+      : contactsData?.find(
+          (c) => c.email?.toLowerCase() === userDetails?.email?.toLowerCase(),
+        )?.isLead ?? false;
   const contactOptions = useMemo(
     () =>
       (contactsData ?? [])
