@@ -85,8 +85,12 @@ export interface CsmTimeCard {
   projectId: string;
   projectName: string;
   /**
-   * When the record was created (ISO). The backend doesn't separately track
-   * the engineer-chosen work date on read, only creation time.
+   * The work date (ISO, YYYY-MM-DD), despite the name — confirmed live by
+   * backdating a test card and reading it back: the backend returns
+   * whatever date was submitted on create under this field, not a separate
+   * system-generated creation timestamp. Occasionally unparseable on real
+   * records (confirmed live); see `groupIntoSheets` in `useTimeSheets.ts`
+   * for how that's handled.
    */
   createdOn: string;
   userId: string;

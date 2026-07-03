@@ -29,7 +29,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import {
+  useAllTimeCards,
   useApprovalQueue,
+  useCurrentEngineer,
   useDecideCard,
   useMyTimeSheets,
 } from "@features/csm-timecards/api/useTimeSheets";
@@ -50,20 +52,22 @@ import type {
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
 
-type TabId = "mine" | "approvals";
+type TabId = "mine" | "all" | "approvals";
 
 /**
- * Time cards workspace. Two tabs: **My time sheets** (weekly grouping, read
- * only — logging happens from a case's Time tracking tab) and **Approvals**
- * (approver/admin: approve/reject a submitted card). There's no sheet-level
- * bulk action, delegation, or reports — the backend has no endpoints for
- * those (see the module-level notes in `types/timeCards.ts`).
+ * Time cards workspace. Three tabs: **My time sheets** (own cards only),
+ * **All** (everyone's cards, read only — visibility, not action), and
+ * **Approvals** (approver/admin: approve/reject a submitted card). Logging
+ * time happens from a case's Time tracking tab, not here. There's no
+ * sheet-level bulk action, delegation, or reports — the backend has no
+ * endpoints for those (see the module-level notes in `types/timeCards.ts`).
  */
 export default function CsmTimeCardsPage(): JSX.Element {
   const role = useTimecardRole();
+  const me = useCurrentEngineer();
   const { showError } = useErrorBanner();
   const [tab, setTab] = useState<TabId>("mine");
-  const activeTab: TabId = tab !== "mine" && !role.isApprover ? "mine" : tab;
+  const activeTab: TabId = tab === "approvals" && !role.isApprover ? "mine" : tab;
 
   const [reviewCard, setReviewCard] = useState<CsmTimeCard | null>(null);
 
@@ -91,8 +95,14 @@ export default function CsmTimeCardsPage(): JSX.Element {
     ...(filterState && { states: [filterState] }),
   };
 
-  const mySheets = useMyTimeSheets(baseFilters);
-  const queue = useApprovalQueue(role.isApprover, baseFilters);
+  // Each search paginates independently (up to ~20 pages over the full
+  // scope) — fetching all three eagerly regardless of which tab is showing
+  // overloads the backend with concurrent requests (confirmed live: enough
+  // to make some fail outright or never settle). Gate each on its own tab
+  // actually being the active one.
+  const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters);
+  const allCards = useAllTimeCards(activeTab === "all", baseFilters);
+  const queue = useApprovalQueue(activeTab === "approvals" && role.isApprover, baseFilters);
   const decideCard = useDecideCard();
 
   const anyFilterActive =
@@ -138,6 +148,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
         sx={{ borderBottom: 1, borderColor: "divider" }}
       >
         <Tab value="mine" label="My time sheets" />
+        <Tab value="all" label="All" />
         {role.isApprover && <Tab value="approvals" label="Approvals" />}
       </Tabs>
 
@@ -190,6 +201,86 @@ export default function CsmTimeCardsPage(): JSX.Element {
                     key={s.id}
                     sheet={s}
                     role={{ isOwner: true, isApprover: false, isAdmin: false }}
+                    onCardAction={handleCardAction}
+                  />
+                ));
+              })()}
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* All — everyone's cards, own included. Read only: role is always
+       passed as non-approver/non-admin here regardless of the viewer's
+       actual role, so no Approve/Reject actions ever show — that stays
+       exclusive to the Approvals tab. */}
+      {activeTab === "all" && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <FilterBar
+            projects={projects.data ?? []}
+            filterProject={filterProject}
+            setFilterProject={setFilterProject}
+            filterWorkItem={filterWorkItem}
+            setFilterWorkItem={setFilterWorkItem}
+            filterState={filterState}
+            setFilterState={setFilterState}
+            onClear={clearFilters}
+            engineerSlot={
+              <TextField
+                size="small"
+                label="Engineer"
+                placeholder="Name…"
+                value={filterEngineer}
+                onChange={(e) => setFilterEngineer(e.target.value)}
+                sx={{ width: 180 }}
+              />
+            }
+            engineerChip={
+              filterEngineer.trim()
+                ? {
+                    label: `Engineer: ${filterEngineer.trim()}`,
+                    onDelete: () => setFilterEngineer(""),
+                  }
+                : undefined
+            }
+          />
+
+          {allCards.isLoading || projects.isLoading ? (
+            <Centered>
+              <CircularProgress />
+            </Centered>
+          ) : allCards.isError ? (
+            <Typography color="error">Could not load time cards.</Typography>
+          ) : (
+            <>
+              {!allCards.isError && allCards.data?.truncated && (
+                <TimeCardTruncatedNotice hint="Narrow the Project filter to see everything." />
+              )}
+              {(() => {
+                const q = filterEngineer.trim().toLowerCase();
+                const byEngineer = (allCards.data?.sheets ?? []).filter(
+                  (s) => !q || s.userName.toLowerCase().includes(q),
+                );
+                const filtered = byWorkItem(byEngineer) ?? [];
+                if (filtered.length === 0) {
+                  return (
+                    <Empty
+                      text={
+                        q && byEngineer.length === 0
+                          ? `No engineers match "${filterEngineer}".`
+                          : anyFilterActive
+                            ? "No time cards match the current filters."
+                            : "No time logged yet."
+                      }
+                    />
+                  );
+                }
+                return filtered.map((s) => (
+                  <TimeSheetCard
+                    key={s.id}
+                    sheet={s}
+                    role={{ isOwner: s.userId === me.id, isApprover: false, isAdmin: false }}
+                    showEngineer
                     onCardAction={handleCardAction}
                   />
                 ));

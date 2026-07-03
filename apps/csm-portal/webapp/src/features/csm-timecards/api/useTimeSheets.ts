@@ -53,10 +53,8 @@ import type {
   CsmTimeSheet,
   TimeCardDecisionInput,
   TimeCardSearchFilters,
-  TimeSheetState,
 } from "@features/csm-timecards/types/timeCards";
-import { weekEndOf, weekStartOf } from "@features/csm-timecards/utils/timeSheetWeek";
-import { roundHours } from "@features/csm-timecards/utils/timeCardTotals";
+import { groupIntoSheets } from "@features/csm-timecards/utils/timeSheetGrouping";
 
 /**
  * The signed-in engineer's stable identity, resolved from `GET /users/me`.
@@ -86,6 +84,7 @@ export function invalidateTimecards(queryClient: QueryClient): void {
     ApiQueryKeys.CASE_TIME_CARDS_SEARCH,
     ApiQueryKeys.TIME_SHEETS_SEARCH,
     ApiQueryKeys.TIME_CARD_APPROVAL_QUEUE,
+    ApiQueryKeys.TIME_CARD_ALL,
   ]) {
     void queryClient.invalidateQueries({ queryKey: [key] });
   }
@@ -200,45 +199,6 @@ export async function searchTimeCards(
   };
 }
 
-/** Roll a week's cards up into a single display status. */
-function sheetStatus(cards: CsmTimeCard[]): TimeSheetState {
-  if (cards.some((c) => c.state === "rejected")) return "rejected";
-  if (cards.every((c) => c.state === "approved" || c.state === "processed")) {
-    return "approved";
-  }
-  return "submitted";
-}
-
-/** Group a flat list of cards into weekly sheets (Mon–Sun), newest first. */
-function groupIntoSheets(
-  cards: CsmTimeCard[],
-  userId: string,
-  userName: string,
-): CsmTimeSheet[] {
-  const byWeek = new Map<string, CsmTimeCard[]>();
-  for (const c of cards) {
-    const wk = weekStartOf(c.createdOn);
-    const bucket = byWeek.get(wk);
-    if (bucket) bucket.push(c);
-    else byWeek.set(wk, [c]);
-  }
-  const sheets: CsmTimeSheet[] = [];
-  for (const [weekStart, weekCards] of byWeek) {
-    weekCards.sort((a, b) => b.createdOn.localeCompare(a.createdOn));
-    sheets.push({
-      id: `${userId}:${weekStart}`,
-      userId,
-      userName,
-      weekStart,
-      weekEnd: weekEndOf(weekStart),
-      state: sheetStatus(weekCards),
-      cards: weekCards,
-      totalHours: roundHours(weekCards.reduce((sum, c) => sum + c.totalHours, 0)),
-    });
-  }
-  return sheets.sort((a, b) => b.weekStart.localeCompare(a.weekStart));
-}
-
 /** Weekly sheets plus whether {@link searchTimeCards} hit its page cap —
  * i.e. some cards in scope weren't fetched and aren't reflected below. */
 export interface TimeSheetsResult {
@@ -252,8 +212,16 @@ export interface TimeSheetsResult {
  * anything (see {@link searchTimeCards}) — so this stays disabled until the
  * caller has resolved a real project scope (defaulted to every visible
  * project when the user hasn't picked one — see `CsmTimeCardsPage.tsx`).
+ *
+ * `enabled` should be gated on the owning tab actually being active (see
+ * `CsmTimeCardsPage.tsx`) — confirmed live: with this, {@link useAllTimeCards}
+ * and {@link useApprovalQueue} all fetching eagerly regardless of which tab
+ * is shown means up to three independent ~20-page pagination walks over the
+ * same few-hundred-record scope firing at once on load, which is enough
+ * concurrent load to make some of them fail outright or never settle.
  */
 export function useMyTimeSheets(
+  enabled: boolean,
   filters?: TimeCardSearchFilters,
 ): UseQueryResult<TimeSheetsResult, Error> {
   const api = useBackendApi();
@@ -272,7 +240,7 @@ export function useMyTimeSheets(
         truncated,
       };
     },
-    enabled: !!me.id && !!filters?.projectIds?.length,
+    enabled: enabled && !!me.id && !!filters?.projectIds?.length,
     staleTime: 5_000,
   });
 }
@@ -282,7 +250,9 @@ export function useMyTimeSheets(
  * approver's decision. There's no server-side "approval queue" endpoint or
  * engineer filter, so this fetches submitted cards (scoped by `filters`) and
  * excludes the signed-in user's own on the client. Like {@link useMyTimeSheets},
- * this requires `filters.projectIds` to be non-empty to get anything back.
+ * this requires `filters.projectIds` to be non-empty to get anything back,
+ * and `enabled` should be gated on this tab actually being active (see the
+ * note on {@link useMyTimeSheets} for why).
  */
 export function useApprovalQueue(
   enabled: boolean,
@@ -301,6 +271,43 @@ export function useApprovalQueue(
       const others = cards.filter((c) => c.userId !== me.id);
       const byUser = new Map<string, CsmTimeCard[]>();
       for (const c of others) {
+        const bucket = byUser.get(c.userId);
+        if (bucket) bucket.push(c);
+        else byUser.set(c.userId, [c]);
+      }
+      return {
+        sheets: [...byUser.entries()].flatMap(([userId, userCards]) =>
+          groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
+        ),
+        truncated,
+      };
+    },
+    enabled: enabled && !!me.id && !!filters?.projectIds?.length,
+    staleTime: 5_000,
+  });
+}
+
+/**
+ * Every visible user's sheets, own included — unlike {@link useMyTimeSheets}
+ * (self only) and {@link useApprovalQueue} (others' submitted cards only,
+ * for deciding), this is a read-only "see everything in scope" view: no
+ * state restriction, no ownership exclusion. Requires `filters.projectIds`
+ * to be non-empty, same as every other search here, and `enabled` should be
+ * gated on this tab actually being active (see the note on
+ * {@link useMyTimeSheets} for why).
+ */
+export function useAllTimeCards(
+  enabled: boolean,
+  filters?: TimeCardSearchFilters,
+): UseQueryResult<TimeSheetsResult, Error> {
+  const api = useBackendApi();
+  const me = useCurrentEngineer();
+  return useQuery<TimeSheetsResult, Error>({
+    queryKey: [ApiQueryKeys.TIME_CARD_ALL, filters],
+    queryFn: async (): Promise<TimeSheetsResult> => {
+      const { cards, truncated } = await searchTimeCards(api, filters);
+      const byUser = new Map<string, CsmTimeCard[]>();
+      for (const c of cards) {
         const bucket = byUser.get(c.userId);
         if (bucket) bucket.push(c);
         else byUser.set(c.userId, [c]);
