@@ -24,6 +24,7 @@ import CaseDetailsCard from "./CaseDetailsCard";
 
 const TOTAL_LEVELS = 5;
 const LEAD_WARNING_THRESHOLD = 3;
+const NON_LEAD_AVAILABLE_MAX = 3;
 
 const LEVEL_ROLE: Record<number, string> = Object.fromEntries(
   Array.from({ length: TOTAL_LEVELS }, (_, i) => [
@@ -34,10 +35,10 @@ const LEVEL_ROLE: Record<number, string> = Object.fromEntries(
 
 type StepStatus = "previous" | "active" | "available" | "locked";
 
-function getStepStatus(levelNum: number, currentLevelNum: number): StepStatus {
+function getStepStatus(levelNum: number, currentLevelNum: number, isLead: boolean): StepStatus {
   if (levelNum < currentLevelNum) return "previous";
   if (levelNum === currentLevelNum) return "active";
-  if (levelNum === currentLevelNum + 1) return "available";
+  if (isLead || levelNum <= NON_LEAD_AVAILABLE_MAX) return "available";
   return "locked";
 }
 
@@ -67,9 +68,10 @@ function TooltipContent({ levelNum, record }: { levelNum: number; record: Escala
 type Props = {
   caseId: string;
   currentLevelId?: number | string | null;
+  isLead?: boolean;
 };
 
-export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Props): JSX.Element {
+export default function CaseEscalationLevelsCard({ caseId, currentLevelId, isLead }: Props): JSX.Element {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
   const { data: escalationData } = usePostCaseEscalationsSearch(caseId);
@@ -99,7 +101,7 @@ export default function CaseEscalationLevelsCard({ caseId, currentLevelId }: Pro
       {/* Stepper */}
       <Box sx={{ display: "flex", alignItems: "flex-start", width: "100%", px: 2, pt: 2, pb: 1 }}>
         {Array.from({ length: TOTAL_LEVELS }, (_, i) => i + 1).map((levelNum, idx) => {
-          const status: StepStatus = getStepStatus(levelNum, currentLevelNum);
+          const status: StepStatus = getStepStatus(levelNum, currentLevelNum, isLead ?? false);
           const record = recordByLevel.get(levelNum);
           const canShowTooltip = status === "previous" || status === "active";
 
