@@ -33,6 +33,12 @@ const md: MarkdownIt = new MarkdownIt({
   breaks: true,
 });
 
+// Wrap tables in a scrollable container instead of making the <table> itself a
+// scroll box: `display: block` on a <table> drops its implicit table/row/cell
+// roles for assistive tech. The wrapper scrolls; the table keeps native display.
+md.renderer.rules.table_open = () => '<div class="md-table-wrap">\n<table>\n';
+md.renderer.rules.table_close = () => "</table>\n</div>\n";
+
 export function markdownToHtml(source: string | undefined | null): string {
   return md.render(source ?? "");
 }

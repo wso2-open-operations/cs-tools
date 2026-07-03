@@ -263,10 +263,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
-  // Disabled (no fetch) when the case has no linked conversation.
-  const { data: chatMessages } = useGetCsmConversationMessages(
-    data?.conversationId,
-  );
+  // Disabled (no fetch) when the case has no linked conversation, so
+  // isChatLoading/isChatError stay false for chat-less cases.
+  const {
+    data: chatMessages,
+    isLoading: isChatLoading,
+    isError: isChatError,
+  } = useGetCsmConversationMessages(data?.conversationId);
   const postComment = usePostCsmCaseComment();
   const {
     data: attachments,
@@ -1154,14 +1157,17 @@ export default function CsmCaseDetailPage(): JSX.Element {
               )}
             </Box>
 
-            {isCommentsLoading ? (
+            {isCommentsLoading || isChatLoading ? (
+              // Wait for both the comments and the linked chat transcript so the
+              // transcript doesn't pop into an already-rendered timeline.
+              // isChatLoading is false for chat-less cases (query disabled).
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {[0, 1, 2].map((i) => (
                   <Skeleton key={i} variant="rectangular" height={56} />
                 ))}
               </Box>
             ) : (
-              // A comments failure shouldn't blank the timeline — the
+              // A comments/chat failure shouldn't blank the timeline — the
               // description, audit, and attachments loaded fine. Show them with
               // an inline notice.
               <>
@@ -1169,6 +1175,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   <Typography variant="body2" color="error">
                     Could not load comments. Showing the rest of the activity —
                     reload to try again.
+                  </Typography>
+                )}
+                {isChatError && (
+                  <Typography variant="body2" color="error">
+                    Could not load the chat conversation. Showing the rest of the
+                    activity — reload to try again.
                   </Typography>
                 )}
                 <CaseActivitiesFeed

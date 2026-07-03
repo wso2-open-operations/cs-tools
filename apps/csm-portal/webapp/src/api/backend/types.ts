@@ -543,7 +543,8 @@ export interface BeComment {
 }
 
 export interface BeCommentSearchResponse extends BeSearchResponseBase {
-  comments: BeComment[];
+  /** Optional: the backend may omit the array on an empty result. */
+  comments?: BeComment[];
 }
 
 // ---------------------------------------------------------------------------

@@ -194,15 +194,14 @@ export default function CsmCaseCommentBubble({
               fontStyle: "italic",
             },
             "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
-            // Novera answers arrive as Markdown tables; keep them readable and
-            // horizontally scrollable rather than overflowing the bubble.
+            // Novera answers arrive as Markdown tables; the markdown-it renderer
+            // wraps each in `.md-table-wrap`, which scrolls horizontally while
+            // the table keeps its native display (preserving a11y table roles).
+            "& .md-table-wrap": { overflowX: "auto", maxWidth: "100%", my: 0.75 },
             "& table": {
-              display: "block",
               width: "max-content",
-              maxWidth: "100%",
-              overflowX: "auto",
+              minWidth: "100%",
               borderCollapse: "collapse",
-              my: 0.75,
             },
             "& th, & td": {
               border: 1,
