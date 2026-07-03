@@ -31,6 +31,7 @@ import { SectionCard } from "@components/shared";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { chats } from "@src/services/chats";
+import { READ_ONLY_CONVERSATION_STATUS_IDS } from "@src/config/constants";
 import { useDateTime } from "../utils/useDateTime";
 
 export default function ChatDetailPage() {
@@ -41,10 +42,12 @@ export default function ChatDetailPage() {
   const [messages, setMessages] = useState<(ChatMessage & { id: string })[]>([]);
   const [comment, setComment] = useState("");
 
-  const { fromNow, format } = useDateTime();
+  const { format } = useDateTime();
   const { id } = useParams();
   const { data } = useQuery(chats.get(id!));
   const { data: comments, isLoading: isCommentsLoading } = useQuery(chats.comments(id!));
+
+  const isReadOnly = data?.statusId !== undefined && READ_ONLY_CONVERSATION_STATUS_IDS.includes(Number(data.statusId));
 
   const mutation = useMutation({
     mutationFn: (body: { message: string; envProducts: Record<string, string[]> }) => {
@@ -65,7 +68,7 @@ export default function ChatDetailPage() {
 
   const handleSend = () => {
     const trimmed = comment.trim();
-    if (!trimmed || !projectId || !id) return;
+    if (!trimmed || !projectId || !id || isReadOnly) return;
     mutation.mutate({ message: trimmed, envProducts: {} });
   };
 
@@ -77,7 +80,7 @@ export default function ChatDetailPage() {
         id: comment.id,
         author: comment.createdBy === "Novera" ? "assistant" : "you",
         blocks: [{ type: "text", value: comment.content || "" }],
-        timestamp: fromNow(comment.createdOn),
+        timestamp: format(comment.createdOn),
       })) || [],
     );
 
@@ -159,13 +162,7 @@ export default function ChatDetailPage() {
                 .slice()
                 .reverse()
                 .map(({ id, ...message }) => (
-                  <MessageBubble
-                    key={id}
-                    {...message}
-                    sx={{ bgcolor: "background.default" }}
-                    thinking={false}
-                    animated={false}
-                  />
+                  <MessageBubble key={id} {...message} thinking={false} animated={false} />
                 ))}
             </Stack>
           )}
@@ -176,10 +173,10 @@ export default function ChatDetailPage() {
 
       <StickyCommentBar
         value={comment}
-        placeholder="Type your message"
+        placeholder={isReadOnly ? "This conversation is no longer active" : "Type your message"}
         submitOnEnter={false}
         loading={mutation.isPending}
-        disabled={!projectId}
+        disabled={!projectId || isReadOnly}
         onChange={setComment}
         onSend={handleSend}
       />

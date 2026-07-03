@@ -145,12 +145,27 @@ export const CASE_STATE_IDS = {
   REOPENED: 1006,
 } as const;
 
+export const CONVERSATION_STATE_IDS = {
+  OPEN: 1,
+  ACTIVE: 2,
+  RESOLVED: 3,
+  CONVERTED: 4,
+  ABANDONED: 5,
+} as const;
+
 export const ACTION_REQUIRED_CASE_STATUS_IDS = [18, 6];
 export const ACTION_REQUIRED_CHANGE_REQUEST_STATUS_IDS = [1, 5];
 
 export const OUTSTANDING_CASE_STATUS_IDS = [1, 10, 18, 1003, 6, 1006];
 export const OUTSTANDING_CONVERSATIONS_STATUS_IDS = [1, 2];
 export const OUTSTANDING_CHANGE_REQUESTS_STATUS_IDS = [5, -2, -1, 0, 1, 2];
+
+// Chats in these states are read-only — replying is disabled once a conversation
+// has been resolved or converted to a case.
+export const READ_ONLY_CONVERSATION_STATUS_IDS: number[] = [
+  CONVERSATION_STATE_IDS.RESOLVED,
+  CONVERSATION_STATE_IDS.CONVERTED,
+];
 
 export const RESOLVED_CASE_STATUS_IDS = [3];
 export const RESOLVED_CHANGE_REQUEST_STATUS_IDS = [3];
