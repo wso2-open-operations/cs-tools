@@ -80,8 +80,6 @@ import {
 import AsyncProjectMultiSelect from "@features/csm-cases/components/AsyncProjectMultiSelect";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
 
-/** Sentinel used inside `assignees` to mean "the current user". */
-export const ASSIGNEE_ME_TOKEN = "@me";
 
 /**
  * Filter state for the CSM cases list. `severities` / `states` / `caseTypes`

@@ -25,7 +25,7 @@ import { useMemo, useState, type JSX } from "react";
 import type * as React from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useInfiniteUserSearch } from "@features/csm-cases/api/useUserSearch";
-import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 
 interface AssigneeOption {
   /** The value stored in the filter: an engineer email, or the `@me` sentinel. */

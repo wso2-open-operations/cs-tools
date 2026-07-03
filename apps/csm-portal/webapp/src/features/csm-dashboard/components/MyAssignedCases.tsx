@@ -17,7 +17,7 @@
 import { Link, TablePagination, Typography } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import { Link as RouterLink } from "react-router";
-import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import CasesList from "@features/csm-cases/components/CasesList";
 import {
   MY_OPEN_CASES_LINK_STATES,

@@ -30,7 +30,7 @@ import {
   uiStateFromBe,
 } from "@api/backend/mappers";
 import { projectOptionsQueryOptions } from "@features/csm-cases/api/useProjectOptions";
-import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/components/CasesFilterBar";
+import { ASSIGNEE_ME_TOKEN } from "@features/csm-cases/utils/assignee";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import type {
   BeAccount,
