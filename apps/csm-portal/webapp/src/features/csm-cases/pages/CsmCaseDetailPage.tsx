@@ -60,6 +60,7 @@ import {
   useGetCsmCaseComments,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
+import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
@@ -259,6 +260,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isLoading: isCommentsLoading,
     isError: isCommentsError,
   } = useGetCsmCaseComments(caseId);
+  // The chat transcript the case was spawned from, when linked. Loaded lazily
+  // off the case's conversation id and merged into the comment stream below so
+  // it renders as the earliest activity entries — mirrors the customer portal.
+  // Disabled (no fetch) when the case has no linked conversation.
+  const { data: chatMessages } = useGetCsmConversationMessages(
+    data?.conversationId,
+  );
   const postComment = usePostCsmCaseComment();
   const {
     data: attachments,
@@ -679,6 +687,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
+  // Case comments + the linked chat transcript, as one list for the activity
+  // feed. Memoised so the feed's own sort doesn't rerun on every render.
+  const mergedComments = useMemo(
+    () => [...(comments ?? []), ...(chatMessages ?? [])],
+    [comments, chatMessages],
+  );
+
   const onUploadAttachment = useCallback(
     (file: File) => {
       if (!caseId) return;
@@ -807,8 +822,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const hasSlaData = c.slaClocks.length > 0;
   // The case description is already returned by `comments/search` as the
   // opening comment, so the stream renders it directly — no synthetic entry is
-  // injected (that duplicated the first comment).
-  const safeComments = comments ?? [];
+  // injected (that duplicated the first comment). The linked chat transcript
+  // (if any) is appended; the feed sorts chronologically, so the chat — being
+  // oldest — sinks below the case comments in the default newest-first view.
+  const safeComments = mergedComments;
 
   // SLA breach is a live condition, not a dismissible notice: surface it in a
   // persistent banner under the header so it stays visible on every tab, not

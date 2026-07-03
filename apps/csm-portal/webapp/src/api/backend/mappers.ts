@@ -22,7 +22,8 @@
 
 import type {
   BeAttachment,
-  BeCaseComment,
+  BeCaseCommentAuthor,
+  BeComment,
   BeCreatableCommentType,
   BeCaseSeverity,
   BeCaseState,
@@ -112,9 +113,8 @@ export function commentTypeFromInternal(
   return internal ? "work_note" : "comment";
 }
 
-/** Best display name from the comment author block, falling back to the id. */
-function authorDisplayName(author: BeCaseComment["createdBy"]): string {
-  if (!author) return "Unknown";
+/** Best display name from a nested comment-author block, falling back to id. */
+function authorDisplayName(author: BeCaseCommentAuthor): string {
   const full = author.fullName?.trim();
   if (full) return full;
   const composed = [author.firstName, author.lastName]
@@ -124,18 +124,77 @@ function authorDisplayName(author: BeCaseComment["createdBy"]): string {
   return composed || author.id || "Unknown";
 }
 
-export function uiCommentFromBe(comment: BeCaseComment): CsmCaseComment {
-  const role: CsmCommentAuthorRole =
-    comment.type === "activity" ? "system" : "wso2_engineer";
+/**
+ * Best display name from a {@link BeComment}. The search/messages endpoints
+ * embed a nested `createdBy` object (`{id, firstName, lastName, fullName}`); the
+ * comment-create ack echoes `createdBy` as a bare string. Handle both.
+ */
+function commentAuthorName(comment: BeComment): string {
+  const cb = comment.createdBy;
+  if (cb && typeof cb === "object") return authorDisplayName(cb);
+  if (typeof cb === "string" && cb.trim()) return cb;
+  return "Unknown";
+}
+
+/**
+ * Novera/bot sender detection — mirrors the customer portal's
+ * `isNoveraOrBotSender`. Chat messages carry no role field, and the backend
+ * normalizes `type` to `comment`/`work_note`/`activity` (a `bot` type never
+ * survives), so the bot is identified by author NAME: the nested
+ * `createdBy.id` or `createdBy.fullName` (or the bare string on the create ack)
+ * equalling `"Novera"`. The `type === "bot"` check is a defensive fallback.
+ */
+function isBotSender(comment: BeComment): boolean {
+  const cb = comment.createdBy;
+  const names =
+    cb && typeof cb === "object"
+      ? [cb.id, cb.fullName]
+      : [typeof cb === "string" ? cb : ""];
+  const isNovera = names.some(
+    (n) => (n ?? "").trim().toLowerCase() === "novera",
+  );
+  const ty = (comment.type ?? "").trim().toLowerCase();
+  return ty === "bot" || isNovera;
+}
+
+// The backend normalizes `type` to the singular enum (`work_note`/`comment`/
+// `activity`); the plural forms are kept as a defensive fallback in case an
+// un-normalized SN value slips through.
+const WORK_NOTE_TYPES = new Set(["work_note", "work_notes"]);
+const ACTIVITY_TYPES = new Set(["activity", "activities"]);
+
+/**
+ * Map a backend comment onto the UI shape. Used for both case comments and
+ * conversation (chat) messages — they share the `/comments/search` shape.
+ *
+ * `context` sets the default author role for a non-bot, non-system message:
+ * chat participants default to `"customer"`, while a case comment defaults to
+ * `"wso2_engineer"` (the FE has no reliable customer-vs-engineer signal on a
+ * case comment yet). A Novera/bot sender always maps to `"chatbot"`.
+ */
+export function uiCommentFromBe(
+  comment: BeComment,
+  opts?: { context?: "case" | "conversation" },
+): CsmCaseComment {
+  const ty = (comment.type ?? "").trim().toLowerCase();
+  let role: CsmCommentAuthorRole;
+  if (isBotSender(comment)) {
+    role = "chatbot";
+  } else if (ACTIVITY_TYPES.has(ty)) {
+    role = "system";
+  } else {
+    role = opts?.context === "conversation" ? "customer" : "wso2_engineer";
+  }
   return {
     id: comment.id,
-    caseId: comment.caseId,
-    authorName: authorDisplayName(comment.createdBy),
-    authorRole: role,
-    // `content` is already rich-text HTML; the bubble sanitises it on render.
+    caseId: comment.referenceId ?? "",
+    authorName: commentAuthorName(comment),
+    // For a chatbot the body is Markdown; the bubble renders it as Markdown.
+    // Otherwise it is rich-text HTML, sanitised on render.
     bodyHtml: comment.content ?? "",
+    authorRole: role,
     createdAt: comment.createdOn,
-    internal: comment.type === "work_note",
+    internal: WORK_NOTE_TYPES.has(ty),
   };
 }
 

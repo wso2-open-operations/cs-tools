@@ -15,11 +15,13 @@
 // under the License.
 
 import { alpha, Avatar, Box, Chip, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
-import type { JSX } from "react";
+import { Bot } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, type JSX } from "react";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip from "@components/SemanticChip";
 import { pickAccessibleText } from "@utils/contrastText";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import type {
   CsmCaseComment,
@@ -34,6 +36,7 @@ const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
   customer: "Customer",
   wso2_engineer: "WSO2",
   system: "System",
+  chatbot: "Chatbot",
 };
 
 const ROLE_COLOR: Record<
@@ -43,13 +46,24 @@ const ROLE_COLOR: Record<
   customer: "default",
   wso2_engineer: "primary",
   system: "warning",
+  chatbot: "default",
 };
 
 export default function CsmCaseCommentBubble({
   comment,
 }: CsmCaseCommentBubbleProps): JSX.Element {
   const theme = useTheme();
-  const safeHtml = sanitizeRichTextHtml(comment.bodyHtml);
+  const isBot = comment.authorRole === "chatbot";
+  // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
+  // other comment body is already rich-text HTML. Both go through the same
+  // sanitiser before injection.
+  const safeHtml = useMemo(
+    () =>
+      sanitizeRichTextHtml(
+        isBot ? markdownToHtml(comment.bodyHtml) : comment.bodyHtml,
+      ),
+    [comment.bodyHtml, isBot],
+  );
   const isSystem = comment.authorRole === "system";
 
   if (isSystem) {
@@ -112,7 +126,7 @@ export default function CsmCaseCommentBubble({
           fontSize: "0.85rem",
         }}
       >
-        {initialsOf(comment.authorName)}
+        {isBot ? <Bot size={16} /> : initialsOf(comment.authorName)}
       </Avatar>
       <Paper
         variant="outlined"
@@ -180,6 +194,24 @@ export default function CsmCaseCommentBubble({
               fontStyle: "italic",
             },
             "& h1, & h2, & h3": { mt: 1, mb: 0.5 },
+            // Novera answers arrive as Markdown tables; keep them readable and
+            // horizontally scrollable rather than overflowing the bubble.
+            "& table": {
+              display: "block",
+              width: "max-content",
+              maxWidth: "100%",
+              overflowX: "auto",
+              borderCollapse: "collapse",
+              my: 0.75,
+            },
+            "& th, & td": {
+              border: 1,
+              borderColor: "divider",
+              px: 1,
+              py: 0.5,
+              textAlign: "left",
+            },
+            "& th": { bgcolor: "action.hover", fontWeight: 600 },
           }}
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />

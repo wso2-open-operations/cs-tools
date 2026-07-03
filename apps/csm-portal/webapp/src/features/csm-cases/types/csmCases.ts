@@ -90,7 +90,11 @@ export interface CsmCasesListResponse {
   hasMore: boolean;
 }
 
-export type CsmCommentAuthorRole = "customer" | "wso2_engineer" | "system";
+export type CsmCommentAuthorRole =
+  | "customer"
+  | "wso2_engineer"
+  | "system"
+  | "chatbot";
 
 export interface CsmCaseComment {
   id: string;
@@ -247,6 +251,13 @@ export type CaseLifecycleAction =
 export interface CsmCaseDetail extends CsmCaseRow {
   description: string;
   assignmentGroup: string;
+  /**
+   * Id of the chat conversation this case was spawned from, when any. Drives
+   * loading the Novera chat transcript as the earliest entries in the activity
+   * feed (mirrors the customer portal). Absent when the case has no linked
+   * conversation (e.g. non-ServiceNow source, or a case opened without chat).
+   */
+  conversationId?: string;
   /** States this case may transition into next, per the backend. */
   nextStates?: CaseState[];
   /** Display name of the person who opened the case. */

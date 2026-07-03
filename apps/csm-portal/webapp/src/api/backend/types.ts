@@ -519,6 +519,33 @@ export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
   comments: BeCaseComment[];
 }
 
+/**
+ * Comment shape returned by the generic `POST /comments/search`, which — since
+ * the entity-service refactor — backs BOTH `/cases/{id}/comments/search` and
+ * `/conversations/{id}/messages`. It reuses `referenceId` (the case or
+ * conversation id) rather than `caseId`; the backend normalizes `type` to the
+ * `BeCaseCommentType` enum (unknown SN types default to `comment`).
+ *
+ * `createdBy` is typed `BeCaseCommentAuthor | string`: search/messages embed the
+ * nested author object, while the comment-create ack echoes only a bare string.
+ * The mapper handles both.
+ */
+export interface BeComment {
+  id: string;
+  /** Parent reference id — the case id or conversation id per the endpoint. */
+  referenceId?: string;
+  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. */
+  content: string;
+  /** Normalized comment type; `string` (not the enum) to tolerate new values. */
+  type: string;
+  createdOn: string;
+  createdBy: BeCaseCommentAuthor | string | null;
+}
+
+export interface BeCommentSearchResponse extends BeSearchResponseBase {
+  comments: BeComment[];
+}
+
 // ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
