@@ -60,6 +60,14 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
 	}
 
+	if req.Filters != nil && req.Filters.Type != nil {
+		snType, ok := snCommentTypeMap[*req.Filters.Type]
+		if !ok {
+			return domain.SearchCommentsResponse{}, &apierror.ValidationError{Msg: "filters.type must be one of: comment, work_notes, activity"}
+		}
+		payload.Filters = &snCommentFilters{Type: snType}
+	}
+
 	raw, err := s.client.Post(ctx, "/comments/search", token, payload)
 	if err != nil {
 		return domain.SearchCommentsResponse{}, err

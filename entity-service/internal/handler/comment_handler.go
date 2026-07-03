@@ -49,3 +49,32 @@ func (h *CommentHandler) SearchComments(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// SearchCaseComments handles POST /cases/{id}/comments/search.
+// The case ID comes from the URL path; pagination and filters come from the body.
+func (h *CommentHandler) SearchCaseComments(w http.ResponseWriter, r *http.Request) {
+	caseID := r.PathValue("id")
+
+	var body struct {
+		Pagination domain.Pagination    `json:"pagination"`
+		Filters    *domain.CommentFilters `json:"filters"`
+	}
+	if !decodeRequest(w, r, &body) {
+		return
+	}
+
+	req := domain.SearchCommentsRequest{
+		ReferenceID:   caseID,
+		ReferenceType: domain.ReferenceTypeCase,
+		Pagination:    body.Pagination,
+		Filters:       body.Filters,
+	}
+
+	resp, err := h.svc.SearchComments(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

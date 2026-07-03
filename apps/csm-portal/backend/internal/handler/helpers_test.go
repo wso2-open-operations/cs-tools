@@ -88,7 +88,7 @@ type mockEntityCaseClient struct {
 	createCaseFn               func(ctx context.Context, body []byte) ([]byte, error)
 	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCaseCommentsFn       func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
 	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
@@ -122,9 +122,9 @@ func (m *mockEntityCaseClient) CreateCaseComment(ctx context.Context, caseID str
 	return []byte(`{}`), nil
 }
 
-func (m *mockEntityCaseClient) SearchCaseComments(ctx context.Context, caseID string, body []byte) ([]byte, error) {
-	if m.searchCaseCommentsFn != nil {
-		return m.searchCaseCommentsFn(ctx, caseID, body)
+func (m *mockEntityCaseClient) SearchComments(ctx context.Context, body []byte) ([]byte, error) {
+	if m.searchCommentsFn != nil {
+		return m.searchCommentsFn(ctx, body)
 	}
 	return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
 }

@@ -399,14 +399,12 @@ func TestSearchCaseComments(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("forwards case ID and body to upstream and returns 200", func(t *testing.T) {
-		var capturedCaseID string
+	t.Run("injects referenceId and referenceType into SearchComments payload", func(t *testing.T) {
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
-			searchCaseCommentsFn: func(_ context.Context, caseID string, body []byte) ([]byte, error) {
-				capturedCaseID = caseID
+			searchCommentsFn: func(_ context.Context, body []byte) ([]byte, error) {
 				capturedBody = body
-				return []byte(`{"comments":[{"id":"c-1","caseId":"case-42","type":"comment","content":"First comment","createdBy":"user-1","createdOn":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
+				return []byte(`{"comments":[{"id":"c-1","referenceId":"case-42","type":"comment","content":"First comment","createdBy":"user-1","createdOn":"2026-06-03T00:00:00Z"}],"total":1,"limit":20,"offset":0,"hasMore":false}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
@@ -419,11 +417,15 @@ func TestSearchCaseComments(t *testing.T) {
 		assertStatus(t, w, http.StatusOK)
 		assertContentType(t, w, "application/json")
 
-		if capturedCaseID != "case-42" {
-			t.Errorf("upstream received caseID %q, want %q", capturedCaseID, "case-42")
+		var payload map[string]any
+		if err := json.Unmarshal(capturedBody, &payload); err != nil {
+			t.Fatalf("upstream received invalid JSON: %v", err)
 		}
-		if !json.Valid(capturedBody) {
-			t.Errorf("upstream received invalid JSON body: %s", capturedBody)
+		if payload["referenceId"] != "case-42" {
+			t.Errorf("referenceId = %v, want %q", payload["referenceId"], "case-42")
+		}
+		if payload["referenceType"] != "case" {
+			t.Errorf("referenceType = %v, want %q", payload["referenceType"], "case")
 		}
 
 		resp := decodeJSON[map[string]any](t, w)
@@ -437,7 +439,7 @@ func TestSearchCaseComments(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				client := &mockEntityCaseClient{
-					searchCaseCommentsFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					searchCommentsFn: func(_ context.Context, _ []byte) ([]byte, error) {
 						return nil, tc.err
 					},
 				}

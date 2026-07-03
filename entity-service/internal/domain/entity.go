@@ -1095,9 +1095,10 @@ type Comment struct {
 
 // SearchCommentsRequest is the input for POST /comments/search.
 type SearchCommentsRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Pagination    Pagination    `json:"pagination"`
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType ReferenceType   `json:"referenceType"`
+	Pagination    Pagination      `json:"pagination"`
+	Filters       *CommentFilters `json:"filters,omitempty"`
 }
 
 // SearchCommentsResponse is the paginated result of a generic comment search.
