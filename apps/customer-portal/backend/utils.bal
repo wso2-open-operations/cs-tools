@@ -335,7 +335,8 @@ public isolated function mapDeployments(entity:DeploymentsResponse response) ret
             description: deployment.description,
             url: deployment.url,
             project: project != () ? {id: project.id, label: project.name} : (),
-            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : ()
+            'type: 'type != () ? {id: 'type.id.toString(), label: 'type.label} : (),
+            productCount: deployment.deployedProductCount
         };
     return {deployments, totalRecords: response.totalRecords, offset: response.offset, 'limit: response.'limit};
 }

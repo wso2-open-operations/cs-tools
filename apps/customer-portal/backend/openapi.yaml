@@ -213,6 +213,10 @@ paths:
       responses:
         "200":
           description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentsResponse'
         "400":
           description: BadRequest
           content:
@@ -4828,6 +4832,73 @@ components:
           type: string
           description: Description
       description: Payload for creating a deployment.
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID
+        number:
+          type: string
+          description: Number of the deployment
+          nullable: true
+        name:
+          type: string
+          description: Name
+        createdOn:
+          type: string
+          description: Created date and time
+        updatedOn:
+          type: string
+          description: Updated date and time
+        description:
+          type: string
+          description: Description
+          nullable: true
+        url:
+          type: string
+          description: URL
+          nullable: true
+        project:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Associated project
+        type:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceItem'
+          nullable: true
+          description: Type
+        productCount:
+          type: integer
+          description: Number of deployed products associated with this deployment
+          format: int64
+      description: Deployment information.
+    DeploymentsResponse:
+      required:
+      - deployments
+      - totalRecords
+      type: object
+      properties:
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+          description: List of deployments
+        totalRecords:
+          type: integer
+          description: Total records count
+          format: int64
+        offset:
+          minimum: 0
+          type: integer
+          description: Offset for pagination
+          format: int64
+        limit:
+          type: integer
+          description: Limit for pagination
+          format: int64
+      description: Deployments search response.
     DeploymentSearchPayload:
       type: object
       properties:
