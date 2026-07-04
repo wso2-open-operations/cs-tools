@@ -2067,19 +2067,19 @@ public type DeployedProductMetricsChartDataPoint record {|
 
 # Summary for deployed product metrics.
 public type DeployedProductMetricsSummary record {|
-    # Date range of the metrics query
+    # Queried date range
     record {|
         string 'start;
         string 'end;
     |} dateRange;
-    # Total number of distinct instances
+    # Total number of distinct instances in the range
     int totalInstances;
-    # Minimum CPU cores across the range
-    int minCores;
-    # Maximum CPU cores across the range
-    int maxCores;
-    # Average CPU cores across the range
-    decimal avgCores;
+    # Minimum core count in the range; null when there are no instances
+    int? minCores;
+    # Maximum core count in the range; null when there are no instances
+    int? maxCores;
+    # Average core count in the range; null when there are no instances
+    decimal? avgCores;
 |};
 
 # Response for deployed product metrics search.
