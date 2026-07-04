@@ -674,3 +674,16 @@ public isolated function searchEscalations(string idToken, EscalationSearchPaylo
 
     return csEntityClient->/escalations/search.post(payload, generateHeaders(idToken));
 }
+
+# Search metrics for a specific deployed product.
+#
+# + idToken - ID token for authorization
+# + deployedProductId - ID of the deployed product
+# + payload - Metrics search payload containing deploymentId, startDate, and endDate
+# + return - Deployed product metrics response or error
+public isolated function searchDeployedProductMetrics(string idToken, IdString deployedProductId,
+    DeployedProductMetricsPayload payload) returns DeployedProductMetricsResponse|error {
+
+    return csEntityClient->/deployed\-products/[deployedProductId]/metrics/search.post(payload,
+            generateHeaders(idToken));
+}

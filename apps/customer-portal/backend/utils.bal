@@ -292,6 +292,32 @@ public isolated function isInvalidLimitOffset(int? 'limit, int? offset) returns 
 public isolated function isInvalidDateRange(string? startDate, string? endDate) returns boolean =>
     startDate != () && endDate != () && startDate > endDate;
 
+# Validate that the date range does not exceed 1 year.
+#
+# + startDate - Start date string (format: YYYY-MM-DD)
+# + endDate - End date string (format: YYYY-MM-DD)
+# + return - True if the range is within 1 year, else false
+public isolated function isWithinOneYear(string startDate, string endDate) returns boolean {
+    do {
+        int startYear = check int:fromString(startDate.substring(0, 4));
+        int startMonth = check int:fromString(startDate.substring(5, 7));
+        int startDay = check int:fromString(startDate.substring(8, 10));
+        int endYear = check int:fromString(endDate.substring(0, 4));
+        int endMonth = check int:fromString(endDate.substring(5, 7));
+        int endDay = check int:fromString(endDate.substring(8, 10));
+
+        if endYear - startYear > 1 {
+            return false;
+        }
+        if endYear - startYear == 1 {
+            return endMonth < startMonth || (endMonth == startMonth && endDay <= startDay);
+        }
+        return true;
+    } on fail {
+        return false;
+    }
+}
+
 # Map attachments response to map to desired structure.
 #
 # + response - Attachments response from the entity service
@@ -1331,3 +1357,46 @@ public isolated function mapInstanceMetricStats(entity:InstanceMetricStatsRespon
     startDate: response.startDate,
     endDate: response.endDate
 };
+
+# Map deployed product metrics response.
+#
+# + response - Deployed product metrics response from the entity service
+# + return - Mapped deployed product metrics response
+public isolated function mapDeployedProductMetrics(entity:DeployedProductMetricsResponse response)
+    returns types:DeployedProductMetricsResponse {
+
+    types:DeployedProductMetricsChartDataPoint[] chartData =
+        from entity:DeployedProductMetricsChartDataPoint dataPoint in response.chartData
+        select {
+            date: dataPoint.date,
+            instanceCount: dataPoint.instanceCount,
+            totalCores: dataPoint.totalCores,
+            minCores: dataPoint.minCores,
+            maxCores: dataPoint.maxCores,
+            avgCores: dataPoint.avgCores,
+            instances: from entity:DeployedProductMetricsInstance instance in dataPoint.instances
+                select {
+                    id: instance.id,
+                    name: instance.name,
+                    cores: instance.cores
+                }
+        };
+
+    return {
+        product: {
+            id: response.deployedProduct.id,
+            name: response.deployedProduct.name
+        },
+        summary: {
+            dateRange: {
+                'start: response.summary.dateRange.'start,
+                'end: response.summary.dateRange.'end
+            },
+            totalInstances: response.summary.totalInstances,
+            minCores: response.summary.minCores,
+            maxCores: response.summary.maxCores,
+            avgCores: response.summary.avgCores
+        },
+        chartData
+    };
+}

@@ -1516,6 +1516,49 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+  /deployments/{deploymentId}/products/{productId}/metrics/search:
+    post:
+      summary: Search metrics for a deployed product within a specific deployment.
+      operationId: postDeploymentsDeploymentidProductsProductidMetricsSearch
+      parameters:
+      - name: deploymentId
+        in: path
+        description: ID of the deployment
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      - name: productId
+        in: path
+        description: ID of the deployed product
+        required: true
+        schema:
+          $ref: '#/components/schemas/IdString'
+      requestBody:
+        description: Metrics search payload containing startDate and endDate (within a 1-year range)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployedProductMetricsPayload'
+        required: true
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployedProductMetricsResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+        "500":
+          description: InternalServerError
+        "403":
+          description: Forbidden
   /deployments/products/{id}/catalogs/search:
     post:
       summary: Search catalogs for a specific deployed product with filters and pagination.
@@ -4785,6 +4828,127 @@ components:
           $ref: '#/components/schemas/Pagination'
       additionalProperties: false
       description: Deployed product search payload
+    DeployedProductMetricsPayload:
+      required:
+      - startDate
+      - endDate
+      type: object
+      properties:
+        startDate:
+          type: string
+          description: "Start date of the metrics range (format: YYYY-MM-DD)"
+        endDate:
+          type: string
+          description: "End date of the metrics range (format: YYYY-MM-DD)"
+    DeployedProductMetricsInstance:
+      required:
+      - id
+      - name
+      - cores
+      type: object
+      properties:
+        id:
+          type: string
+          description: Instance ID
+        name:
+          type: string
+          description: Instance name
+        cores:
+          type: integer
+          description: CPU cores allocated
+    DeployedProductMetricsChartDataPoint:
+      required:
+      - date
+      - instanceCount
+      - totalCores
+      - minCores
+      - maxCores
+      - avgCores
+      - instances
+      type: object
+      properties:
+        date:
+          type: string
+          description: "Date of the data point (format: YYYY-MM-DD)"
+        instanceCount:
+          type: integer
+          description: Number of instances on this date
+        totalCores:
+          type: integer
+          description: Total CPU cores on this date
+        minCores:
+          type: integer
+          description: Minimum CPU cores on this date
+        maxCores:
+          type: integer
+          description: Maximum CPU cores on this date
+        avgCores:
+          type: number
+          description: Average CPU cores on this date
+        instances:
+          type: array
+          description: Individual instances on this date
+          items:
+            $ref: '#/components/schemas/DeployedProductMetricsInstance'
+    DeployedProductMetricsSummary:
+      required:
+      - dateRange
+      - totalInstances
+      - minCores
+      - maxCores
+      - avgCores
+      type: object
+      properties:
+        dateRange:
+          required:
+          - start
+          - end
+          type: object
+          properties:
+            start:
+              type: string
+              description: Start date
+            end:
+              type: string
+              description: End date
+        totalInstances:
+          type: integer
+          description: Total number of distinct instances
+        minCores:
+          type: integer
+          description: Minimum CPU cores across the range
+        maxCores:
+          type: integer
+          description: Maximum CPU cores across the range
+        avgCores:
+          type: number
+          description: Average CPU cores across the range
+    DeployedProductMetricsResponse:
+      required:
+      - product
+      - summary
+      - chartData
+      type: object
+      properties:
+        product:
+          required:
+          - id
+          - name
+          type: object
+          properties:
+            id:
+              type: string
+              description: Deployed product ID
+            name:
+              type: string
+              description: Deployed product name
+        summary:
+          $ref: '#/components/schemas/DeployedProductMetricsSummary'
+        chartData:
+          type: array
+          description: Chart data points ordered by date
+          items:
+            $ref: '#/components/schemas/DeployedProductMetricsChartDataPoint'
     DeployedProductUpdatePayload:
       type: object
       properties:

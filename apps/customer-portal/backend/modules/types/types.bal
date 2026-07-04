@@ -2028,3 +2028,69 @@ public type GlobalSearchResponse record {|
     # List of matching cases
     GlobalSearchCase[] cases;
 |};
+
+# Request payload for searching deployed product metrics.
+public type DeployedProductMetricsPayload record {|
+    # Start date of the metrics range (format: YYYY-MM-DD), required
+    entity:Date startDate;
+    # End date of the metrics range (format: YYYY-MM-DD), required
+    entity:Date endDate;
+|};
+
+# A single instance entry within a chart data point.
+public type DeployedProductMetricsInstance record {|
+    # Instance ID
+    string id;
+    # Instance name
+    string name;
+    # CPU cores allocated
+    int cores;
+|};
+
+# A single chart data point for deployed product metrics.
+public type DeployedProductMetricsChartDataPoint record {|
+    # Date of the data point (format: YYYY-MM-DD)
+    string date;
+    # Number of instances on this date
+    int instanceCount;
+    # Total CPU cores on this date
+    int totalCores;
+    # Minimum CPU cores on this date
+    int minCores;
+    # Maximum CPU cores on this date
+    int maxCores;
+    # Average CPU cores on this date
+    decimal avgCores;
+    # Individual instances on this date
+    DeployedProductMetricsInstance[] instances;
+|};
+
+# Summary for deployed product metrics.
+public type DeployedProductMetricsSummary record {|
+    # Date range of the metrics query
+    record {|
+        string 'start;
+        string 'end;
+    |} dateRange;
+    # Total number of distinct instances
+    int totalInstances;
+    # Minimum CPU cores across the range
+    int minCores;
+    # Maximum CPU cores across the range
+    int maxCores;
+    # Average CPU cores across the range
+    decimal avgCores;
+|};
+
+# Response for deployed product metrics search.
+public type DeployedProductMetricsResponse record {|
+    # The deployed product reference
+    record {|
+        string id;
+        string name;
+    |} product;
+    # Summary statistics for the queried range
+    DeployedProductMetricsSummary summary;
+    # Chart data points ordered by date
+    DeployedProductMetricsChartDataPoint[] chartData;
+|};

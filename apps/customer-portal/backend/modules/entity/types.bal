@@ -2618,3 +2618,81 @@ public type GlobalSearchResponse record {|
     GlobalSearchCase[] cases;
     json...;
 |};
+
+# Request payload for searching deployed product metrics.
+public type DeployedProductMetricsPayload record {|
+    # Deployment ID reference (e.g. "deployments/<id>")
+    IdString deploymentId;
+    # Start date of the metrics range (format: YYYY-MM-DD)
+    Date startDate;
+    # End date of the metrics range (format: YYYY-MM-DD)
+    Date endDate;
+|};
+
+# A single instance entry within a chart data point.
+public type DeployedProductMetricsInstance record {|
+    # Instance ID
+    string id;
+    # Instance name
+    string name;
+    # CPU cores allocated
+    int cores;
+    json...;
+|};
+
+# A single chart data point for deployed product metrics.
+public type DeployedProductMetricsChartDataPoint record {|
+    # Date of the data point (format: YYYY-MM-DD)
+    string date;
+    # Number of instances on this date
+    int instanceCount;
+    # Total CPU cores on this date
+    int totalCores;
+    # Minimum CPU cores on this date
+    int minCores;
+    # Maximum CPU cores on this date
+    int maxCores;
+    # Average CPU cores on this date
+    decimal avgCores;
+    # Individual instances on this date
+    DeployedProductMetricsInstance[] instances;
+    json...;
+|};
+
+# Summary for deployed product metrics.
+public type DeployedProductMetricsSummary record {|
+    # Date range of the metrics query
+    record {|
+        # Start date
+        string 'start;
+        # End date
+        string 'end;
+        json...;
+    |} dateRange;
+    # Total number of distinct instances
+    int totalInstances;
+    # Minimum CPU cores across the range
+    int minCores;
+    # Maximum CPU cores across the range
+    int maxCores;
+    # Average CPU cores across the range
+    decimal avgCores;
+    json...;
+|};
+
+# Response for deployed product metrics search.
+public type DeployedProductMetricsResponse record {|
+    # The deployed product reference
+    record {|
+        # Deployed product ID
+        string id;
+        # Deployed product name
+        string name;
+        json...;
+    |} deployedProduct;
+    # Summary statistics for the queried range
+    DeployedProductMetricsSummary summary;
+    # Chart data points ordered by date
+    DeployedProductMetricsChartDataPoint[] chartData;
+    json...;
+|};
