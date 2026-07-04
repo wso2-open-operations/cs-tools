@@ -1559,6 +1559,8 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+        "404":
+          description: NotFound
   /deployments/{deploymentId}/products/{productId}/metrics/usage-counts/search:
     post:
       summary: Search metrics usage counts for a deployed product within a specific deployment.
@@ -1602,6 +1604,8 @@ paths:
           description: InternalServerError
         "403":
           description: Forbidden
+        "404":
+          description: NotFound
   /deployments/products/{id}/catalogs/search:
     post:
       summary: Search catalogs for a specific deployed product with filters and pagination.
@@ -4878,11 +4882,9 @@ components:
       type: object
       properties:
         startDate:
-          type: string
-          description: "Start date of the metrics range (format: YYYY-MM-DD)"
+          $ref: '#/components/schemas/Date'
         endDate:
-          type: string
-          description: "End date of the metrics range (format: YYYY-MM-DD)"
+          $ref: '#/components/schemas/Date'
     DeployedProductMetricsInstance:
       required:
       - id
@@ -4937,9 +4939,6 @@ components:
       required:
       - dateRange
       - totalInstances
-      - minCores
-      - maxCores
-      - avgCores
       type: object
       properties:
         dateRange:
@@ -4949,23 +4948,24 @@ components:
           type: object
           properties:
             start:
-              type: string
-              description: Start date
+              $ref: '#/components/schemas/Date'
             end:
-              type: string
-              description: End date
+              $ref: '#/components/schemas/Date'
         totalInstances:
           type: integer
-          description: Total number of distinct instances
+          description: Total number of distinct instances in the range
         minCores:
           type: integer
-          description: Minimum CPU cores across the range
+          nullable: true
+          description: "Minimum core count in the range; null when there are no instances"
         maxCores:
           type: integer
-          description: Maximum CPU cores across the range
+          nullable: true
+          description: "Maximum core count in the range; null when there are no instances"
         avgCores:
           type: number
-          description: Average CPU cores across the range
+          nullable: true
+          description: "Average core count in the range; null when there are no instances"
     DeployedProductMetricsResponse:
       required:
       - product
@@ -4999,11 +4999,9 @@ components:
       type: object
       properties:
         startDate:
-          type: string
-          description: "Start date of the metrics range (format: YYYY-MM-DD)"
+          $ref: '#/components/schemas/Date'
         endDate:
-          type: string
-          description: "End date of the metrics range (format: YYYY-MM-DD)"
+          $ref: '#/components/schemas/Date'
     DeployedProductMetricsUsageCountsSummary:
       required:
       - dateRange

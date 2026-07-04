@@ -2808,7 +2808,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + return - Deployed product metrics response or error response
     resource function post deployments/[entity:IdString deploymentId]/products/[entity:IdString productId]
             /metrics/search(http:RequestContext ctx, types:DeployedProductMetricsPayload payload)
-        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -2868,6 +2868,13 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     }
                 };
             }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "Deployed product or deployment not found."
+                    }
+                };
+            }
 
             string customError = "Failed to retrieve metrics for the deployed product.";
             log:printError(customError, response);
@@ -2890,7 +2897,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     resource function post deployments/[entity:IdString deploymentId]/products/[entity:IdString productId]
             /metrics/usage\-counts/search(http:RequestContext ctx,
             types:DeployedProductMetricsUsageCountsPayload payload)
-        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -2949,6 +2956,13 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 return <http:Forbidden>{
                     body: {
                         message: "Access to the requested deployed product metrics usage counts is forbidden!"
+                    }
+                };
+            }
+            if getStatusCode(response) == http:STATUS_NOT_FOUND {
+                return <http:NotFound>{
+                    body: {
+                        message: "Deployed product or deployment not found."
                     }
                 };
             }
