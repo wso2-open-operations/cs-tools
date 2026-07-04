@@ -219,3 +219,64 @@ describe("CaseActionBar — nextStates-driven buttons", () => {
     expect(screen.getByRole("button", { name: /more/i })).toBeInTheDocument();
   });
 });
+
+describe("CaseActionBar — reassign gating for WIP-Ongoing", () => {
+  /** Open the "More" overflow and return the reassign engineer menu item. */
+  function openReassignItem(): HTMLElement {
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
+    return screen.getByRole("menuitem", { name: /assign \/ reassign engineer/i });
+  }
+
+  it("disables reassign when the case is Work in progress + Ongoing", () => {
+    // The backend silently reverts an assignee change on a WIP-Ongoing case and
+    // still returns success, so the action must be gated rather than fired.
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={{
+          ...caseInState("work_in_progress", ["solution_proposed"]),
+          workState: "ongoing",
+        }}
+        onAction={onAction}
+      />,
+    );
+    const item = openReassignItem();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps reassign enabled when the WIP case is paused (not ongoing)", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={{
+          ...caseInState("work_in_progress", ["solution_proposed"]),
+          workState: "paused",
+        }}
+        onAction={onAction}
+      />,
+    );
+    const item = openReassignItem();
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "reassign_engineer" });
+  });
+
+  it("keeps reassign enabled for a non-WIP state regardless of workState", () => {
+    const onAction = vi.fn();
+    render(
+      <CaseActionBar
+        caseDetail={{
+          ...caseInState("awaiting_info", ["waiting_on_wso2"]),
+          workState: "ongoing",
+        }}
+        onAction={onAction}
+      />,
+    );
+    const item = openReassignItem();
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(onAction).toHaveBeenCalledWith({ secondary: "reassign_engineer" });
+  });
+});

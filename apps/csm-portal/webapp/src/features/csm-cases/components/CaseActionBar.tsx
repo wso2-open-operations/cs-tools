@@ -178,6 +178,8 @@ interface SecondaryItem {
   divider?: boolean;
   /** If true, the item is greyed out and not clickable. */
   disabled?: boolean;
+  /** Optional hover hint — used to explain why a `disabled` item is greyed out. */
+  tooltip?: string;
 }
 
 /**
@@ -216,12 +218,29 @@ function buildSecondaryItems(caseDetail: CsmCaseDetail): SecondaryItem[] {
     });
   }
 
+  // Assignee changes are rejected while a case is Work in progress + Ongoing:
+  // the backend silently reverts the change and still reports success, so the
+  // reassign would appear to work while the assignee stays put. Gate the action
+  // here so we never fire that no-op. The work must be paused first (by the
+  // current assignee) or the reassignment handled by a lead.
+  const reassignBlocked =
+    caseDetail.state === "work_in_progress" && caseDetail.workState === "ongoing";
+
   // Only "Copy case link" is wired up for now. The rest are disabled until
   // their backend flows land, so the menu advertises the roadmap without
   // exposing dead actions that would no-op or toast a mock message.
   items.push(
     { key: "raise_git_issue", label: "Raise internal Git issue…", icon: <GitBranch size={16} />, divider: true },
-    { key: "reassign_engineer", label: "Assign / reassign engineer…", icon: <User size={16} />, divider: true },
+    {
+      key: "reassign_engineer",
+      label: "Assign / reassign engineer…",
+      icon: <User size={16} />,
+      divider: true,
+      disabled: reassignBlocked,
+      tooltip: reassignBlocked
+        ? "Can't reassign while the case is in progress and ongoing. Pause the work first, or ask the current assignee or a lead to reassign."
+        : undefined,
+    },
     { key: "escalate", label: "Escalate to lead…", icon: <TriangleAlert size={16} />, disabled: true },
     { key: "change_severity", label: "Request severity change…", icon: <ShieldAlert size={16} />, disabled: true },
     { key: "hold_auto_close", label: "Hold auto-closure…", icon: <PauseCircle size={16} />, divider: true, disabled: true },
@@ -333,26 +352,44 @@ export default function CaseActionBar({
         open={!!menuAnchor}
         onClose={() => setMenuAnchor(null)}
       >
-        {secondary.map((item) => [
-          <MenuItem
-            key={item.key}
-            disabled={item.disabled}
-            onClick={() => {
-              setMenuAnchor(null);
-              void onAction({ secondary: item.key });
-            }}
-            sx={{ gap: 1.25, minHeight: 36 }}
-          >
-            {item.icon}
-            {item.label}
-          </MenuItem>,
-          item.divider ? (
-            <Box
-              key={`${item.key}-divider`}
-              sx={{ borderTop: 1, borderColor: "divider", my: 0.25 }}
-            />
-          ) : null,
-        ])}
+        {secondary.map((item) => {
+          const menuItem = (
+            <MenuItem
+              key={item.key}
+              disabled={item.disabled}
+              onClick={() => {
+                if (item.disabled) return;
+                setMenuAnchor(null);
+                void onAction({ secondary: item.key });
+              }}
+              sx={{ gap: 1.25, minHeight: 36 }}
+            >
+              {item.icon}
+              {item.label}
+            </MenuItem>
+          );
+          return [
+            // A disabled MenuItem has `pointer-events: none`, so a Tooltip only
+            // fires when it wraps a non-disabled span. Wrap only the tooltip item
+            // (which is disabled, so not keyboard-focusable anyway); leave the
+            // other items as bare MenuItems so the menu's arrow-key nav works.
+            item.tooltip ? (
+              <Tooltip key={item.key} title={item.tooltip}>
+                <Box component="span" sx={{ display: "block" }}>
+                  {menuItem}
+                </Box>
+              </Tooltip>
+            ) : (
+              menuItem
+            ),
+            item.divider ? (
+              <Box
+                key={`${item.key}-divider`}
+                sx={{ borderTop: 1, borderColor: "divider", my: 0.25 }}
+              />
+            ) : null,
+          ];
+        })}
       </Menu>
 
       <Dialog
