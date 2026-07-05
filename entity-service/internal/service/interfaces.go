@@ -149,7 +149,7 @@ type CaseService interface {
 	// ValidationError is returned for a malformed UUID; a NotFoundError if no case matches.
 	GetCaseByID(ctx context.Context, id string) (domain.CaseView, error)
 	// GetCaseSlas returns the SLAs attached to the case identified by the given UUID.
-	// Populated for the ServiceNow data source; the Postgres path returns an empty list.
+	// Populated when the backing data source tracks SLAs; the Postgres path returns an empty list.
 	GetCaseSlas(ctx context.Context, id string) (domain.CaseSlaListView, error)
 	// SearchCases returns a paginated list of cases filtered by optional project IDs,
 	// deployment IDs, deployed product IDs, state keys, severity keys, and search query.

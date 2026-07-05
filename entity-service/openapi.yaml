@@ -3129,7 +3129,7 @@ components:
           enum: [in_progress, paused, completed, cancelled, breached]
         stageLabel:
           type: string
-          description: Raw stage label as returned by ServiceNow.
+          description: Stage label as provided by the data source.
         hasBreached:
           type: boolean
         businessTimeLeftLabel:

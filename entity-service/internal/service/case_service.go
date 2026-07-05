@@ -437,8 +437,8 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}, nil
 }
 
-// GetCaseSlas returns an empty SLA list for the Postgres data source; SLAs are
-// tracked only in the ServiceNow data source.
+// GetCaseSlas returns an empty SLA list for the Postgres data source, which
+// does not track SLAs.
 func (s *caseService) GetCaseSlas(_ context.Context, id string) (domain.CaseSlaListView, error) {
 	return domain.CaseSlaListView{CaseID: id, Count: 0, Slas: []domain.CaseSla{}}, nil
 }
