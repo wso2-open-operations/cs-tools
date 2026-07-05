@@ -296,26 +296,22 @@ public isolated function isInvalidDateRange(string? startDate, string? endDate) 
 #
 # + startDate - Start date string (format: YYYY-MM-DD)
 # + endDate - End date string (format: YYYY-MM-DD)
-# + return - True if the range is within 1 year, else false
-public isolated function isWithinOneYear(string startDate, string endDate) returns boolean {
-    do {
-        int startYear = check int:fromString(startDate.substring(0, 4));
-        int startMonth = check int:fromString(startDate.substring(5, 7));
-        int startDay = check int:fromString(startDate.substring(8, 10));
-        int endYear = check int:fromString(endDate.substring(0, 4));
-        int endMonth = check int:fromString(endDate.substring(5, 7));
-        int endDay = check int:fromString(endDate.substring(8, 10));
+# + return - True if the range is within 1 year, false if it exceeds 1 year, or error if parsing fails
+public isolated function isWithinOneYear(string startDate, string endDate) returns boolean|error {
+    int startYear = check int:fromString(startDate.substring(0, 4));
+    int startMonth = check int:fromString(startDate.substring(5, 7));
+    int startDay = check int:fromString(startDate.substring(8, 10));
+    int endYear = check int:fromString(endDate.substring(0, 4));
+    int endMonth = check int:fromString(endDate.substring(5, 7));
+    int endDay = check int:fromString(endDate.substring(8, 10));
 
-        if endYear - startYear > 1 {
-            return false;
-        }
-        if endYear - startYear == 1 {
-            return endMonth < startMonth || (endMonth == startMonth && endDay <= startDay);
-        }
-        return true;
-    } on fail {
+    if endYear - startYear > 1 {
         return false;
     }
+    if endYear - startYear == 1 {
+        return endMonth < startMonth || (endMonth == startMonth && endDay <= startDay);
+    }
+    return true;
 }
 
 # Map attachments response to map to desired structure.

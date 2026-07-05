@@ -2667,6 +2667,7 @@ public type DeployedProductMetricsSummary record {|
         string 'start;
         # End date of the range
         string 'end;
+        json...;
     |} dateRange;
     # Total number of distinct instances in the range
     int totalInstances;

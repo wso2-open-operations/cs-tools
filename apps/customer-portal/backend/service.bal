@@ -2827,7 +2827,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if !isWithinOneYear(payload.startDate, payload.endDate) {
+        boolean|error withinOneYear = isWithinOneYear(payload.startDate, payload.endDate);
+        if withinOneYear is error {
+            log:printError("Failed to parse date range for deployed product metrics search.", withinOneYear);
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to process the requested date range."
+                }
+            };
+        }
+        if !withinOneYear {
             return <http:BadRequest>{
                 body: {
                     message: "Invalid date range: the range between startDate and endDate must not exceed 1 year."
@@ -2839,7 +2848,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 userInfo.idToken,
                 productId,
                 {
-                    deploymentId: deploymentId,
+                    deploymentId,
                     startDate: payload.startDate,
                     endDate: payload.endDate
                 });
@@ -2916,7 +2925,17 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
-        if !isWithinOneYear(payload.startDate, payload.endDate) {
+        boolean|error withinOneYear = isWithinOneYear(payload.startDate, payload.endDate);
+        if withinOneYear is error {
+            log:printError("Failed to parse date range for deployed product metrics usage counts search.",
+                    withinOneYear);
+            return <http:InternalServerError>{
+                body: {
+                    message: "Failed to process the requested date range."
+                }
+            };
+        }
+        if !withinOneYear {
             return <http:BadRequest>{
                 body: {
                     message: "Invalid date range: the range between startDate and endDate must not exceed 1 year."
@@ -2929,7 +2948,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                 userInfo.idToken,
                 productId,
                 {
-                    deploymentId: deploymentId,
+                    deploymentId,
                     startDate: payload.startDate,
                     endDate: payload.endDate
                 });

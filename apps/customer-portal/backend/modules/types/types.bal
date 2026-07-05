@@ -2069,7 +2069,9 @@ public type DeployedProductMetricsChartDataPoint record {|
 public type DeployedProductMetricsSummary record {|
     # Queried date range
     record {|
+        # Start date of the range
         string 'start;
+        # End date of the range
         string 'end;
     |} dateRange;
     # Total number of distinct instances in the range
@@ -2086,7 +2088,9 @@ public type DeployedProductMetricsSummary record {|
 public type DeployedProductMetricsResponse record {|
     # The deployed product reference
     record {|
+        # Deployed product ID
         string id;
+        # Deployed product name
         string name;
     |} product;
     # Summary statistics for the queried range
@@ -2107,7 +2111,9 @@ public type DeployedProductMetricsUsageCountsPayload record {|
 public type DeployedProductMetricsUsageCountsSummary record {|
     # Date range of the metrics query
     record {|
+        # Start date of the range
         string 'start;
+        # End date of the range
         string 'end;
     |} dateRange;
     # Count types aggregated over the range
@@ -2118,7 +2124,9 @@ public type DeployedProductMetricsUsageCountsSummary record {|
 public type DeployedProductMetricsUsageCountsResponse record {|
     # The deployed product reference
     record {|
+        # Deployed product ID
         string id;
+        # Deployed product name
         string name;
     |} product;
     # Summary statistics for the queried range
