@@ -156,18 +156,6 @@ export type EnvironmentBreakdownAccordionProps = {
 
 export type ProductExpandedViewProps = {
   product: UsageEnvironmentProduct;
-  expandedInstanceKeys: Set<string>;
-  onToggleInstance: (key: string) => void;
-};
-
-export type InstanceMiniTrendCardProps = {
-  block: UsageInstanceChartBlock;
-};
-
-export type InstanceAccordionRowProps = {
-  instance: UsageProductInstanceRow;
-  expanded: boolean;
-  onToggle: () => void;
 };
 
 export type ProductAccordionRowProps = {
@@ -175,8 +163,6 @@ export type ProductAccordionRowProps = {
   deploymentId: string;
   expanded: boolean;
   onToggle: () => void;
-  expandedInstanceKeys: Set<string>;
-  onToggleInstance: (key: string) => void;
 };
 
 export type MetricPillProps = {

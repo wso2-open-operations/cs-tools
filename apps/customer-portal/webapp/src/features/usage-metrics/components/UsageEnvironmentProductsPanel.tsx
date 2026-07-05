@@ -28,21 +28,20 @@ import {
   colors,
 } from "@wso2/oxygen-ui";
 import {
-  Activity,
   ChevronDown,
   Code2,
-  Cpu,
+  Monitor,
   Package,
   Server,
 } from "@wso2/oxygen-ui-icons-react";
 import EmptyState from "@components/empty-state/EmptyState";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   USAGE_LINE_CHART_MARGIN,
   USAGE_METRICS_ENVIRONMENT_PRODUCTS_ERROR,
-  USAGE_METRICS_INSTANCE_CORE_COUNT,
+  USAGE_METRICS_INSTANCE_OS,
   USAGE_METRICS_INSTANCE_JAVA,
   USAGE_METRICS_INSTANCE_U2,
   USAGE_METRICS_NO_INSTANCE_DATA,
@@ -50,7 +49,6 @@ import {
   USAGE_METRICS_PRODUCT_INSTANCES_SECTION,
   USAGE_METRICS_PRODUCT_INSTANCE_METRICS,
   USAGE_METRICS_PRODUCT_CORE_METRICS,
-  USAGE_METRICS_STAT_LABEL_CURR,
   USAGE_METRICS_STAT_LABEL_AVG,
   USAGE_METRICS_STAT_LABEL_MIN,
   USAGE_METRICS_STAT_LABEL_MAX,
@@ -58,32 +56,19 @@ import {
 import { UsageChartSurface } from "@features/usage-metrics/components/UsageChartSurface";
 import usePostDeploymentInstancesUsagesSearch from "@features/project-details/api/usePostDeploymentInstancesUsagesSearch";
 import usePostDeploymentInstancesMetricsSearch from "@features/project-details/api/usePostDeploymentInstancesMetricsSearch";
-import type { CurrMinMaxAvg } from "@features/project-details/types/usage";
+import type { CurrMinMaxAvg, UsageProductInstanceRow } from "@features/project-details/types/usage";
 import type {
-  InstanceAccordionRowProps,
-  InstanceMiniTrendCardProps,
   MetricPillProps,
   ProductAccordionRowProps,
   ProductExpandedViewProps,
   UsageEnvironmentProductsPanelProps,
 } from "@features/usage-metrics/types/usageMetrics";
 import { getUsageEnvironmentPanelAccent } from "@features/usage-metrics/utils/usageMetricsAccent";
-import {
-  buildUsageProductInstanceAccordionKey,
-  deriveUsageEnvironmentProducts,
-} from "@features/usage-metrics/utils/usageMetricsEnvironmentProducts";
-import { resolveSignedDeltaColor } from "@features/usage-metrics/utils/usageMetricSignedDelta";
+import { deriveUsageEnvironmentProducts } from "@features/usage-metrics/utils/usageMetricsEnvironmentProducts";
 
-// ─── Per-product expanded view (Renders pre-computed inherited instances directly) ──────
+// ─── Per-product expanded view ────────────────────────────────────────────────
 
-/**
- * Renders the expanded product instance grid utilizing the pre-processed grouped payload.
- */
-function ProductExpandedView({
-  product,
-  expandedInstanceKeys,
-  onToggleInstance,
-}: ProductExpandedViewProps): JSX.Element {
+function ProductExpandedView({ product }: ProductExpandedViewProps): JSX.Element {
   const instances = product.instances;
 
   if (!instances || instances.length === 0) {
@@ -94,7 +79,8 @@ function ProductExpandedView({
     );
   }
 
-  const chartGridSize = product.chartTrends.length === 1 ? 12
+  const chartGridSize =
+    product.chartTrends.length === 1 ? 12
     : product.chartTrends.length === 3 ? 4
     : 6;
 
@@ -144,18 +130,7 @@ function ProductExpandedView({
         </Typography>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {instances.map((inst) => (
-            <InstanceAccordionRow
-              key={inst.id}
-              instance={inst}
-              expanded={expandedInstanceKeys.has(
-                buildUsageProductInstanceAccordionKey(product.id, inst.id),
-              )}
-              onToggle={() =>
-                onToggleInstance(
-                  buildUsageProductInstanceAccordionKey(product.id, inst.id),
-                )
-              }
-            />
+            <InstanceRow key={inst.id} instance={inst} />
           ))}
         </Box>
       </Box>
@@ -163,207 +138,71 @@ function ProductExpandedView({
   );
 }
 
-// ─── Instance minicard ────────────────────────────────────────────────────────
+// ─── Flat instance row ────────────────────────────────────────────────────────
 
-function InstanceMiniTrendCard({
-  block,
-}: InstanceMiniTrendCardProps): JSX.Element {
-  const deltaColor = resolveSignedDeltaColor(block.deltaPositive);
+function InstanceRow({
+  instance,
+}: {
+  instance: UsageProductInstanceRow;
+}): JSX.Element {
+  const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
 
   return (
-    <Card
+    <Box
       sx={{
-        p: 2,
-        border: 1,
-        borderColor: "divider",
-        borderRadius: 0,
+        px: 2,
+        py: 1.5,
         display: "flex",
-        flexDirection: "column",
-        gap: 0,
+        flexDirection: { xs: "column", lg: "row" },
+        alignItems: { xs: "stretch", lg: "center" },
+        justifyContent: "space-between",
+        gap: 2,
+        border: "1px solid",
+        borderColor: "divider",
+        bgcolor: wellBg,
       }}
     >
       <Box
         sx={{
           display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          mb: 1.5,
-          gap: 1,
+          alignItems: "center",
+          gap: 1.5,
+          minWidth: { lg: 200 },
         }}
       >
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            {block.title}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {block.caption}
-          </Typography>
-        </Box>
-        <Box sx={{ textAlign: "right", flexShrink: 0 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            {block.headlineValue}
-          </Typography>
-          <Typography
-            variant="caption"
-            sx={{ fontWeight: 600, color: deltaColor }}
-          >
-            {block.deltaLabel}
-          </Typography>
-        </Box>
+        <Server size={18} color={colors.grey?.[500]} />
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {instance.hostName}
+        </Typography>
       </Box>
-      <UsageChartSurface minHeight={150}>
-        <LineChart
-          data={block.data}
-          xAxisDataKey="name"
-          height={150}
-          width="100%"
-          margin={USAGE_LINE_CHART_MARGIN}
-          accessibilityLayer={false}
-          xAxis={{ interval: Math.max(0, Math.ceil(block.data.length / 6) - 1) }}
-          legend={{ show: false }}
-          grid={{ show: true, strokeDasharray: "3 3" }}
-          lines={[
-            {
-              dataKey: "value",
-              name: block.title,
-              stroke: block.stroke,
-              strokeWidth: 2,
-              dot: false,
-            },
-          ]}
+      <Box
+        sx={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 5,
+          alignItems: "center",
+          justifyContent: { xs: "flex-start", lg: "flex-end" },
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        <MetricPill
+          icon={<Monitor size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_OS}
+          value={instance.os}
         />
-      </UsageChartSurface>
-    </Card>
-  );
-}
-
-function InstanceAccordionRow({
-  instance,
-  expanded,
-  onToggle,
-}: InstanceAccordionRowProps): JSX.Element {
-  const wellBg = alpha(colors.grey?.[500] ?? "#6B7280", 0.04);
-
-  return (
-    <Accordion
-      expanded={expanded}
-      onChange={() => onToggle()}
-      disableGutters
-      elevation={0}
-      sx={{
-        "&:before": { display: "none" },
-        boxShadow: 1,
-        overflow: "hidden",
-        border: "1px solid",
-        borderColor: "divider",
-        borderRadius: 0,
-        bgcolor: "background.paper",
-        "&.Mui-expanded": { margin: 0 },
-      }}
-    >
-      <AccordionSummary
-        expandIcon={
-          <ChevronDown size={20} color={colors.grey?.[400] ?? "#9CA3AF"} />
-        }
-        sx={{
-          px: 2,
-          py: 2,
-          minHeight: 56,
-          textAlign: "left",
-          borderRadius: 0,
-          "&:hover": { bgcolor: wellBg },
-        }}
-      >
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: { xs: "column", lg: "row" },
-            alignItems: { xs: "stretch", lg: "center" },
-            justifyContent: "space-between",
-            gap: 2,
-            width: "100%",
-            minWidth: 0,
-            pr: 1,
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1.5,
-              minWidth: { lg: 200 },
-            }}
-          >
-            <Server size={18} color={colors.grey?.[500]} />
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {instance.hostName}
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: { xs: 2, lg: 4 },
-              alignItems: "center",
-              justifyContent: { xs: "flex-start", lg: "flex-end" },
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            <MetricPill
-              icon={<Code2 size={16} color={colors.grey?.[400]} />}
-              label={USAGE_METRICS_INSTANCE_JAVA}
-              value={instance.javaVersion}
-            />
-            <MetricPill
-              icon={<Package size={16} color={colors.grey?.[400]} />}
-              label={USAGE_METRICS_INSTANCE_U2}
-              value={instance.u2Level}
-            />
-            {instance.summaryStats.map((stat) => (
-              <MetricPill
-                key={stat.label}
-                icon={<Activity size={16} color={colors.grey?.[400]} />}
-                label={stat.label}
-                value={stat.value}
-              />
-            ))}
-            <MetricPill
-              icon={<Cpu size={16} color={colors.grey?.[400]} />}
-              label={USAGE_METRICS_INSTANCE_CORE_COUNT}
-              value={`Curr ${instance.coreSummary.curr} / Avg ${instance.coreSummary.avg} / Min ${instance.coreSummary.min} / Max ${instance.coreSummary.max}`}
-            />
-          </Box>
-        </Box>
-      </AccordionSummary>
-      <AccordionDetails
-        sx={{
-          px: 2,
-          pb: 2,
-          pt: 0,
-          borderTop: 1,
-          borderColor: "divider",
-          bgcolor: alpha(colors.grey?.[500] ?? "#6B7280", 0.06),
-          borderRadius: 0,
-        }}
-      >
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          {instance.charts.map((chart) => (
-            <Grid
-              key={chart.title}
-              size={{
-                xs: 12,
-                lg: instance.charts.length === 1 ? 12
-                  : instance.charts.length === 3 ? 4
-                  : 6,
-              }}
-            >
-              <InstanceMiniTrendCard block={chart} />
-            </Grid>
-          ))}
-        </Grid>
-      </AccordionDetails>
-    </Accordion>
+        <MetricPill
+          icon={<Code2 size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_JAVA}
+          value={instance.javaVersion}
+        />
+        <MetricPill
+          icon={<Package size={16} color={colors.grey?.[400]} />}
+          label={USAGE_METRICS_INSTANCE_U2}
+          value={instance.u2Level}
+        />
+      </Box>
+    </Box>
   );
 }
 
@@ -377,7 +216,6 @@ function CurrMinMaxBlock({
   summary: CurrMinMaxAvg;
 }): JSX.Element {
   const cols = [
-    { l: USAGE_METRICS_STAT_LABEL_CURR, v: summary.curr, highlight: true },
     { l: USAGE_METRICS_STAT_LABEL_AVG, v: summary.avg, highlight: false },
     { l: USAGE_METRICS_STAT_LABEL_MIN, v: summary.min, highlight: false },
     { l: USAGE_METRICS_STAT_LABEL_MAX, v: summary.max, highlight: false },
@@ -394,7 +232,12 @@ function CurrMinMaxBlock({
       <Box sx={{ display: "flex", gap: 2 }}>
         {cols.map(({ l, v, highlight }) => (
           <Box key={l} sx={{ textAlign: "left" }}>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.25 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              display="block"
+              sx={{ mb: 0.25 }}
+            >
               {l}
             </Typography>
             <Typography
@@ -413,15 +256,13 @@ function CurrMinMaxBlock({
   );
 }
 
-// ─── Product accordion row (summary from deployment-scoped data) ───────────────
+// ─── Product accordion row ────────────────────────────────────────────────────
 
 function ProductAccordionRow({
   product,
   deploymentId,
   expanded,
   onToggle,
-  expandedInstanceKeys,
-  onToggleInstance,
 }: ProductAccordionRowProps): JSX.Element {
   const a = getUsageEnvironmentPanelAccent(deploymentId);
 
@@ -451,9 +292,7 @@ function ProductAccordionRow({
           minHeight: 56,
           bgcolor: a.headerBg,
           borderRadius: 0,
-          "&:hover": {
-            bgcolor: a.headerHoverBg,
-          },
+          "&:hover": { bgcolor: a.headerHoverBg },
         }}
       >
         <Box
@@ -473,7 +312,6 @@ function ProductAccordionRow({
               alignItems: "center",
               gap: 2,
               minWidth: { lg: 240 },
-              maxWidth: { lg: 280 },
             }}
           >
             <Box
@@ -487,7 +325,7 @@ function ProductAccordionRow({
               <Package size={20} color={a.iconColor} />
             </Box>
             <Box sx={{ textAlign: "left", minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 {product.name}
               </Typography>
             </Box>
@@ -499,14 +337,19 @@ function ProductAccordionRow({
               minWidth: 0,
               display: "flex",
               flexWrap: "wrap",
-              justifyContent: { xs: "flex-start", sm: "space-between" },
+              justifyContent: "flex-end",
               alignItems: "flex-start",
-              gap: 2,
+              gap: 5,
             }}
           >
             {product.summaryStats.map((stat) => (
               <Box key={stat.label}>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ mb: 0.5 }}
+                >
                   {stat.label}
                 </Typography>
                 <Typography variant="body1" sx={{ fontWeight: 700 }}>
@@ -535,11 +378,7 @@ function ProductAccordionRow({
           borderRadius: 0,
         }}
       >
-        <ProductExpandedView
-          product={product}
-          expandedInstanceKeys={expandedInstanceKeys}
-          onToggleInstance={onToggleInstance}
-        />
+        <ProductExpandedView product={product} />
       </AccordionDetails>
     </Accordion>
   );
@@ -561,18 +400,6 @@ function MetricPill({ icon, label, value }: MetricPillProps): JSX.Element {
   );
 }
 
-/**
- * Deployment tab — fetches deployment-scoped instances/usages/metrics to build
- * the product summary list, then lazily loads per-product detail from
- * POST /deployments/products/{id}/... when a product is expanded.
- *
- * @param deploymentId - The deployment whose products to display.
- * @param projectId - Active project ID (kept for possible future use).
- * @param dateRange - Selected date range for API queries.
- * @param expandedProductIds - Expanded product ids.
- * @param onToggleProduct - Toggle handler.
- * @returns {JSX.Element} Deployment tab content.
- */
 export default function UsageEnvironmentProductsPanel({
   deploymentId,
   dateRange,
@@ -586,7 +413,6 @@ export default function UsageEnvironmentProductsPanel({
     [dateRange],
   );
 
-  // Deployment-scoped calls for the product summary list
   const {
     data: usagesData,
     isLoading: usagesLoading,
@@ -606,22 +432,6 @@ export default function UsageEnvironmentProductsPanel({
     if (!usagesData || !metricsData) return [];
     return deriveUsageEnvironmentProducts(usagesData.usages, metricsData.metrics);
   }, [usagesData, metricsData]);
-
-  const [expandedInstanceKeys, setExpandedInstanceKeys] = useState<Set<string>>(
-    () => new Set(),
-  );
-
-  const toggleInstance = useCallback((key: string) => {
-    setExpandedInstanceKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
 
   if (isError) {
     return (
@@ -711,8 +521,6 @@ export default function UsageEnvironmentProductsPanel({
           deploymentId={deploymentId}
           expanded={expandedProductIds.has(product.id)}
           onToggle={() => onToggleProduct(product.id)}
-          expandedInstanceKeys={expandedInstanceKeys}
-          onToggleInstance={toggleInstance}
         />
       ))}
     </Box>

@@ -89,13 +89,13 @@ export const USAGE_METRICS_EXPANDED_CARD_CORES = "Cores";
 
 export const USAGE_METRICS_EXPANDED_CARD_TOTAL_TX = "Total Transactions";
 
+export const USAGE_METRICS_INSTANCE_OS = "OS";
+
 export const USAGE_METRICS_INSTANCE_JAVA = "Java Version";
 
 export const USAGE_METRICS_INSTANCE_U2 = "U2 Level";
 
 export const USAGE_METRICS_INSTANCE_TOTAL_TX = "Total Transactions";
-
-export const USAGE_METRICS_INSTANCE_CORE_COUNT = "Core Count (Curr/Avg/Min/Max)";
 
 export const USAGE_METRICS_INSTANCE_CHART_TX_TITLE = "Transactions";
 
@@ -157,9 +157,9 @@ export const USAGE_METRICS_TREND_LINE_CURRENT_FALLBACK = "Current";
 
 export const USAGE_METRICS_DATA_SOURCE_LABEL = "Data Source:";
 
-export const USAGE_METRICS_DATA_SOURCE_API_CALL = "API Call";
+export const USAGE_METRICS_DATA_SOURCE_API_CALL = "Live";
 
-export const USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD = "File Upload";
+export const USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD = "Upload";
 
 export const USAGE_METRICS_DATA_SOURCE_STATS_SECTION = "Usage by Data Source";
 
@@ -190,7 +190,7 @@ export const DATA_SOURCE_STAT_KEYS = [
 
 export const USAGE_METRICS_PRODUCT_INSTANCE_METRICS = "Instance Metrics";
 
-export const USAGE_METRICS_PRODUCT_CORE_METRICS = "Core Metrics";
+export const USAGE_METRICS_PRODUCT_CORE_METRICS = "CPU Usage";
 
 export const USAGE_METRICS_STAT_LABEL_CURR = "Curr";
 

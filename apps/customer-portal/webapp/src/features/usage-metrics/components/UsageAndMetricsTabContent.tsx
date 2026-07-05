@@ -24,17 +24,15 @@ import {
   USAGE_METRICS_DATA_SOURCE_API_CALL,
   USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD,
   USAGE_METRICS_DATA_SOURCE_LABEL,
+  USAGE_METRICS_DEPLOYMENT_TAB_PREFIX,
 } from "@features/usage-metrics/constants/usageMetricsConstants";
 import { useParams } from "react-router";
 import TabBar from "@components/tab-bar/TabBar";
-import UsageOverviewPanel from "@features/usage-metrics/components/UsageOverviewPanel";
 import UsageEnvironmentProductsPanel from "@features/usage-metrics/components/UsageEnvironmentProductsPanel";
 import UsageMetricsTimeRangeSelector from "@features/usage-metrics/components/UsageMetricsTimeRangeSelector";
 import DeploymentUsageUploadDialog from "@features/usage-metrics/components/DeploymentUsageUploadDialog";
-import { UsageMetricsInnerTabId } from "@features/usage-metrics/types/usageMetrics";
 import { UsageTimeRange } from "@features/project-details/types/usage";
 import {
-  buildUsageInnerTabs,
   getActiveUsageDeploymentId,
   resolveUsagePresetDateRange,
 } from "@features/usage-metrics/utils/usageMetricsTab";
@@ -50,12 +48,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [timeRange, setTimeRange] = useState<UsageTimeRange>(
     UsageTimeRange.ONE_MONTH,
   );
-  const [innerTab, setInnerTab] = useState<string>(
-    UsageMetricsInnerTabId.OVERVIEW,
-  );
-  const [expandedEnvironmentIds, setExpandedEnvironmentIds] = useState<
-    Set<string>
-  >(() => new Set());
+  const [innerTab, setInnerTab] = useState<string>("");
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -65,7 +58,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
   const [appliedCustomStart, setAppliedCustomStart] = useState<string>("");
   const [appliedCustomEnd, setAppliedCustomEnd] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState<boolean>(false);
-  const [dataSource, setDataSource] = useState<DataSource | null>(null);
+  const [dataSource] = useState<DataSource>(DataSource.API_CALL);
 
   const dateRange = useMemo(
     () => resolveUsagePresetDateRange(timeRange),
@@ -76,39 +69,29 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
     projectId ?? "",
   );
 
-  const innerTabs = useMemo(
-    () => buildUsageInnerTabs(deploymentsData),
+  const deploymentTabs = useMemo(
+    () =>
+      (deploymentsData ?? []).map((dep) => ({
+        id: `${USAGE_METRICS_DEPLOYMENT_TAB_PREFIX}${dep.id}`,
+        label: dep.name,
+        instanceCount: dep.instanceCount ?? 0,
+        productCount: dep.productCount ?? 0,
+      })),
     [deploymentsData],
   );
 
-  const overviewTab = useMemo(
-    () =>
-      innerTabs.find((tab) => tab.id === UsageMetricsInnerTabId.OVERVIEW) ??
-      innerTabs[0],
-    [innerTabs],
-  );
+  // Default to the first deployment that has products, fallback to first tab.
+  const defaultTab = useMemo(() => {
+    const withProducts = deploymentTabs.find((t) => t.productCount > 0);
+    return (withProducts ?? deploymentTabs[0])?.id ?? "";
+  }, [deploymentTabs]);
 
-  const deploymentTabs = useMemo(
-    () => innerTabs.filter((tab) => tab.id !== overviewTab?.id),
-    [innerTabs, overviewTab],
-  );
+  const activeTab = innerTab || defaultTab;
 
   const activeDeploymentId = useMemo(
-    () => getActiveUsageDeploymentId(innerTab),
-    [innerTab],
+    () => getActiveUsageDeploymentId(activeTab),
+    [activeTab],
   );
-
-  const toggleEnvironment = useCallback((id: string) => {
-    setExpandedEnvironmentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
 
   const toggleProduct = useCallback((productId: string) => {
     setExpandedProductIds((prev) => {
@@ -150,8 +133,8 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
         size="small"
         exclusive
         value={dataSource}
-        onChange={(_e, val: DataSource | null) => setDataSource(val)}
         aria-label="data source filter"
+        sx={{ pointerEvents: "none" }}
       >
         <ToggleButton value={DataSource.API_CALL} aria-label={USAGE_METRICS_DATA_SOURCE_API_CALL}>
           {USAGE_METRICS_DATA_SOURCE_API_CALL}
@@ -177,7 +160,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
 
   const timeRangeSelector = (
     <UsageMetricsTimeRangeSelector
-      innerTab={innerTab}
+      innerTab={activeTab}
       timeRange={timeRange}
       onTimeRangeChange={setTimeRange}
       onClearCustomApplied={clearCustomApplied}
@@ -222,45 +205,21 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
       >
         <Box
           sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            maxWidth: "100%",
-            minWidth: 0,
-            overflow: "hidden",
+            overflowX: "auto",
+            overflowY: "hidden",
+            scrollbarWidth: "none",
+            "&::-webkit-scrollbar": { display: "none" },
           }}
         >
-          {overviewTab && (
+          <Box sx={{ width: "max-content" }}>
             <TabBar
-              tabs={[overviewTab]}
-              activeTab={innerTab}
+              tabs={deploymentTabs}
+              activeTab={activeTab}
               onTabChange={setInnerTab}
               keepButtonWidth={true}
               compact={true}
-              sx={{ mb: 0, border: "none", boxShadow: "none", flexShrink: 0, flexGrow: 0 }}
+              sx={{ mb: 0, border: "none", boxShadow: "none" }}
             />
-          )}
-          <Box
-            sx={{
-              flex: "1 1 0",
-              minWidth: 0,
-              maxWidth: "100%",
-              overflowX: "auto",
-              overflowY: "hidden",
-              scrollbarWidth: "none",
-              "&::-webkit-scrollbar": { display: "none" },
-            }}
-          >
-            <Box sx={{ width: "max-content" }}>
-              <TabBar
-                tabs={deploymentTabs}
-                activeTab={innerTab}
-                onTabChange={setInnerTab}
-                keepButtonWidth={true}
-                compact={true}
-                sx={{ mb: 0, border: "none", boxShadow: "none" }}
-              />
-            </Box>
           </Box>
         </Box>
       </Box>
@@ -270,18 +229,7 @@ export default function UsageAndMetricsTabContent(): JSX.Element {
         onClose={() => setUploadOpen(false)}
       />
 
-      {innerTab !== UsageMetricsInnerTabId.OVERVIEW && timeRangeSelector}
-
-      {innerTab === UsageMetricsInnerTabId.OVERVIEW && (
-        <UsageOverviewPanel
-          projectId={projectId}
-          dateRange={dateRange}
-          expandedEnvironmentIds={expandedEnvironmentIds}
-          onToggleEnvironment={toggleEnvironment}
-          timeRangeSelector={timeRangeSelector}
-          dataSource={dataSource}
-        />
-      )}
+      {timeRangeSelector}
 
       {activeDeploymentId != null && (
         <UsageEnvironmentProductsPanel

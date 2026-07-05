@@ -232,18 +232,30 @@ export function deriveUsageEnvironmentProducts(
           },
         ];
 
+        // Sort ascending so .at(-1) is always the most recent data point,
+        // regardless of whether SN returns newest-first or oldest-first.
+        const sortedDps = [...(instMetric?.dataPoints ?? [])].sort((a, b) =>
+          (a.date ?? "").localeCompare(b.date ?? ""),
+        );
+        const lastDp = sortedDps.at(-1);
         const javaVer = (
-          instMetric?.dataPoints.at(-1)?.jdkVersion ??
-          instMetric?.dataPoints.at(-1)?.deploymentMetadata?.jdkVersion ??
+          lastDp?.jdkVersion ??
+          lastDp?.deploymentMetadata?.jdkVersion ??
           USAGE_METRICS_VALUE_EM_DASH
         ).replace(/^"|"$/g, "");
         const u2Level =
-          instMetric?.dataPoints.at(-1)?.deploymentMetadata?.updateLevel ??
-          USAGE_METRICS_VALUE_EM_DASH;
+          lastDp?.deploymentMetadata?.updateLevel ?? USAGE_METRICS_VALUE_EM_DASH;
+        const dm = lastDp?.deploymentMetadata;
+        const os = dm?.os
+          ? dm.osVersion
+            ? `${dm.os} ${dm.osVersion}`
+            : dm.os
+          : USAGE_METRICS_VALUE_EM_DASH;
 
         return {
           id: u.instanceId,
           hostName: u.instanceKey,
+          os,
           javaVersion: javaVer,
           u2Level,
           summaryStats: instSummaryStats,

@@ -258,6 +258,7 @@ export type ProductChartTrend = {
 export type UsageProductInstanceRow = {
   id: string;
   hostName: string;
+  os: string;
   javaVersion: string;
   u2Level: string;
   summaryStats: { label: string; value: string }[];

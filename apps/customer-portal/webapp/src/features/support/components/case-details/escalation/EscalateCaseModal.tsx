@@ -135,7 +135,7 @@ export default function EscalateCaseModal({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <TriangleAlert size={22} color={amberColor} />
           <Typography variant="h6" component="span" fontWeight={700}>
-            Escalate to {nextLevel?.notifiedLabel ?? "Next Level"} Escalation
+            Escalate to {nextLevel?.notifiedLabel ?? "Next Level"}
           </Typography>
         </Box>
         <Typography
