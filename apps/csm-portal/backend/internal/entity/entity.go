@@ -41,6 +41,12 @@ func (c *Client) GetCase(ctx context.Context, caseID string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/cases/%s", url.PathEscape(caseID)), nil)
 }
 
+// GetCaseSlas calls GET /cases/{id}/slas on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) GetCaseSlas(ctx context.Context, caseID string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/cases/%s/slas", url.PathEscape(caseID)), nil)
+}
+
 // PatchCase calls PATCH /cases/{id} on the entity service to update case state.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) PatchCase(ctx context.Context, caseID string, body []byte) ([]byte, error) {

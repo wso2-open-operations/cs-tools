@@ -437,6 +437,12 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}, nil
 }
 
+// GetCaseSlas returns an empty SLA list for the Postgres data source; SLAs are
+// tracked only in the ServiceNow data source.
+func (s *caseService) GetCaseSlas(_ context.Context, id string) (domain.CaseSlaListView, error) {
+	return domain.CaseSlaListView{CaseID: id, Count: 0, Slas: []domain.CaseSla{}}, nil
+}
+
 func (s *caseService) CreateCaseAttachment(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
 	return domain.CreateAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }

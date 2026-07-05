@@ -208,6 +208,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/slas:
+    get:
+      summary: Get the SLAs for a case.
+      description: |
+        Raw passthrough of the entity service's SLA response for the given case.
+        The response shape is owned by the entity service and is not reshaped by
+        the portal.
+      operationId: getCasesIdSlas
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The SLAs associated with the given case.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request (e.g. malformed UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases/{id}/comments:
     post:
       summary: Create a comment on a case.

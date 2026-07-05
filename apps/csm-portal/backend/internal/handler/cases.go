@@ -50,6 +50,7 @@ type entityCaseClient interface {
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
+	GetCaseSlas(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error)
 	SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error)
 	GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error)
@@ -535,6 +536,35 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to inject nextStates", "userID", user.UserID, "caseID", caseID, "err", err)
 		writeError(w, http.StatusInternalServerError, "Failed to process case details.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetCaseSlas handles GET /cases/{id}/slas. It is a raw passthrough of the
+// entity service response; the SLA shape is owned by the entity service.
+func (h *CaseHandler) GetCaseSlas(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	caseID := r.PathValue("id")
+	if caseID == "" {
+		writeError(w, http.StatusBadRequest, "Case ID cannot be empty!")
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("x-user-id-token")) == "" && !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetCaseSlas(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCaseSlas failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to retrieve case SLAs.")
 		return
 	}
 

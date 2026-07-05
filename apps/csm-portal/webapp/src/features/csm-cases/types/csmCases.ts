@@ -128,15 +128,45 @@ export interface CaseAttachment {
  */
 export type CustomerTier = string;
 
-export type SlaClockState = "running" | "paused" | "met" | "breached";
+/**
+ * Stage of a case SLA record, as returned by the case SLA list endpoint.
+ */
+export type SlaStage =
+  | "in_progress"
+  | "paused"
+  | "completed"
+  | "cancelled"
+  | "breached";
 
-export interface CaseSlaClock {
-  clockType: SlaClockType;
-  state: SlaClockState;
-  /** Minutes left until breach (negative = already breached). */
-  minutesToBreach: number;
-  /** Target SLA duration in minutes (e.g. ack target = 30 min for S1). */
-  targetMinutes: number;
+/**
+ * A single SLA record attached to a case. All time fields
+ * are pre-formatted server-side (`*Label`) — the frontend renders them as-is
+ * rather than recomputing.
+ */
+export interface CaseSla {
+  id: string;
+  /** SLA definition name (e.g. "S1 - Response"). */
+  definition: string;
+  /** Target duration as a display string (e.g. "4 Business Hours"); absent for open-ended SLAs. */
+  target: string | null;
+  stage: SlaStage;
+  /** Human-readable stage label from the backend (e.g. "In progress"). */
+  stageLabel: string;
+  hasBreached: boolean;
+  businessTimeLeftLabel: string;
+  businessElapsedLabel: string;
+  /** Percentage (0-100+) of the target consumed in business time. */
+  businessElapsedPercent: number;
+  /** ISO-8601 UTC; null when the SLA clock hasn't started. */
+  startTime: string | null;
+  /** ISO-8601 UTC; null while the SLA is still running. */
+  stopTime: string | null;
+}
+
+export interface CaseSlaList {
+  caseId: string;
+  count: number;
+  slas: CaseSla[];
 }
 
 export interface CaseWatcher {
@@ -266,7 +296,6 @@ export interface CsmCaseDetail extends CsmCaseRow {
   createdByEmail?: string;
   customerContext: CaseCustomerContext;
   productContext: CaseProductContext;
-  slaClocks: CaseSlaClock[];
   watchers: CaseWatcher[];
   linkedItems: CaseLinkedItem[];
   tags: CaseTag[];

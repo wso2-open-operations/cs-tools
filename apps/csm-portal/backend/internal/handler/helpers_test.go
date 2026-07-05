@@ -91,6 +91,7 @@ type mockEntityCaseClient struct {
 	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
 	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
+	getCaseSlasFn              func(ctx context.Context, caseID string) ([]byte, error)
 	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
 	searchCaseAttachmentsFn    func(ctx context.Context, body []byte) ([]byte, error)
 	getCaseAttachmentContentFn func(ctx context.Context, attachmentID string) ([]byte, string, error)
@@ -139,6 +140,13 @@ func (m *mockEntityCaseClient) SearchCases(ctx context.Context, body []byte) ([]
 func (m *mockEntityCaseClient) GetCase(ctx context.Context, caseID string) ([]byte, error) {
 	if m.getCaseFn != nil {
 		return m.getCaseFn(ctx, caseID)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) GetCaseSlas(ctx context.Context, caseID string) ([]byte, error) {
+	if m.getCaseSlasFn != nil {
+		return m.getCaseSlasFn(ctx, caseID)
 	}
 	return []byte(`{}`), nil
 }

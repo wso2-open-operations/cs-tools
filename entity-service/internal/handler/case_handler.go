@@ -67,6 +67,18 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(c)
 }
 
+// GetCaseSlas handles GET /cases/{id}/slas.
+func (h *CaseHandler) GetCaseSlas(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	resp, err := h.svc.GetCaseSlas(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // CreateCase handles POST /cases.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateCaseRequest
