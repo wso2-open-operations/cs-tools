@@ -37,15 +37,15 @@ const HEADER_CELLS: string[] = [
   "Product",
   "Severity",
   "State",
-  "Work state",
   "Updated",
 ];
 
 // Subject gets the lion's share of the row; the ids sit in their own narrow
 // column so a long subject no longer has to share one cell with them.
-// State and Work state are separate columns so neither chip crowds the other.
+// The work-state chip (only present for WIP cases) stacks under the State chip
+// in the State column, so it doesn't need a column of its own.
 const GRID =
-  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto auto";
+  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto";
 
 export default function CasesList({
   cases,
@@ -201,12 +201,18 @@ export default function CasesList({
               <Box sx={{ justifySelf: "start" }}>
                 <SeverityChip severity={c.severity} clickable />
               </Box>
-              {/* State chip — lifecycle state only. */}
-              <Box sx={{ justifySelf: "start" }}>
+              {/* State chip, with the work-state chip stacked beneath it (the
+                  latter only for WIP cases). */}
+              <Box
+                sx={{
+                  justifySelf: "start",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 0.5,
+                }}
+              >
                 <StateChip state={c.state} variant="outlined" clickable />
-              </Box>
-              {/* Work state chip — separate column; only rendered for WIP cases. */}
-              <Box sx={{ justifySelf: "start" }}>
                 {c.state === "work_in_progress" && c.workState && (
                   <Chip
                     size="small"
