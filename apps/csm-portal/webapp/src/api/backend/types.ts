@@ -478,6 +478,9 @@ export interface BeCaseSearchView {
   /** Embedded as `{ id, name }` (name already includes the version), not the
    * `displayName`-shaped ref the GET view uses. */
   deployedProduct?: BeEntityRef | null;
+  /** The product itself (distinct from `deployedProduct`); used to populate the
+   * list Product column when no deployed product is set (e.g. cloud cases). */
+  product?: BeEntityRef | null;
 }
 
 export interface BeCaseSearchResponse extends BeSearchResponseBase {

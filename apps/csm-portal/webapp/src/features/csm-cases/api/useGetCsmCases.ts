@@ -143,6 +143,7 @@ export function useGetCsmCases(
       [...filters.assignees].sort(),
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
+      [...filters.productNames].sort(),
       currentUserEmail ?? "",
       currentUserId ?? "",
       page,
@@ -287,7 +288,7 @@ export function useGetCsmCases(
           projectName: c.project?.name ?? "-",
           // Search embeds deployedProduct as { id, name } (name includes the
           // version); the GET view uses a displayName-shaped ref instead.
-          product: c.deployedProduct?.name ?? "-",
+          product: c.deployedProduct?.name ?? c.product?.name ?? "-",
           severity: severityFromPriority(c.severity),
           state: uiStateFromBe(c.state),
           caseType: c.type,
