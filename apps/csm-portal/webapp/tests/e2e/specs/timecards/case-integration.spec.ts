@@ -31,7 +31,7 @@
 // just-created card round-tripped through search and rendered.
 //
 
-import { test, expect, withRole, currentUserSearchQuery } from "../../fixtures/test";
+import { test, expect, withRole, approverSearchQuery } from "../../fixtures/test";
 import { LogTimeDialog } from "../../pages/LogTimeDialog";
 import { e2eWorkLogComment } from "../../utils/selectors";
 
@@ -41,7 +41,7 @@ test.describe("time cards — case integration", () => {
   test("logging time from a case appears in the panel (real create + display)", async ({
     page,
   }) => {
-    const approverQuery = await currentUserSearchQuery(page);
+    const approverQuery = await approverSearchQuery(page);
     await page.goto("/cases");
 
     const firstCase = page

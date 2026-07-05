@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useState, type JSX } from "react";
+import { useState, type ChangeEvent, type JSX } from "react";
 import {
   Box,
   Chip,
@@ -23,6 +23,7 @@ import {
   MenuItem,
   Tab,
   Tabs,
+  TablePagination,
   TextField,
   Typography,
   Button,
@@ -34,16 +35,17 @@ import {
   useCurrentEngineer,
   useDecideCard,
   useMyTimeSheets,
+  type TimeCardPagination,
 } from "@features/csm-timecards/api/useTimeSheets";
 import { useProjectOptions } from "@features/csm-cases/api/useProjectOptions";
 import { BackendApiError } from "@api/backend/client";
+import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import type { BeProject } from "@api/backend/types";
 import { TIME_CARD_STATE_META } from "@features/csm-timecards/constants/timeCardConstants";
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import TimeSheetCard from "@features/csm-timecards/components/TimeSheetCard";
 import TimeCardReviewDialog from "@features/csm-timecards/components/TimeCardReviewDialog";
-import TimeCardTruncatedNotice from "@features/csm-timecards/components/TimeCardTruncatedNotice";
 import type { TimecardAction } from "@features/csm-timecards/utils/timeSheetState";
 import type {
   CsmTimeCard,
@@ -51,6 +53,32 @@ import type {
   TimeCardSearchFilters,
   TimeCardState,
 } from "@features/csm-timecards/types/timeCards";
+
+const DEFAULT_ROWS_PER_PAGE = 20;
+// Top option is the backend's max page limit; larger requests are rejected.
+const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
+
+/** Page + rows-per-page state for one tab's `TablePagination`, following the
+ * same shape/convention as `CsmUsersPage.tsx` and friends. Each tab gets its
+ * own instance so switching tabs doesn't disturb another tab's position. */
+function usePagination(): {
+  pagination: TimeCardPagination;
+  onPageChange: (event: unknown, newPage: number) => void;
+  onRowsPerPageChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  setPage: (page: number) => void;
+} {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  return {
+    pagination: { page, rowsPerPage },
+    onPageChange: (_, newPage) => setPage(newPage),
+    onRowsPerPageChange: (e) => {
+      setRowsPerPage(parseInt(e.target.value, 10));
+      setPage(0);
+    },
+    setPage,
+  };
+}
 
 type TabId = "mine" | "all" | "approvals";
 
@@ -95,23 +123,51 @@ export default function CsmTimeCardsPage(): JSX.Element {
     ...(filterState && { states: [filterState] }),
   };
 
-  // Each search paginates independently (up to ~20 pages over the full
-  // scope) — fetching all three eagerly regardless of which tab is showing
-  // overloads the backend with concurrent requests (confirmed live: enough
-  // to make some fail outright or never settle). Gate each on its own tab
-  // actually being the active one.
-  const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters);
-  const allCards = useAllTimeCards(activeTab === "all", baseFilters);
-  const queue = useApprovalQueue(activeTab === "approvals" && role.isApprover, baseFilters);
+  // Each tab pages independently — was previously fetching its *entire*
+  // scope (up to 1,000 cards, sequential page-by-page requests) before
+  // showing anything, confirmed live to take 30-60+ seconds and, with all
+  // three tabs doing this eagerly at once, enough concurrent load to make
+  // some fail outright. Real pagination replaces that: one page at a time,
+  // driven by the TablePagination controls below each list. Still gated on
+  // its own tab actually being active, for the same concurrent-load reason.
+  const minePagination = usePagination();
+  const allPagination = usePagination();
+  const approvalsPagination = usePagination();
+
+  const mySheets = useMyTimeSheets(activeTab === "mine", baseFilters, minePagination.pagination);
+  const allCards = useAllTimeCards(activeTab === "all", baseFilters, allPagination.pagination);
+  const queue = useApprovalQueue(
+    activeTab === "approvals" && role.isApprover,
+    baseFilters,
+    approvalsPagination.pagination,
+  );
   const decideCard = useDecideCard();
 
   const anyFilterActive =
     !!filterProject || !!filterWorkItem.trim() || !!filterState || !!filterEngineer.trim();
+
+  // A filter change re-scopes the search for every tab, so every tab's page
+  // position needs to reset too — otherwise "page 3" of a narrower result
+  // set could be past the end, or just show unrelated leftovers.
+  const resetAllPages = (): void => {
+    minePagination.setPage(0);
+    allPagination.setPage(0);
+    approvalsPagination.setPage(0);
+  };
+  const handleFilterProjectChange = (v: string): void => {
+    setFilterProject(v);
+    resetAllPages();
+  };
+  const handleFilterStateChange = (v: TimeCardState | ""): void => {
+    setFilterState(v);
+    resetAllPages();
+  };
   const clearFilters = (): void => {
     setFilterProject("");
     setFilterWorkItem("");
     setFilterState("");
     setFilterEngineer("");
+    resetAllPages();
   };
 
   const handleCardAction = (card: CsmTimeCard, action: TimecardAction): void => {
@@ -158,11 +214,11 @@ export default function CsmTimeCardsPage(): JSX.Element {
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
-            setFilterProject={setFilterProject}
+            setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
-            setFilterState={setFilterState}
+            setFilterState={handleFilterStateChange}
             onClear={clearFilters}
           />
 
@@ -180,9 +236,6 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load your time sheets.</Typography>
           ) : (
             <>
-              {mySheets.data?.truncated && (
-                <TimeCardTruncatedNotice hint="Narrow the Project filter to see everything." />
-              )}
               {(() => {
                 const filtered = byWorkItem(mySheets.data?.sheets) ?? [];
                 if (filtered.length === 0) {
@@ -205,6 +258,22 @@ export default function CsmTimeCardsPage(): JSX.Element {
                   />
                 ));
               })()}
+              {/* Pages over raw records, not weekly sheets — a week's cards
+               can legitimately span a page boundary and look incomplete
+               until you've paged further; same for "my cards" being a small
+               slice of whatever's on each raw page. Accepted tradeoff for
+               real pagination instead of a 30-60s upfront full-scope fetch. */}
+              <TablePagination
+                component="div"
+                count={mySheets.data?.total ?? 0}
+                page={minePagination.pagination.page}
+                onPageChange={minePagination.onPageChange}
+                rowsPerPage={minePagination.pagination.rowsPerPage}
+                onRowsPerPageChange={minePagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
             </>
           )}
         </Box>
@@ -219,11 +288,11 @@ export default function CsmTimeCardsPage(): JSX.Element {
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
-            setFilterProject={setFilterProject}
+            setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
-            setFilterState={setFilterState}
+            setFilterState={handleFilterStateChange}
             onClear={clearFilters}
             engineerSlot={
               <TextField
@@ -253,9 +322,6 @@ export default function CsmTimeCardsPage(): JSX.Element {
             <Typography color="error">Could not load time cards.</Typography>
           ) : (
             <>
-              {!allCards.isError && allCards.data?.truncated && (
-                <TimeCardTruncatedNotice hint="Narrow the Project filter to see everything." />
-              )}
               {(() => {
                 const q = filterEngineer.trim().toLowerCase();
                 const byEngineer = (allCards.data?.sheets ?? []).filter(
@@ -285,6 +351,17 @@ export default function CsmTimeCardsPage(): JSX.Element {
                   />
                 ));
               })()}
+              <TablePagination
+                component="div"
+                count={allCards.data?.total ?? 0}
+                page={allPagination.pagination.page}
+                onPageChange={allPagination.onPageChange}
+                rowsPerPage={allPagination.pagination.rowsPerPage}
+                onRowsPerPageChange={allPagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
             </>
           )}
         </Box>
@@ -298,11 +375,11 @@ export default function CsmTimeCardsPage(): JSX.Element {
           <FilterBar
             projects={projects.data ?? []}
             filterProject={filterProject}
-            setFilterProject={setFilterProject}
+            setFilterProject={handleFilterProjectChange}
             filterWorkItem={filterWorkItem}
             setFilterWorkItem={setFilterWorkItem}
             filterState={filterState}
-            setFilterState={setFilterState}
+            setFilterState={handleFilterStateChange}
             onClear={clearFilters}
             engineerSlot={
               <TextField
@@ -330,48 +407,53 @@ export default function CsmTimeCardsPage(): JSX.Element {
             </Centered>
           ) : queue.isError ? (
             <Typography color="error">Could not load the approval queue.</Typography>
-          ) : (queue.data?.sheets ?? []).length === 0 ? (
-            <>
-              {queue.data?.truncated && (
-                <TimeCardTruncatedNotice hint="Narrow the Project filter to see everything." />
-              )}
-              <Empty text="Nothing awaiting approval." />
-            </>
           ) : (
             <>
-              {queue.data?.truncated && (
-                <TimeCardTruncatedNotice hint="Narrow the Project filter to see everything." />
-              )}
-              {(() => {
-                const q = filterEngineer.trim().toLowerCase();
-                const byEngineer = (queue.data?.sheets ?? []).filter(
-                  (s) => !q || s.userName.toLowerCase().includes(q),
-                );
-                const filtered = byWorkItem(byEngineer) ?? [];
-                if (filtered.length === 0) {
-                  return (
-                    <Empty
-                      text={
-                        // Only blame the engineer filter when it's the one that
-                        // excluded everything — if it matched fine and the
-                        // work-item filter emptied the result, say that instead.
-                        q && byEngineer.length === 0
-                          ? `No engineers match "${filterEngineer}".`
-                          : "No time cards match the current filters."
-                      }
-                    />
+              {(queue.data?.sheets ?? []).length === 0 ? (
+                <Empty text="Nothing awaiting approval." />
+              ) : (
+                (() => {
+                  const q = filterEngineer.trim().toLowerCase();
+                  const byEngineer = (queue.data?.sheets ?? []).filter(
+                    (s) => !q || s.userName.toLowerCase().includes(q),
                   );
-                }
-                return filtered.map((s) => (
-                  <TimeSheetCard
-                    key={s.id}
-                    sheet={s}
-                    role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
-                    showEngineer
-                    onCardAction={handleCardAction}
-                  />
-                ));
-              })()}
+                  const filtered = byWorkItem(byEngineer) ?? [];
+                  if (filtered.length === 0) {
+                    return (
+                      <Empty
+                        text={
+                          // Only blame the engineer filter when it's the one that
+                          // excluded everything — if it matched fine and the
+                          // work-item filter emptied the result, say that instead.
+                          q && byEngineer.length === 0
+                            ? `No engineers match "${filterEngineer}".`
+                            : "No time cards match the current filters."
+                        }
+                      />
+                    );
+                  }
+                  return filtered.map((s) => (
+                    <TimeSheetCard
+                      key={s.id}
+                      sheet={s}
+                      role={{ isOwner: false, isApprover: true, isAdmin: role.isAdmin }}
+                      showEngineer
+                      onCardAction={handleCardAction}
+                    />
+                  ));
+                })()
+              )}
+              <TablePagination
+                component="div"
+                count={queue.data?.total ?? 0}
+                page={approvalsPagination.pagination.page}
+                onPageChange={approvalsPagination.onPageChange}
+                rowsPerPage={approvalsPagination.pagination.rowsPerPage}
+                onRowsPerPageChange={approvalsPagination.onRowsPerPageChange}
+                rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+                showFirstButton
+                showLastButton
+              />
             </>
           )}
         </Box>
