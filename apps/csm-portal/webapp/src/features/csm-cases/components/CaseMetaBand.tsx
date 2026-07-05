@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, Chip, Typography } from "@wso2/oxygen-ui";
+import { Box, Card, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
-import { tierLabel } from "@features/csm-cases/utils/caseTier";
+import { tierLabel, tierColor } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
@@ -181,6 +181,7 @@ export default function CaseMetaBand({
     >
       <Box
         component="button"
+        type="button"
         onClick={onToggleCollapsed}
         aria-label={collapsed ? "Show case details" : "Hide case details"}
         sx={{
@@ -237,7 +238,7 @@ export default function CaseMetaBand({
         >
           <Cell label="Tier">
             <Box sx={{ minWidth: 0 }}>
-              <Chip size="small" variant="outlined" color="primary" label={tierLabel(tier)} />
+              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
             </Box>
           </Cell>
           <Cell label="Assignee">
