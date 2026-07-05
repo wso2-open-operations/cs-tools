@@ -216,7 +216,7 @@ export function CallRequestsWidget({
             <Typography variant="body2" color="text.secondary">
               {stateFilter
                 ? `No call requests in state "${CALL_REQUEST_STATE_LABEL[stateFilter]}".`
-                : "No call requests yet. Use the button above to request a call."}
+                : "No call requests yet."}
             </Typography>
           </Box>
         )}

@@ -24,6 +24,7 @@ interface SemanticChipProps {
   role: SemanticRole;
   label: string;
   size?: "small" | "medium";
+  variant?: "filled" | "outlined";
   /** Bold label — use for priority signals (severity), not quiet metadata. */
   bold?: boolean;
   /** Pointer cursor when wrapped in a link / clickable row. */
@@ -42,6 +43,7 @@ export default function SemanticChip({
   role,
   label,
   size = "small",
+  variant,
   bold = false,
   clickable = false,
 }: SemanticChipProps): JSX.Element {
@@ -50,6 +52,7 @@ export default function SemanticChip({
       size={size}
       // "default" is a valid MUI Chip color — filled grey, no border.
       color={role}
+      variant={variant}
       label={label}
       sx={{
         ...(bold ? { "& .MuiChip-label": { fontWeight: 600 } } : {}),

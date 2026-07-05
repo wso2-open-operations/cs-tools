@@ -251,9 +251,22 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const isEngagementRoute = location.pathname.startsWith("/engagements/");
-  const backPath = isEngagementRoute ? "/engagements" : "/cases";
-  const backLabel = isEngagementRoute ? "Back to engagements" : "Back to cases";
-  const detailPath = isEngagementRoute ? `/engagements/${caseId}` : `/cases/${caseId}`;
+  const isServiceRequestRoute = location.pathname.startsWith("/operations/service-requests/");
+  const backPath = isEngagementRoute
+    ? "/engagements"
+    : isServiceRequestRoute
+      ? "/operations?tab=service_requests"
+      : "/cases";
+  const backLabel = isEngagementRoute
+    ? "Back to engagements"
+    : isServiceRequestRoute
+      ? "Back to service requests"
+      : "Back to cases";
+  const detailPath = isEngagementRoute
+    ? `/engagements/${caseId}`
+    : isServiceRequestRoute
+      ? `/operations/service-requests/${caseId}`
+      : `/cases/${caseId}`;
   const { data, isLoading, isError } = useGetCsmCaseDetail(caseId);
   const {
     data: comments,
@@ -763,8 +776,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <Skeleton variant="rectangular" height={32} width={240} />
-        <Skeleton variant="rectangular" height={200} />
+        <Skeleton variant="rounded" height={32} width={240} />
+        <Skeleton variant="rounded" height={200} />
       </Box>
     );
   }
@@ -1163,7 +1176,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               // isChatLoading is false for chat-less cases (query disabled).
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} variant="rectangular" height={56} />
+                  <Skeleton key={i} variant="rounded" height={56} />
                 ))}
               </Box>
             ) : (

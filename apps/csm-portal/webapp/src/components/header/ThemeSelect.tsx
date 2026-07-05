@@ -18,7 +18,6 @@ import {
   Box,
   MenuItem,
   Select,
-  Tooltip,
   type SelectChangeEvent,
 } from "@wso2/oxygen-ui";
 import { Palette } from "@wso2/oxygen-ui-icons-react";
@@ -41,8 +40,7 @@ export default function ThemeSelect(): JSX.Element {
   };
 
   return (
-    <Tooltip title="Theme">
-      <Box sx={{ display: "flex", alignItems: "center" }}>
+    <Box sx={{ display: "flex", alignItems: "center" }}>
         <Select
           value={themeKey}
           onChange={handleChange}
@@ -73,7 +71,6 @@ export default function ThemeSelect(): JSX.Element {
             </MenuItem>
           ))}
         </Select>
-      </Box>
-    </Tooltip>
+    </Box>
   );
 }

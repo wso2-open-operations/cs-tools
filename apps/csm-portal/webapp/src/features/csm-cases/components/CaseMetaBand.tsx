@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Card, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Box, Card, Typography } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
-import { tierColor, tierLabel } from "@features/csm-cases/utils/caseTier";
+import { tierLabel, tierColor } from "@features/csm-cases/utils/caseTier";
 import type { CsmCaseDetail } from "@features/csm-cases/types/csmCases";
 import SemanticChip from "@components/SemanticChip";
 import DeploymentDetailsDialog from "@features/csm-projects/components/DeploymentDetailsDialog";
@@ -180,12 +180,23 @@ export default function CaseMetaBand({
       }}
     >
       <Box
+        component="button"
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-label={collapsed ? "Show case details" : "Hide case details"}
         sx={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           px: 2,
           py: collapsed ? 0.75 : 1,
+          width: "100%",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          color: "inherit",
+          textAlign: "left",
+          "&:hover": { bgcolor: "action.hover" },
         }}
       >
         {collapsed ? (
@@ -206,15 +217,7 @@ export default function CaseMetaBand({
             Overview
           </Typography>
         )}
-        <Tooltip title={collapsed ? "Show details" : "Hide details"}>
-          <IconButton
-            size="small"
-            onClick={onToggleCollapsed}
-            aria-label={collapsed ? "Show case details" : "Hide case details"}
-          >
-            {collapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-          </IconButton>
-        </Tooltip>
+        {collapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
       </Box>
       {!collapsed && (
         <Box
@@ -235,7 +238,7 @@ export default function CaseMetaBand({
         >
           <Cell label="Tier">
             <Box sx={{ minWidth: 0 }}>
-              <SemanticChip role={tierColor(tier)} label={tierLabel(tier)} />
+              <SemanticChip role={tierColor(tier)} variant="outlined" label={tierLabel(tier)} />
             </Box>
           </Cell>
           <Cell label="Assignee">

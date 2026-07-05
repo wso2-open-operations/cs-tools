@@ -275,6 +275,7 @@ export default function CaseActionBar({
   onAction,
 }: CaseActionBarProps): JSX.Element {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [stateMenuAnchor, setStateMenuAnchor] = useState<HTMLElement | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PrimaryButton | null>(
     null,
   );
@@ -308,35 +309,39 @@ export default function CaseActionBar({
         justifyContent: { xs: "flex-start", md: "flex-end" },
       }}
     >
-      {primary.map((p, idx) => {
-        const button = (
+      {primary.length > 0 && (
+        <>
           <Button
             size="small"
-            variant={idx === 0 ? "contained" : "outlined"}
-            color={p.color}
-            startIcon={p.icon}
-            onClick={() => runPrimary(p)}
+            variant="outlined"
+            endIcon={<ChevronDown size={16} />}
+            onClick={(e) => setStateMenuAnchor(e.currentTarget)}
           >
-            {p.label}
+            Change state
           </Button>
-        );
-        // `targetState` is unique per button (each moves to a distinct state),
-        // so it is the correct React key — the lifecycle action is not (e.g.
-        // `resume_work` can map from more than one source state).
-        return p.tooltip ? (
-          <Tooltip key={p.targetState} title={p.tooltip}>
-            {button}
-          </Tooltip>
-        ) : (
-          <Box
-            key={p.targetState}
-            component="span"
-            sx={{ display: "inline-flex" }}
+          <Menu
+            anchorEl={stateMenuAnchor}
+            open={!!stateMenuAnchor}
+            onClose={() => setStateMenuAnchor(null)}
           >
-            {button}
-          </Box>
-        );
-      })}
+            {primary.map((p) => (
+              <MenuItem
+                key={p.targetState}
+                onClick={() => {
+                  setStateMenuAnchor(null);
+                  runPrimary(p);
+                }}
+                sx={{ gap: 1.25, minHeight: 36 }}
+              >
+                <Box sx={{ color: `${p.color}.main`, display: "flex" }}>
+                  {p.icon}
+                </Box>
+                {p.label}
+              </MenuItem>
+            ))}
+          </Menu>
+        </>
+      )}
 
       <Button
         size="small"

@@ -15,7 +15,6 @@
 // under the License.
 
 import {
-  alpha,
   Box,
   Button,
   FormControlLabel,
@@ -228,11 +227,10 @@ export default function CsmCaseCommentInput({
         gap: 1,
         p: internal ? 1.25 : 0,
         borderRadius: internal ? 1 : 0,
-        backgroundColor: internal
-          ? (theme) => alpha(theme.palette.warning.main, 0.15)
-          : undefined,
+        bgcolor: internal ? "action.hover" : undefined,
         border: internal ? 1 : 0,
-        borderColor: internal ? "warning.main" : undefined,
+        borderColor: internal ? "divider" : undefined,
+        ...(internal && { borderLeftWidth: "3px", borderLeftColor: "primary.main" }),
       }}
     >
       <Box
@@ -246,10 +244,10 @@ export default function CsmCaseCommentInput({
       >
         <Typography
           variant="caption"
-          color={internal ? "warning.main" : "text.secondary"}
+          color="text.secondary"
         >
           {internal
-            ? "Internal work note — not visible to the customer."
+            ? "Internal work note - not visible to the customer."
             : sourceMode
               ? "HTML source — edit raw markup directly."
               : "Reply to this case…"}
@@ -259,7 +257,7 @@ export default function CsmCaseCommentInput({
             control={
               <Switch
                 size="small"
-                color="warning"
+                color="primary"
                 checked={internal}
                 onChange={(e) => setInternal(e.target.checked)}
                 disabled={disabled || submitting || publicReplyLocked}
@@ -397,7 +395,7 @@ export default function CsmCaseCommentInput({
         </Typography>
         <Button
           variant="contained"
-          color={internal ? "warning" : "primary"}
+          color="primary"
           size="small"
           startIcon={internal ? <Lock size={16} /> : <Send size={16} />}
           disabled={

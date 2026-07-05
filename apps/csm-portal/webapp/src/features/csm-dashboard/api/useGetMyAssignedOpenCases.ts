@@ -128,11 +128,11 @@ export function useGetMyAssignedOpenCases(
           subject: c.subject ?? "(no subject)",
           // The search view does not embed the account; CasesList never renders
           // it, so leave it unresolved rather than scanning the account list.
-          customer: "—",
+          customer: "-",
           accountId: "",
           projectId: c.project?.id ?? "",
-          projectName: c.project?.name ?? "—",
-          product: c.deployedProduct?.name ?? "—",
+          projectName: c.project?.name ?? "-",
+          product: c.deployedProduct?.name ?? "-",
           severity: severityFromPriority(c.severity),
           state: uiStateFromBe(c.state),
           caseType: c.type,

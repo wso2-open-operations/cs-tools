@@ -269,6 +269,10 @@ export default function App(): JSX.Element {
                     element={<CreateServiceRequestPage />}
                   />
                   <Route
+                    path="operations/service-requests/:caseId"
+                    element={<CsmCaseDetailPage />}
+                  />
+                  <Route
                     path="operations/change-requests/:id"
                     element={<CsmChangeRequestDetailPage />}
                   />

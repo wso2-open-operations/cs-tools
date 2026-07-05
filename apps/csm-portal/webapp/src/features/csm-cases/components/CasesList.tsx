@@ -37,13 +37,15 @@ const HEADER_CELLS: string[] = [
   "Product",
   "Severity",
   "State",
+  "Work state",
   "Updated",
 ];
 
 // Subject gets the lion's share of the row; the ids sit in their own narrow
 // column so a long subject no longer has to share one cell with them.
+// State and Work state are separate columns so neither chip crowds the other.
 const GRID =
-  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto";
+  "minmax(120px, 0.9fr) minmax(280px, 3fr) minmax(140px, 1fr) auto minmax(110px, 1fr) auto auto";
 
 export default function CasesList({
   cases,
@@ -160,6 +162,7 @@ export default function CasesList({
                   <Typography
                     variant="body2"
                     noWrap
+                    title={c.wso2CaseId}
                     sx={{ fontFamily: "monospace", fontWeight: 600 }}
                   >
                     {c.wso2CaseId}
@@ -170,49 +173,47 @@ export default function CasesList({
                     variant="caption"
                     color="text.secondary"
                     noWrap
+                    title={c.caseNumber}
                     sx={{ fontFamily: "monospace", display: "block" }}
                   >
                     {c.caseNumber}
                   </Typography>
                 )}
-                {!c.wso2CaseId && !c.caseNumber && (
-                  <Typography variant="body2" color="text.secondary">
-                    —
-                  </Typography>
-                )}
               </Box>
               {/* Subject (the widest column) + project for context. */}
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="body2" noWrap>
+                <Typography variant="body2" noWrap title={c.subject}>
                   {c.subject}
                 </Typography>
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   noWrap
+                  title={c.projectName || undefined}
                   sx={{ display: "block" }}
                 >
                   {c.projectName}
                 </Typography>
               </Box>
-              <Typography variant="body2" noWrap>
+              <Typography variant="body2" noWrap title={c.product || undefined}>
                 {c.product}
               </Typography>
               <Box sx={{ justifySelf: "start" }}>
                 <SeverityChip severity={c.severity} clickable />
               </Box>
-              {/* State, plus the work sub-state (Ongoing/Paused) when the case
-                  is in progress. Paused is coloured to stand out as a stalled
-                  case; ongoing stays quiet. */}
-              <Box sx={{ justifySelf: "start", minWidth: 0 }}>
-                <StateChip state={c.state} clickable />
+              {/* State chip — lifecycle state only. */}
+              <Box sx={{ justifySelf: "start" }}>
+                <StateChip state={c.state} variant="outlined" clickable />
+              </Box>
+              {/* Work state chip — separate column; only rendered for WIP cases. */}
+              <Box sx={{ justifySelf: "start" }}>
                 {c.state === "work_in_progress" && c.workState && (
                   <Chip
                     size="small"
                     variant="outlined"
                     color={c.workState === "paused" ? "warning" : "default"}
                     label={WORK_STATE_LABEL[c.workState]}
-                    sx={{ display: "flex", mt: 0.25, fontWeight: 600, width: "fit-content" }}
+                    sx={{ fontWeight: 600 }}
                   />
                 )}
               </Box>

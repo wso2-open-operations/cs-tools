@@ -24,6 +24,7 @@ import SemanticChip from "@components/SemanticChip";
 interface StateChipProps {
   state: string;
   size?: "small" | "medium";
+  variant?: "filled" | "outlined";
   /** Render a pointer cursor when the chip sits inside a link / clickable row. */
   clickable?: boolean;
 }
@@ -39,6 +40,7 @@ interface StateChipProps {
 export default function StateChip({
   state,
   size = "small",
+  variant,
   clickable = false,
 }: StateChipProps): JSX.Element {
   return (
@@ -46,6 +48,7 @@ export default function StateChip({
       role={stateColor(state)}
       label={stateLabel(state)}
       size={size}
+      variant={variant}
       clickable={clickable}
     />
   );
