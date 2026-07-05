@@ -66,7 +66,7 @@ function formatSlaDateTime(iso: string | null): string {
 
 /** Chip color for a row: a breached SLA is always shown in error styling. */
 function stageColor(sla: CaseSla): "info" | "warning" | "success" | "default" | "error" {
-  return sla.hasBreached ? "error" : SLA_STAGE_COLOR[sla.stage];
+  return sla.hasBreached ? "error" : (SLA_STAGE_COLOR[sla.stage] ?? "default");
 }
 
 interface CaseSlaTableProps {
@@ -196,7 +196,7 @@ export function CaseSlaTable({ caseId, active }: CaseSlaTableProps): JSX.Element
                     </TableCell>
                     <TableCell>{sla.businessTimeLeftLabel}</TableCell>
                     <TableCell>{sla.businessElapsedLabel}</TableCell>
-                    <TableCell>{`${sla.businessElapsedPercent}%`}</TableCell>
+                    <TableCell>{`${Math.round(sla.businessElapsedPercent)}%`}</TableCell>
                     <TableCell>{formatSlaDateTime(sla.startTime)}</TableCell>
                     <TableCell>{formatSlaDateTime(sla.stopTime)}</TableCell>
                   </TableRow>

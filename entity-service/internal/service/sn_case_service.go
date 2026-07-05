@@ -591,7 +591,14 @@ type snSla struct {
 // produce the domain stage enum (e.g. "In Progress" → "in_progress"). The raw
 // SN label is preserved separately as stageLabel.
 func normalizeSlaStage(stage string) string {
-	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(stage)), " ", "_")
+	s := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(stage)), " ", "_")
+	// ServiceNow uses "achieved" as a synonym for a successfully met SLA; the
+	// domain contract only exposes the canonical stages, so fold it into
+	// "completed" to stay within the CaseSla.Stage enum.
+	if s == "achieved" {
+		return "completed"
+	}
+	return s
 }
 
 func (s *snCaseService) GetCaseSlas(ctx context.Context, id string) (domain.CaseSlaListView, error) {
