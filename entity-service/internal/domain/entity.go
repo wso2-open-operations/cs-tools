@@ -866,6 +866,7 @@ type SearchCasesFilters struct {
 	CreatedByMe      bool             `json:"createdByMe"`
 	WorkStates       []CaseWorkState  `json:"workStates"`
 	AssignedUserIDs  []string         `json:"assignedUserIds"`
+	ProductNames     []string         `json:"productNames"`
 }
 
 // SearchCasesRequest is the input for a case search operation.

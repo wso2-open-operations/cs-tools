@@ -2835,6 +2835,14 @@ components:
             type: string
             format: uuid
           description: Filter by assigned engineer user UUIDs.
+        productNames:
+          type: array
+          items:
+            type: string
+          description: |
+            Filter by product family name (e.g. "API Manager", "Identity Server",
+            "Asgardeo"). Matches every version of each named product. Only applied
+            by the ServiceNow data source.
 
     SearchCasesRequest:
       type: object

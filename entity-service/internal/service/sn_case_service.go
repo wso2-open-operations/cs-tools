@@ -38,36 +38,33 @@ type snCasesResponse struct {
 	Limit        int      `json:"limit"`
 }
 
-
-
-
 type snCase struct {
-	ID               string                `json:"id"`
-	InternalID       string                `json:"internalId"`
-	Number           string                `json:"number"`
-	Title            string                `json:"title"`
-	Description      string                `json:"description"`
-	CreatedOn        string                `json:"createdOn"`
-	UpdatedOn        *string               `json:"updatedOn"`
-	CreatedBy        string                `json:"createdBy"`
-	Project          snCaseEntityRef       `json:"project"`
-	Deployment       snCaseEntityRef       `json:"deployment"`
-	DeployedProduct  snCaseDeployedProduct `json:"deployedProduct"`
-	Product          *snCaseEntityRef      `json:"product"`
-	State            *snCaseState          `json:"state"`
-	WorkState        *snCaseLabel          `json:"workState"`
-	Severity         *snCaseLabel          `json:"severity"`
-	IssueType        *snCaseIssueType      `json:"issueType"`
-	EngagementType   *snCaseLabel          `json:"engagementType"`
-	CaseType         *snCaseEntityRef      `json:"caseType"`
-	Catalog          *snCaseEntityRef      `json:"catalog"`
-	CatalogItem      *snCaseEntityRef      `json:"catalogItem"`
-	AssignedTeam     *snCaseEntityRef      `json:"assignedTeam"`
-	Conversation     *snCaseEntityRef      `json:"conversation"`
+	ID               string                 `json:"id"`
+	InternalID       string                 `json:"internalId"`
+	Number           string                 `json:"number"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	CreatedOn        string                 `json:"createdOn"`
+	UpdatedOn        *string                `json:"updatedOn"`
+	CreatedBy        string                 `json:"createdBy"`
+	Project          snCaseEntityRef        `json:"project"`
+	Deployment       snCaseEntityRef        `json:"deployment"`
+	DeployedProduct  snCaseDeployedProduct  `json:"deployedProduct"`
+	Product          *snCaseEntityRef       `json:"product"`
+	State            *snCaseState           `json:"state"`
+	WorkState        *snCaseLabel           `json:"workState"`
+	Severity         *snCaseLabel           `json:"severity"`
+	IssueType        *snCaseIssueType       `json:"issueType"`
+	EngagementType   *snCaseLabel           `json:"engagementType"`
+	CaseType         *snCaseEntityRef       `json:"caseType"`
+	Catalog          *snCaseEntityRef       `json:"catalog"`
+	CatalogItem      *snCaseEntityRef       `json:"catalogItem"`
+	AssignedTeam     *snCaseEntityRef       `json:"assignedTeam"`
+	Conversation     *snCaseEntityRef       `json:"conversation"`
 	AssignedEngineer *snAssignedEngineerRef `json:"assignedEngineer"`
-	ParentCase       *snCaseRef            `json:"parentCase"`
-	RelatedCase      *snCaseRef            `json:"relatedCase"`
-	Account          *snCaseAccount        `json:"account"`
+	ParentCase       *snCaseRef             `json:"parentCase"`
+	RelatedCase      *snCaseRef             `json:"relatedCase"`
+	Account          *snCaseAccount         `json:"account"`
 }
 
 type snCaseEntityRef struct {
@@ -126,11 +123,11 @@ type snCaseSort struct {
 
 // snCaseTypeMap maps domain case type strings to the ServiceNow caseType values.
 var snCaseTypeMap = map[string]string{
-	"case":                       "default_case",
-	"service_request":            "service_request",
-	"security_report_analysis":   "security_report_analysis",
-	"announcement":               "announcement",
-	"engagement":                 "engagement",
+	"case":                     "default_case",
+	"service_request":          "service_request",
+	"security_report_analysis": "security_report_analysis",
+	"announcement":             "announcement",
+	"engagement":               "engagement",
 }
 
 // snCaseTypeSysidMap maps ServiceNow caseType sysids to domain case type values.
@@ -174,25 +171,26 @@ var snSortFieldMap = map[domain.CaseSortField]string{
 }
 
 type snCaseFilters struct {
-	CaseTypes           []string `json:"caseTypes"`
-	SearchQuery         string   `json:"searchQuery,omitempty"`
-	ProjectIDs          []string `json:"projectIds,omitempty"`
-	DeploymentIDs       []string `json:"deploymentIds,omitempty"`
-	DeployedProductIDs  []string `json:"deployedProductIds,omitempty"`
-	StateKeys           []int    `json:"stateKeys,omitempty"`
-	SeverityKeys        []int    `json:"severityKeys,omitempty"`
-	IssueTypeKeys       []int    `json:"issueTypeKeys,omitempty"`
-	EngagementTypeKeys  []int    `json:"engagementTypeKeys,omitempty"`
-	ClosedStartDate     string   `json:"closedStartDate,omitempty"`
-	ClosedEndDate       string   `json:"closedEndDate,omitempty"`
-	StartCreatedDate    string   `json:"startCreatedDate,omitempty"`
-	EndCreatedDate      string   `json:"endCreatedDate,omitempty"`
-	StartUpdatedDate    string   `json:"startUpdatedDate,omitempty"`
-	EndUpdatedDate      string   `json:"endUpdatedDate,omitempty"`
-	CreatedBy           []string `json:"createdBy,omitempty"`
-	CreatedByMe         bool     `json:"createdByMe,omitempty"`
-	WorkStateKeys       []int    `json:"workStateKeys,omitempty"`
-	AssignedUserIDs     []string `json:"assignedUserIds,omitempty"`
+	CaseTypes          []string `json:"caseTypes"`
+	SearchQuery        string   `json:"searchQuery,omitempty"`
+	ProjectIDs         []string `json:"projectIds,omitempty"`
+	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
+	DeployedProductIDs []string `json:"deployedProductIds,omitempty"`
+	StateKeys          []int    `json:"stateKeys,omitempty"`
+	SeverityKeys       []int    `json:"severityKeys,omitempty"`
+	IssueTypeKeys      []int    `json:"issueTypeKeys,omitempty"`
+	EngagementTypeKeys []int    `json:"engagementTypeKeys,omitempty"`
+	ClosedStartDate    string   `json:"closedStartDate,omitempty"`
+	ClosedEndDate      string   `json:"closedEndDate,omitempty"`
+	StartCreatedDate   string   `json:"startCreatedDate,omitempty"`
+	EndCreatedDate     string   `json:"endCreatedDate,omitempty"`
+	StartUpdatedDate   string   `json:"startUpdatedDate,omitempty"`
+	EndUpdatedDate     string   `json:"endUpdatedDate,omitempty"`
+	CreatedBy          []string `json:"createdBy,omitempty"`
+	CreatedByMe        bool     `json:"createdByMe,omitempty"`
+	WorkStateKeys      []int    `json:"workStateKeys,omitempty"`
+	AssignedUserIDs    []string `json:"assignedUserIds,omitempty"`
+	ProductNames       []string `json:"productNames,omitempty"`
 }
 
 // snStateIDMap maps domain CaseState enums to SN numeric state IDs.
@@ -284,8 +282,6 @@ func domainEngagementTypesToSNIDs(engTypes []domain.EngagementType) []int {
 	return ids
 }
 
-
-
 func formatSNDate(t *time.Time) string {
 	if t == nil {
 		return ""
@@ -304,7 +300,6 @@ func NewServiceNowCaseService(client *integrationservice.Client, pgFallback Case
 	return &snCaseService{client: client, pgFallback: pgFallback}
 }
 
-
 // snIssueTypeID maps domain CaseIssueType to the ServiceNow issue-type choice-list value.
 var snIssueTypeID = map[domain.CaseIssueType]int{
 	domain.CaseIssueTypeTotalOutage:            1,
@@ -316,21 +311,21 @@ var snIssueTypeID = map[domain.CaseIssueType]int{
 }
 
 type snCreateCasePayload struct {
-	Type              string              `json:"type"`
-	ProjectID         string              `json:"projectId"`
-	DeploymentID      string              `json:"deploymentId"`
-	DeployedProductID string              `json:"deployedProductId"`
-	Title             string              `json:"title,omitempty"`
-	Description       string              `json:"description,omitempty"`
-	SeverityKey       int                 `json:"severityKey,omitempty"`
-	IssueTypeKey      int                 `json:"issueTypeKey,omitempty"`
-	CatalogID         string              `json:"catalogId,omitempty"`
-	CatalogItemID     string              `json:"catalogItemId,omitempty"`
-	Variables         []snCaseVariable    `json:"variables,omitempty"`
-	RelatedCaseID     string              `json:"relatedCaseId,omitempty"`
-	ConversationID    string              `json:"conversationId,omitempty"`
-	WatchList         []string            `json:"watchList,omitempty"`
-	Attachments       []snCaseAttachment  `json:"attachments,omitempty"`
+	Type              string             `json:"type"`
+	ProjectID         string             `json:"projectId"`
+	DeploymentID      string             `json:"deploymentId"`
+	DeployedProductID string             `json:"deployedProductId"`
+	Title             string             `json:"title,omitempty"`
+	Description       string             `json:"description,omitempty"`
+	SeverityKey       int                `json:"severityKey,omitempty"`
+	IssueTypeKey      int                `json:"issueTypeKey,omitempty"`
+	CatalogID         string             `json:"catalogId,omitempty"`
+	CatalogItemID     string             `json:"catalogItemId,omitempty"`
+	Variables         []snCaseVariable   `json:"variables,omitempty"`
+	RelatedCaseID     string             `json:"relatedCaseId,omitempty"`
+	ConversationID    string             `json:"conversationId,omitempty"`
+	WatchList         []string           `json:"watchList,omitempty"`
+	Attachments       []snCaseAttachment `json:"attachments,omitempty"`
 }
 
 type snCaseVariable struct {
@@ -523,7 +518,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		CreatedByDetails: domain.UserRef{
 			Email: c.CreatedBy,
 		},
-		ProjectDetails:    domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+		ProjectDetails: domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 	}
 
 	if depID := sysidToUUID(c.Deployment.ID); depID != "" {
@@ -647,22 +642,22 @@ type snCommentFilters struct {
 }
 
 type snSearchCommentsPayload struct {
-	ReferenceID   string             `json:"referenceId"`
-	ReferenceType string             `json:"referenceType"`
-	Filters       *snCommentFilters  `json:"filters,omitempty"`
+	ReferenceID   string              `json:"referenceId"`
+	ReferenceType string              `json:"referenceType"`
+	Filters       *snCommentFilters   `json:"filters,omitempty"`
 	Pagination    snProjectPagination `json:"pagination"`
 }
 
 type snComment struct {
-	ID                  string `json:"id"`
-	ReferenceID         string `json:"referenceId"`
-	Content             string `json:"content"`
-	Type                string `json:"type"`
-	CreatedOn           string `json:"createdOn"`
-	CreatedBy           string `json:"createdBy"`
-	CreatedByFirstName  string `json:"createdByFirstName"`
-	CreatedByLastName   string `json:"createdByLastName"`
-	CreatedByFullName   string `json:"createdByFullName"`
+	ID                 string `json:"id"`
+	ReferenceID        string `json:"referenceId"`
+	Content            string `json:"content"`
+	Type               string `json:"type"`
+	CreatedOn          string `json:"createdOn"`
+	CreatedBy          string `json:"createdBy"`
+	CreatedByFirstName string `json:"createdByFirstName"`
+	CreatedByLastName  string `json:"createdByLastName"`
+	CreatedByFullName  string `json:"createdByFullName"`
 }
 
 type snSearchCommentsResponse struct {
@@ -778,12 +773,12 @@ var snWorkStateIDMap = map[domain.CaseWorkState]int{
 type snUpdateCaseResponse struct {
 	Message string `json:"message"`
 	Case    struct {
-		ID        string        `json:"id"`
-		UpdatedOn string        `json:"updatedOn"`
-		UpdatedBy string        `json:"updatedBy"`
-		State     *snCaseState  `json:"state"`
-		Severity  *snCaseLabel  `json:"severity"`
-		WorkState *snCaseLabel  `json:"workState"`
+		ID        string       `json:"id"`
+		UpdatedOn string       `json:"updatedOn"`
+		UpdatedBy string       `json:"updatedBy"`
+		State     *snCaseState `json:"state"`
+		Severity  *snCaseLabel `json:"severity"`
+		WorkState *snCaseLabel `json:"workState"`
 		WatchList []struct {
 			ID       string `json:"id"`
 			UserName string `json:"userName"`
@@ -1111,13 +1106,13 @@ func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.Se
 			ReferenceID:   sysidToUUID(a.ReferenceID),
 			ReferenceType: req.ReferenceType,
 			Name:          a.Name,
-			Type:        a.Type,
-			SizeBytes:   a.SizeBytes,
-			Description: a.Description,
-			CreatedBy:   a.CreatedBy,
-			CreatedOn:   createdOn,
-			DownloadURL: a.DownloadURL,
-			PreviewURL:  a.PreviewURL,
+			Type:          a.Type,
+			SizeBytes:     a.SizeBytes,
+			Description:   a.Description,
+			CreatedBy:     a.CreatedBy,
+			CreatedOn:     createdOn,
+			DownloadURL:   a.DownloadURL,
+			PreviewURL:    a.PreviewURL,
 		})
 	}
 
@@ -1241,10 +1236,11 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 			EndCreatedDate:     formatSNDate(req.Filters.EndCreatedDate),
 			StartUpdatedDate:   formatSNDate(req.Filters.StartUpdatedDate),
 			EndUpdatedDate:     formatSNDate(req.Filters.EndUpdatedDate),
-			CreatedBy:           req.Filters.CreatedBy,
-			CreatedByMe:         req.Filters.CreatedByMe,
-			WorkStateKeys:       domainWorkStatesToSNIDs(req.Filters.WorkStates),
-			AssignedUserIDs:     uuidsToSysids(req.Filters.AssignedUserIDs),
+			CreatedBy:          req.Filters.CreatedBy,
+			CreatedByMe:        req.Filters.CreatedByMe,
+			WorkStateKeys:      domainWorkStatesToSNIDs(req.Filters.WorkStates),
+			AssignedUserIDs:    uuidsToSysids(req.Filters.AssignedUserIDs),
+			ProductNames:       req.Filters.ProductNames,
 		},
 		SortBy:     snSortBy,
 		Pagination: snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
@@ -1279,20 +1275,20 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		}
 
 		cv := domain.SearchCaseView{
-			ID:              sysidToUUID(c.ID),
-			Number:          c.Number,
-			InternalID:      c.InternalID,
-			CreatedOn:       c.CreatedOn,
-			CreatedBy:       c.CreatedBy,
-			Subject:         &title,
-			Description:     &description,
-			IssueType:       issueTypeLabel,
-			State:           stateLabel,
-			Severity:        severityLabel,
-			EngagementType:  engagementTypeLabel,
-			WorkState:       workStateLabel,
-			Type:            caseTypeDomain,
-			Project: domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
+			ID:             sysidToUUID(c.ID),
+			Number:         c.Number,
+			InternalID:     c.InternalID,
+			CreatedOn:      c.CreatedOn,
+			CreatedBy:      c.CreatedBy,
+			Subject:        &title,
+			Description:    &description,
+			IssueType:      issueTypeLabel,
+			State:          stateLabel,
+			Severity:       severityLabel,
+			EngagementType: engagementTypeLabel,
+			WorkState:      workStateLabel,
+			Type:           caseTypeDomain,
+			Project:        domain.EntityRef{ID: sysidToUUID(c.Project.ID), Name: c.Project.Name},
 		}
 		if depID := sysidToUUID(c.Deployment.ID); depID != "" {
 			cv.Deployment = &domain.EntityRef{ID: depID, Name: c.Deployment.Name}
@@ -1451,4 +1447,3 @@ func snWorkStateLabelToEnum(ws *snCaseLabel) *domain.CaseWorkState {
 		return nil
 	}
 }
-
