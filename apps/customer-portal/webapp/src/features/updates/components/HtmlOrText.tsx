@@ -17,7 +17,7 @@
 import { Box } from "@wso2/oxygen-ui";
 import DOMPurify from "dompurify";
 import type { JSX } from "react";
-import { stripLightModeInlineStyles } from "@utils/common";
+import { DESCRIPTION_PURIFY_CONFIG, stripLightModeInlineStyles } from "@utils/common";
 
 // Matches actual HTML formatting tags — not XML/config tag-like strings e.g. <Product_Home>.
 export const HTML_FORMAT_RE =
@@ -63,7 +63,7 @@ export function HtmlOrText({
     const stripped = isDark ? stripLightModeInlineStyles(content) : content;
     return (
       <Box
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(stripped) }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(stripped, DESCRIPTION_PURIFY_CONFIG) }}
         sx={HTML_CONTENT_SX}
       />
     );

@@ -20,22 +20,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import ProjectCard from "@features/project-hub/components/ProjectCard";
 import { LoaderProvider } from "@context/linear-loader/LoaderContext";
 
-// Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
-  Form: {
-    CardButton: ({ children, onClick }: any) => (
-      <button data-testid="card-button" onClick={onClick}>
-        {children}
-      </button>
-    ),
-  },
-  Box: ({ children }: any) => <div>{children}</div>,
-  Skeleton: () => <div data-testid="skeleton" />,
-}));
-
-// Mock sub-components
 vi.mock("../ProjectCardBadges", () => ({
-  default: ({ projectKey }: any) => (
+  default: ({ projectKey }: { projectKey: string }) => (
     <div data-testid="badges">{projectKey}</div>
   ),
 }));
@@ -47,10 +33,8 @@ vi.mock("../ProjectCardInfo", () => ({
 }));
 
 vi.mock("../ProjectCardStats", () => ({
-  default: ({ activeChatsCount, date }: any) => (
-    <div data-testid="stats">
-      {activeChatsCount} {date}
-    </div>
+  default: ({ activeChatsCount }: { activeChatsCount: number }) => (
+    <div data-testid="stats">{activeChatsCount}</div>
   ),
 }));
 
@@ -58,17 +42,14 @@ vi.mock("../ProjectCardActions", () => ({
   default: () => <div data-testid="actions" />,
 }));
 
-// Mock react-router
 const mockNavigate = vi.fn();
-vi.mock("react-router", () => ({
-  useNavigate: () => mockNavigate,
+
+vi.mock("@hooks/useModifierAwareNavigate", () => ({
+  useModifierAwareNavigate: () => mockNavigate,
 }));
 
-// Mock mockFunctions
-vi.mock("@/models/mockFunctions", () => ({
-  getMockActiveChats: vi.fn(() => 5),
-  getMockOpenCases: vi.fn(() => 10),
-  getMockStatus: vi.fn(() => "All Good"),
+vi.mock("@features/settings/utils/settingsStorage", () => ({
+  setLastSelectedProject: vi.fn(),
 }));
 
 const renderWithLoader = (ui: ReactElement) =>
@@ -85,26 +66,23 @@ describe("ProjectCard", () => {
     title: "Project Title",
     date: "2026-01-17",
     activeChatsCount: 5,
-    actionRequiredCount: 0,
+    actionRequiredCount: 2,
+    outstandingCount: 10,
   };
 
   it("should render all sub-components with correct props", () => {
     renderWithLoader(<ProjectCard {...defaultProps} />);
 
-    expect(screen.getByTestId("badges")).toBeInTheDocument();
-    expect(screen.getByTestId("info")).toBeInTheDocument();
-    expect(screen.getByTestId("stats")).toBeInTheDocument();
-    expect(screen.getByTestId("actions")).toBeInTheDocument();
-
     expect(screen.getByTestId("badges")).toHaveTextContent("PROJ");
     expect(screen.getByTestId("info")).toHaveTextContent("Project Title");
-    expect(screen.getByTestId("stats")).toHaveTextContent("2026-01-17");
+    expect(screen.getByTestId("stats")).toHaveTextContent("5");
+    expect(screen.getByTestId("actions")).toBeInTheDocument();
   });
 
   it("should navigate to dashboard on click", () => {
     renderWithLoader(<ProjectCard {...defaultProps} />);
 
-    fireEvent.click(screen.getByTestId("card-button"));
+    fireEvent.click(screen.getByRole("button"));
 
     expect(mockNavigate).toHaveBeenCalledWith("/projects/1/dashboard");
   });
@@ -115,7 +93,7 @@ describe("ProjectCard", () => {
       <ProjectCard {...defaultProps} onViewDashboard={onViewDashboard} />,
     );
 
-    fireEvent.click(screen.getByTestId("card-button"));
+    fireEvent.click(screen.getByRole("button"));
 
     expect(onViewDashboard).toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();

@@ -34,10 +34,17 @@ import {
   isFileCopyPathField,
   isDescriptionField,
   isDateTimeField,
+  isStartDateTimeField,
+  isEndDateTimeField,
 } from "@features/operations/utils/serviceRequestValidation";
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import {
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_SIZE_EXCEEDED,
+} from "@constants/common";
 
 export interface VariableFormFieldsProps {
   variables: CatalogItemVariable[] | undefined;
@@ -209,6 +216,7 @@ export default function VariableFormFields({
   onAttachmentAdd,
   userTimeZone,
 }: VariableFormFieldsProps): JSX.Element {
+  const { showError } = useErrorBanner();
   const effectiveTimeZone = userTimeZone ?? resolveDisplayTimeZone();
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, effectiveTimeZone);
   const sortedVariables = useMemo(
@@ -350,6 +358,13 @@ export default function VariableFormFields({
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={onAttachmentRemove}
+            onPasteError={(reason) =>
+              showError(
+                reason === "type"
+                  ? ERROR_UNSUPPORTED_TYPE
+                  : ERROR_SIZE_EXCEEDED,
+              )
+            }
           />
         </Grid>
       );
@@ -491,6 +506,27 @@ export default function VariableFormFields({
     }
 
     if (isDateTimeField(variable)) {
+      const isStart = isStartDateTimeField(variable);
+      const isEnd = isEndDateTimeField(variable);
+
+      let dateError = false;
+      let dateHelperText: string = `Timezone: ${effectiveTimeZone}`;
+
+      if (isStart || isEnd) {
+        const startField = sortedVariables.find(isStartDateTimeField);
+        const endField = sortedVariables.find(isEndDateTimeField);
+        const startVal = startField ? (values[startField.id] ?? "") : "";
+        const endVal = endField ? (values[endField.id] ?? "") : "";
+        if (startVal && endVal && startVal >= endVal) {
+          dateError = true;
+          dateHelperText = isStart
+            ? "Start time must be before end time."
+            : "End time must be after start time.";
+        }
+      }
+
+      const inputConstraints = !isStart && !isEnd ? { min: minDatetime } : {};
+
       return (
         <Grid key={variable.id} size={{ xs: 12, sm: 6 }}>
           <Box sx={{ mb: 1 }}>
@@ -504,8 +540,9 @@ export default function VariableFormFields({
             onChange={(e) => onChange(variable.id, e.target.value)}
             disabled={isContext}
             slotProps={{ inputLabel: { shrink: true } }}
-            inputProps={{ min: minDatetime }}
-            helperText={`Timezone: ${effectiveTimeZone}`}
+            inputProps={inputConstraints}
+            error={dateError}
+            helperText={dateHelperText}
           />
         </Grid>
       );

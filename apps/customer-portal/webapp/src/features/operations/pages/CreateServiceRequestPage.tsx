@@ -13,7 +13,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { Autocomplete, Box, Button, Chip, TextField, Typography } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
   useState,
@@ -55,6 +55,7 @@ import {
 import { datetimeLocalWallTimeToUtcMs } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
   getBaseDeploymentOptions,
   getBaseProductOptions,
@@ -216,6 +217,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const requestDetailsSectionRef = useRef<HTMLDivElement>(null);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
+  const [watchList, setWatchList] = useState<string[]>([]);
 
   const { data: projectDetails, isLoading: isProjectLoading } =
     useGetProjectDetails(projectId || "");
@@ -337,6 +339,16 @@ export default function CreateServiceRequestPage(): JSX.Element {
     );
     return item?.label;
   }, [catalogsData, selectedCatalogId, selectedCatalogItemId]);
+
+  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId || "");
+  const contactOptions = useMemo(
+    () =>
+      (contactsData ?? []).map((c) => ({
+        label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+        value: c.email,
+      })),
+    [contactsData],
+  );
 
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
 
@@ -553,6 +565,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       catalogItemId: selectedCatalogItemId,
       variables: variablePayload,
       ...(encodedAttachments.length > 0 && { attachments: encodedAttachments }),
+      ...(watchList.length > 0 && { watchList }),
     };
 
     postCase(payload, {
@@ -677,7 +690,38 @@ export default function CreateServiceRequestPage(): JSX.Element {
           hasMoreProducts={!!deploymentProductsQuery.hasNextPage}
           isFetchingMoreProducts={deploymentProductsQuery.isFetchingNextPage}
           projectTypeLabel={projectDetails?.type?.label}
-        />
+        >
+          <Autocomplete
+            multiple
+            loading={isContactsLoading}
+            loadingText="Loading..."
+            options={contactOptions}
+            getOptionLabel={(option) => option.label}
+            value={contactOptions.filter((o) => watchList.includes(o.value))}
+            onChange={(_event, newValue) => {
+              setWatchList(newValue.map((o) => o.value));
+            }}
+            isOptionEqualToValue={(option, val) => option.value === val.value}
+            renderTags={(tagValue, getTagProps) =>
+              tagValue.map((option, index) => {
+                const { key, ...tagProps } = getTagProps({ index });
+                return (
+                  <Chip key={key} label={option.label} size="small" {...tagProps} />
+                );
+              })
+            }
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Watch List"
+                placeholder="Add watchers..."
+                size="small"
+                error={isContactsError}
+                helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
+              />
+            )}
+          />
+        </BasicInformationSection>
 
         {!!productId && (
           <CatalogSelector

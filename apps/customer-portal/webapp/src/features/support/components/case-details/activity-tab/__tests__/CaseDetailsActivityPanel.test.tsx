@@ -15,6 +15,7 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CaseDetailsActivityPanel from "@case-details-activity/CaseDetailsActivityPanel";
@@ -102,18 +103,23 @@ function renderPanel(
     caseCreatedOn?: string | null;
   } = {},
 ) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <ThemeProvider theme={createTheme()}>
-      <LoggerProvider>
-        <ErrorBannerProvider>
-          <CaseDetailsActivityPanel
-            projectId={props.projectId ?? "project-001"}
-            caseId={props.caseId ?? "case-001"}
-            caseCreatedOn={props.caseCreatedOn}
-          />
-        </ErrorBannerProvider>
-      </LoggerProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={createTheme()}>
+        <LoggerProvider>
+          <ErrorBannerProvider>
+            <CaseDetailsActivityPanel
+              projectId={props.projectId ?? "project-001"}
+              caseId={props.caseId ?? "case-001"}
+              caseCreatedOn={props.caseCreatedOn}
+            />
+          </ErrorBannerProvider>
+        </LoggerProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 

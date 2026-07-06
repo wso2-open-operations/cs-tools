@@ -20,11 +20,12 @@ import type { ProjectContact } from "@features/settings/types/users";
 import type { RegistryToken } from "@features/settings/types/registryTokens";
 import type { RegistryTokenType } from "@features/settings/types/registryTokens";
 
-/** Main Settings page tabs (User Management, AI, Registry Tokens). */
+/** Main Settings page tabs (User Management, AI, Registry Tokens, Display). */
 export enum SettingsPageTabId {
   USERS = "users",
   AI = "ai",
   REGISTRY_TOKENS = "registryTokens",
+  DISPLAY = "display",
 }
 
 /** Registry Tokens sub-tabs (User vs Service token lists). */
@@ -44,6 +45,7 @@ export enum RegistryTokenDisplayStatus {
 export enum SettingsRoleInfoId {
   ADMIN = "admin",
   PORTAL_USER = "portal_user",
+  LEAD = "lead",
   SYSTEM_USER = "system_user",
   SECURITY_USER = "security_user",
 }
@@ -103,7 +105,7 @@ export type EditUserModalProps = {
   contact: ProjectContact | null;
   isSubmitting?: boolean;
   onClose: () => void;
-  onSubmit: (next: { isCsAdmin: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => void;
+  onSubmit: (next: { isCsAdmin: boolean; isLead: boolean; isPortalUser: boolean; isSecurityContact: boolean }) => void;
 };
 
 export type RemoveUserModalProps = {

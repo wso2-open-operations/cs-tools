@@ -14,6 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { DashboardCasesViewMode } from "@features/dashboard/types/casesTable";
+
 // Lowercase substring for labels treated like resolved for status coloring
 export const CASE_TABLE_RESOLVED_LABEL_SUBSTRING = "resolved";
 
@@ -32,6 +34,9 @@ export const CASES_TABLE_HEADER_TITLE = "Outstanding Support Cases";
 export const CASES_TABLE_HEADER_SUBTITLE =
   "Track and manage all active support tickets";
 
+// Cases table column header for creator.
+export const CASES_TABLE_HEADER_CREATED_BY = "Created by";
+
 // Cases table button filters.
 export const CASES_TABLE_BUTTON_FILTERS = "Filters";
 
@@ -40,3 +45,9 @@ export const CASES_TABLE_BUTTON_CREATE = "Create";
 
 // Cases table clear filters label.
 export const CASES_TABLE_CLEAR_FILTERS_LABEL = "Clear Filters";
+
+// TabBar options for my vs all outstanding cases (dashboard).
+export const DASHBOARD_CASES_VIEW_TABS = [
+  { id: DashboardCasesViewMode.MyCases, label: "My Cases" },
+  { id: DashboardCasesViewMode.AllCases, label: "All Cases" },
+] as const;

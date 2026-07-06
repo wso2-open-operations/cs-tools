@@ -17,7 +17,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { getStatusColor, getSeverityColor } from "@features/dashboard/utils/casesTable";
+import {
+  formatCasesTableCaseIdentifier,
+  getSeverityColor,
+  getStatusColor,
+} from "@features/dashboard/utils/casesTable";
 import { CaseSeverityLevel, CaseStatus } from "@features/support/constants/supportConstants";
 
 describe("casesTable utils", () => {
@@ -28,6 +32,7 @@ describe("casesTable utils", () => {
       expect(getSeverityColor(CaseSeverityLevel.S2)).toBe("info.main");
       expect(getSeverityColor(CaseSeverityLevel.S3)).toBe("secondary.main");
       expect(getSeverityColor(CaseSeverityLevel.S4)).toBe("success.main");
+      expect(getSeverityColor("S4")).toBe("success.main");
       expect(getSeverityColor("Unknown")).toBe("text.secondary");
       expect(getSeverityColor(undefined)).toBe("text.secondary");
     });
@@ -53,6 +58,32 @@ describe("casesTable utils", () => {
 
     it("should return 'text.secondary' for unknown status", () => {
       expect(getStatusColor("Unknown")).toBe("text.secondary");
+    });
+  });
+
+  describe("formatCasesTableCaseIdentifier", () => {
+    it("should join number and internal id with a pipe after ID prefix", () => {
+      expect(formatCasesTableCaseIdentifier("CS-001", "INT-1")).toBe(
+        "ID: CS-001 | INT-1",
+      );
+    });
+
+    it("should return ID and number when internal id is missing", () => {
+      expect(formatCasesTableCaseIdentifier("CS-001", undefined)).toBe(
+        "ID: CS-001",
+      );
+    });
+
+    it("should return ID and internal id when number is missing", () => {
+      expect(formatCasesTableCaseIdentifier(undefined, "INT-1")).toBe(
+        "ID: INT-1",
+      );
+    });
+
+    it("should return ID placeholder when both are missing", () => {
+      expect(formatCasesTableCaseIdentifier(undefined, undefined)).toBe(
+        "ID: --",
+      );
     });
   });
 });

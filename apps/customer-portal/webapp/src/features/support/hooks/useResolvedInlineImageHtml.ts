@@ -17,7 +17,6 @@
 import { useMemo } from "react";
 import { useAttachmentPreviews } from "@api/useAttachmentPreview";
 import { extractInlineImageRefId } from "@features/support/utils/support";
-import type { InlineAttachment } from "@features/support/utils/support";
 
 /**
  * Extracts all `.iix`-style attachment IDs referenced in img src attributes within HTML.
@@ -42,12 +41,10 @@ function extractIixAttachmentIds(html: string): string[] {
  * Fetches images via the authenticated backend and replaces src attributes with data URLs.
  *
  * @param html - Sanitized HTML string potentially containing `.iix` img src URLs.
- * @param inlineAttachments - Inline attachment metadata list from the comment.
  * @returns `{ resolvedHtml: string, isLoading: boolean }`
  */
 export function useResolvedInlineImageHtml(
   html: string,
-  _inlineAttachments?: InlineAttachment[] | null,
 ): { resolvedHtml: string; isLoading: boolean } {
   const idsFromHtml = useMemo(() => extractIixAttachmentIds(html), [html]);
 

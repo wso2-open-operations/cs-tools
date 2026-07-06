@@ -89,13 +89,13 @@ export const USAGE_METRICS_EXPANDED_CARD_CORES = "Cores";
 
 export const USAGE_METRICS_EXPANDED_CARD_TOTAL_TX = "Total Transactions";
 
+export const USAGE_METRICS_INSTANCE_OS = "OS";
+
 export const USAGE_METRICS_INSTANCE_JAVA = "Java Version";
 
 export const USAGE_METRICS_INSTANCE_U2 = "U2 Level";
 
 export const USAGE_METRICS_INSTANCE_TOTAL_TX = "Total Transactions";
-
-export const USAGE_METRICS_INSTANCE_CORE_COUNT = "Core Count";
 
 export const USAGE_METRICS_INSTANCE_CHART_TX_TITLE = "Transactions";
 
@@ -154,3 +154,48 @@ export const USAGE_AGGREGATED_ORG_COUNT_CAPTION =
 export const USAGE_METRICS_TREND_LINE_AVERAGE = "Average";
 
 export const USAGE_METRICS_TREND_LINE_CURRENT_FALLBACK = "Current";
+
+export const USAGE_METRICS_DATA_SOURCE_LABEL = "Data Source:";
+
+export const USAGE_METRICS_DATA_SOURCE_API_CALL = "Live";
+
+export const USAGE_METRICS_DATA_SOURCE_FILE_UPLOAD = "Upload";
+
+export const USAGE_METRICS_DATA_SOURCE_STATS_SECTION = "Usage by Data Source";
+
+export const USAGE_METRICS_STAT_CURR = "Current";
+
+export const USAGE_METRICS_STAT_MIN = "Min";
+
+export const USAGE_METRICS_STAT_MAX = "Max";
+
+export const USAGE_METRICS_STAT_AVG = "Avg";
+
+export const USAGE_METRICS_NO_DATA_SOURCE_STATS = "No data available for the selected data source and date range.";
+
+export const METRIC_TYPE_LABELS: Record<string, string> = {
+  TRANSACTION_COUNT: "Transactions",
+  TOTAL_USERS: "Total Users",
+  TOTAL_ROOT_ORGS: "Organizations",
+  API_COUNT: "API Count",
+};
+
+// Ordered list of stat keys to display in the data source stats section.
+export const DATA_SOURCE_STAT_KEYS = [
+  "TRANSACTION_COUNT",
+  "TOTAL_USERS",
+  "TOTAL_ROOT_ORGS",
+  "API_COUNT",
+];
+
+export const USAGE_METRICS_PRODUCT_INSTANCE_METRICS = "Instance Metrics";
+
+export const USAGE_METRICS_PRODUCT_CORE_METRICS = "CPU Usage";
+
+export const USAGE_METRICS_STAT_LABEL_CURR = "Curr";
+
+export const USAGE_METRICS_STAT_LABEL_AVG = "Avg";
+
+export const USAGE_METRICS_STAT_LABEL_MIN = "Min";
+
+export const USAGE_METRICS_STAT_LABEL_MAX = "Max";

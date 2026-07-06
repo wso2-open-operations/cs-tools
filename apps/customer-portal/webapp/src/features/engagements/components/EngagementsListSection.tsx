@@ -16,16 +16,20 @@
 
 import type { JSX } from "react";
 import {
+  Box,
+  Checkbox,
   Divider,
   FormControl,
   Grid,
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import ListSearchBar from "@components/list-view/ListSearchBar";
+import DateRangeFilter from "@components/list-view/DateRangeFilter";
 import ListResultsBar from "@components/list-view/ListResultsBar";
 import ListPagination from "@components/list-view/ListPagination";
 import ListItems from "@components/list-view/ListItems";
@@ -70,10 +74,16 @@ export default function EngagementsListSection({
   rowsPerPage,
   onPageChange,
   onRowsPerPageChange,
+  actionsBeforeClearFilters,
+  resultsBarRightContent,
 }: EngagementsListSectionProps): JSX.Element {
   const activeFiltersCount = countListSearchAndFilters(searchTerm, {
-    statusId: filters.statusId,
+    statusIds: filters.statusIds,
     engagementTypeKey: filters.engagementTypeKey,
+    startCreatedDate: filters.startCreatedDate,
+    endCreatedDate: filters.endCreatedDate,
+    startUpdatedDate: filters.startUpdatedDate,
+    endUpdatedDate: filters.endUpdatedDate,
   });
 
   return (
@@ -91,26 +101,47 @@ export default function EngagementsListSection({
           onClearFilters={onClearFilters}
           hideFiltersButton={hideFiltersButton}
           isLoading={isProjectContextLoading}
+          actionsBeforeClearFilters={actionsBeforeClearFilters}
           filtersContent={
-            <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid container spacing={2} sx={{ mt: 1 }} alignItems="flex-end">
               {filterMetadata?.caseStates && (
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="eng-status-label">Status</InputLabel>
-                    <Select
+                    <Select<string[]>
+                      multiple
                       labelId="eng-status-label"
-                      value={filters.statusId ?? ""}
+                      value={filters.statusIds ?? []}
                       label="Status"
-                      onChange={(e: SelectChangeEvent<string>) =>
-                        onFilterChange("statusId", e.target.value)
+                      onChange={(e: SelectChangeEvent<string[]>) =>
+                        onFilterChange("statusIds", e.target.value as string[])
                       }
+                      renderValue={(selected) => {
+                        if (!Array.isArray(selected) || selected.length === 0) return "";
+                        const labels = selected.map((v) => filterMetadata.caseStates?.find((s) => s.id === v)?.label ?? v);
+                        const displayText = labels.join(", ");
+                        if (labels.length === 1) return displayText;
+                        return (
+                          <Tooltip title={displayText} placement="top">
+                            <Box
+                              component="span"
+                              sx={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {displayText}
+                            </Box>
+                          </Tooltip>
+                        );
+                      }}
                     >
-                      <MenuItem value="">
-                        <Typography variant="body2">All Statuses</Typography>
-                      </MenuItem>
                       {filterMetadata.caseStates.map((s) => (
                         <MenuItem key={s.id} value={s.id}>
-                          <Typography variant="body2">{s.label}</Typography>
+                          <Checkbox checked={(filters.statusIds ?? []).includes(s.id)} size="small" />
+                          <Typography variant="body2" sx={{ ml: 1 }}>{s.label}</Typography>
                         </MenuItem>
                       ))}
                     </Select>
@@ -121,26 +152,66 @@ export default function EngagementsListSection({
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="eng-type-label">Engagement Type</InputLabel>
-                    <Select
+                    <Select<string[]>
+                      multiple
                       labelId="eng-type-label"
-                      value={filters.engagementTypeKey ?? ""}
+                      value={filters.engagementTypeKey ?? []}
                       label="Engagement Type"
-                      onChange={(e: SelectChangeEvent<string>) =>
-                        onFilterChange("engagementTypeKey", e.target.value)
+                      onChange={(e: SelectChangeEvent<string[]>) =>
+                        onFilterChange("engagementTypeKey", e.target.value as string[])
                       }
+                      renderValue={(selected) => {
+                        if (!Array.isArray(selected) || selected.length === 0) return "";
+                        const labels = selected.map(
+                          (v) => engagementTypeOptions.find((o) => o.value === v)?.label ?? v,
+                        );
+                        const displayText = labels.join(", ");
+                        if (labels.length === 1) return displayText;
+                        return (
+                          <Tooltip title={displayText} placement="top">
+                            <Box
+                              component="span"
+                              sx={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {displayText}
+                            </Box>
+                          </Tooltip>
+                        );
+                      }}
                     >
-                      <MenuItem value="">
-                        <Typography variant="body2">All Types</Typography>
-                      </MenuItem>
                       {engagementTypeOptions.map((opt) => (
                         <MenuItem key={opt.value} value={opt.value}>
-                          <Typography variant="body2">{opt.label}</Typography>
+                          <Checkbox checked={(filters.engagementTypeKey ?? []).includes(opt.value)} size="small" />
+                          <Typography variant="body2" sx={{ ml: 1 }}>{opt.label}</Typography>
                         </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
                 </Grid>
               )}
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <DateRangeFilter
+                  label="Created Date"
+                  startDate={filters.startCreatedDate}
+                  endDate={filters.endCreatedDate}
+                  onStartChange={(val) => onFilterChange("startCreatedDate", val ?? "")}
+                  onEndChange={(val) => onFilterChange("endCreatedDate", val ?? "")}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <DateRangeFilter
+                  label="Updated Date"
+                  startDate={filters.startUpdatedDate}
+                  endDate={filters.endUpdatedDate}
+                  onStartChange={(val) => onFilterChange("startUpdatedDate", val ?? "")}
+                  onEndChange={(val) => onFilterChange("endUpdatedDate", val ?? "")}
+                />
+              </Grid>
             </Grid>
           }
         />
@@ -155,6 +226,7 @@ export default function EngagementsListSection({
         onSortFieldChange={onSortFieldChange}
         sortOrder={sortOrder}
         onSortOrderChange={onSortOrderChange}
+        rightContent={resultsBarRightContent}
       />
 
       <ListItems
@@ -165,6 +237,7 @@ export default function EngagementsListSection({
         entityName={ENGAGEMENTS_LIST_ENTITY_LABEL}
         onCaseClick={onCaseClick}
         hideSeverity
+        showEngagementType
       />
 
       <ListPagination

@@ -237,13 +237,20 @@ export type ChatWebSocketEvent = {
 };
 
 // Request type for chat WebSocket user message payload.
-export type ChatWebSocketPayload = {
-  type: "user_message";
-  accountId: string;
-  conversationId: string;
-  message: string;
-  envProducts: Record<string, string[]>;
-};
+export type ChatWebSocketPayload =
+  | {
+      type: "user_message";
+      accountId: string;
+      conversationId: string;
+      message: string;
+      envProducts: Record<string, string[]>;
+    }
+  | {
+      type: "token_increase_request";
+      accountId: string;
+      reason: string;
+      period: "daily" | "monthly";
+    };
 
 // Model type for chat WebSocket hook options.
 export type UseChatWebSocketOptions = {

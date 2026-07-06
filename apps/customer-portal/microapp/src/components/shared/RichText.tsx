@@ -17,6 +17,8 @@
 import { Box, pxToRem, styled } from "@wso2/oxygen-ui";
 import { useEffect, useRef } from "react";
 import { openUrl } from "../microapp-bridge";
+import { useQueryClient } from "@tanstack/react-query";
+import { cases } from "@root/src/services/cases";
 
 export const RichTextBase = styled(Box)(({ theme }) => ({
   fontSize: pxToRem(13),
@@ -53,6 +55,7 @@ export const RichTextBase = styled(Box)(({ theme }) => ({
     lineHeight: "inherit !important",
   },
 
+<<<<<<< v2
   ...theme.applyStyles("dark", {
     color: "#000",
     filter: "invert(1) hue-rotate(180deg) brightness(0.88)",
@@ -60,10 +63,14 @@ export const RichTextBase = styled(Box)(({ theme }) => ({
     "& pre": { backgroundColor: "#ececec !important", color: "#000 !important" },
     "& img": { filter: "invert(1) hue-rotate(180deg) brightness(1.136)" }
   }),
+=======
+  "& img": { width: "100%" },
+>>>>>>> main
 }));
 
 export const RichText = (props: React.ComponentProps<typeof RichTextBase>) => {
   const ref = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const el = ref.current;
@@ -84,6 +91,33 @@ export const RichText = (props: React.ComponentProps<typeof RichTextBase>) => {
     el.addEventListener("click", handler);
     return () => el.removeEventListener("click", handler);
   }, []);
+
+  useEffect(() => {
+    if (!ref.current) return;
+
+    const images = Array.from(ref.current.querySelectorAll<HTMLImageElement>("img[src]"));
+
+    Promise.all(
+      images.map(async (image) => {
+        image.style.visibility = "hidden";
+
+        const originalSrc = image.getAttribute("src");
+        if (!originalSrc) return;
+        if (originalSrc.startsWith("blob:") || originalSrc.startsWith("data:")) return;
+
+        const id = originalSrc.split("/").pop()?.split(".")[0];
+        if (!id) return;
+
+        try {
+          const { content: data } = await queryClient.fetchQuery(cases.attachment(id));
+          if (!data) return;
+          image.src = data;
+        } finally {
+          image.style.visibility = "visible";
+        }
+      }),
+    );
+  }, [props.dangerouslySetInnerHTML]);
 
   return <RichTextBase ref={ref} {...props} />;
 };

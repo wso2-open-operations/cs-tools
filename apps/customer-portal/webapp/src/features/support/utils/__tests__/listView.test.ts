@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   countListSearchAndFilters,
   hasListSearchOrFilters,
+  normalizeCaseSearchIssueIds,
 } from "@features/support/utils/listView";
 
 describe("hasListSearchOrFilters", () => {
@@ -39,5 +40,22 @@ describe("countListSearchAndFilters", () => {
     expect(
       countListSearchAndFilters("q", { a: "1", b: "", c: undefined }),
     ).toBe(2);
+  });
+
+  it("counts non-empty array filters once", () => {
+    expect(countListSearchAndFilters("", { issueTypes: ["1", "2"] })).toBe(1);
+  });
+});
+
+describe("normalizeCaseSearchIssueIds", () => {
+  it("returns undefined when no selection", () => {
+    expect(normalizeCaseSearchIssueIds(undefined)).toBeUndefined();
+    expect(normalizeCaseSearchIssueIds([])).toBeUndefined();
+    expect(normalizeCaseSearchIssueIds("")).toBeUndefined();
+  });
+
+  it("normalizes single and multiple string ids", () => {
+    expect(normalizeCaseSearchIssueIds("3")).toEqual([3]);
+    expect(normalizeCaseSearchIssueIds(["3", "5"])).toEqual([3, 5]);
   });
 });

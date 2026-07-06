@@ -155,6 +155,7 @@ export type CaseListItem = AuditMetadata & {
   assignedEngineer: string | IdLabelRef | null;
   project: IdLabelRef;
   issueType: IdLabelRef | null;
+  engagementType?: IdLabelRef | null;
   deployedProduct: IdLabelRef | null;
   deployment: IdLabelRef | null;
   severity: IdLabelRef | null;
@@ -201,6 +202,65 @@ export type CaseVariable = {
   value: string;
 };
 
+// Item type for an escalation level.
+export type EscalationLevel = {
+  id: number | string;
+  label: string;
+};
+
+// Item type for a user notified about an escalation.
+export type EscalationNotifiedUser = {
+  id: string;
+  userName: string;
+  name?: string | null;
+  email?: string | null;
+};
+
+// Item type for a single escalation record.
+export type EscalationRecord = {
+  id: string;
+  case: { id: string; name: string };
+  currentLevel: EscalationLevel | null;
+  previousLevel: EscalationLevel | null;
+  createdBy: string;
+  createdOn: string;
+  updatedOn?: string;
+  reason: string;
+  notificationSentTo?: EscalationNotifiedUser[] | null;
+};
+
+// Request type for creating an escalation.
+export type CreateEscalationRequest = {
+  reason: string;
+};
+
+// Response type for creating an escalation.
+export type CreateEscalationResponse = {
+  message: string;
+  escalation: EscalationRecord;
+};
+
+// Request type for searching escalations.
+// Note: filters.caseIds is injected by cs-tools backend; frontend sends only sortBy/pagination.
+export type EscalationSearchRequest = {
+  sortBy?: {
+    field: "createdOn" | "updatedOn";
+    order: "asc" | "desc";
+  };
+  pagination?: {
+    limit: number;
+    offset: number;
+  };
+};
+
+// Response type for escalation search.
+export type EscalationSearchResponse = {
+  escalations: EscalationRecord[];
+  totalRecords: number;
+  offset: number;
+  limit: number;
+};
+
 // Response type for detailed case information.
 export type CaseDetails = AuditMetadata & {
   id: string;
@@ -219,6 +279,7 @@ export type CaseDetails = AuditMetadata & {
   relatedCase: IdLabelRef | null;
   conversation: IdLabelRef | null;
   issueType: IdLabelRef | null;
+  engagementType?: IdLabelRef | null;
   catalog?: IdLabelRef | null;
   catalogItem?: IdLabelRef | null;
   variables?: CaseVariable[];
@@ -237,6 +298,9 @@ export type CaseDetails = AuditMetadata & {
   engineerEmail: string | null;
   findingsResolved: number | null;
   findingsTotal: number | null;
+  watchList?: Array<{ id?: string; userName?: string; name?: string; email?: string }> | null;
+  escalationLevel?: EscalationLevel | null;
+  isEscalated?: boolean | null;
 };
 
 // Item type for a single case comment.
@@ -301,12 +365,17 @@ export type CaseMetadataResponse = {
 
 // Model type for all cases filter values state.
 export type AllCasesFilterValues = {
-  [key: string]: string | undefined;
-  statusId?: string;
-  severityId?: string;
-  issueTypes?: string;
-  deploymentId?: string;
-  engagementTypeKey?: string;
+  [key: string]: string | string[] | undefined;
+  statusIds?: string[];
+  severityIds?: string[];
+  issueTypes?: string[];
+  deploymentIds?: string[];
+  engagementTypeKey?: string[];
+  createdBy?: string[];
+  startCreatedDate?: string;
+  endCreatedDate?: string;
+  startUpdatedDate?: string;
+  endUpdatedDate?: string;
 };
 
 // Item type for a case attachment.
@@ -357,16 +426,22 @@ export type CreateCaseResponse = AuditMetadata & {
 // Filter type for searching cases.
 export type CaseSearchFilters = {
   issueId?: number;
-  deploymentId?: string;
-  severityId?: number;
+  issueIds?: number[];
+  deploymentIds?: string[];
+  severityIds?: number[];
   statusId?: number;
   statusIds?: number[];
   searchQuery?: string;
   caseTypes?: string[];
   createdByMe?: boolean;
+  createdBy?: string[];
   closedStartDate?: string;
   closedEndDate?: string;
   engagementTypeKeys?: number[];
+  startCreatedDate?: string;
+  endCreatedDate?: string;
+  startUpdatedDate?: string;
+  endUpdatedDate?: string;
 };
 
 // Request type for searching cases.
@@ -382,7 +457,8 @@ export type CaseClassificationRequest = SharedEnvContext & {
 
 // Request type for patching a case.
 export type PatchCaseRequest = {
-  stateKey: number;
+  stateKey?: number;
+  watchList?: string[];
 };
 
 // Request type for creating a support case.
@@ -398,4 +474,5 @@ export type CreateCaseRequest = {
   title: string;
   relatedCaseId?: string;
   conversationId?: string;
+  watchList?: string[];
 };

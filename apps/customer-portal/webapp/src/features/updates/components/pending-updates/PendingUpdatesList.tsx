@@ -65,7 +65,12 @@ export function PendingUpdatesList({
           minHeight: "55vh",
         }}
       >
-        <img src={error500Svg} alt="" aria-hidden="true" style={{ width: 300, height: "auto" }} />
+        <img
+          src={error500Svg}
+          alt=""
+          aria-hidden="true"
+          style={{ width: 300, height: "auto" }}
+        />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {PENDING_UPDATES_LIST_ERROR_MESSAGE}
         </Typography>
@@ -86,9 +91,7 @@ export function PendingUpdatesList({
   const mixedCount = entries.filter(([, e]) => e.updateType === "mixed").length;
 
   if (entries.length === 0) {
-    return (
-      <EmptyState description={PENDING_UPDATES_LIST_EMPTY_DESCRIPTION} />
-    );
+    return <EmptyState description={PENDING_UPDATES_LIST_EMPTY_DESCRIPTION} />;
   }
 
   return (

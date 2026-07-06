@@ -16,10 +16,13 @@
 
 import type { CaseDetailsDetailsPanelProps } from "@features/support/types/supportComponents";
 import {
+  Autocomplete,
   Box,
   Button,
+  Checkbox,
   Chip,
   Stack,
+  TextField,
   Typography,
   alpha,
   useTheme,
@@ -35,13 +38,21 @@ import {
   Mail,
   FileText,
   ExternalLink,
+  Pencil,
 } from "@wso2/oxygen-ui-icons-react";
-import { type JSX } from "react";
+import { type JSX, useState, useMemo } from "react";
 import { Link, useLocation, useParams } from "react-router";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
+import { usePatchCase } from "@features/support/api/usePatchCase";
+import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DOMPurify from "dompurify";
+import { DESCRIPTION_PURIFY_CONFIG } from "@utils/common";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import AssignedEngineerDisplay from "@case-details-details/AssignedEngineerDisplay";
 import CaseDetailsCard from "@case-details-details/CaseDetailsCard";
+import CaseEscalationLevelsCard from "@case-details-details/CaseEscalationLevelsCard";
 import ApiErrorState from "@components/error/ApiErrorState";
 import {
   formatValue,
@@ -68,10 +79,65 @@ export default function CaseDetailsDetailsPanel({
   error,
   isEngagement = false,
   isServiceRequest = false,
+  projectId: propProjectId,
+  caseId = "",
 }: CaseDetailsDetailsPanelProps): JSX.Element {
   const theme = useTheme();
-  const { projectId = "" } = useParams<{ projectId: string }>();
+  const { projectId: paramProjectId = "" } = useParams<{ projectId: string }>();
+  const projectId = propProjectId ?? paramProjectId;
   const location = useLocation();
+
+  const [isEditingWatchList, setIsEditingWatchList] = useState(false);
+  const [pendingWatchList, setPendingWatchList] = useState<string[]>([]);
+  const [savedWatchList, setSavedWatchList] = useState<string[] | null>(null);
+
+  const { data: contactsData, isLoading: isContactsLoading, isError: isContactsError } = useGetProjectContacts(projectId);
+  const { data: userDetails, isLoading: isUserDetailsLoading } = useGetUserDetails();
+  const isCurrentUserLead =
+    isContactsLoading || isUserDetailsLoading
+      ? undefined
+      : contactsData?.find(
+          (c) => c.email?.toLowerCase() === userDetails?.email?.toLowerCase(),
+        )?.isLead ?? false;
+  const contactOptions = useMemo(
+    () =>
+      (contactsData ?? [])
+        .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
+        .map((c) => ({
+          label: `${c.firstName} ${c.lastName}`.trim() || c.email,
+          value: c.email,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [contactsData],
+  );
+
+  const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
+  const { mutate: patchCase, isPending: isPatchPending } = usePatchCase(projectId, caseId);
+
+  const handleEditWatchList = () => {
+    const current = savedWatchList ?? (data?.watchList ?? [])
+      .map((w) => w.email ?? w.userName ?? w.name ?? "")
+      .filter(Boolean);
+    setPendingWatchList(current);
+    setIsEditingWatchList(true);
+  };
+
+  const handleSaveWatchList = () => {
+    const optimisticList = [...pendingWatchList];
+    setSavedWatchList(optimisticList);
+    patchCase({ watchList: optimisticList }, {
+      onSuccess: () => {
+        setIsEditingWatchList(false);
+        setSavedWatchList(null);
+        showSuccess("Watch list updated successfully");
+      },
+      onError: () => {
+        setSavedWatchList(null);
+        showError("Failed to update watch list. Please try again.");
+      },
+    });
+  };
   const basePath = location.pathname.includes("/operations/")
     ? "operations"
     : "support";
@@ -216,20 +282,38 @@ export default function CaseDetailsDetailsPanel({
               />
             </Box>
           )}
-          {(!isServiceRequest || data?.issueType) && (
-            <Box>
-              <Typography {...labelSx}>Category</Typography>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Tag
-                  size={16}
-                  color={theme.palette.text.secondary}
-                  aria-hidden
-                />
-                <Typography {...valueSx}>
-                  {formatValue(data?.issueType)}
-                </Typography>
-              </Stack>
-            </Box>
+          {isEngagement ? (
+            data?.engagementType && (
+              <Box>
+                <Typography {...labelSx}>Engagement Type</Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Tag
+                    size={16}
+                    color={theme.palette.text.secondary}
+                    aria-hidden
+                  />
+                  <Typography {...valueSx}>
+                    {formatValue(data.engagementType)}
+                  </Typography>
+                </Stack>
+              </Box>
+            )
+          ) : (
+            (!isServiceRequest || data?.issueType) && (
+              <Box>
+                <Typography {...labelSx}>Category</Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Tag
+                    size={16}
+                    color={theme.palette.text.secondary}
+                    aria-hidden
+                  />
+                  <Typography {...valueSx}>
+                    {formatValue(data?.issueType)}
+                  </Typography>
+                </Stack>
+              </Box>
+            )
           )}
           {data?.createdBy ? (
             <Box>
@@ -376,7 +460,7 @@ export default function CaseDetailsDetailsPanel({
               }}
               // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
               dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(data.description),
+                __html: DOMPurify.sanitize(data.description, DESCRIPTION_PURIFY_CONFIG),
               }}
             />
           ) : (
@@ -404,7 +488,16 @@ export default function CaseDetailsDetailsPanel({
         )
       )}
 
-      {/* Section 2: Product & Environment */}
+      {/* Section 2: Escalation Levels */}
+      {!isEngagement && !isServiceRequest && !isSecurityReportAnalysis && caseId && (
+        <CaseEscalationLevelsCard
+          caseId={caseId}
+          currentLevelId={data?.escalationLevel?.id}
+          isLead={isCurrentUserLead}
+        />
+      )}
+
+      {/* Section 3: Product & Environment */}
       {!isEngagement && (
         <CaseDetailsCard
           title="Product & Environment"
@@ -447,7 +540,7 @@ export default function CaseDetailsDetailsPanel({
         </CaseDetailsCard>
       )}
 
-      {/* Section 3: Closed Case Details (only when case is closed) */}
+      {/* Section 4: Closed Case Details (only when case is closed) */}
       {statusLabel?.toLowerCase() === "closed" && (
         <CaseDetailsCard
           title={
@@ -487,7 +580,7 @@ export default function CaseDetailsDetailsPanel({
         </CaseDetailsCard>
       )}
 
-      {/* Section 4: Customer Information */}
+      {/* Section 5: Customer Information */}
       <CaseDetailsCard
         title="Customer Information"
         icon={<Building2 size={20} aria-hidden />}
@@ -532,6 +625,160 @@ export default function CaseDetailsDetailsPanel({
             </>
           )}
         </Box>
+      </CaseDetailsCard>
+
+      {/* Section 6: Watch List */}
+      <CaseDetailsCard
+        title="Watch List"
+        icon={<Mail size={20} aria-hidden />}
+        rightAction={
+          !isEditingWatchList ? (
+            <Button
+              variant="text"
+              size="small"
+              startIcon={<Pencil size={14} />}
+              onClick={handleEditWatchList}
+              disabled={!caseId || data?.status?.label?.toLowerCase() === "closed"}
+              sx={{ minHeight: "unset", p: 0, textTransform: "none" }}
+            >
+              Edit
+            </Button>
+          ) : null
+        }
+      >
+        {isEditingWatchList ? (() => {
+          type WatchOption = { label: string; value: string; readonly?: boolean };
+          const hiddenWatcherOptions: WatchOption[] = pendingWatchList
+            .filter((email) => !contactOptions.some((o) => o.value === email))
+            .map((email) => ({
+              label:
+                data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
+                email,
+              value: email,
+              readonly: true,
+            }));
+          const editableValue: WatchOption[] = pendingWatchList
+            .filter((email) => contactOptions.some((o) => o.value === email))
+            .map((email) => contactOptions.find((o) => o.value === email)!);
+          return (
+            <Box>
+            <Autocomplete<WatchOption, true>
+              multiple
+              disableCloseOnSelect
+              loading={isContactsLoading}
+              loadingText="Loading..."
+              options={contactOptions}
+              getOptionLabel={(option) => option.label}
+              value={[...hiddenWatcherOptions, ...editableValue]}
+              onChange={(_event, newValue) => {
+                const visibleEmails = newValue
+                  .filter((o) => !o.readonly)
+                  .map((o) => o.value);
+                const hiddenEmails = pendingWatchList.filter(
+                  (email) => !contactOptions.some((o) => o.value === email),
+                );
+                setPendingWatchList([...visibleEmails, ...hiddenEmails]);
+              }}
+              isOptionEqualToValue={(option, val) => option.value === val.value}
+              renderOption={(props, option, { selected }) => {
+                const { key, ...rest } = props;
+                return (
+                  <li key={key} {...rest}>
+                    <Checkbox
+                      size="small"
+                      checked={selected}
+                      sx={{ mr: 1, p: 0.5 }}
+                    />
+                    {option.label}
+                  </li>
+                );
+              }}
+              renderTags={(tagValue, getTagProps) =>
+                tagValue.map((option, index) => {
+                  const { key, onDelete, ...tagProps } = getTagProps({ index });
+                  return option.readonly ? (
+                    <Chip
+                      key={key}
+                      label={option.label}
+                      size="small"
+                      {...tagProps}
+                      sx={{ opacity: 0.7 }}
+                    />
+                  ) : (
+                    <Chip key={key} label={option.label} size="small" onDelete={onDelete} {...tagProps} />
+                  );
+                })
+              }
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Watch List"
+                  placeholder="Add watchers..."
+                  size="small"
+                  error={isContactsError}
+                  helperText={isContactsError ? "Could not load users. Please refresh and try again." : undefined}
+                />
+              )}
+            />
+            <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 1 }}>
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => setIsEditingWatchList(false)}
+                sx={{ minHeight: "unset", textTransform: "none" }}
+                disabled={isPatchPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="text"
+                size="small"
+                color="primary"
+                onClick={handleSaveWatchList}
+                sx={{ minHeight: "unset", textTransform: "none" }}
+                loading={isPatchPending}
+              >
+                Save
+              </Button>
+            </Stack>
+            </Box>
+          );
+        })() : (() => {
+          const displayItems = savedWatchList
+            ? savedWatchList.map((email) => ({
+                key: email,
+                label:
+                  contactOptions.find((o) => o.value === email)?.label ??
+                  data?.watchList?.find((w) => w.email === email || w.userName === email)?.name ??
+                  email,
+              }))
+            : (data?.watchList ?? [])
+                .filter((w) => w.email ?? w.userName ?? w.name)
+                .map((w) => ({
+                  key: w.email ?? w.userName ?? w.name ?? "",
+                  label: w.name ?? w.userName ?? w.email ?? "",
+                }));
+          return displayItems.length > 0 ? (
+            <Stack direction="row" flexWrap="wrap" gap={1}>
+              {displayItems.map(({ key, label }) => (
+                  <Chip
+                    key={key}
+                    label={label}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      borderColor: "transparent",
+                      bgcolor: "action.hover",
+                      height: 24,
+                      fontSize: "0.75rem",
+                    }}
+                  />
+              ))}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">No watchers added</Typography>
+          );
+        })()}
       </CaseDetailsCard>
     </Stack>
   );

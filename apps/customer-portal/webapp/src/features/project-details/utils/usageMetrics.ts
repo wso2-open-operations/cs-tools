@@ -15,6 +15,7 @@
 // under the License.
 
 import type {
+  CurrMinMaxAvg,
   InstanceMetricEntry,
   InstanceUsageEntry,
   UsageTrendRow,
@@ -29,35 +30,15 @@ import type {
  */
 export function formatIsoDateForUsageChart(
   isoDate: string,
-  isSmallScreen: boolean = false,
+  _isSmallScreen: boolean = false,
 ): string {
-  try {
-    const date = new Date(`${isoDate}T00:00:00Z`);
-    const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    const month = monthNames[date.getUTCMonth()];
-    const day = date.getUTCDate();
-    const year = date.getUTCFullYear();
-
-    if (isSmallScreen) {
-      return `${month} ${day}`;
-    }
-    return `${month} ${day}\n${year}`;
-  } catch {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (isNaN(date.getTime())) {
     return isoDate.slice(5);
   }
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${mm}/${dd}`;
 }
 
 /**
@@ -201,6 +182,132 @@ export function computeUsageHeadlineDeltaSigned(trend: UsageTrendRow[]): {
     headline: formatUsageMetricCount(last),
     delta: `${sign}${pct.toFixed(1)}%`,
     deltaPositive: pct >= 0,
+  };
+}
+
+/**
+ * Computes curr/avg/min/max from a sorted values array.
+ * curr = last value, min/max/avg from all values (ignoring leading zeros only when all are zero).
+ *
+ * @param values - Time-ordered values (oldest → newest).
+ * @returns Summary stats.
+ */
+export function computeSeriesSummary(values: number[]): CurrMinMaxAvg {
+  if (values.length === 0) return { curr: 0, avg: 0, min: 0, max: 0 };
+  const curr = values[values.length - 1];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  return { curr, min, max, avg };
+}
+
+/**
+ * Derives per-period counts for instances, products, and environments.
+ * - Instances: derived from metric dataPoints (per date, count distinct instanceIds).
+ * - Products / Environments: derived from usage periodSummaries (per period, count distinct IDs).
+ *   Usages reliably carry deployment.id and deployedProduct.id; metrics often have them null.
+ *
+ * @param metrics - Project-wide instance metric entries.
+ * @param usages - Project-wide instance usage entries.
+ * @returns Summary stats for instances, products, and environments.
+ */
+export function computeOverviewSummaries(
+  metrics: InstanceMetricEntry[],
+  usages: InstanceUsageEntry[],
+): {
+  instanceSummary: CurrMinMaxAvg;
+  productSummary: CurrMinMaxAvg;
+  environmentSummary: CurrMinMaxAvg;
+} {
+  // Instances — from metric dataPoints (daily granularity)
+  const dayInstances = new Map<string, Set<string>>();
+  for (const m of metrics) {
+    for (const dp of m.dataPoints) {
+      if (!dp.date) continue;
+      const s = dayInstances.get(dp.date) ?? new Set<string>();
+      s.add(m.instanceId);
+      dayInstances.set(dp.date, s);
+    }
+  }
+  const sortedDays = Array.from(dayInstances.keys()).sort();
+  const instanceSummary = computeSeriesSummary(
+    sortedDays.map((d) => dayInstances.get(d)?.size ?? 0),
+  );
+
+  // Products / Environments — from usage periodSummaries (period granularity)
+  const periodProducts = new Map<string, Set<string>>();
+  const periodEnvironments = new Map<string, Set<string>>();
+  for (const u of usages) {
+    const prodId = u.deployedProduct?.id ?? u.product?.id;
+    const envId = u.deployment?.id;
+    for (const ps of u.periodSummaries) {
+      if (prodId) {
+        const s = periodProducts.get(ps.period) ?? new Set<string>();
+        s.add(prodId);
+        periodProducts.set(ps.period, s);
+      }
+      if (envId) {
+        const s = periodEnvironments.get(ps.period) ?? new Set<string>();
+        s.add(envId);
+        periodEnvironments.set(ps.period, s);
+      }
+    }
+  }
+  const sortedPeriods = Array.from(
+    new Set([...periodProducts.keys(), ...periodEnvironments.keys()]),
+  ).sort();
+  const productSummary = computeSeriesSummary(
+    sortedPeriods.map((p) => periodProducts.get(p)?.size ?? 0),
+  );
+  const environmentSummary = computeSeriesSummary(
+    sortedPeriods.map((p) => periodEnvironments.get(p)?.size ?? 0),
+  );
+
+  return { instanceSummary, productSummary, environmentSummary };
+}
+
+/**
+ * Derives instance-count and core-count curr/avg/min/max from metric data points.
+ * Instance count per date = number of distinct instances that have a data point on that date.
+ * Core count per date = sum of coreCount across all data points on that date.
+ *
+ * @param metrics - Instance metric entries for a product or project scope.
+ * @returns Instance and core summaries.
+ */
+export function computeInstanceAndCoreSummary(metrics: InstanceMetricEntry[]): {
+  instanceSummary: CurrMinMaxAvg;
+  coreSummary: CurrMinMaxAvg;
+} {
+  const dayInstances = new Map<string, Set<string>>();
+  const dayCores = new Map<string, number>();
+
+  for (const m of metrics) {
+    for (const dp of m.dataPoints) {
+      if (!dp.date) continue;
+      const instSet = dayInstances.get(dp.date) ?? new Set<string>();
+      instSet.add(m.instanceId);
+      dayInstances.set(dp.date, instSet);
+
+      const cores =
+        dp.coreCount != null
+          ? dp.coreCount
+          : dp.deploymentMetadata?.numberOfCores != null
+            ? Number(dp.deploymentMetadata.numberOfCores)
+            : 0;
+      dayCores.set(dp.date, (dayCores.get(dp.date) ?? 0) + cores);
+    }
+  }
+
+  const sortedDates = Array.from(
+    new Set([...dayInstances.keys(), ...dayCores.keys()]),
+  ).sort();
+
+  const instanceValues = sortedDates.map((d) => dayInstances.get(d)?.size ?? 0);
+  const coreValues = sortedDates.map((d) => dayCores.get(d) ?? 0);
+
+  return {
+    instanceSummary: computeSeriesSummary(instanceValues),
+    coreSummary: computeSeriesSummary(coreValues),
   };
 }
 

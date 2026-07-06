@@ -61,9 +61,7 @@ describe("AllCasesStatCards", () => {
       </ThemeProvider>,
     );
 
-    // openCases = 10+20+30 = 60 (excluding Closed)
-    // workInProgress (10), waitingOnClient (20), waitingOnWso2 (30)
-    expect(screen.getByText("60")).toBeInTheDocument();
+    expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("10")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("30")).toBeInTheDocument();
@@ -82,7 +80,8 @@ describe("AllCasesStatCards", () => {
     );
 
     // Should find skeleton elements
-    const skeletons = screen.getAllByTestId("Skeleton");
-    expect(skeletons.length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".MuiSkeleton-root").length).toBeGreaterThan(
+      0,
+    );
   });
 });

@@ -96,7 +96,9 @@ export default function AnnouncementList({
         const statusLabel = caseItem.status?.label;
         const statusColor = getStatusColor(statusLabel);
         const resolvedStatusColor = resolveColorFromTheme(statusColor, theme);
-        const createdOnLabel = formatAnnouncementDateDisplay(caseItem.createdOn);
+        const updatedOnLabel = formatAnnouncementDateDisplay(
+          caseItem.updatedOn ?? caseItem.createdOn,
+        );
 
         const cardContent = (
           <>
@@ -193,7 +195,7 @@ export default function AnnouncementList({
                     color="text.secondary"
                     sx={{ lineHeight: 1 }}
                   >
-                    Created {createdOnLabel}
+                    Updated {updatedOnLabel}
                   </Typography>
                 </Box>
                 {caseItem.issueType?.label && (

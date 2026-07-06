@@ -35,8 +35,29 @@ const mockProjects = [
   },
 ];
 
+const mockUseIsStackedHeaderLayout = vi.fn(() => false);
+
+vi.mock("@hooks/useResponsiveLayout", () => ({
+  useIsStackedHeaderLayout: () => mockUseIsStackedHeaderLayout(),
+}));
+
+vi.mock("@utils/permission", () => ({
+  shouldExcludeS0: () => false,
+}));
+
+vi.mock("@api/useGetProjectFeatures", () => ({
+  default: () => ({ data: undefined }),
+}));
+
+vi.mock("@context/error-page/ErrorPageContext", () => ({
+  useErrorPageContext: () => ({ isProjectSuspended: false }),
+}));
+
 // Mock @wso2/oxygen-ui
 vi.mock("@wso2/oxygen-ui", () => ({
+  Box: ({ children, ...props }: { children: any }) => (
+    <div {...props}>{children}</div>
+  ),
   Header: Object.assign(
     ({ children }: { children: any }) => <header>{children}</header>,
     {
@@ -172,25 +193,25 @@ vi.mock("@asgardeo/react", () => ({
 
 vi.mock("../ProjectSwitcher", () => ({
   default: ({
+    projectId,
     projects,
-    selectedProject,
     onProjectChange,
-    isLoading,
-    isError,
+    isAuthLoading,
+    stackedHeaderRow,
   }: any) => (
     <div
       data-testid="project-switcher"
-      data-selected-id={selectedProject?.id || ""}
-      data-loading={isLoading ? "true" : "false"}
-      data-error={isError ? "true" : "false"}
+      data-selected-id={projectId || ""}
+      data-loading={isAuthLoading ? "true" : "false"}
+      data-stacked-header-row={stackedHeaderRow ? "true" : "false"}
     >
       <select
         data-testid="project-select"
-        value={selectedProject?.id || ""}
+        value={projectId || ""}
         onChange={(e) => onProjectChange(e.target.value)}
       >
         <option value="">None</option>
-        {projects.map((p: any) => (
+        {(projects ?? mockProjects).map((p: any) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>
@@ -210,6 +231,7 @@ describe("Header", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseIsStackedHeaderLayout.mockReturnValue(false);
     mockLocation.pathname = "/";
     mockParams.projectId = "";
     mockUseSearchProjects.mockReturnValue({
@@ -240,6 +262,24 @@ describe("Header", () => {
 
     expect(screen.getByText("Toggle")).toBeInTheDocument();
     expect(screen.getByTestId("project-select")).toBeInTheDocument();
+    expect(screen.getByTestId("search-bar")).toBeInTheDocument();
+  });
+
+  it("should render project switcher and search on a second row for stacked header layout", () => {
+    mockUseIsStackedHeaderLayout.mockReturnValue(true);
+    mockLocation.pathname = "/projects/project-1/dashboard";
+    mockParams.projectId = "project-1";
+
+    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
+
+    expect(
+      screen.getByTestId("header-stacked-controls-row"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("project-switcher")).toHaveAttribute(
+      "data-stacked-header-row",
+      "true",
+    );
+    expect(screen.getByTestId("search-bar")).toBeInTheDocument();
   });
 
   it("should call onToggleSidebar when toggle is clicked", () => {
@@ -298,7 +338,7 @@ describe("Header", () => {
     render(<Header onToggleSidebar={mockOnToggleSidebar} />);
 
     const switcher = screen.getByTestId("project-switcher");
-    expect(switcher).toHaveAttribute("data-selected-id", "");
+    expect(switcher).toHaveAttribute("data-selected-id", "invalid-project");
   });
 
   it("should clear selection when projectId is missing (hub page)", () => {
@@ -345,20 +385,5 @@ describe("Header", () => {
 
     const switcher = screen.getByTestId("project-switcher");
     expect(switcher).toHaveAttribute("data-loading", "true");
-  });
-
-  it("should pass isError to ProjectSwitcher", () => {
-    mockLocation.pathname = "/projects/project-1/dashboard";
-    mockParams.projectId = "project-1";
-    mockUseSearchProjects.mockReturnValue({
-      data: null,
-      isLoading: false,
-      isError: true,
-    });
-
-    render(<Header onToggleSidebar={mockOnToggleSidebar} />);
-
-    const switcher = screen.getByTestId("project-switcher");
-    expect(switcher).toHaveAttribute("data-error", "true");
   });
 });

@@ -116,6 +116,16 @@ curl -X GET "http://localhost:9090/cases/<case-id>/comments?limit=10&offset=0" \
 	-H "x-user-id-token: <asgardeo_user_token>"
 ```
 
+Add users to an external group:
+
+```bash
+curl -X POST http://localhost:9090/users/groups \
+	-H "Content-Type: application/json" \
+	-H "x-jwt-assertion: <jwt_assertion_token>" \
+	-H "x-user-id-token: <asgardeo_user_token>" \
+	-d '{"group":"<group_display_name>","emails":["user@example.com"]}'
+```
+
 ## API Endpoints
 
 The following endpoints are defined in `service.bal`.
@@ -124,6 +134,7 @@ The following endpoints are defined in `service.bal`.
 
 - `GET /users/me` - Get logged-in user profile.
 - `PATCH /users/me` - Update logged-in user profile.
+- `POST /users/groups` - Add users to an external group via SCIM.
 
 ### Projects
 

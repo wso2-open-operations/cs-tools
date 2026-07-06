@@ -185,22 +185,40 @@ export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 // Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Allowed MIME types for inline image uploads in the rich text editor.
+export const ALLOWED_INLINE_IMAGE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+
+// Allowed file extensions for inline image uploads (used in accept attribute and validation).
+export const ALLOWED_INLINE_IMAGE_EXTENSIONS = [
+  "png",
+  "jpeg",
+  "jpg",
+  "webp",
+] as const;
+
 // Initial limit for case attachments list.
 export const CASE_ATTACHMENTS_INITIAL_LIMIT = 50;
 
-/** Tooltip when delete is disabled because the case is closed. */
+// Max rows per search page when exporting.
+export const CASE_SEARCH_RESULTS_PAGE_SIZE = 50;
+
+// Tooltip when delete is disabled because the case is closed.
 export const ATTACHMENT_DELETE_TOOLTIP_CASE_CLOSED =
   "Attachments cannot be deleted on a closed case.";
 
-/** Tooltip when delete is disabled because the current user did not upload the file. */
+// Tooltip when delete is disabled because the current user did not upload the file.
 export const ATTACHMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this attachment can delete it.";
 
-/** Tooltip for deployment documents when delete is disabled for non-owners. */
+// Tooltip for deployment documents when delete is disabled for non-owners.
 export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can delete it.";
 
-/** Tooltip for deployment documents when edit is disabled for non-owners. */
+// Tooltip for deployment documents when edit is disabled for non-owners.
 export const DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER =
   "Only the person who uploaded this document can edit it.";
 
@@ -310,7 +328,24 @@ export const CASE_DETAILS_TABS: CaseDetailsTabConfig[] = [
   { label: "Calls (0)", Icon: Phone },
   { label: "Knowledge Base (0)", Icon: BookOpen },
   { label: "Related Change Requests", Icon: GitBranch },
+  { label: "Escalation", Icon: TriangleAlert },
 ];
+
+export const ESCALATION_MAX_LEVEL_ID = "5";
+
+// Escalation levels that require the user to have isLead: true (EL3→EL4 and EL4→EL5).
+export const ESCALATION_LEAD_REQUIRED_FROM_LEVEL = new Set(["3", "4"]);
+
+export const ESCALATION_NEXT_LEVEL: Record<
+  string,
+  { nextId: string; nextLabel: string; notifiedLabel: string }
+> = {
+  "0": { nextId: "1", nextLabel: "EL1", notifiedLabel: "Team Lead" },
+  "1": { nextId: "2", nextLabel: "EL2", notifiedLabel: "Technology Unit Head" },
+  "2": { nextId: "3", nextLabel: "EL3", notifiedLabel: "CRE Head" },
+  "3": { nextId: "4", nextLabel: "EL4", notifiedLabel: "CCO / CRO" },
+  "4": { nextId: "5", nextLabel: "EL5", notifiedLabel: "CEO" },
+};
 
 // Case status actions shown in the case details action row. Close button last.
 export const CASE_STATUS_ACTIONS: CaseStatusAction[] = [
@@ -422,24 +457,33 @@ export const ALL_CONVERSATIONS_FILTER_DEFINITIONS: AllConversationsFilterDefinit
  */
 export const ALL_CASES_FILTER_DEFINITIONS: AllCasesFilterDefinition[] = [
   {
-    filterKey: "statusId",
+    filterKey: "statusIds",
     id: "status",
     metadataKey: "caseStates",
+    multiSelect: true,
   },
   {
-    filterKey: "severityId",
+    filterKey: "severityIds",
     id: "severity",
     metadataKey: "severities",
+    multiSelect: true,
   },
   {
     filterKey: "issueTypes",
     id: "category",
     metadataKey: "issueTypes",
+    multiSelect: true,
   },
   {
-    filterKey: "deploymentId",
+    filterKey: "deploymentIds",
     id: "deployment",
     metadataKey: "deploymentTypes",
+    multiSelect: true,
+  },
+  {
+    filterKey: "createdBy",
+    id: "createdBy",
+    multiSelect: true,
   },
 ];
 
@@ -494,9 +538,10 @@ export const ANNOUNCEMENT_STAT_CONFIGS: SupportStatConfig<AnnouncementStatKey>[]
  */
 export const ANNOUNCEMENT_FILTER_DEFINITIONS: AnnouncementFilterDefinition[] = [
   {
-    filterKey: "statusId",
+    filterKey: "statusIds",
     id: "status",
     metadataKey: "caseStates",
+    multiSelect: true,
   },
 ];
 

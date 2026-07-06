@@ -47,12 +47,12 @@ export function buildAnnouncementCaseSearchRequest(
   filters: AnnouncementFilterValues,
   searchTerm: string,
   sortOrder: SortOrder,
-  sortField: AnnouncementSortField = AnnouncementSortField.CreatedOn,
+  sortField: AnnouncementSortField = AnnouncementSortField.UpdatedOn,
 ): Omit<CaseSearchRequest, "pagination"> {
   return {
     filters: {
       caseTypes: [CaseType.ANNOUNCEMENT],
-      statusIds: filters.statusId ? [Number(filters.statusId)] : undefined,
+      statusIds: filters.statusIds?.length ? filters.statusIds.map(Number) : undefined,
       searchQuery: searchTerm.trim() || undefined,
     },
     sortBy: {

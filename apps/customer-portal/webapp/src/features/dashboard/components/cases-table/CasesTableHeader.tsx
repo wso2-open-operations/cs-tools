@@ -15,6 +15,7 @@
 // under the License.
 
 import { Box, Typography, Button } from "@wso2/oxygen-ui";
+import TabBar from "@components/tab-bar/TabBar";
 import {
   ListFilter,
   ChevronDown,
@@ -39,6 +40,9 @@ const CasesTableHeader = ({
   activeFiltersCount,
   isFiltersOpen,
   onFilterToggle,
+  viewTabs,
+  activeViewMode,
+  onViewModeChange,
 }: CasesTableHeaderProps): JSX.Element => {
   const hasActiveFilters = activeFiltersCount > 0;
 
@@ -52,35 +56,53 @@ const CasesTableHeader = ({
           mb: 3,
           flexWrap: "wrap",
           gap: 2,
+          width: "100%",
+          minWidth: 0,
         }}
       >
-        <Box>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography variant="h6">{CASES_TABLE_HEADER_TITLE}</Typography>
           <Typography variant="body2" color="text.secondary">
             {CASES_TABLE_HEADER_SUBTITLE}
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          color="warning"
-          size="small"
-          onClick={onFilterToggle}
-          startIcon={
-            hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
-          }
-          endIcon={
-            !hasActiveFilters &&
-            (isFiltersOpen ? (
-              <ChevronUp size={16} />
-            ) : (
-              <ChevronDown size={16} />
-            ))
-          }
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            flexWrap: "wrap",
+            flexShrink: 0,
+          }}
         >
-          {hasActiveFilters
-            ? formatCasesTableClearFiltersLabel(activeFiltersCount)
-            : CASES_TABLE_BUTTON_FILTERS}
-        </Button>
+          <TabBar
+            tabs={viewTabs}
+            activeTab={activeViewMode}
+            onTabChange={onViewModeChange}
+            sx={{ mb: 0, height: 32 }}
+          />
+          <Button
+            variant="outlined"
+            color="warning"
+            size="small"
+            onClick={onFilterToggle}
+            startIcon={
+              hasActiveFilters ? <X size={16} /> : <ListFilter size={16} />
+            }
+            endIcon={
+              !hasActiveFilters &&
+              (isFiltersOpen ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              ))
+            }
+          >
+            {hasActiveFilters
+              ? formatCasesTableClearFiltersLabel(activeFiltersCount)
+              : CASES_TABLE_BUTTON_FILTERS}
+          </Button>
+        </Box>
       </Box>
     </Box>
   );

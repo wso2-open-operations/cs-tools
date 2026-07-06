@@ -28,6 +28,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import useGetProjectFilters from "@api/useGetProjectFilters";
+import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
@@ -45,8 +46,10 @@ import type { CreateCaseRequest } from "@features/support/types/cases";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { CaseDetailsSection } from "@features/support/components/case-creation-layout/form-sections/case-details-section/CaseDetailsSection";
+import { WatchListSection } from "@features/support/components/case-creation-layout/form-sections/watch-list-section/WatchListSection";
 import { ConversationSummary } from "@features/support/components/case-creation-layout/form-sections/conversation-summary-section/ConversationSummary";
 import { RelatedCaseSummary } from "@features/support/components/case-creation-layout/form-sections/conversation-summary-section/RelatedCaseSummary";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
   buildClassificationProductLabel,
   findMatchingDeploymentLabel,
@@ -146,6 +149,9 @@ export default function CreateCasePage(): JSX.Element {
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
   );
+  const { data: projectContacts, isLoading: isContactsLoading } =
+    useGetProjectContacts(projectId || "");
+  const { data: currentUser } = useGetUserDetails();
   const [title, setTitle] = useState(() => relatedCase?.title ?? "");
   const [description, setDescription] = useState(() =>
     relatedCase ? buildRelatedCaseDescriptionHtml(relatedCase.description) : "",
@@ -154,6 +160,7 @@ export default function CreateCasePage(): JSX.Element {
   const [product, setProduct] = useState("");
   const [deployment, setDeployment] = useState("");
   const [severity, setSeverity] = useState("");
+  const [watchList, setWatchList] = useState<string[]>([]);
   const [classificationProductLabel, setClassificationProductLabel] =
     useState("");
   type AttachmentItem = { id: string; file: File };
@@ -244,6 +251,18 @@ export default function CreateCasePage(): JSX.Element {
       );
     }
   }, [deploymentProductsError, showError]);
+
+  useEffect(() => {
+    if (!projectContacts) return;
+    const eligibleEmails = projectContacts
+      .filter((c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact)
+      .map((c) => c.email);
+    const creatorEmail = currentUser?.email;
+    const merged = creatorEmail
+      ? Array.from(new Set([creatorEmail, ...eligibleEmails]))
+      : Array.from(new Set(eligibleEmails));
+    setWatchList(merged);
+  }, [projectContacts, currentUser?.email]);
 
   const hasInitializedRef = useRef(false);
   const hasClassificationAppliedRef = useRef(false);
@@ -958,6 +977,7 @@ export default function CreateCasePage(): JSX.Element {
       ...(conversationId && {
         conversationId,
       }),
+      ...(watchList.length > 0 && { watchList }),
     };
 
     postCase(payload, {
@@ -1162,6 +1182,15 @@ export default function CreateCasePage(): JSX.Element {
             isSecurityReport={isSecurityReport}
             excludeS0={excludeS0}
             isSeverityDisabled={forceSeverityS4}
+          />
+
+          <WatchListSection
+            contacts={(projectContacts ?? []).filter(
+              (c) => c.isCsAdmin || c.isCsIntegrationUser || c.isPortalUser || !c.isSecurityContact,
+            )}
+            selectedEmails={watchList}
+            onChange={setWatchList}
+            isLoading={isContactsLoading}
           />
 
           {/* form actions container */}

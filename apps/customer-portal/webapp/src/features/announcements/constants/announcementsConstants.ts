@@ -38,8 +38,8 @@ export const ANNOUNCEMENTS_SEARCH_PLACEHOLDER = "Search announcements...";
 /** Entity label for results bar and pagination copy. */
 export const ANNOUNCEMENTS_LIST_ENTITY_LABEL = "announcements";
 
-/** Sort row: label for created date column. */
-export const ANNOUNCEMENTS_SORT_CREATED_LABEL = "Created date";
+/** Sort row: label for updated date column. */
+export const ANNOUNCEMENTS_SORT_UPDATED_LABEL = "Updated date";
 
 /** Sort row: label for state column. */
 export const ANNOUNCEMENTS_SORT_STATE_LABEL = "Status";
@@ -47,8 +47,8 @@ export const ANNOUNCEMENTS_SORT_STATE_LABEL = "Status";
 /** Options passed to `ListResultsBar`. */
 export const ANNOUNCEMENTS_SORT_FIELD_OPTIONS: AnnouncementSortOption[] = [
   {
-    value: AnnouncementSortField.CreatedOn,
-    label: ANNOUNCEMENTS_SORT_CREATED_LABEL,
+    value: AnnouncementSortField.UpdatedOn,
+    label: ANNOUNCEMENTS_SORT_UPDATED_LABEL,
     kind: "chronological",
   },
   {

@@ -38,6 +38,8 @@ public type Contact record {|
     string lastName;
     # Whether the contact is a customer admin or not
     boolean isCsAdmin;
+    # Whether the contact is a lead or not
+    boolean? isLead?;
     # Whether the contact is an Integration user or not
     boolean isCsIntegrationUser;
     # Whether the contact is a portal user or not
@@ -85,6 +87,8 @@ public type OnBoardContactPayload record {|
     boolean isCsIntegrationUser;
     # Whether the contact is a customer admin or not
     boolean isCsAdmin = false;
+    # Whether the contact is a lead or not
+    boolean isLead = false;
     # Whether the contact is a portal user or not
     boolean isPortalUser = false;
     # Whether the contact is Security Contact or not
@@ -115,6 +119,8 @@ public type Membership record {|
     string state;
     # Whether the contact is a customer admin or not
     boolean? isCsAdmin;
+    # Whether the contact is a lead or not
+    boolean? isLead;
     # Whether the contact is a portal user or not
     boolean? isPortalUser;
     # Whether the contact is a Security contact or not
@@ -152,6 +158,8 @@ public type MembershipRolePayload record {|
     string adminEmail;
     # Whether the contact is a customer admin or not
     boolean isCsAdmin = false;
+    # Whether the contact is a lead or not
+    boolean isLead = false;
     # Whether the contact is a portal user or not
     boolean isPortalUser = false;
     # Whether the contact is a security contact or not

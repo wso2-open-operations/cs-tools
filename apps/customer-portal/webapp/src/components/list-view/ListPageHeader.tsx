@@ -22,12 +22,12 @@ export interface ListPageHeaderProps {
   title: string;
   description: string;
   backLabel?: string;
-  onBack: () => void;
+  onBack?: () => void;
   actions?: ReactNode;
 }
 
 /**
- * ListPageHeader renders the back button, page title, description, and optional
+ * ListPageHeader renders the page title, description, optional back button, and optional
  * right-side action controls shared across all list pages.
  *
  * @param {ListPageHeaderProps} props - Header configuration.
@@ -42,20 +42,22 @@ export default function ListPageHeader({
 }: ListPageHeaderProps): JSX.Element {
   return (
     <Stack spacing={2} sx={{ alignItems: "stretch" }}>
-      <Button
-        startIcon={<ArrowLeft size={16} />}
-        onClick={onBack}
-        variant="text"
-        sx={{
-          alignSelf: "flex-start",
-          px: 1,
-          ml: -1,
-          minWidth: 0,
-          mb: 0,
-        }}
-      >
-        {backLabel}
-      </Button>
+      {onBack && (
+        <Button
+          startIcon={<ArrowLeft size={16} />}
+          onClick={onBack}
+          variant="text"
+          sx={{
+            alignSelf: "flex-start",
+            px: 1,
+            ml: -1,
+            minWidth: 0,
+            mb: 0,
+          }}
+        >
+          {backLabel}
+        </Button>
+      )}
       <Stack
         direction={{ xs: "column", sm: actions ? "row" : "column" }}
         spacing={2}

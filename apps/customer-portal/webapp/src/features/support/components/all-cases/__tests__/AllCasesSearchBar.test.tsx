@@ -29,10 +29,10 @@ describe("ListSearchPanel", () => {
   const mockOnFilterChange = vi.fn();
   const mockOnClearFilters = vi.fn();
   const defaultFilters = {
-    statusId: "",
-    severityId: "",
-    issueTypes: "",
-    deploymentId: "",
+    statusIds: [] as string[],
+    severityIds: [] as string[],
+    issueTypes: [] as string[],
+    deploymentIds: [] as string[],
   };
 
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe("ListSearchPanel", () => {
   });
 
   it("should call onClearFilters when clicking clear button if filters are active", () => {
-    const activeFilters = { ...defaultFilters, statusId: "Open" };
+    const activeFilters = { ...defaultFilters, statusIds: ["Open"] };
 
     render(
       <ThemeProvider theme={theme}>

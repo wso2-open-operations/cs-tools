@@ -63,7 +63,7 @@ export default function ListStatGrid<T extends string>({
   isError,
   entityName = "statistics",
   spacing = 2,
-  itemSize = { xs: 12, sm: 6, md: 3 },
+  itemSize = { xs: 12, sm: 6, md: 6, lg: 3 },
   valueFormatter,
   onStatClick,
   nonClickableKeys,
@@ -93,7 +93,8 @@ export default function ListStatGrid<T extends string>({
       {configs.map((stat) => {
         const SecondaryIcon = stat.secondaryIcon;
         const Icon = stat.icon;
-        const isClickable = !!onStatClick && !nonClickableKeys?.includes(stat.key);
+        const isClickable =
+          !!onStatClick && !nonClickableKeys?.includes(stat.key);
 
         return (
           <Box
@@ -116,7 +117,9 @@ export default function ListStatGrid<T extends string>({
               minWidth: 0,
               cursor: isClickable ? "pointer" : undefined,
               borderRadius: 1,
-              transition: isClickable ? "box-shadow 0.2s ease, transform 0.15s ease" : undefined,
+              transition: isClickable
+                ? "box-shadow 0.2s ease, transform 0.15s ease"
+                : undefined,
               "&:hover": isClickable
                 ? {
                     boxShadow: `0 0 0 1px ${theme.palette.primary.main}, 0 4px 16px rgba(0,0,0,0.12)`,
@@ -163,8 +166,8 @@ export default function ListStatGrid<T extends string>({
             )}
             <StatCard
               label={stat.label}
-              value={(
-                isLoading ? (
+              value={
+                (isLoading ? (
                   <Skeleton
                     data-testid="Skeleton"
                     variant="rounded"
@@ -181,8 +184,8 @@ export default function ListStatGrid<T extends string>({
                   )
                 ) : (
                   "--"
-                )
-              ) as unknown as string | number}
+                )) as unknown as string | number
+              }
               icon={<Icon />}
               iconColor={stat.iconColor}
             />

@@ -49,12 +49,15 @@ export type CaseDetailsHeaderProps = {
   severityLabel: string | null | undefined;
   statusLabel: string | null | undefined;
   assignedEngineerLabel?: string | null;
+  engagementTypeLabel?: string | null;
   statusChipIcon: ReactNode;
   statusChipSx: Record<string, unknown>;
   isLoading?: boolean;
   showSeverityChip?: boolean;
   showStatusChip?: boolean;
   variant?: CaseDetailsHeaderVariant;
+  isEscalated?: boolean;
+  escalationLevelLabel?: string | null;
 };
 
 export type OutstandingCasesListProps = {
@@ -71,6 +74,8 @@ export type CaseDetailsDetailsPanelProps = {
   error?: unknown;
   isEngagement?: boolean;
   isServiceRequest?: boolean;
+  projectId?: string;
+  caseId?: string;
 };
 
 export type CaseDetailsSectionProps = {
@@ -101,6 +106,7 @@ export type CaseDetailsSectionProps = {
   isSeverityAutoDetected?: boolean;
   isTitleFromChat?: boolean;
   isDescriptionFromConversation?: boolean;
+  children?: ReactNode;
 };
 
 export type ChatMessageCardProps = {
@@ -178,6 +184,7 @@ export type BasicInformationSectionProps = {
   onLoadMoreProducts?: () => void;
   hasMoreProducts?: boolean;
   isFetchingMoreProducts?: boolean;
+  children?: React.ReactNode;
 };
 
 export type ImageFullscreenModalProps = {
@@ -400,6 +407,9 @@ export type CaseDetailsTabsProps = {
   knowledgeBaseCount?: number;
   knowledgeBaseCountLoading?: boolean;
   hideRelatedChangeRequestsTab?: boolean;
+  hideEscalationTab?: boolean;
+  escalationCount?: number;
+  isEscalated?: boolean;
 };
 
 export type CaseDetailsTabPanelsProps = {
@@ -436,6 +446,19 @@ export type CaseDetailsActionRowProps = {
   isLoading?: boolean;
   hideAssignedEngineer?: boolean;
   restrictToCloseOnly?: boolean;
+  escalationLevelId?: string | null;
+  onEscalateSuccess?: () => void;
+  isCurrentUserLead?: boolean | undefined;
+};
+
+export type EscalateCaseModalProps = {
+  open: boolean;
+  caseId: string;
+  escalationLevelId: string;
+  escalationLevelLabel: string;
+  onClose: () => void;
+  onSuccess?: () => void;
+  onError?: (message: string) => void;
 };
 
 export type CasesOverviewStatCardProps = {
@@ -463,6 +486,7 @@ export type ChatInputProps = {
   forceRichText?: boolean;
   disabled?: boolean;
   typingDisabled?: boolean;
+  onRequestTokens?: () => void;
 };
 
 export type ChatHeaderProps = {

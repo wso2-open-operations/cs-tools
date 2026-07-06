@@ -791,6 +791,9 @@ export function deriveFilterLabels(id: string): {
   if (id === "caseType") {
     return { label: "Case Type", allLabel: "All Case Types" };
   }
+  if (id === "createdBy") {
+    return { label: "Created By", allLabel: "All Users" };
+  }
   const label = id.charAt(0).toUpperCase() + id.slice(1);
   const allLabel = `All ${
     label.endsWith("s")
@@ -1861,12 +1864,42 @@ export function computeMinScheduleDatetimeLocalForTimeZone(
   return severityStr > floorStr ? severityStr : floorStr;
 }
 
-export { hasListSearchOrFilters, countListSearchAndFilters } from "./listView";
+export {
+  countListSearchAndFilters,
+  hasListSearchOrFilters,
+  normalizeCaseSearchIssueIds,
+} from "@features/support/utils/listView";
 
 /** Hide terminal states from the Outstanding Cases overview list only. */
 export function isClosedLikeCaseStatus(statusLabel?: string | null): boolean {
   const normalized = statusLabel?.trim().toLowerCase() ?? "";
   return normalized === CASE_STATUS.CLOSED.toLowerCase();
+}
+
+/**
+ * Returns the UTC ISO string for the start of the selected calendar date.
+ * Uses the local calendar date with UTC midnight so the filter aligns with
+ * what the user sees in the date picker regardless of their timezone offset.
+ */
+export function toUtcStartOfDay(date: Date): string {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    throw new TypeError(`toUtcStartOfDay: invalid Date argument — ${String(date)}`);
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00Z`;
+}
+
+export function toUtcEndOfDay(date: Date): string {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    throw new TypeError(`toUtcEndOfDay: invalid Date argument — ${String(date)}`);
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  // Send start of next UTC day as the exclusive upper bound.
+  // ServiceNow applies a strict < comparison on the date portion, so
+  // "2026-06-10T23:59:59Z" becomes < 2026-06-10 (excludes Jun 10).
+  // Sending "2026-06-11T00:00:00Z" becomes < 2026-06-11 (includes Jun 10).
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T00:00:00Z`;
 }
 
 /**

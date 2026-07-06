@@ -48,19 +48,33 @@ describe("getDashboardOutstandingCasesDescription", () => {
 });
 
 describe("buildDashboardCaseSearchFilters", () => {
-  it("uses explicit statusId when selected", () => {
+  it("uses explicit statusIds when selected", () => {
     expect(
       buildDashboardCaseSearchFilters({
-        statusId: "10",
-        severityId: "11",
+        statusIds: ["10"],
+        severityIds: ["11"],
         searchQuery: " test ",
       }),
     ).toEqual({
       statusIds: [10],
-      severityId: 11,
-      issueId: undefined,
-      deploymentId: undefined,
+      severityIds: [11],
+      issueIds: undefined,
+      deploymentIds: undefined,
       searchQuery: "test",
+      createdByMe: undefined,
+    });
+  });
+
+  it("maps multiple issueTypes to issueIds", () => {
+    expect(
+      buildDashboardCaseSearchFilters({
+        issueTypes: ["3", "5"],
+      }),
+    ).toEqual({
+      severityIds: undefined,
+      issueIds: [3, 5],
+      deploymentIds: undefined,
+      searchQuery: undefined,
       createdByMe: undefined,
     });
   });
@@ -68,7 +82,7 @@ describe("buildDashboardCaseSearchFilters", () => {
   it("uses outstanding statusIds for dashboard severity navigation", () => {
     expect(
       buildDashboardCaseSearchFilters({
-        severityId: "11",
+        severityIds: ["11"],
         isDashboardSeverityNavigation: true,
         caseStates: [
           { id: "1", label: "Open" },
@@ -78,9 +92,9 @@ describe("buildDashboardCaseSearchFilters", () => {
       }),
     ).toEqual({
       statusIds: [1, 1006],
-      severityId: 11,
-      issueId: undefined,
-      deploymentId: undefined,
+      severityIds: [11],
+      issueIds: undefined,
+      deploymentIds: undefined,
       searchQuery: undefined,
       createdByMe: undefined,
     });

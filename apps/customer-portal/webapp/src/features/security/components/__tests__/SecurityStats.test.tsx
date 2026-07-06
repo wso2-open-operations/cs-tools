@@ -22,14 +22,6 @@ import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { type ReactNode } from "react";
 import SecurityStats from "@features/security/components/SecurityStats";
 
-vi.mock("@features/security/api/usePostProductVulnerabilitiesSearch", () => ({
-  usePostProductVulnerabilitiesSearch: vi.fn(() => ({
-    data: { totalRecords: 1265, offset: 0, limit: 10 },
-    isLoading: false,
-    isError: false,
-  })),
-}));
-
 vi.mock("@features/dashboard/api/useGetProjectCasesStats", () => ({
   useGetProjectCasesStats: vi.fn(() => ({
     data: {
@@ -71,19 +63,13 @@ function renderSecurityStats() {
 }
 
 describe("SecurityStats", () => {
-  it("should render three stat cards with correct labels", () => {
+  it("should render stat cards with correct labels", () => {
     renderSecurityStats();
 
-    expect(screen.getByText("Total Vulnerabilities")).toBeInTheDocument();
-    expect(screen.getByText("Active Security Reports")).toBeInTheDocument();
+    expect(screen.getByText("Outstanding Security Reports")).toBeInTheDocument();
     expect(
       screen.getByText("Resolved Security Reports (Last 30d)"),
     ).toBeInTheDocument();
-  });
-
-  it("should display vulnerability count from API", () => {
-    renderSecurityStats();
-    expect(screen.getByText("1265")).toBeInTheDocument();
   });
 
   it("should display active security reports count", () => {
@@ -97,14 +83,14 @@ describe("SecurityStats", () => {
   });
 
   it("should render with loading state", async () => {
-    const { usePostProductVulnerabilitiesSearch } = await import(
-      "@features/security/api/usePostProductVulnerabilitiesSearch"
+    const { useGetProjectCasesStats } = await import(
+      "@features/dashboard/api/useGetProjectCasesStats"
     );
-    vi.mocked(usePostProductVulnerabilitiesSearch).mockReturnValue({
+    vi.mocked(useGetProjectCasesStats).mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
-    } as any);
+    } as ReturnType<typeof useGetProjectCasesStats>);
 
     renderSecurityStats();
 

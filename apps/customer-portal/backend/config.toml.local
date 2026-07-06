@@ -8,6 +8,7 @@ csEntityBaseUrl = "<base_url>"
 
 [customer_portal.authorization.authorizedRoles]
     userRole  = "<authorized_role>"
+    securityAdvisoryPatchesAdminRole = "<authorized_role>"
 
 [customer_portal.scim]
 scimOperationsServiceUrl = "<base_url>"

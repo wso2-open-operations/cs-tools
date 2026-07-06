@@ -48,6 +48,7 @@ export interface ListSearchBarProps {
   isLoading?: boolean;
   /** Hide the filters/clear-filters button entirely */
   hideFiltersButton?: boolean;
+  actionsBeforeClearFilters?: ReactNode;
 }
 
 /**
@@ -68,6 +69,7 @@ export default function ListSearchBar({
   filtersContent,
   isLoading = false,
   hideFiltersButton = false,
+  actionsBeforeClearFilters,
 }: ListSearchBarProps): JSX.Element {
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(event.target.value);
@@ -114,6 +116,7 @@ export default function ListSearchBar({
             }}
           />
         </Box>
+        {actionsBeforeClearFilters}
         {!hideFiltersButton && (
           <Button
             variant="outlined"

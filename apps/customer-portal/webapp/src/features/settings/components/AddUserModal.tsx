@@ -34,7 +34,7 @@ import {
   colors,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { Code, Crown, Monitor, Shield, X } from "@wso2/oxygen-ui-icons-react";
+import { Code, Crown, Monitor, Shield, Star, X } from "@wso2/oxygen-ui-icons-react";
 import { useValidateProjectContact } from "@features/settings/api/useValidateProjectContact";
 import {
   ADD_USER_DETAILS_INTRO,
@@ -74,6 +74,13 @@ const ADD_USER_ROLES = [
     colorKey: "admin" as const,
   },
   {
+    id: "lead" as const,
+    label: "Lead",
+    description: "A portal user who can escalate an issue beyond level 3",
+    Icon: Star,
+    colorKey: "warning" as const,
+  },
+  {
     id: "portal" as const,
     label: "Portal User",
     description: "Can log in to and access the Support Portal",
@@ -92,7 +99,7 @@ const ADD_USER_ROLES = [
     label: "System User",
     description: "Used exclusively for system to system integrations. Cannot log in to the Support Portal",
     Icon: Code,
-    colorKey: "warning" as const,
+    colorKey: "success" as const,
   },
 ] as const;
 
@@ -117,6 +124,7 @@ export default function AddUserModal({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [isCsAdmin, setIsCsAdmin] = useState(false);
+  const [isLead, setIsLead] = useState(false);
   const [isPortalUser, setIsPortalUser] = useState(true);
   const [isSecurityContact, setIsSecurityContact] = useState(false);
   const [isWebUser, setIsWebUser] = useState(false);
@@ -132,6 +140,7 @@ export default function AddUserModal({
     setFirstName("");
     setLastName("");
     setIsCsAdmin(false);
+    setIsLead(false);
     setIsPortalUser(true);
     setIsSecurityContact(false);
     setIsWebUser(false);
@@ -198,6 +207,7 @@ export default function AddUserModal({
     setFirstName("");
     setLastName("");
     setIsCsAdmin(false);
+    setIsLead(false);
     setIsPortalUser(true);
     setIsSecurityContact(false);
     setIsWebUser(false);
@@ -212,12 +222,14 @@ export default function AddUserModal({
         setIsWebUser(next);
         if (next) {
           setIsCsAdmin(false);
+          setIsLead(false);
           setIsPortalUser(false);
           setIsSecurityContact(false);
         }
       } else {
         if (isWebUser) return;
         if (roleId === "admin") setIsCsAdmin((p) => !p);
+        else if (roleId === "lead") setIsLead((p) => !p);
         else if (roleId === "portal") setIsPortalUser((p) => !p);
         else setIsSecurityContact((p) => !p);
       }
@@ -237,6 +249,7 @@ export default function AddUserModal({
       contactLastName: trimmedLast,
       isCsAdmin: isWebUser ? false : isCsAdmin,
       isCsIntegrationUser: isWebUser,
+      isLead: isWebUser ? false : isLead,
       isPortalUser: isWebUser ? false : isPortalUser,
       isSecurityContact: isWebUser ? false : isSecurityContact,
     });
@@ -245,6 +258,7 @@ export default function AddUserModal({
     lastName,
     email,
     isCsAdmin,
+    isLead,
     isPortalUser,
     isSecurityContact,
     isWebUser,
@@ -421,7 +435,7 @@ export default function AddUserModal({
                     const resolvedColor =
                       role.colorKey === "admin"
                         ? ADMIN_COLOR
-                        : theme.palette[role.colorKey as "info" | "error" | "warning"]
+                        : theme.palette[role.colorKey as "info" | "error" | "warning" | "success"]
                             ?.main ?? theme.palette.text.primary;
                     const isOtherRole = role.id !== "webuser";
                     const isChecked =
@@ -429,9 +443,11 @@ export default function AddUserModal({
                         ? isWebUser
                         : role.id === "admin"
                           ? isCsAdmin
-                          : role.id === "portal"
-                            ? isPortalUser
-                            : isSecurityContact;
+                          : role.id === "lead"
+                            ? isLead
+                            : role.id === "portal"
+                              ? isPortalUser
+                              : isSecurityContact;
                     const isDisabled = isSubmitting || (isOtherRole && isWebUser);
 
                     return (

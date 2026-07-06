@@ -51,8 +51,8 @@ describe("settingsStorage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns true when nothing is set (default)", () => {
-    expect(getNoveraChatEnabled()).toBe(true);
+  it("returns false when nothing is set (default)", () => {
+    expect(getNoveraChatEnabled()).toBe(false);
   });
 
   it("returns true when stored as 'true'", () => {

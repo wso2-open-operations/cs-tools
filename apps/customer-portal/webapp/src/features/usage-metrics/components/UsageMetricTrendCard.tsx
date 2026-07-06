@@ -92,6 +92,7 @@ export default function UsageMetricTrendCard({
           width="100%"
           margin={USAGE_LINE_CHART_MARGIN}
           accessibilityLayer={false}
+          xAxis={{ interval: Math.max(0, Math.ceil(metric.data.length / 6) - 1) }}
           legend={
             hasSecondary
               ? { show: true, align: "center", verticalAlign: "bottom" }

@@ -28,6 +28,12 @@ public enum CaseSortField {
     STATE = "state"
 }
 
+# Valid change request sort field values.
+public enum ChangeRequestSortField {
+    CREATED_ON = "createdOn",
+    UPDATED_ON = "updatedOn"
+}
+
 # Valid reference type values.
 public enum ReferenceType {
     CASE = "case",
@@ -45,6 +51,12 @@ public enum CommentType {
 public enum ConversationSortField {
     CONVERSATION_CREATED_ON = "createdOn",
     CONVERSATION_UPDATED_ON = "updatedOn"
+}
+
+# Valid escalation sort field values.
+public enum EscalationSortField {
+    ESCALATION_CREATED_ON = "createdOn",
+    ESCALATION_UPDATED_ON = "updatedOn"
 }
 
 # Case type enum
@@ -77,4 +89,10 @@ public enum ProductCategory {
     CLOUD = "cl",
     MS = "ms",
     PC = "pc"
+}
+
+# Valid global search type values.
+public enum GlobalSearchType {
+    PROJECTS = "projects",
+    CASES = "cases"
 }

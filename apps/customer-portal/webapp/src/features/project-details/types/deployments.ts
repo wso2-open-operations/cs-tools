@@ -99,7 +99,7 @@ export type ProjectDeploymentItem = AuditMetadata & {
   url: string | null;
   project: IdLabelRef;
   type: IdLabelRef;
-  deployedProductCount?: number;
+  productCount?: number;
   instanceCount?: number;
 };
 

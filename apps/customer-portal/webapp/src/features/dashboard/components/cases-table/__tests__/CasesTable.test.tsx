@@ -26,10 +26,45 @@ const mockNavigate = vi.fn();
 // Mock dependencies
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: "/projects/p1/dashboard", state: null }),
 }));
 
 vi.mock("@api/useGetProjectCasesPage");
 vi.mock("@api/useGetProjectFilters");
+vi.mock("@api/useGetProjectCases", () => ({
+  default: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
+  usePostProjectDeploymentsSearchInfinite: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
+  usePostProjectDeploymentsSearchInfinite: () => ({
+    data: undefined,
+    isLoading: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+}));
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
 
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
@@ -156,7 +191,7 @@ describe("CasesTable", () => {
     expect(mockUseGetProjectCasesPage).toHaveBeenCalledWith(
       mockProjectId,
       expect.objectContaining({
-        sortBy: { field: "createdOn", order: "desc" },
+        sortBy: { field: "updatedOn", order: "desc" },
       }),
       expect.any(Number),
       expect.any(Number),

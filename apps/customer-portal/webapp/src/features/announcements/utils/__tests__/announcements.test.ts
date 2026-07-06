@@ -19,23 +19,27 @@ import { SortOrder } from "@/types/common";
 import { CaseType } from "@features/support/constants/supportConstants";
 import {
   buildAnnouncementCaseSearchRequest,
+  buildAnnouncementsFilterSelectOptions,
+  formatAnnouncementDateDisplay,
   formatAnnouncementsClearFiltersButtonLabel,
   getAnnouncementTotalPages,
   isAnnouncementDescriptionEffectivelyEmpty,
   normalizeAnnouncementDescriptionHtml,
+  resolveAnnouncementListFilterOptions,
 } from "@features/announcements/utils/announcements";
+import { AnnouncementFilterMetadataKey } from "@features/announcements/types/announcements";
 
 describe("buildAnnouncementCaseSearchRequest", () => {
   it("sets announcement case type and optional filters", () => {
     const req = buildAnnouncementCaseSearchRequest(
-      { statusId: "5" },
+      { statusIds: ["5"] },
       " hello ",
       SortOrder.ASC,
     );
     expect(req.filters?.caseTypes).toEqual([CaseType.ANNOUNCEMENT]);
     expect(req.filters?.statusIds).toEqual([5]);
     expect(req.filters?.searchQuery).toBe("hello");
-    expect(req.sortBy?.field).toBe("createdOn");
+    expect(req.sortBy?.field).toBe("updatedOn");
     expect(req.sortBy?.order).toBe(SortOrder.ASC);
   });
 
@@ -73,5 +77,55 @@ describe("formatAnnouncementsClearFiltersButtonLabel", () => {
     expect(formatAnnouncementsClearFiltersButtonLabel(3)).toBe(
       "Clear Filters (3)",
     );
+  });
+});
+
+describe("resolveAnnouncementListFilterOptions", () => {
+  it("filters case states to allowed values only", () => {
+    const options = resolveAnnouncementListFilterOptions(
+      {
+        id: "statusIds",
+        filterKey: "statusIds",
+        metadataKey: AnnouncementFilterMetadataKey.CaseStates,
+        useLabelAsValue: false,
+      },
+      {
+        caseStates: [
+          { id: "1", label: "Open" },
+          { id: "2", label: "Closed" },
+          { id: "3", label: "Published" },
+        ],
+      } as never,
+    );
+    expect(options.map((o) => o.value)).toEqual(["1", "3"]);
+  });
+});
+
+describe("buildAnnouncementsFilterSelectOptions", () => {
+  it("maps severity labels for display", () => {
+    const options = buildAnnouncementsFilterSelectOptions(
+      {
+        id: "severityId",
+        filterKey: "severityId",
+        metadataKey: AnnouncementFilterMetadataKey.Severities,
+        useLabelAsValue: false,
+      } as never,
+      {
+        severities: [{ id: "10", label: "1 - Critical" }],
+      } as never,
+    );
+    expect(options[0]?.label).toBeTruthy();
+    expect(options[0]?.value).toBe("10");
+  });
+});
+
+describe("formatAnnouncementDateDisplay", () => {
+  it("returns placeholder for missing date", () => {
+    expect(formatAnnouncementDateDisplay(null)).toBe("--");
+  });
+
+  it("formats valid ISO timestamps", () => {
+    const formatted = formatAnnouncementDateDisplay("2024-06-15T10:30:00Z");
+    expect(formatted).not.toBe("--");
   });
 });

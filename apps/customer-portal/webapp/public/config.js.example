@@ -1,21 +1,252 @@
+/**
+ * config.js — Runtime configuration for the WSO2 Customer Portal
+ * ─────────────────────────────────────────────────────────────────────────────
+ * This file is loaded by the browser before the React application bundle.
+ * All values are set once at page load and do not change during a session.
+ *
+ * HOW IT WORKS
+ *   1. Copy this file to  public/config.js  (never commit secrets to git).
+ *   2. Fill in the required values for your environment.
+ *   3. Optional fields can be omitted — the app uses safe defaults.
+ *   4. Restart the dev server (or redeploy) after changing values.
+ *
+ * REQUIRED vs OPTIONAL
+ *   Fields without a default shown below are REQUIRED.
+ *   Fields marked "(optional)" have a built-in default and can be omitted.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 window.config = {
+
+  // ── Authentication (Asgardeo / WSO2 Identity Server) ──────────────────────
+  //
+  // CUSTOMER_PORTAL_AUTH_BASE_URL
+  //   The base URL of the Asgardeo organisation or WSO2 Identity Server tenant
+  //   used for OAuth 2.0 / OIDC authentication.
+  //   Asgardeo format : "https://api.asgardeo.io/t/<your-org-name>"
+  //   On-prem IS format: "https://<your-is-host>/t/<your-tenant>"
   CUSTOMER_PORTAL_AUTH_BASE_URL: "https://api.asgardeo.io/t/<your-tenant>",
+
+  // CUSTOMER_PORTAL_AUTH_CLIENT_ID
+  //   The OAuth 2.0 client ID of the Single Page Application (SPA) registered
+  //   in Asgardeo / Identity Server for this portal.
   CUSTOMER_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
+
+  // CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL
+  //   The URL the identity provider redirects to after a successful login.
+  //   Must exactly match one of the Allowed Callback URLs configured on the
+  //   application in Asgardeo / Identity Server.
+  //   Local development : "http://localhost:3000"
+  //   Production        : "https://<your-portal-domain>"
   CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
+
+  // CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL
+  //   The URL the identity provider redirects to after logout.
+  //   Must exactly match one of the Allowed Logout URLs configured on the
+  //   application in Asgardeo / Identity Server.
+  //   Typically the same as SIGN_IN_REDIRECT_URL.
   CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
+
+  // ── Backend API ────────────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_BACKEND_BASE_URL
+  //   Base URL of the Customer Portal backend service (REST API).
+  //   Do not include a trailing slash.
+  //   Example: "https://<host>/llkq/customer-portal-backend/v1.0"
   CUSTOMER_PORTAL_BACKEND_BASE_URL: "<your-backend-base-url>",
+
+  // ── UI Theme ───────────────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_THEME  (optional — default: "acrylicOrange")
+  //   Controls the Oxygen UI colour theme applied to the portal.
+  //   Available values: "acrylicOrange"
   CUSTOMER_PORTAL_THEME: "acrylicOrange",
+
+  // ── Chatbot ────────────────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL  (optional)
+  //   WebSocket endpoint for the AI chatbot feature.
+  //   When omitted the chatbot widget is not initialised.
+  //   Example: "wss://<host>/customer-portal-backend/websocket/v1.0/ws"
   CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL: "<your-chatbot-websocket-url>",
+
+  // ── Logging ────────────────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_LOG_LEVEL  (optional — default: "ERROR")
+  //   Minimum severity of messages written to the browser console.
+  //   Allowed values (least → most verbose):
+  //     "ERROR"  – only errors (recommended for production)
+  //     "WARN"   – errors and warnings
+  //     "INFO"   – errors, warnings and informational messages
+  //     "DEBUG"  – all messages including verbose debug output
   CUSTOMER_PORTAL_LOG_LEVEL: "ERROR",
+
+  // ── Maintenance banner ─────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE
+  //   true  – displays a site-wide maintenance / alert banner below the header.
+  //   false – banner is hidden (default).
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
-  // Optional maintenance banner overrides:
-  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY: "info",
+
+  // The following fields customise the maintenance banner and are only used
+  // when CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE is true.
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY  (optional — default: "info")
+  //   Visual severity style of the banner.
+  //   Allowed values: "info" | "warning" | "error" | "success"
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE  (optional)
+  //   Bold heading text shown on the left side of the banner.
+  //   Example: "Scheduled maintenance"
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE  (optional)
+  //   Body text with more detail shown beside the title.
+  //   Example: "Some services may be unavailable between 02:00–04:00 UTC."
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL  (optional)
+  //   Label of the call-to-action link/button in the banner.
+  //   Example: "Learn more"
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL  (optional)
+  //   URL opened when the action label is clicked.
+  //   Example: "https://status.wso2.com"
+  //
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY: "warning",
   // CUSTOMER_PORTAL_MAINTENANCE_BANNER_TITLE: "Scheduled maintenance",
-  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE: "Some services may be unavailable.",
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_MESSAGE: "Some services may be unavailable between 02:00–04:00 UTC.",
   // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_LABEL: "Learn more",
-  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://example.com",
-  CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED: true,
-  CUSTOMER_PORTAL_TOP_BANNER_ENABLED: false,
-  // Optional top banner rendered above the header (raw HTML string):
-  // CUSTOMER_PORTAL_TOP_BANNER_HTML: '<div style="background-color:#000;height:6.8rem"><a href="https://wso2.com/wso2con/" target="_blank"><img style="object-fit:cover;height:100%;width:100%" src="banner.png" role="presentation"></a></div>',
+  // CUSTOMER_PORTAL_MAINTENANCE_BANNER_ACTION_URL: "https://status.wso2.com",
+
+  // ── Floating Novera widget ─────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED  (optional — default: false)
+  //   true  – enables the floating Novera AI assistant button on all pages.
+  //   false – widget is hidden.
+  CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED: false,
+
+  // ── Top banners ─────────────────────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])
+  //   An ordered array of banner objects rendered at the very top of every
+  //   page, stacked above the main navigation header.
+  //   Banners appear top-to-bottom in the order defined here.
+  //
+  //   To add a banner  → push a new object into the array.
+  //   To remove one   → delete its object, or set  enabled: false.
+  //   No code changes are required — only this file needs updating.
+  //
+  //   Each object supports four fields:
+  //
+  //   enabled {boolean}
+  //     true  – banner is rendered on every page.
+  //     false – banner is skipped entirely. Safe to leave in the array.
+  //
+  //   closeable {boolean}
+  //     true  – a close (×) button appears in the top-right corner.
+  //             When clicked the banner is hidden and the dismissed state
+  //             is saved in localStorage under `storageKey`. The banner
+  //             will not reappear until storageKey is changed.
+  //     false – no close button; banner is always visible to all users.
+  //
+  //   storageKey {string}
+  //     Unique localStorage key used to track whether this banner was
+  //     dismissed. Required when closeable is true — if missing an error
+  //     is logged and a fallback key is used (risks collisions).
+  //     Change this value whenever banner content changes so returning
+  //     users see the updated version again.
+  //     Recommended format: "<purpose>_banner_<year>_v<version>"
+  //       e.g. "wso2con_banner_2026_v1", "is_announcement_2026_v2"
+  //
+  //   html {string}
+  //     Self-contained HTML for the banner body. All styling must be
+  //     inline — no external CSS classes are available.
+  //     • Host images on a stable CDN. Temporary signed URLs (e.g.
+  //       GitHub X-Amz-* URLs) expire in minutes and break the banner.
+  //     • Do NOT add a close button inside html — the app injects one
+  //       automatically when closeable is true.
+  //     • Recommended height: 3rem (48 px).
+  //
+  CUSTOMER_PORTAL_TOP_BANNERS: [
+    // Banner 1 — non-dismissable event/promotion banner
+    {
+      enabled: false,
+      closeable: false,
+      storageKey: "event_banner_2026_v1",
+      html: '<div style="background-color:#000;height:3rem"><a href="https://example.com" target="_blank"><img style="object-fit:cover;height:100%;width:100%" src="https://cdn.example.com/event-banner.png" role="presentation"></a></div>',
+    },
+    // Banner 2 — dismissable announcement banner (close button injected automatically)
+    {
+      enabled: false,
+      closeable: true,
+      storageKey: "announcement_banner_2026_v1",
+      html: '<div style="background-color:#000;height:3rem;overflow:hidden"><img style="object-fit:cover;height:100%;width:100%;display:block" src="https://cdn.example.com/announcement.png" role="presentation"></div>',
+    },
+  ],
+
+  // ── Announcement banner ────────────────────────────────────────────────────
+  //
+  // A dismissable text-based banner rendered below the top banners and above
+  // the main header. Intended for one-time user notifications (e.g. portal
+  // upgrades, policy changes). Unlike top banners this banner's HTML fully
+  // controls its own close button via  data-close-banner="true".
+  //
+  // CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_VISIBLE  (optional — default: false)
+  //   true  – renders the announcement banner.
+  //   false – banner is hidden.
+  CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_VISIBLE: false,
+
+  // CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_STORAGE_KEY  (optional)
+  //   Unique localStorage key used to remember whether the user dismissed
+  //   this banner. Change this value when updating banner content so all
+  //   users see the new message again.
+  //   Example: "announcement_banner_portal_upgrade_2026_v1"
+  // CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_STORAGE_KEY: "announcement_banner_2026_v1",
+
+  // CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_HTML  (optional)
+  //   Fully self-contained HTML string for the announcement banner.
+  //   Must include all styling inline (background, padding, colours).
+  //   To make the banner dismissable, add  data-close-banner="true"  to
+  //   any element (typically a button) inside the HTML.
+  //   Example:
+  //     '<div style="position:relative;background:#1f2937;padding:12px 48px 12px 16px;
+  //       font:14px/1.5 sans-serif;color:#f9fafb;">
+  //       <span>Your message here.</span>
+  //       <button data-close-banner="true" style="position:absolute;top:50%;right:12px;
+  //         transform:translateY(-50%);background:#374151;border:1px solid #6b7280;
+  //         color:#fff;width:28px;height:28px;cursor:pointer;border-radius:6px;">
+  //         &times;
+  //       </button>
+  //     </div>'
+  // CUSTOMER_PORTAL_ANNOUNCEMENT_BANNER_HTML: '<div>...</div>',
+
+  // ── Mobile app download prompt ─────────────────────────────────────────────
+  //
+  // CUSTOMER_PORTAL_MOBILE_APP_PROMPT_ENABLED  (optional — default: false)
+  //   true  – on detected mobile devices the web portal is blocked and a
+  //           full-screen prompt is shown directing users to download the
+  //           WSO2 Super App from the relevant app store.
+  //   false – the web portal loads normally on all devices.
+  CUSTOMER_PORTAL_MOBILE_APP_PROMPT_ENABLED: false,
+
+  // CUSTOMER_PORTAL_MOBILE_APP_IOS_STORE_URL
+  //   Apple App Store URL for the WSO2 Super App.
+  //   Shown to users on iPhone and iPod Touch (and iPad when
+  //   CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS is true).
+  //   Format: "https://apps.apple.com/app/<app-name>/id<numeric-id>"
+  CUSTOMER_PORTAL_MOBILE_APP_IOS_STORE_URL:
+    "https://apps.apple.com/app/wso2/id<your-ios-app-id>",
+
+  // CUSTOMER_PORTAL_MOBILE_APP_ANDROID_STORE_URL
+  //   Google Play Store URL for the WSO2 Super App.
+  //   Shown to users on Android phones (and tablets when
+  //   CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS is true).
+  //   Format: "https://play.google.com/store/apps/details?id=<package-name>"
+  CUSTOMER_PORTAL_MOBILE_APP_ANDROID_STORE_URL:
+    "https://play.google.com/store/apps/details?id=com.wso2.superapp",
+
+  // CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS  (optional — default: false)
+  //   false – only phones see the download prompt (iPhone, iPod, Android phones).
+  //           iPad and Android tablets load the full web portal.
+  //   true  – iPad and Android tablets also see the download prompt.
+  //           Desktop browsers are never affected by this setting.
+  CUSTOMER_PORTAL_MOBILE_APP_INCLUDE_TABLETS: false,
 };

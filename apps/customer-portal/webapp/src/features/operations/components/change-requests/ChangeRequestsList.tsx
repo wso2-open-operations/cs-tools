@@ -30,7 +30,7 @@ import {
 } from "@features/operations/utils/changeRequestUi";
 import type { ChangeRequestsListProps } from "@features/operations/types/changeRequests";
 import {
-  CHANGE_REQUESTS_LIST_CREATED_PREFIX,
+  CHANGE_REQUESTS_LIST_UPDATED_PREFIX,
   CHANGE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE,
   CHANGE_REQUESTS_LIST_EMPTY_REFINED_MESSAGE,
   CHANGE_REQUESTS_LIST_ERROR_MESSAGE,
@@ -319,7 +319,7 @@ export default function ChangeRequestsList({
                     </Typography>
                   </Box>
                 )}
-                {item.createdOn && (
+                {(item.updatedOn ?? item.createdOn) && (
                   <Box
                     sx={{
                       display: "flex",
@@ -328,14 +328,14 @@ export default function ChangeRequestsList({
                     }}
                   >
                     <Typography variant="body2" color="text.secondary">
-                      {CHANGE_REQUESTS_LIST_CREATED_PREFIX}
+                      {CHANGE_REQUESTS_LIST_UPDATED_PREFIX}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {formatDateTime(item.createdOn)}
+                      {formatDateTime(item.updatedOn ?? item.createdOn)}
                     </Typography>
                   </Box>
                 )}
-                {item.createdOn && (item.startDate || item.endDate) && (
+                {(item.updatedOn ?? item.createdOn) && (item.startDate || item.endDate) && (
                   <Typography variant="body2" color="text.disabled">
                     |
                   </Typography>

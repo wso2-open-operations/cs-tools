@@ -21,6 +21,8 @@ import {
   KeyRound,
   Monitor,
   Shield,
+  Star,
+  Type,
   Users,
 } from "@wso2/oxygen-ui-icons-react";
 import { colors } from "@wso2/oxygen-ui";
@@ -29,6 +31,7 @@ import {
   SettingsPageTabId,
   SettingsRoleInfoId,
 } from "@features/settings/types/settings";
+import { FONT_SIZE_PX } from "@context/font-size/FontSizeContext";
 import { NULL_PLACEHOLDER as COMMON_NULL_PLACEHOLDER } from "@constants/common";
 
 /** Placeholder for empty/null values in user management UI. */
@@ -39,6 +42,17 @@ export const SETTINGS_NULL_PLACEHOLDER = NULL_PLACEHOLDER;
 
 /** Role that can see AI Assistant tab and User Management Add/Delete. */
 export const SETTINGS_CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
+
+/** ServiceNow partner role — triggers list view in ProjectHub when >4 projects. */
+export const SETTINGS_PARTNER_ROLE = "sn_customerservice.partner";
+
+/** ServiceNow partner admin role — same partner UI access as SETTINGS_PARTNER_ROLE. */
+export const SETTINGS_PARTNER_ADMIN_ROLE = "sn_customerservice.partner_admin";
+
+/** Returns true if the given role list grants partner-level UI access. */
+export function hasPartnerAccess(roles: string[]): boolean {
+  return roles.includes(SETTINGS_PARTNER_ROLE) || roles.includes(SETTINGS_PARTNER_ADMIN_ROLE);
+}
 
 export const SETTINGS_PAGE_TABS = [
   {
@@ -56,7 +70,29 @@ export const SETTINGS_PAGE_TABS = [
     label: "Registry Tokens",
     icon: KeyRound,
   },
+  {
+    id: SettingsPageTabId.DISPLAY,
+    label: "Display",
+    icon: Type,
+  },
 ] as const;
+
+export const SETTINGS_DISPLAY_HEADER_TITLE = "Display Preferences";
+
+export const SETTINGS_DISPLAY_HEADER_BODY =
+  "Customize the appearance of the portal. Changes apply immediately and are saved to your browser.";
+
+export const SETTINGS_DISPLAY_FONT_SIZE_TITLE = "Font Size";
+
+export const SETTINGS_DISPLAY_FONT_SIZE_DESCRIPTION =
+  "Adjust the text size across the portal";
+
+export const SETTINGS_DISPLAY_FONT_SIZE_OPTIONS = [
+  { id: "small" as const, label: "Small", size: FONT_SIZE_PX.small, description: "Compact view" },
+  { id: "medium" as const, label: "Default", size: FONT_SIZE_PX.medium, description: "Standard view" },
+  { id: "large" as const, label: "Large", size: FONT_SIZE_PX.large, description: "Comfortable view" },
+  { id: "xlarge" as const, label: "Extra Large", size: FONT_SIZE_PX.xlarge, description: "Accessible view" },
+];
 
 export const SETTINGS_PROJECT_NOT_FOUND_MESSAGE =
   "Project not found. Please select a project.";
@@ -84,10 +120,19 @@ export const ROLE_CONFIG = [
     ],
   },
   {
+    id: SettingsRoleInfoId.LEAD,
+    label: "Lead",
+    Icon: Star,
+    paletteKey: "warning" as const,
+    permissions: [
+      "A portal user who can escalate an issue beyond level 3",
+    ],
+  },
+  {
     id: SettingsRoleInfoId.SYSTEM_USER,
     label: "System User",
     Icon: Code,
-    paletteKey: "info" as const,
+    paletteKey: "success" as const,
     permissions: [
       "Used exclusively for system to system integrations",
       "Cannot log in to the Support Portal",
@@ -270,7 +315,7 @@ export const REGISTRY_ADMIN_ALERT_BODY =
 export const REGISTRY_PAGE_TITLE = "Registry Tokens";
 
 export const REGISTRY_PAGE_DESCRIPTION =
-  "Manage registry tokens for WSO2 Updates 2.0. User tokens are for individual access, while service tokens are for automation and CI/CD pipelines.";
+  "Manage tokens for the WSO2 container registry. User tokens are for individual access to pull Docker images, while service tokens are for automation and CI/CD pipelines.";
 
 export const REGISTRY_SUBTAB_USER_BASE = "User Tokens";
 

@@ -35,6 +35,7 @@ export function resolveSettingsPageTabId(activeTab: string): SettingsPageTabId {
     case SettingsPageTabId.USERS:
     case SettingsPageTabId.AI:
     case SettingsPageTabId.REGISTRY_TOKENS:
+    case SettingsPageTabId.DISPLAY:
       return activeTab;
     default:
       return SettingsPageTabId.USERS;

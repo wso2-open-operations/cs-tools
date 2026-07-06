@@ -15,6 +15,7 @@
 // under the License.
 
 import { resolveCasesTableDefaultStatusIds } from "@features/dashboard/utils/casesTable";
+import { normalizeCaseSearchIssueIds } from "@features/support/utils/listView";
 import type { MetadataItem } from "@/types/common";
 import type { CaseSearchFilters } from "@features/support/types/cases";
 
@@ -80,57 +81,65 @@ export function getDashboardOutstandingCasesDescription(
  * @returns {CaseSearchFilters} Normalized case search filters.
  */
 export function buildDashboardCaseSearchFilters(params: {
-  statusId?: string;
-  severityId?: string;
-  issueTypes?: string;
-  deploymentId?: string;
+  statusIds?: string[];
+  severityIds?: string[];
+  issueTypes?: string | string[];
+  deploymentIds?: string[];
   searchQuery?: string;
   createdByMe?: boolean;
+  createdBy?: string[];
   caseStates?: MetadataItem[];
   isDashboardSeverityNavigation?: boolean;
 }): CaseSearchFilters {
   const {
-    statusId,
-    severityId,
+    statusIds,
+    severityIds,
     issueTypes,
-    deploymentId,
+    deploymentIds,
     searchQuery,
     createdByMe,
+    createdBy,
     caseStates,
     isDashboardSeverityNavigation = false,
   } = params;
 
   const normalizedSearchQuery = searchQuery?.trim() || undefined;
-  const explicitStatusId = statusId ? Number(statusId) : undefined;
-  const normalizedSeverityId = severityId ? Number(severityId) : undefined;
-  const normalizedIssueId = issueTypes ? Number(issueTypes) : undefined;
+  const explicitStatusIds = statusIds?.length ? statusIds.map(Number) : undefined;
+  const normalizedSeverityIds = severityIds?.length
+    ? severityIds.map(Number)
+    : undefined;
+  const normalizedIssueIds = normalizeCaseSearchIssueIds(issueTypes);
+  const normalizedCreatedBy = createdBy?.length ? createdBy : undefined;
 
   switch (true) {
-    case Boolean(explicitStatusId):
+    case Boolean(explicitStatusIds?.length):
       return {
-        statusIds: [explicitStatusId as number],
-        severityId: normalizedSeverityId,
-        issueId: normalizedIssueId,
-        deploymentId,
+        statusIds: explicitStatusIds,
+        severityIds: normalizedSeverityIds,
+        issueIds: normalizedIssueIds,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
     case isDashboardSeverityNavigation:
       return {
         statusIds: resolveCasesTableDefaultStatusIds(caseStates),
-        severityId: normalizedSeverityId,
-        issueId: normalizedIssueId,
-        deploymentId,
+        severityIds: normalizedSeverityIds,
+        issueIds: normalizedIssueIds,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
     default:
       return {
-        severityId: normalizedSeverityId,
-        issueId: normalizedIssueId,
-        deploymentId,
+        severityIds: normalizedSeverityIds,
+        issueIds: normalizedIssueIds,
+        deploymentIds,
         searchQuery: normalizedSearchQuery,
         createdByMe,
+        createdBy: normalizedCreatedBy,
       };
   }
 }

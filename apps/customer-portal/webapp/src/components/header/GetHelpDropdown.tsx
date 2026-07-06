@@ -48,6 +48,23 @@ interface GetHelpMenuItem {
   onClick: () => void;
 }
 
+const GET_HELP_BUTTON_SX = {
+  px: 2,
+  flexShrink: 0,
+} as const;
+
+const GET_HELP_LABEL_SX = {
+  display: "inline",
+  whiteSpace: "nowrap",
+} as const;
+
+const GET_HELP_CONTAINER_SX = {
+  display: "flex",
+  alignItems: "center",
+  flexShrink: 0,
+  maxWidth: "100%",
+} as const;
+
 /**
  * Get Help dropdown in the header.
  * Shows Issue, Service Request, and Security Report options.
@@ -163,9 +180,14 @@ function GetHelpDropdownContent(): JSX.Element {
 
   if (isProjectsListBusy) {
     return (
-      <Stack direction="row" alignItems="center" spacing={0.5}>
-        <Skeleton variant="rounded" width={96} height={36} />
-        <Skeleton variant="rounded" width={36} height={36} />
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={0.5}
+        sx={GET_HELP_CONTAINER_SX}
+      >
+        <Skeleton variant="rounded" width={96} height={36} sx={{ flexShrink: 0 }} />
+        <Skeleton variant="rounded" width={36} height={36} sx={{ flexShrink: 0 }} />
         <Divider
           orientation="vertical"
           flexItem
@@ -176,25 +198,36 @@ function GetHelpDropdownContent(): JSX.Element {
   }
 
   return (
-    <Box sx={{ display: "flex", alignItems: "center" }}>
-      <ButtonGroup variant="contained" color="primary">
-        {/* LEFT SIDE (main action) */}
-        <Button
-          startIcon={<CircleQuestionMark size={16} />}
-          onClick={handleIssue}
-          sx={{ px: 2 }}
-        >
-          Get Help
+    <Box sx={GET_HELP_CONTAINER_SX}>
+      <ButtonGroup
+        variant="contained"
+        color="primary"
+        sx={{ flexShrink: 0, maxWidth: "100%" }}
+      >
+        <Button onClick={handleIssue} aria-label="Get Help" sx={GET_HELP_BUTTON_SX}>
+          <Box
+            component="span"
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
+            <CircleQuestionMark size={16} aria-hidden />
+            <Box component="span" sx={GET_HELP_LABEL_SX}>
+              Get Help
+            </Box>
+          </Box>
         </Button>
 
-        {/* RIGHT SIDE (dropdown trigger) */}
         <Button
           id="get-help-trigger"
           aria-controls={open ? "get-help-menu" : undefined}
           aria-haspopup="true"
           aria-expanded={open ? "true" : undefined}
+          aria-label="More help options"
           onClick={handleClick}
-          sx={{ minWidth: 40, px: 1 }}
+          sx={{ minWidth: 40, px: 1, flexShrink: 0 }}
         >
           <ChevronDown size={16} />
         </Button>
@@ -240,7 +273,9 @@ function GetHelpDropdownContent(): JSX.Element {
                 />
               )}
               <MenuItem onClick={item.onClick}>
-                <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+                <Box
+                  sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}
+                >
                   <Box sx={{ display: "flex", alignItems: "center", mt: 0.5 }}>
                     {item.icon}
                   </Box>

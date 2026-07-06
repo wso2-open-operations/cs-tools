@@ -62,11 +62,10 @@ export default function ServiceHoursAllocationsCard({
   const hideOnboardingSection = shouldHideOnboardingData(project?.onboardingStatus);
 
   return (
-    <Card sx={{ height: "100%" }}>
+    <Card>
       <CardContent
         sx={{
           p: 3,
-          height: "100%",
           display: "flex",
           flexDirection: "column",
           gap: 3,

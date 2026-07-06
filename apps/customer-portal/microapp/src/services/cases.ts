@@ -269,6 +269,7 @@ export const cases = {
     queryOptions<{ content: string }>({
       queryKey: ["attachment", id],
       queryFn: id ? () => getAttachment(id) : skipToken,
+      staleTime: Infinity,
     }),
 
   createAttachment: mutationOptions({

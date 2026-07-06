@@ -49,6 +49,9 @@ export function usePatchCase(
     mutationFn: async (body: PatchCaseRequest): Promise<PatchCaseResponse> => {
       logger.debug("[usePatchCase] Request:", { caseId, body });
 
+      if (!caseId || !projectId) {
+        throw new Error("Case ID and project ID are required to update a case");
+      }
       if (!isSignedIn || isAuthLoading) {
         throw new Error("User must be signed in to update a case");
       }
@@ -80,8 +83,12 @@ export function usePatchCase(
         return queryKey[1] === projectId;
       };
 
-      queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CASE_DETAILS, projectId, caseId],
+      const isCaseDetailsQuery = (queryKey: readonly unknown[]) =>
+        queryKey[0] === ApiQueryKeys.CASE_DETAILS && queryKey[2] === caseId;
+
+      void queryClient.refetchQueries({
+        predicate: (q) => isCaseDetailsQuery(q.queryKey),
+        type: "active",
       });
       queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CASES_STATS, projectId],

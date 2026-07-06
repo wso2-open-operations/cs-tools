@@ -59,6 +59,7 @@ export default function UsageMetricsTimeRangeSelector({
   onCancelCustom,
   appliedCustomStart,
   appliedCustomEnd,
+  rightAction,
 }: UsageMetricsTimeRangeSelectorProps): JSX.Element {
   const timeLabel = USAGE_TIME_RANGE_LABELS[timeRange];
 
@@ -184,21 +185,23 @@ export default function UsageMetricsTimeRangeSelector({
         </Box>
       </Box>
 
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{
-          minWidth: { xs: "100%", md: 100 },
-          textAlign: { xs: "left", md: "right" },
-          flexShrink: 0,
-        }}
-      >
-        {timeRange === UsageTimeRange.CUSTOM
-          ? appliedCustomStart && appliedCustomEnd
-            ? `${appliedCustomStart} to ${appliedCustomEnd}`
-            : USAGE_METRICS_CUSTOM_RANGE_PLACEHOLDER
-          : timeLabel}
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{
+            minWidth: { xs: "auto", md: 100 },
+            textAlign: { xs: "left", md: "right" },
+          }}
+        >
+          {timeRange === UsageTimeRange.CUSTOM
+            ? appliedCustomStart && appliedCustomEnd
+              ? `${appliedCustomStart} to ${appliedCustomEnd}`
+              : USAGE_METRICS_CUSTOM_RANGE_PLACEHOLDER
+            : timeLabel}
+        </Typography>
+        {rightAction}
+      </Box>
     </Box>
   );
 }

@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { CaseMetadataResponse } from "@features/support/types/cases";
 import type { ProjectDeploymentItem } from "@features/project-details/types/deployments";
+import type { ProjectContact } from "@features/settings/types/users";
 import ListSearchBar from "@components/list-view/ListSearchBar";
 import ListFilters from "@components/list-view/ListFilters";
 import { countListSearchAndFilters } from "@features/support/utils/support";
@@ -28,14 +29,21 @@ export interface ListSearchPanelProps {
   isFiltersOpen: boolean;
   onFiltersToggle: () => void;
   filters: {
-    statusId?: string;
-    severityId?: string;
-    issueTypes?: string;
-    deploymentId?: string;
+    statusIds?: string[];
+    severityIds?: string[];
+    issueTypes?: string[];
+    deploymentIds?: string[];
+    createdBy?: string[];
+    startCreatedDate?: string;
+    endCreatedDate?: string;
+    startUpdatedDate?: string;
+    endUpdatedDate?: string;
   };
   filterMetadata: CaseMetadataResponse | undefined;
   deployments?: ProjectDeploymentItem[];
-  onFilterChange: (field: string, value: string) => void;
+  contacts?: ProjectContact[];
+  isContactsLoading?: boolean;
+  onFilterChange: (field: string, value: string | string[]) => void;
   onClearFilters: () => void;
   excludeS0?: boolean;
   restrictSeverityToLow?: boolean;
@@ -43,12 +51,15 @@ export interface ListSearchPanelProps {
   hideStatusFilter?: boolean;
   hideDeploymentFilter?: boolean;
   hideCategoryFilter?: boolean;
+  hideCreatedByFilter?: boolean;
   hideFiltersButton?: boolean;
+  hideDateFilters?: boolean;
   isProjectContextLoading?: boolean;
   onLoadMoreDeployments?: () => void;
   hasMoreDeployments?: boolean;
   isFetchingMoreDeployments?: boolean;
   excludeFromCount?: string[];
+  actionsBeforeClearFilters?: ReactNode;
 }
 
 /**
@@ -66,6 +77,8 @@ export default function ListSearchPanel({
   filters,
   filterMetadata,
   deployments,
+  contacts,
+  isContactsLoading = false,
   onFilterChange,
   onClearFilters,
   excludeS0 = false,
@@ -74,20 +87,41 @@ export default function ListSearchPanel({
   hideStatusFilter = false,
   hideDeploymentFilter = false,
   hideCategoryFilter = false,
+  hideCreatedByFilter = false,
   hideFiltersButton = false,
+  hideDateFilters = false,
   isProjectContextLoading = false,
   onLoadMoreDeployments,
   hasMoreDeployments = false,
   isFetchingMoreDeployments = false,
   excludeFromCount = [],
+  actionsBeforeClearFilters,
 }: ListSearchPanelProps): JSX.Element {
   const excluded = Object.fromEntries(excludeFromCount.map((k) => [k, undefined]));
   const filtersForCount = {
     ...filters,
-    ...(hideSeverityFilter ? { severityId: undefined } : {}),
-    ...(hideStatusFilter ? { statusId: undefined } : {}),
-    ...(hideDeploymentFilter ? { deploymentId: undefined } : {}),
+    ...(hideSeverityFilter ? { severityIds: undefined } : {}),
+    ...(hideStatusFilter ? { statusIds: undefined } : {}),
+    ...(hideDeploymentFilter ? { deploymentIds: undefined } : {}),
     ...(hideCategoryFilter ? { issueTypes: undefined } : {}),
+    ...(hideCreatedByFilter ? { createdBy: undefined } : {}),
+    // Collapse each date range pair into a single "active" sentinel so each pair counts as 1.
+    startCreatedDate: undefined,
+    endCreatedDate: undefined,
+    startUpdatedDate: undefined,
+    endUpdatedDate: undefined,
+    ...(!hideDateFilters
+      ? {
+          _createdDateRange:
+            filters.startCreatedDate || filters.endCreatedDate
+              ? "active"
+              : undefined,
+          _updatedDateRange:
+            filters.startUpdatedDate || filters.endUpdatedDate
+              ? "active"
+              : undefined,
+        }
+      : {}),
     ...excluded,
   };
   return (
@@ -104,11 +138,14 @@ export default function ListSearchPanel({
       onClearFilters={onClearFilters}
       hideFiltersButton={hideFiltersButton}
       isLoading={isProjectContextLoading}
+      actionsBeforeClearFilters={actionsBeforeClearFilters}
       filtersContent={
         <ListFilters
           filters={filters}
           filterMetadata={filterMetadata}
           deployments={deployments}
+          contacts={contacts}
+          isContactsLoading={isContactsLoading}
           onFilterChange={onFilterChange}
           excludeS0={excludeS0}
           restrictSeverityToLow={restrictSeverityToLow}
@@ -116,6 +153,8 @@ export default function ListSearchPanel({
           hideStatusFilter={hideStatusFilter}
           hideDeploymentFilter={hideDeploymentFilter}
           hideCategoryFilter={hideCategoryFilter}
+          hideCreatedByFilter={hideCreatedByFilter}
+          hideDateFilters={hideDateFilters}
           onLoadMoreDeployments={onLoadMoreDeployments}
           hasMoreDeployments={hasMoreDeployments}
           isFetchingMoreDeployments={isFetchingMoreDeployments}

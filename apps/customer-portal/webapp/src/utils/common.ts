@@ -15,7 +15,18 @@
 // under the License.
 
 import type { UIEvent } from "react";
+import DOMPurify from "dompurify";
 import { PAGINATED_SELECT_MENU_MAX_HEIGHT_PX } from "@constants/common";
+
+// Harden all sanitized <a target="_blank"> links against reverse tabnabbing.
+// Registered once at module load; applies to every DOMPurify.sanitize() call in the app.
+if (typeof window !== "undefined") {
+  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+    if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+}
 
 /**
  * MenuList props for paginated selects: fixed max height + optional scroll handler.
@@ -71,6 +82,12 @@ export function stripLightModeInlineStyles(html: string): string {
     },
   );
 }
+
+/** DOMPurify config for backend description/body HTML: strips tables and code blocks. */
+export const DESCRIPTION_PURIFY_CONFIG = {
+  FORBID_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+  FORBID_CONTENTS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"],
+};
 
 function isDarkColor(colorDecl: string): boolean {
   // Named dark colors
