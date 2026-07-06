@@ -27,7 +27,7 @@ import {
   Typography,
   Button,
 } from "@wso2/oxygen-ui";
-import { ListFilter, X } from "@wso2/oxygen-ui-icons-react";
+import { CalendarRange, ListFilter, X } from "@wso2/oxygen-ui-icons-react";
 import {
   useAllTimeCards,
   useApprovalQueue,
@@ -81,6 +81,25 @@ function workItemOptionsFrom(sheets: CsmTimeSheet[] | undefined): string[] {
 const DEFAULT_ROWS_PER_PAGE = 20;
 // Top option is the backend's max page limit; larger requests are rejected.
 const ROWS_PER_PAGE_OPTIONS = [10, 20, BE_MAX_PAGE_LIMIT];
+
+/** Strips the native date input's own chrome so it blends into the grouped
+ * pill it sits in, rather than looking like a bare HTML form control.
+ * `colorScheme: "light dark"` lets the browser render its calendar icon
+ * for whichever of light/dark actually applies, instead of always dark. */
+const dateInputSx = {
+  border: "none",
+  outline: "none",
+  background: "none",
+  font: "inherit",
+  fontSize: "0.8125rem",
+  color: "inherit",
+  colorScheme: "light dark",
+  width: 108,
+  "&::-webkit-calendar-picker-indicator": {
+    cursor: "pointer",
+    opacity: 0.7,
+  },
+};
 
 /** Page + rows-per-page state for one tab's `TablePagination`, following the
  * same shape/convention as `CsmUsersPage.tsx` and friends. Each tab gets its
@@ -681,94 +700,104 @@ function FilterBar({
         overflow: "hidden",
       }}
     >
-      {/* Controls row */}
-      <Box
-        sx={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 1.5,
-          px: 2,
-          py: 1.5,
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
-          <ListFilter size={16} />
-          <Typography variant="caption" fontWeight={600} color="text.secondary">
-            Filters
+      {/* Controls — a fixed two-row layout rather than one row that wraps
+       unpredictably: which controls land on row two would otherwise depend
+       on viewport width, and a single item stranding itself alone on a new
+       row (with a lot of empty space next to it) reads as broken overflow
+       rather than a deliberate section. Row one is the entity filters, row
+       two is always the date range, regardless of width. */}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, px: 2, py: 1.5 }}>
+        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", mr: 0.5 }}>
+            <ListFilter size={16} />
+            <Typography variant="caption" fontWeight={600} color="text.secondary">
+              Filters
+            </Typography>
+          </Box>
+
+          <Box sx={{ width: 220 }}>
+            <SearchableMultiSelect
+              id="timecards-filter-project"
+              label="Project"
+              placeholder="Search projects…"
+              values={filterProject}
+              options={projects.map((p) => p.id)}
+              formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
+              onChange={setFilterProject}
+            />
+          </Box>
+
+          <Box sx={{ width: 220 }}>
+            <SearchableMultiSelect
+              id="timecards-filter-work-item"
+              label="Work item"
+              placeholder="Search work items…"
+              values={filterWorkItem}
+              options={workItemOptions}
+              onChange={setFilterWorkItem}
+            />
+          </Box>
+
+          {engineerSlot}
+
+          {!hideStateFilter && (
+            <TextField
+              select
+              size="small"
+              label="State"
+              value={filterState}
+              onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+              sx={{ width: 150 }}
+            >
+              <MenuItem value="">All states</MenuItem>
+              {FILTER_STATES.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {TIME_CARD_STATE_META[s].label}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+        </Box>
+
+        {/* One grouped pill instead of two separate outlined fields — reads
+         as a single "date range" control, always on its own row. */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 0.75,
+            width: "fit-content",
+            height: 40,
+            px: 1.25,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            color: "text.secondary",
+          }}
+        >
+          <CalendarRange size={15} style={{ flexShrink: 0, opacity: 0.7 }} />
+          <Box
+            component="input"
+            type="date"
+            aria-label="From date"
+            value={filterFrom}
+            max={filterTo || undefined}
+            onChange={(e) => setFilterFrom(e.target.value)}
+            sx={dateInputSx}
+          />
+          <Typography variant="body2" color="text.disabled">
+            –
           </Typography>
-        </Box>
-
-        <Box sx={{ width: 220 }}>
-          <SearchableMultiSelect
-            id="timecards-filter-project"
-            label="Project"
-            placeholder="Search projects…"
-            values={filterProject}
-            options={projects.map((p) => p.id)}
-            formatOption={(id) => projects.find((p) => p.id === id)?.name ?? id}
-            onChange={setFilterProject}
+          <Box
+            component="input"
+            type="date"
+            aria-label="To date"
+            value={filterTo}
+            min={filterFrom || undefined}
+            onChange={(e) => setFilterTo(e.target.value)}
+            sx={dateInputSx}
           />
         </Box>
-
-        <Box sx={{ width: 220 }}>
-          <SearchableMultiSelect
-            id="timecards-filter-work-item"
-            label="Work item"
-            placeholder="Search work items…"
-            values={filterWorkItem}
-            options={workItemOptions}
-            onChange={setFilterWorkItem}
-          />
-        </Box>
-
-        {engineerSlot}
-
-        {!hideStateFilter && (
-          <TextField
-            select
-            size="small"
-            label="State"
-            value={filterState}
-            onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
-            sx={{ width: 150 }}
-          >
-            <MenuItem value="">All states</MenuItem>
-            {FILTER_STATES.map((s) => (
-              <MenuItem key={s} value={s}>
-                {TIME_CARD_STATE_META[s].label}
-              </MenuItem>
-            ))}
-          </TextField>
-        )}
-
-        <TextField
-          size="small"
-          type="date"
-          label="From"
-          value={filterFrom}
-          onChange={(e) => setFilterFrom(e.target.value)}
-          sx={{ width: 160 }}
-          slotProps={{
-            inputLabel: { shrink: true },
-            htmlInput: { max: filterTo || undefined },
-          }}
-        />
-
-        <TextField
-          size="small"
-          type="date"
-          label="To"
-          value={filterTo}
-          onChange={(e) => setFilterTo(e.target.value)}
-          sx={{ width: 160 }}
-          slotProps={{
-            inputLabel: { shrink: true },
-            htmlInput: { min: filterFrom || undefined },
-          }}
-        />
-
-        <Box sx={{ flexGrow: 1 }} />
       </Box>
 
       {/* Active filter chips */}
