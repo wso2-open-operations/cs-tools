@@ -24,7 +24,7 @@ import type {
   TaskSlaSearchResponse,
 } from "@features/csm-cases/types/csmCases";
 
-const TASK_SLA_PAGE_LIMIT = 100;
+const TASK_SLA_PAGE_LIMIT = 50; // entity caps the page size at 50
 
 /**
  * Lists the SLA records attached to a case.
