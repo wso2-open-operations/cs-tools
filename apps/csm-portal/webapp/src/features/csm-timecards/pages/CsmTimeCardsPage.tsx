@@ -381,6 +381,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
             filterState={filterState}
             setFilterState={handleFilterStateChange}
             onClear={clearFilters}
+            hideStateFilter
             engineerSlot={
               <TextField
                 size="small"
@@ -491,7 +492,7 @@ export default function CsmTimeCardsPage(): JSX.Element {
  * "processed" exist in the backend's enum but nothing here can produce them. */
 const FILTER_STATES: TimeCardState[] = ["submitted", "approved", "rejected"];
 
-/** Shared filter bar for the My time sheets and Approvals tabs. */
+/** Shared filter bar for the My time sheets, All, and Approvals tabs. */
 function FilterBar({
   projects,
   filterProject,
@@ -503,6 +504,7 @@ function FilterBar({
   onClear,
   engineerSlot,
   engineerChip,
+  hideStateFilter,
 }: {
   projects: BeProject[];
   filterProject: string;
@@ -515,6 +517,10 @@ function FilterBar({
   engineerSlot?: JSX.Element;
   /** Active-chip for the Engineer filter — only the Approvals tab has one. */
   engineerChip?: { label: string; onDelete: () => void };
+  /** Approvals always forces `states: ["submitted"]` server-side (see
+   * `useApprovalQueue`), so the State control can't actually narrow anything
+   * there — hide it instead of showing a filter that silently does nothing. */
+  hideStateFilter?: boolean;
 }): JSX.Element {
   const activeChips: { key: string; label: string; onDelete: () => void }[] = [];
   if (engineerChip) activeChips.push({ key: "engineer", ...engineerChip });
@@ -533,7 +539,7 @@ function FilterBar({
       onDelete: () => setFilterWorkItem(""),
     });
   }
-  if (filterState) {
+  if (!hideStateFilter && filterState) {
     activeChips.push({
       key: "state",
       label: `State: ${TIME_CARD_STATE_META[filterState].label}`,
@@ -605,21 +611,23 @@ function FilterBar({
 
         {engineerSlot}
 
-        <TextField
-          select
-          size="small"
-          label="State"
-          value={filterState}
-          onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
-          sx={{ width: 150 }}
-        >
-          <MenuItem value="">All states</MenuItem>
-          {FILTER_STATES.map((s) => (
-            <MenuItem key={s} value={s}>
-              {TIME_CARD_STATE_META[s].label}
-            </MenuItem>
-          ))}
-        </TextField>
+        {!hideStateFilter && (
+          <TextField
+            select
+            size="small"
+            label="State"
+            value={filterState}
+            onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+            sx={{ width: 150 }}
+          >
+            <MenuItem value="">All states</MenuItem>
+            {FILTER_STATES.map((s) => (
+              <MenuItem key={s} value={s}>
+                {TIME_CARD_STATE_META[s].label}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
 
         <Box sx={{ flexGrow: 1 }} />
       </Box>

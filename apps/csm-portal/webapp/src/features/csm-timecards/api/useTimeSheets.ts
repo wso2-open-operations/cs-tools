@@ -180,7 +180,7 @@ export async function searchTimeCards(
   filters?: TimeCardSearchFilters,
   pagination?: TimeCardPagination,
 ): Promise<TimeCardSearchResult> {
-  const limit = pagination?.rowsPerPage ?? BE_MAX_PAGE_LIMIT;
+  const limit = Math.min(pagination?.rowsPerPage ?? BE_MAX_PAGE_LIMIT, BE_MAX_PAGE_LIMIT);
   const payload: BeSearchTimeCardsPayload = {
     filters: {
       ...(filters?.projectIds?.length ? { projectIds: filters.projectIds } : {}),
@@ -210,6 +210,21 @@ export async function searchTimeCards(
 export interface TimeSheetsResult {
   sheets: CsmTimeSheet[];
   total: number;
+}
+
+/** Groups cards by `userId` into per-user weekly sheets, newest first —
+ * shared by {@link useApprovalQueue} and {@link useAllTimeCards}, which only
+ * differ in which cards they pass in (others' submitted cards vs everyone's). */
+function groupCardsByUserIntoSheets(cards: CsmTimeCard[]): CsmTimeSheet[] {
+  const byUser = new Map<string, CsmTimeCard[]>();
+  for (const c of cards) {
+    const bucket = byUser.get(c.userId);
+    if (bucket) bucket.push(c);
+    else byUser.set(c.userId, [c]);
+  }
+  return [...byUser.entries()].flatMap(([userId, userCards]) =>
+    groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
+  );
 }
 
 /**
@@ -286,18 +301,7 @@ export function useApprovalQueue(
         pagination,
       );
       const others = cards.filter((c) => c.userId !== me.id);
-      const byUser = new Map<string, CsmTimeCard[]>();
-      for (const c of others) {
-        const bucket = byUser.get(c.userId);
-        if (bucket) bucket.push(c);
-        else byUser.set(c.userId, [c]);
-      }
-      return {
-        sheets: [...byUser.entries()].flatMap(([userId, userCards]) =>
-          groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
-        ),
-        total,
-      };
+      return { sheets: groupCardsByUserIntoSheets(others), total };
     },
     enabled: enabled && !!me.id && !!filters?.projectIds?.length,
     staleTime: 5_000,
@@ -324,18 +328,7 @@ export function useAllTimeCards(
     queryKey: [ApiQueryKeys.TIME_CARD_ALL, filters, pagination],
     queryFn: async (): Promise<TimeSheetsResult> => {
       const { cards, total } = await searchTimeCards(api, filters, pagination);
-      const byUser = new Map<string, CsmTimeCard[]>();
-      for (const c of cards) {
-        const bucket = byUser.get(c.userId);
-        if (bucket) bucket.push(c);
-        else byUser.set(c.userId, [c]);
-      }
-      return {
-        sheets: [...byUser.entries()].flatMap(([userId, userCards]) =>
-          groupIntoSheets(userCards, userId, userCards[0]?.userName ?? "—"),
-        ),
-        total,
-      };
+      return { sheets: groupCardsByUserIntoSheets(cards), total };
     },
     enabled: enabled && !!me.id && !!filters?.projectIds?.length,
     staleTime: 5_000,
